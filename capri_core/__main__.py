@@ -50,15 +50,13 @@ def _workflow_event_branches(workflow: str, event: str) -> set[str] | None:
     rather than being mistaken for verified trigger coverage.
     """
     lines = workflow.splitlines()
-    on_index = next(
-        (
-            index for index, line in enumerate(lines)
-            if re.fullmatch(r"on:\s*(?:#.*)?", line)
-        ),
-        None,
-    )
-    if on_index is None:
+    on_blocks = [
+        index for index, line in enumerate(lines)
+        if re.fullmatch(r"on:\\s*(?:#.*)?", line)
+    ]
+    if len(on_blocks) != 1:
         return None
+    on_index = on_blocks[0]
 
     on_end = len(lines)
     for index in range(on_index + 1, len(lines)):
@@ -76,18 +74,18 @@ def _workflow_event_branches(workflow: str, event: str) -> set[str] | None:
     if event_level_indent is None or event_level_indent == 0:
         return None
 
-    event_index = None
+    event_indices = []
     event_indent = event_level_indent
     for index in range(on_index + 1, on_end):
         line = lines[index]
         if not line.strip() or line.lstrip().startswith("#"):
             continue
         indent = len(line) - len(line.lstrip())
-        if indent == event_level_indent and re.fullmatch(rf"{re.escape(event)}:\s*(?:#.*)?", line.strip()):
-            event_index = index
-            break
-    if event_index is None:
+        if indent == event_level_indent and re.fullmatch(rf"{re.escape(event)}:\\s*(?:#.*)?", line.strip()):
+            event_indices.append(index)
+    if len(event_indices) != 1:
         return None
+    event_index = event_indices[0]
 
     event_end = on_end
     for index in range(event_index + 1, on_end):
