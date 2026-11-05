@@ -40,6 +40,10 @@ Known historical snapshot (2026-11-05, metadata-only, protected scenario exclude
 - [x] Reject commits after a session is closed during adapter execution.
 - [x] Add dedicated regression tests for output/history limits, direct commit validation, boolean configuration, and close-during-generation.
 - [x] Add tests for session lifecycle, adapter failures, validation, and concurrent turns.
+- [x] Enforce session-history limits atomically inside the session store, including direct commits.
+- [x] Require injected stores to match the runtime history-limit configuration.
+- [x] Pin GitHub Actions dependencies to immutable commit SHAs.
+- [x] Add a non-X5 security review with trust boundaries, unresolved risks, and an abuse-case test plan.
 - [ ] Obtain an authorized, completed non-protected product specification and ratify proposed defaults.
 - [ ] Define durable memory, tool authorization, identity/tenant isolation, and deployment from that specification.
 - [ ] Implement concrete model/tool adapters, persistence strategy, and deployment packaging.
