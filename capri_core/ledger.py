@@ -120,7 +120,7 @@ class HashChainLedger:
                             raise LedgerIntegrityError(f"unknown parent_run_id at line {line_number}")
                     except LedgerIntegrityError:
                         raise
-                    except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError, ValueError, RecordValidationError) as exc:
+                    except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError, ValueError, RecordValidationError, RecursionError) as exc:
                         raise LedgerIntegrityError(f"invalid ledger entry at line {line_number}") from exc
 
                     seen_runs.add(run_id)
