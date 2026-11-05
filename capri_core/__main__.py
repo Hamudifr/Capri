@@ -45,7 +45,7 @@ def run_doctor(root: Path) -> int:
         else:
             uses_lines = [
                 line for line in workflow.splitlines()
-                if re.match(r"^\s*uses\s*:", line)
+                if re.match(r"^\s*(?:-\s*)?uses\s*:", line)
             ]
             unpinned = [
                 line.strip() for line in uses_lines
