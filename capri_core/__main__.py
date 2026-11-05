@@ -17,7 +17,7 @@ def _workflow_permissions_are_read_only(workflow: str) -> bool:
         index for index, line in enumerate(lines)
         if re.fullmatch(r"permissions:\s*(?:#.*)?", line)
     ]
-    if len(matches) != 1:
+    if len(matches) != 1 or lines[matches[0]] != lines[matches[0]].lstrip():
         return False
 
     start = matches[0]
