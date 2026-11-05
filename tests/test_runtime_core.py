@@ -270,7 +270,7 @@ class LedgerTests(unittest.TestCase):
             nested = b"[" * 1200 + b"0" + b"]" * 1200
             line = (
                 b'{"hash":"' + b"0" * 64 + b'","previous_hash":"' +
-                b"0" * 64 + b'","record":' + nested + b"}\\n"
+                b"0" * 64 + b'","record":' + nested + b"}\n"
             )
             path.write_bytes(line)
             with self.assertRaises(LedgerIntegrityError):
