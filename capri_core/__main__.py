@@ -9,7 +9,7 @@ from typing import Sequence
 from .ledger import HashChainLedger, LedgerIntegrityError
 
 
-def run_doctor(root: Path) -> int:
+def run_doctor(root: Path, json_output: bool = False) -> int:
     """Run bounded, read-only checks against known Capri project files."""
     root = root.resolve()
     checks: list[tuple[str, bool, str]] = []
@@ -79,11 +79,41 @@ def run_doctor(root: Path) -> int:
     else:
         checks.append(("CI workflow readable", False, "workflow file is missing"))
 
-    failed = 0
-    for name, passed, detail in checks:
-        print(f"[{ 'PASS' if passed else 'FAIL' }] {name}: {detail}")
-        failed += not passed
-    print(f"\nCapri Doctor: {len(checks) - failed}/{len(checks)} checks passed")
+    check_ids = {
+        "Python version": "python_version",
+        "Repository structure": "repository_structure",
+        "CI workflow readable": "ci_workflow_readable",
+        "CI actions pinned": "ci_actions_pinned",
+        "CI permissions": "ci_permissions",
+        "Recovery CI coverage": "recovery_ci_coverage",
+    }
+    report_checks = [
+        {
+            "id": check_ids[name],
+            "name": name,
+            "status": "pass" if passed else "fail",
+            "detail": detail,
+        }
+        for name, passed, detail in checks
+    ]
+    failed = sum(item["status"] == "fail" for item in report_checks)
+    if json_output:
+        report = {
+            "schema_version": 1,
+            "tool": "capri-doctor",
+            "status": "fail" if failed else "pass",
+            "summary": {
+                "passed": len(report_checks) - failed,
+                "failed": failed,
+                "total": len(report_checks),
+            },
+            "checks": report_checks,
+        }
+        print(json.dumps(report, sort_keys=True))
+    else:
+        for item in report_checks:
+            print(f"[{item['status'].upper()}] {item['name']}: {item['detail']}")
+        print(f"\nCapri Doctor: {len(report_checks) - failed}/{len(report_checks)} checks passed")
     return 0 if failed == 0 else 1
 
 
@@ -95,12 +125,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     doctor_parser = commands.add_parser("doctor", help="run read-only repository health checks")
     doctor_parser.add_argument("--root", type=Path, default=Path.cwd(), help="repository root (default: current directory)")
+    doctor_parser.add_argument("--json", action="store_true", help="emit a versioned machine-readable JSON report")
     verify = commands.add_parser("verify", help="verify an existing ledger without modifying it")
     verify.add_argument("path", type=Path, help="path to an existing JSONL ledger")
     args = parser.parse_args(argv)
 
     if args.command == "doctor":
-        return run_doctor(args.root)
+        return run_doctor(args.root, json_output=args.json)
 
     if args.command == "verify":
         if not args.path.exists() or not args.path.is_file():

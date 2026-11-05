@@ -349,6 +349,45 @@ class DoctorTests(unittest.TestCase):
             self.assertIn("Capri Doctor:", output.getvalue())
             self.assertIn("Recovery CI coverage: push and pull_request", output.getvalue())
 
+    def test_doctor_json_report_has_stable_schema_and_exit_code(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_repository(root)
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["doctor", "--root", str(root), "--json"])
+            report = json.loads(output.getvalue())
+            self.assertEqual(code, 0)
+            self.assertEqual(report["schema_version"], 1)
+            self.assertEqual(report["tool"], "capri-doctor")
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(report["summary"], {"passed": 5, "failed": 0, "total": 5})
+            self.assertEqual(
+                [item["id"] for item in report["checks"]],
+                [
+                    "python_version",
+                    "repository_structure",
+                    "ci_actions_pinned",
+                    "ci_permissions",
+                    "recovery_ci_coverage",
+                ],
+            )
+            self.assertTrue(all(item["status"] == "pass" for item in report["checks"]))
+
+    def test_doctor_json_report_is_machine_readable_on_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["doctor", "--root", directory, "--json"])
+            report = json.loads(output.getvalue())
+            self.assertEqual(code, 1)
+            self.assertEqual(report["status"], "fail")
+            self.assertGreater(report["summary"]["failed"], 0)
+            self.assertEqual(
+                report["summary"]["passed"] + report["summary"]["failed"],
+                report["summary"]["total"],
+            )
+
     def test_doctor_fails_closed_on_missing_files(self):
         with tempfile.TemporaryDirectory() as directory:
             output = io.StringIO()
