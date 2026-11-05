@@ -78,9 +78,9 @@ class SessionStore:
 
     def __init__(
         self,
+        max_session_messages: int = 200,
         max_input_chars: int = 16_000,
         max_output_chars: int = 64_000,
-        max_session_messages: int = 200,
     ) -> None:
         limits = {
             "max_input_chars": max_input_chars,
