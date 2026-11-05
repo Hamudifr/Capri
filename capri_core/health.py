@@ -59,6 +59,8 @@ def build_health_report(
     """Build a dependency graph; missing observations remain unknown."""
     check_map: dict[str, dict[str, Any]] = {}
     for check in checks:
+        if not isinstance(check, dict):
+            raise ValueError("each health check must be a mapping")
         check_id = check.get("id")
         if not isinstance(check_id, str) or not check_id:
             raise ValueError("each health check must have a non-empty id")
@@ -66,7 +68,7 @@ def build_health_report(
             raise ValueError(f"duplicate health check id: {check_id}")
         check_map[check_id] = check
 
-    timestamp = observed_at or datetime.now(timezone.utc).isoformat()
+    timestamp = observed_at if observed_at is not None else datetime.now(timezone.utc).isoformat()
     try:
         parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
     except (AttributeError, TypeError, ValueError) as exc:
