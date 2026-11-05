@@ -123,6 +123,18 @@ class ValidationTests(unittest.TestCase):
         with self.assertRaises(RecordValidationError):
             validate_record(record)
 
+    def test_lone_unicode_surrogates_are_rejected_before_ledger_serialization(self):
+        for field in ("run_id", "scenario_id", "evidence_ref", "parent_run_id", "rubric_version"):
+            with self.subTest(field=field):
+                record = replace(passing(), **{field: "invalid-\\ud800"})
+                with self.assertRaises(RecordValidationError):
+                    validate_record(record)
+                with tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / "runs.jsonl"
+                    with self.assertRaises(RecordValidationError):
+                        HashChainLedger(path).append(record)
+                    self.assertFalse(path.exists())
+
 
 class LedgerTests(unittest.TestCase):
     def test_append_verify_and_retest_lineage(self):
