@@ -28,6 +28,7 @@ Do not store protected blind-evaluation content, credentials, secrets, or person
 - Run identifiers are unique within a ledger; retest parents must precede children.
 - Writes flush and call `fsync` before returning.
 - The in-process reentrant lock serializes threads sharing this module instance.
+- Verification and append validation scan the JSONL file line by line; append/verify retain run IDs for duplicate and parent checks rather than retaining every decoded entry.
 - The verification CLI is read-only and refuses a missing or non-file path.
 
 ## Known limitations
@@ -39,6 +40,8 @@ Do not store protected blind-evaluation content, credentials, secrets, or person
 - **No transactional storage:** a process or machine failure can leave a partial final line. Verification fails closed; recovery/repair tooling is not implemented.
 - **No backup or retention system:** operators must provide backups, retention, and secure deletion.
 - **No evidence verification:** a non-empty evidence reference is not proof that the evidence exists, is immutable, or supports the outcome.
+- **Linear scan and ID memory:** append and verification remain O(n) in ledger length; the run-ID set remains O(n) memory. This avoids retaining the full decoded ledger but is not a scalable indexed store.
+- **No parser size ceiling:** individual JSONL lines are not yet capped, so a hostile or accidental oversized line can consume substantial parser memory/CPU. Keep ledger write access restricted.
 - **No migration framework:** changes to record fields or controlled vocabularies require an explicit versioned migration plan before deployment.
 
 ## Operational guidance
