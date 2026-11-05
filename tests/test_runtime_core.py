@@ -229,14 +229,14 @@ class LedgerTests(unittest.TestCase):
             path = Path(directory) / "runs.jsonl"
             ledger = HashChainLedger(path)
             ledger.append(passing("r1"))
-            path.write_bytes(path.read_bytes().replace(b"\\n", b"\\r\\n"))
+            path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n"))
             self.assertEqual(ledger.verify()["records"], 1)
 
     def test_entry_at_exact_configured_byte_limit_is_accepted(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "runs.jsonl"
             HashChainLedger(path).append(passing("r1"))
-            entry_size = len(path.read_bytes().rstrip(b"\\n"))
+            entry_size = len(path.read_bytes().rstrip(b"\n"))
             self.assertEqual(HashChainLedger(path, max_entry_bytes=entry_size).verify()["records"], 1)
             with self.assertRaises(LedgerIntegrityError):
                 HashChainLedger(path, max_entry_bytes=entry_size - 1).verify()
