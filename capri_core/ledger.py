@@ -84,10 +84,10 @@ class HashChainLedger:
                     # an oversized line detectable without unbounded readline().
                     if len(raw_line) > self.max_entry_bytes + 2:
                         raise LedgerIntegrityError(f"entry exceeds {self.max_entry_bytes} bytes at line {line_number}")
-                    if not raw_line.endswith(b"\\n"):
+                    if not raw_line.endswith(b"\n"):
                         raise LedgerIntegrityError(f"unterminated ledger entry at line {line_number}")
                     raw_line = raw_line[:-1]
-                    if raw_line.endswith(b"\\r"):
+                    if raw_line.endswith(b"\r"):
                         raw_line = raw_line[:-1]
                     if len(raw_line) > self.max_entry_bytes:
                         raise LedgerIntegrityError(f"entry exceeds {self.max_entry_bytes} bytes at line {line_number}")
