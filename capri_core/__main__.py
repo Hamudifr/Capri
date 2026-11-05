@@ -50,7 +50,7 @@ def run_doctor(root: Path) -> int:
             unpinned = [
                 line.strip() for line in uses_lines
                 if not re.search(r"@[0-9a-fA-F]{40}(?:\s|$)", line)
-                and not re.search(r"uses\s*:\s*\\./", line)
+                and not re.search(r"uses\s*:\s*\./", line)
             ]
             checks.append((
                 "CI actions pinned",
