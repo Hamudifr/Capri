@@ -64,7 +64,7 @@ class CLITests(unittest.TestCase):
     def test_verify_cli_fails_on_corrupted_ledger(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "runs.jsonl"
-            path.write_text('{"bad":true}\\n', encoding="utf-8")
+            path.write_text('{"bad":true}\n', encoding="utf-8")
             output = io.StringIO()
             with redirect_stderr(output):
                 code = cli_main(["verify", str(path)])
@@ -200,7 +200,7 @@ class LedgerTests(unittest.TestCase):
             path = Path(directory) / "runs.jsonl"
             path.write_text(
                 '{"previous_hash":"' + ("0" * 64) + '","record":{},"hash":"' +
-                ("0" * 64) + '","hash":"' + ("0" * 64) + '"}\\n',
+                ("0" * 64) + '","hash":"' + ("0" * 64) + '"}\n',
                 encoding="utf-8",
             )
             with self.assertRaises(LedgerIntegrityError):
@@ -318,23 +318,23 @@ class DoctorTests(unittest.TestCase):
         for name in required:
             path = root / name
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("# fixture\\n", encoding="utf-8")
+            path.write_text("# fixture\n", encoding="utf-8")
         workflow = root / ".github/workflows/quality.yml"
         workflow.parent.mkdir(parents=True, exist_ok=True)
         workflow.write_text(
-            "on:\\n"
-            "  push:\\n"
-            '    branches: ["main", "recovery/non-x5-foundation"]\\n'
-            "  pull_request:\\n"
-            '    branches: ["main", "recovery/non-x5-foundation"]\\n'
-            "permissions:\\n"
-            "  contents: read\\n"
-            "jobs:\\n"
-            "  test:\\n"
-            "    steps:\\n"
+            "on:\n"
+            "  push:\n"
+            '    branches: ["main", "recovery/non-x5-foundation"]\n'
+            "  pull_request:\n"
+            '    branches: ["main", "recovery/non-x5-foundation"]\n'
+            "permissions:\n"
+            "  contents: read\n"
+            "jobs:\n"
+            "  test:\n"
+            "    steps:\n"
             "      - uses: actions/checkout@"
             + "a" * 40
-            + "\\n",
+            + "\n",
             encoding="utf-8",
         )
 

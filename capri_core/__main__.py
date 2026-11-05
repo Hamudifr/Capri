@@ -9,7 +9,7 @@ from typing import Sequence
 from .ledger import HashChainLedger, LedgerIntegrityError
 
 
-def doctor(root: Path) -> int:
+def run_doctor(root: Path) -> int:
     """Run bounded, read-only checks against known Capri project files."""
     root = root.resolve()
     checks: list[tuple[str, bool, str]] = []
@@ -45,12 +45,12 @@ def doctor(root: Path) -> int:
         else:
             uses_lines = [
                 line for line in workflow.splitlines()
-                if re.match(r"^\\s*uses\\s*:", line)
+                if re.match(r"^\s*uses\s*:", line)
             ]
             unpinned = [
                 line.strip() for line in uses_lines
-                if not re.search(r"@[0-9a-fA-F]{40}(?:\\s|$)", line)
-                and not re.search(r"uses\\s*:\\s*\\./", line)
+                if not re.search(r"@[0-9a-fA-F]{40}(?:\s|$)", line)
+                and not re.search(r"uses\s*:\s*\\./", line)
             ]
             checks.append((
                 "CI actions pinned",
@@ -60,7 +60,7 @@ def doctor(root: Path) -> int:
                 else "unpinned action references: " + "; ".join(unpinned or ["no action references found"]),
             ))
             least_privilege = bool(re.search(
-                r"(?m)^permissions:\\s*\\n\\s+contents:\\s*read\\s*$",
+                r"(?m)^permissions:\s*\n\s+contents:\s*read\s*$",
                 workflow,
             ))
             checks.append((
@@ -93,14 +93,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         description="Read-only tools for the Capri non-X5 execution ledger.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
-    doctor = commands.add_parser("doctor", help="run read-only repository health checks")
-    doctor.add_argument("--root", type=Path, default=Path.cwd(), help="repository root (default: current directory)")
+    doctor_parser = commands.add_parser("doctor", help="run read-only repository health checks")
+    doctor_parser.add_argument("--root", type=Path, default=Path.cwd(), help="repository root (default: current directory)")
     verify = commands.add_parser("verify", help="verify an existing ledger without modifying it")
     verify.add_argument("path", type=Path, help="path to an existing JSONL ledger")
     args = parser.parse_args(argv)
 
     if args.command == "doctor":
-        return doctor(args.root)
+        return run_doctor(args.root)
 
     if args.command == "verify":
         if not args.path.exists() or not args.path.is_file():
