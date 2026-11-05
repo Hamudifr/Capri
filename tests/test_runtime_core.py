@@ -214,7 +214,7 @@ class LedgerTests(unittest.TestCase):
     def test_ledger_entry_size_limit_is_validated(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "runs.jsonl"
-            path.write_bytes(b"x" * 33 + b"\\n")
+            path.write_bytes(b"x" * 33 + b"\n")
             with self.assertRaises(LedgerIntegrityError):
                 HashChainLedger(path, max_entry_bytes=32).verify()
 
