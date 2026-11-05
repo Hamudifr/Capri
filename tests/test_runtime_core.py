@@ -486,10 +486,10 @@ class DoctorTests(unittest.TestCase):
             self._make_repository(root)
             workflow = root / ".github/workflows/quality.yml"
             content = workflow.read_text(encoding="utf-8")
-            content = content.replace("permissions:\\n  contents: read\\n", "")
+            content = content.replace("permissions:\n  contents: read\n", "")
             content = content.replace(
-                "  test:\\n    steps:\\n",
-                "  test:\\n    permissions:\\n      contents: read\\n    steps:\\n",
+                "  test:\n    steps:\n",
+                "  test:\n    permissions:\n      contents: read\n    steps:\n",
             )
             workflow.write_text(content, encoding="utf-8")
             output = io.StringIO()
