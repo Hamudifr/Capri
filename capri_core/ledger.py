@@ -149,7 +149,7 @@ class HashChainLedger:
             if len(encoded) > self.max_entry_bytes:
                 raise LedgerIntegrityError(f"new entry exceeds {self.max_entry_bytes} bytes")
             with self.path.open("ab") as stream:
-                stream.write(encoded + b"\\n")
+                stream.write(encoded + b"\n")
                 stream.flush()
                 os.fsync(stream.fileno())
             return digest
