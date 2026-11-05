@@ -413,5 +413,47 @@ class DoctorTests(unittest.TestCase):
             self.assertIn("[FAIL] CI actions pinned", output.getvalue())
 
 
+    def test_doctor_ignores_unrelated_branch_lists_in_job_matrix(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_repository(root)
+            workflow = root / ".github/workflows/quality.yml"
+            content = workflow.read_text(encoding="utf-8").replace(
+                'branches: ["main", "recovery/non-x5-foundation"]',
+                'branches: ["main"]',
+            )
+            content += (
+                "    strategy:\n"
+                "      matrix:\n"
+                "        include:\n"
+                '          - branches: ["main", "recovery/non-x5-foundation"]\n'
+                '          - branches: ["main", "recovery/non-x5-foundation"]\n'
+            )
+            workflow.write_text(content, encoding="utf-8")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["doctor", "--root", str(root)])
+            self.assertEqual(code, 1)
+            self.assertIn("[FAIL] Recovery CI coverage", output.getvalue())
+
+    def test_doctor_accepts_block_style_event_branch_lists(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_repository(root)
+            workflow = root / ".github/workflows/quality.yml"
+            content = workflow.read_text(encoding="utf-8").replace(
+                'branches: ["main", "recovery/non-x5-foundation"]',
+                'branches:\n'
+                '      - "main"\n'
+                '      - "recovery/non-x5-foundation"',
+            )
+            workflow.write_text(content, encoding="utf-8")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["doctor", "--root", str(root)])
+            self.assertEqual(code, 0, output.getvalue())
+            self.assertIn("[PASS] Recovery CI coverage", output.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()
