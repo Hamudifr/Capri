@@ -10,6 +10,104 @@ from .ledger import HashChainLedger, LedgerIntegrityError
 from .health import build_health_report
 
 
+def _workflow_event_branches(workflow: str, event: str) -> set[str] | None:
+    """Read a simple explicit branch filter under one top-level Actions event.
+
+    This intentionally supports only the mapping and inline/block sequence forms
+    used by the repository workflow. Unsupported YAML constructs fail closed
+    rather than being mistaken for verified trigger coverage.
+    """
+    lines = workflow.splitlines()
+    on_index = next(
+        (
+            index for index, line in enumerate(lines)
+            if re.fullmatch(r"on:\s*(?:#.*)?", line)
+        ),
+        None,
+    )
+    if on_index is None:
+        return None
+
+    on_end = len(lines)
+    for index in range(on_index + 1, len(lines)):
+        line = lines[index]
+        if line.strip() and not line.lstrip().startswith("#") and len(line) - len(line.lstrip()) == 0:
+            on_end = index
+            break
+
+    event_index = None
+    event_indent = 0
+    for index in range(on_index + 1, on_end):
+        line = lines[index]
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent > 0 and re.fullmatch(rf"{re.escape(event)}:\s*(?:#.*)?", line.strip()):
+            event_index = index
+            event_indent = indent
+            break
+    if event_index is None:
+        return None
+
+    event_end = on_end
+    for index in range(event_index + 1, on_end):
+        line = lines[index]
+        if line.strip() and not line.lstrip().startswith("#"):
+            indent = len(line) - len(line.lstrip())
+            if indent <= event_indent:
+                event_end = index
+                break
+
+    branch_entries = []
+    for index in range(event_index + 1, event_end):
+        line = lines[index]
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        match = re.fullmatch(r"branches:\s*(.*)", line.strip())
+        if match and indent > event_indent:
+            branch_entries.append((index, indent, match.group(1).strip()))
+    if len(branch_entries) != 1:
+        return None
+
+    branch_index, branch_indent, value = branch_entries[0]
+    if value:
+        if not (value.startswith("[") and value.endswith("]")):
+            return None
+        raw_values = value[1:-1].split(",")
+        branches = set()
+        for raw in raw_values:
+            item = raw.strip()
+            if len(item) >= 2 and item[0] == item[-1] and item[0] in ("'", '"'):
+                item = item[1:-1]
+            elif "'" in item or '"' in item:
+                return None
+            if not item:
+                return None
+            branches.add(item)
+        return branches
+
+    branches = set()
+    for line in lines[branch_index + 1:event_end]:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent <= branch_indent:
+            break
+        item_match = re.fullmatch(r"-\s*(.+?)\s*", line.strip())
+        if not item_match:
+            return None
+        item = item_match.group(1).strip()
+        if len(item) >= 2 and item[0] == item[-1] and item[0] in ("'", '"'):
+            item = item[1:-1]
+        elif "'" in item or '"' in item:
+            return None
+        if not item:
+            return None
+        branches.add(item)
+    return branches or None
+
+
 def run_doctor(root: Path, json_output: bool = False) -> int:
     """Run bounded, read-only checks against known Capri project files."""
     root = root.resolve()
@@ -71,16 +169,21 @@ def run_doctor(root: Path, json_output: bool = False) -> int:
                 "contents: read is explicitly scoped"
                 if least_privilege else "expected explicit contents: read permission",
             ))
-            branch_lists = re.findall(r"branches:\s*\[([^\]]+)\]", workflow)
-            recovery_triggers = sum(
-                '"main"' in branch_list and '"recovery/non-x5-foundation"' in branch_list
-                for branch_list in branch_lists
+            required_branches = {"main", "recovery/non-x5-foundation"}
+            push_branches = _workflow_event_branches(workflow, "push")
+            pull_request_branches = _workflow_event_branches(workflow, "pull_request")
+            triggers_verified = (
+                push_branches is not None
+                and pull_request_branches is not None
+                and required_branches.issubset(push_branches)
+                and required_branches.issubset(pull_request_branches)
             )
             checks.append((
                 "Recovery CI coverage",
-                recovery_triggers >= 2,
-                "push and pull_request include the recovery branch"
-                if recovery_triggers >= 2 else "recovery branch trigger missing from push or pull_request",
+                triggers_verified,
+                "push and pull_request explicitly include main and the recovery branch"
+                if triggers_verified else
+                "could not verify required branches under both top-level events; unsupported or missing filters fail closed",
             ))
     else:
         checks.append(("CI workflow readable", False, "workflow file is missing"))
