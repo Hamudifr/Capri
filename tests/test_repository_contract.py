@@ -11,6 +11,8 @@ class RepositoryContractTests(unittest.TestCase):
             "docs/OPERATING_MODEL.md",
             "docs/RECOVERY_PLAN.md",
             "docs/EVALUATION_DATA_CONTRACT.md",
+            "docs/RUNTIME_CORE.md",
+            "capri_core/ledger.py",
         ):
             with self.subTest(path=relative):
                 self.assertTrue((ROOT / relative).is_file())
@@ -29,7 +31,7 @@ class RepositoryContractTests(unittest.TestCase):
     def test_recovery_plan_does_not_claim_completion(self):
         text = (ROOT / "docs/RECOVERY_PLAN.md").read_text(encoding="utf-8")
         self.assertIn("release gate not met", text)
-        self.assertIn("No runtime specification was safely available", text)
+        self.assertIn("not a claim that the complete Capri runtime has been recovered", text)
 
     def test_no_protected_x5_artifact_paths(self):
         forbidden = {"x5_rubric", "x5_answers", "x5_expected", "x5_scoring"}
