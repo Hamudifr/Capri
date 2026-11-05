@@ -455,5 +455,30 @@ class DoctorTests(unittest.TestCase):
             self.assertIn("[PASS] Recovery CI coverage", output.getvalue())
 
 
+    def test_doctor_ignores_nested_event_names_and_branch_lists(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_repository(root)
+            workflow = root / ".github/workflows/quality.yml"
+            content = workflow.read_text(encoding="utf-8")
+            start = content.index("on:\n")
+            end = content.index("permissions:\n", start)
+            nested = (
+                "on:\n"
+                "  workflow_dispatch:\n"
+                "    inputs:\n"
+                '      push:\n'
+                '        branches: ["main", "recovery/non-x5-foundation"]\n'
+                '      pull_request:\n'
+                '        branches: ["main", "recovery/non-x5-foundation"]\n'
+            )
+            workflow.write_text(content[:start] + nested + content[end:], encoding="utf-8")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["doctor", "--root", str(root)])
+            self.assertEqual(code, 1)
+            self.assertIn("[FAIL] Recovery CI coverage", output.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()
