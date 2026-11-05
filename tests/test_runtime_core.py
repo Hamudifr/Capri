@@ -231,7 +231,7 @@ class LedgerTests(unittest.TestCase):
             path = Path(directory) / "runs.jsonl"
             ledger = HashChainLedger(path)
             ledger.append(passing("r1"))
-            path.write_bytes(path.read_bytes().rstrip(b"\\n"))
+            path.write_bytes(path.read_bytes().rstrip(b"\n"))
             with self.assertRaises(LedgerIntegrityError):
                 ledger.verify()
 
