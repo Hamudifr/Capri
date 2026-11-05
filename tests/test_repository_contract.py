@@ -12,7 +12,9 @@ class RepositoryContractTests(unittest.TestCase):
             "docs/RECOVERY_PLAN.md",
             "docs/EVALUATION_DATA_CONTRACT.md",
             "docs/RUNTIME_CORE.md",
+            "docs/NON_X5_RUNTIME_DESIGN.md",
             "capri_core/ledger.py",
+            "capri_runtime/runtime.py",
         ):
             with self.subTest(path=relative):
                 self.assertTrue((ROOT / relative).is_file())
@@ -31,7 +33,13 @@ class RepositoryContractTests(unittest.TestCase):
     def test_recovery_plan_does_not_claim_completion(self):
         text = (ROOT / "docs/RECOVERY_PLAN.md").read_text(encoding="utf-8")
         self.assertIn("release gate not met", text)
-        self.assertIn("not a claim that the complete Capri runtime has been recovered", text)
+        self.assertIn("not production-ready", text)
+
+    def test_runtime_does_not_claim_provider_or_tool_support(self):
+        text = (ROOT / "docs/NON_X5_RUNTIME_DESIGN.md").read_text(encoding="utf-8")
+        self.assertIn("No provider SDK", text)
+        self.assertIn("Tool execution", text)
+        self.assertIn("process-local", text)
 
     def test_local_secrets_and_runtime_data_are_ignored(self):
         text = (ROOT / ".gitignore").read_text(encoding="utf-8")
