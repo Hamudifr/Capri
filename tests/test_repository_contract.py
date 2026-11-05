@@ -38,7 +38,7 @@ class RepositoryContractTests(unittest.TestCase):
     def test_runtime_does_not_claim_provider_or_tool_support(self):
         text = (ROOT / "docs/NON_X5_RUNTIME_DESIGN.md").read_text(encoding="utf-8")
         self.assertIn("concrete model provider", text)
-        self.assertIn("Tool execution", text)
+        self.assertIn("tool/plugin invocation", text)
         self.assertIn("process-local", text)
 
     def test_local_secrets_and_runtime_data_are_ignored(self):
