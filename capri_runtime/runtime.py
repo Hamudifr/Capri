@@ -31,6 +31,10 @@ class SessionConflictError(RuntimeErrorBase):
     """The session changed while a model response was being generated."""
 
 
+class SessionLimitError(RuntimeErrorBase):
+    """A configured session resource limit has been reached."""
+
+
 class RuntimeExecutionError(RuntimeErrorBase):
     """The injected model adapter failed."""
 
@@ -111,6 +115,15 @@ class SessionStore:
         user_text: str,
         assistant_text: str,
     ) -> Session:
+        if isinstance(expected_version, bool) or not isinstance(expected_version, int):
+            raise ValidationError("expected_version must be a non-negative integer")
+        if expected_version < 0:
+            raise ValidationError("expected_version must be a non-negative integer")
+        if not isinstance(user_text, str) or not user_text.strip():
+            raise ValidationError("user_text must be a non-empty string")
+        if not isinstance(assistant_text, str) or not assistant_text.strip():
+            raise ValidationError("assistant_text must be a non-empty string")
+
         with self._lock:
             current = self.get(session_id)
             if current.closed:
@@ -138,16 +151,26 @@ class Runtime:
         adapter: ModelAdapter,
         store: SessionStore | None = None,
         max_input_chars: int = 16_000,
+        max_output_chars: int = 64_000,
+        max_session_messages: int = 200,
     ) -> None:
         if not callable(getattr(adapter, "complete", None)):
             raise ValidationError("adapter must implement complete()")
-        if isinstance(max_input_chars, bool) or not isinstance(max_input_chars, int):
-            raise ValidationError("max_input_chars must be an integer")
-        if max_input_chars < 1:
-            raise ValidationError("max_input_chars must be positive")
+        limits = {
+            "max_input_chars": max_input_chars,
+            "max_output_chars": max_output_chars,
+            "max_session_messages": max_session_messages,
+        }
+        for name, value in limits.items():
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValidationError(f"{name} must be a positive integer")
+        if max_session_messages < 2:
+            raise ValidationError("max_session_messages must allow at least one turn")
         self.adapter = adapter
         self.store = store if store is not None else SessionStore()
         self.max_input_chars = max_input_chars
+        self.max_output_chars = max_output_chars
+        self.max_session_messages = max_session_messages
 
     def create_session(self) -> Session:
         return self.store.create()
@@ -167,6 +190,8 @@ class Runtime:
         session = self.store.get(session_id)
         if session.closed:
             raise SessionClosedError("session is closed")
+        if len(session.messages) + 2 > self.max_session_messages:
+            raise SessionLimitError("session message limit reached")
 
         try:
             answer = self.adapter.complete(
@@ -174,11 +199,14 @@ class Runtime:
                 user_text,
                 session.messages,
             )
-        except Exception as exc:
-            raise RuntimeExecutionError("model adapter failed") from exc
+        except Exception:
+            # Provider exception text can contain secrets or personal data.
+            raise RuntimeExecutionError("model adapter failed") from None
 
         if not isinstance(answer, str) or not answer.strip():
             raise ValidationError("adapter must return non-empty assistant text")
+        if len(answer) > self.max_output_chars:
+            raise SessionLimitError("adapter output exceeds max_output_chars")
 
         return self.store.commit_turn(
             session_id=session_id,
