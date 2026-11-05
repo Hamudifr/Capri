@@ -272,6 +272,12 @@ class RuntimeTests(unittest.TestCase):
         self.assertTrue(closed.closed)
         self.assertEqual(closed.messages, ())
 
+    def test_session_store_preserves_positional_history_limit_argument(self):
+        store = SessionStore(2)
+        self.assertEqual(store.max_session_messages, 2)
+        self.assertEqual(store.max_input_chars, 16_000)
+        self.assertEqual(store.max_output_chars, 64_000)
+
     def test_session_store_enforces_history_limit_for_direct_commits(self):
         store = SessionStore(max_session_messages=2)
         session = store.create()
