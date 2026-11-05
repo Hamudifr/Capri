@@ -74,6 +74,7 @@ def _open_parent_directory(path: Path, *, create: bool) -> int:
             current_fd = os.open(absolute.anchor, directory_flags)
             for component in absolute.parts[1:]:
                 flags = directory_flags | os.O_NOFOLLOW
+                created_child = False
                 try:
                     child_fd = os.open(component, flags, dir_fd=current_fd)
                 except FileNotFoundError:
@@ -81,6 +82,7 @@ def _open_parent_directory(path: Path, *, create: bool) -> int:
                         raise
                     try:
                         os.mkdir(component, 0o700, dir_fd=current_fd)
+                        created_child = True
                     except FileExistsError:
                         pass
                     try:
@@ -97,6 +99,11 @@ def _open_parent_directory(path: Path, *, create: bool) -> int:
                 try:
                     if not stat.S_ISDIR(os.fstat(child_fd).st_mode):
                         raise LedgerIntegrityError("ledger parent path is not a directory")
+                    if created_child:
+                        # Persist both the new directory's metadata and its name
+                        # in the parent before relying on it for ledger creation.
+                        os.fsync(child_fd)
+                        os.fsync(current_fd)
                 except BaseException:
                     _close_fd(child_fd)
                     raise
@@ -115,6 +122,7 @@ def _open_parent_directory(path: Path, *, create: bool) -> int:
     current = Path(absolute.anchor)
     for component in absolute.parts[1:]:
         current = current / component
+        created_child = False
         try:
             info = current.lstat()
         except FileNotFoundError:
@@ -122,11 +130,21 @@ def _open_parent_directory(path: Path, *, create: bool) -> int:
                 raise
             try:
                 current.mkdir(mode=0o700)
+                created_child = True
             except FileExistsError:
                 pass
             info = current.lstat()
         if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
             raise LedgerIntegrityError("ledger parent path must contain only real directories")
+        if created_child:
+            child_fd = os.open(current, directory_flags)
+            parent_fd = os.open(current.parent, directory_flags)
+            try:
+                os.fsync(child_fd)
+                os.fsync(parent_fd)
+            finally:
+                _close_fd(child_fd)
+                _close_fd(parent_fd)
 
     descriptor = os.open(current, directory_flags)
     if not stat.S_ISDIR(os.fstat(descriptor).st_mode):
