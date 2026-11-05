@@ -12,6 +12,11 @@ ALLOWED_DIMENSIONS = {
 }
 
 
+def _contains_surrogate(value: str) -> bool:
+    """Reject lone UTF-16 surrogate code points that cannot be UTF-8 encoded."""
+    return any(0xD800 <= ord(character) <= 0xDFFF for character in value)
+
+
 def validate_record(record: EvaluationRecord) -> None:
     """Reject malformed records without relying on callers to honor type hints."""
     if not isinstance(record, EvaluationRecord):
@@ -23,6 +28,8 @@ def validate_record(record: EvaluationRecord) -> None:
         value = getattr(record, field)
         if not isinstance(value, str) or not value.strip():
             errors.append(f"{field} must be a non-empty string")
+        elif _contains_surrogate(value):
+            errors.append(f"{field} must contain valid Unicode scalar values")
 
     if isinstance(record.dimension, str) and record.dimension not in ALLOWED_DIMENSIONS:
         errors.append("dimension is not in the controlled vocabulary")
@@ -42,18 +49,14 @@ def validate_record(record: EvaluationRecord) -> None:
         except ValueError:
             errors.append("run_at must be a valid ISO 8601 timestamp")
 
-    if record.evidence_ref is not None and (
-        not isinstance(record.evidence_ref, str) or not record.evidence_ref.strip()
-    ):
-        errors.append("evidence_ref must be a non-empty string when supplied")
-    if record.parent_run_id is not None and (
-        not isinstance(record.parent_run_id, str) or not record.parent_run_id.strip()
-    ):
-        errors.append("parent_run_id must be a non-empty string when supplied")
-    if record.rubric_version is not None and (
-        not isinstance(record.rubric_version, str) or not record.rubric_version.strip()
-    ):
-        errors.append("rubric_version must be a non-empty string when supplied")
+    optional_strings = ("evidence_ref", "parent_run_id", "rubric_version")
+    for field in optional_strings:
+        value = getattr(record, field)
+        if value is not None:
+            if not isinstance(value, str) or not value.strip():
+                errors.append(f"{field} must be a non-empty string when supplied")
+            elif _contains_surrogate(value):
+                errors.append(f"{field} must contain valid Unicode scalar values")
 
     # Enum-specific rules are evaluated only after enum types are confirmed.
     if isinstance(record.status, Status) and isinstance(record.evidence_stage, EvidenceStage):
