@@ -33,12 +33,17 @@ Known historical snapshot (2026-11-05, metadata-only, protected scenario exclude
 - [x] Implement a single-writer append-only JSONL ledger with SHA-256 hash chaining and integrity verification.
 - [x] Validate stored records on read, including schema, evidence-stage consistency, unique IDs, and retest-parent ordering.
 - [x] Test missing evidence, evaluator-stage mismatch, invalid field types, timestamp validation, retest lineage, duplicate identifiers, unknown parents, malformed entries, rehashed invalid records, and tamper detection.
-- [ ] Obtain an authorized, non-protected Capri runtime specification.
-- [ ] Define actual runtime boundaries, interfaces, session state, and failure behavior from that specification.
-- [ ] Implement model/tool adapters, orchestration, persistence strategy, and deployment packaging.
+- [x] Add a minimal provider-neutral session runtime foundation on the recovery branch.
+- [x] Add in-memory session creation, retrieval, and closure.
+- [x] Add an injected model-adapter boundary without binding Capri to a provider or credentials.
+- [x] Add atomic turn commits, typed failures, input bounds, and optimistic concurrency conflict detection.
+- [x] Add tests for session lifecycle, adapter failures, validation, and concurrent turns.
+- [ ] Obtain an authorized, completed non-protected product specification and ratify proposed defaults.
+- [ ] Define durable memory, tool authorization, identity/tenant isolation, and deployment from that specification.
+- [ ] Implement concrete model/tool adapters, persistence strategy, and deployment packaging.
 - [ ] Add security, privacy, resilience, and integration tests.
 
-The implemented ledger is a narrow reusable foundation, not a claim that the complete Capri runtime has been recovered. It is single-writer and process-local; it has no cross-process locking, authentication, encryption, model/tool integration, or session orchestration.
+The implemented runtime slice is intentionally process-local and memory-only. It is not production-ready and does not include a concrete model provider, tool execution, durable storage, authentication, tenant isolation, or deployment. The ledger remains a separate single-writer metadata component.
 
 ## Phase 4 — Independent verification and release
 
