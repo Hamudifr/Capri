@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 from threading import RLock
 from typing import Any
@@ -20,17 +21,27 @@ _ENTRY_KEYS = {"previous_hash", "record", "hash"}
 
 
 def _canonical(value: dict[str, Any]) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+    ).encode("utf-8")
+
+
+def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Reject duplicate JSON keys instead of silently accepting the last value."""
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON object key: {key}")
+        result[key] = value
+    return result
+
+
+def _reject_constant(value: str) -> None:
+    raise ValueError(f"non-standard JSON constant: {value}")
 
 
 def _is_sha256(value: Any) -> bool:
-    if not isinstance(value, str) or len(value) != 64:
-        return False
-    try:
-        bytes.fromhex(value)
-    except ValueError:
-        return False
-    return True
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
 
 
 class HashChainLedger:
@@ -52,7 +63,7 @@ class HashChainLedger:
         seen_runs: set[str] = set()
         for line_number, line in enumerate(self.path.read_text(encoding="utf-8").splitlines(), 1):
             try:
-                entry = json.loads(line)
+                entry = json.loads(line, object_pairs_hook=_unique_object, parse_constant=_reject_constant)
                 if not isinstance(entry, dict) or set(entry) != _ENTRY_KEYS:
                     raise LedgerIntegrityError(f"invalid entry shape at line {line_number}")
                 payload = entry["record"]
@@ -100,7 +111,7 @@ class HashChainLedger:
             entry = {"previous_hash": previous, "record": payload, "hash": digest}
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with self.path.open("a", encoding="utf-8", newline="\n") as stream:
-                stream.write(json.dumps(entry, sort_keys=True, ensure_ascii=False) + "\n")
+                stream.write(json.dumps(entry, sort_keys=True, ensure_ascii=False, allow_nan=False) + "\n")
                 stream.flush()
                 os.fsync(stream.fileno())
             return digest

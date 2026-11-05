@@ -60,8 +60,11 @@ def validate_record(record: EvaluationRecord) -> None:
         if record.status in (Status.PASS, Status.FAIL):
             if not isinstance(record.evidence_ref, str) or not record.evidence_ref.strip():
                 errors.append("Pass/Fail requires evidence_ref")
-            if record.evidence_stage in (EvidenceStage.NOT_RUN, EvidenceStage.ATTEMPTED):
-                errors.append("Pass/Fail requires captured evidence")
+            if record.evidence_stage not in (
+                EvidenceStage.SELF_SCORED,
+                EvidenceStage.INDEPENDENTLY_REVIEWED,
+            ):
+                errors.append("Pass/Fail requires a completed scoring stage")
         if record.status is Status.NOT_RUN:
             if record.evidence_stage is not EvidenceStage.NOT_RUN:
                 errors.append("Not Run status requires Not Run evidence stage")

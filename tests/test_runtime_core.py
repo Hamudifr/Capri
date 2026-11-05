@@ -30,6 +30,17 @@ class ValidationTests(unittest.TestCase):
         with self.assertRaises(RecordValidationError):
             validate_record(replace(passing(), evidence_ref=None))
 
+    def test_pass_or_fail_requires_a_scoring_stage(self):
+        for status in (Status.PASS, Status.FAIL):
+            with self.subTest(status=status):
+                record = replace(
+                    passing(),
+                    status=status,
+                    evidence_stage=EvidenceStage.EVIDENCE_CAPTURED,
+                )
+                with self.assertRaises(RecordValidationError):
+                    validate_record(record)
+
     def test_self_cannot_claim_independent_review(self):
         record = EvaluationRecord(
             run_id="r1", scenario_id="scenario-a", dimension="Agency", status=Status.PASS,
@@ -119,6 +130,17 @@ class LedgerTests(unittest.TestCase):
             previous = "0" * 64
             digest = hashlib.sha256(bytes.fromhex(previous) + canonical).hexdigest()
             path.write_text(json.dumps({"previous_hash": previous, "record": entry_record, "hash": digest}) + "\n")
+            with self.assertRaises(LedgerIntegrityError):
+                HashChainLedger(path).verify()
+
+    def test_duplicate_json_keys_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "runs.jsonl"
+            path.write_text(
+                '{"previous_hash":"' + ("0" * 64) + '","record":{},"hash":"' +
+                ("0" * 64) + '","hash":"' + ("0" * 64) + '"}\\n',
+                encoding="utf-8",
+            )
             with self.assertRaises(LedgerIntegrityError):
                 HashChainLedger(path).verify()
 
