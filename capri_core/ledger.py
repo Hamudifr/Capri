@@ -378,25 +378,57 @@ class HashChainLedger:
             write_started = False
             try:
                 parent_fd = _open_parent_directory(self.path.parent, create=True)
-                descriptor, created = _open_ledger_file(
-                    self.path, parent_fd, create=True, writable=True
-                )
-                _, existing_ids, previous, _ = self._scan(descriptor=descriptor)
-                payload = record.to_dict()
-                if payload["run_id"] in existing_ids:
-                    raise LedgerIntegrityError("run_id already exists; ledger is append-only")
-                if payload["parent_run_id"] is not None and payload["parent_run_id"] not in existing_ids:
-                    raise LedgerIntegrityError("parent_run_id does not reference an earlier run")
-                digest = hashlib.sha256(bytes.fromhex(previous) + _canonical(payload)).hexdigest()
-                entry = {"previous_hash": previous, "record": payload, "hash": digest}
-                serialized = json.dumps(
-                    entry, sort_keys=True, ensure_ascii=False, allow_nan=False
-                )
-                encoded = serialized.encode("utf-8")
-                if len(encoded) > self.max_entry_bytes:
-                    raise LedgerIntegrityError(
-                        f"new entry exceeds {self.max_entry_bytes} bytes"
+                # Inspect an existing file without creating a new one. This keeps
+                # validation failures (including an oversized first record) from
+                # leaving an empty ledger behind.
+                try:
+                    descriptor, created = _open_ledger_file(
+                        self.path, parent_fd, create=False, writable=True
                     )
+                except FileNotFoundError:
+                    descriptor = None
+                    created = True
+                    existing_ids: set[str] = set()
+                    previous = _ZERO_HASH
+                else:
+                    _, existing_ids, previous, _ = self._scan(descriptor=descriptor)
+
+                payload = record.to_dict()
+
+                def build_entry(previous_hash: str, known_ids: set[str]) -> tuple[str, bytes]:
+                    if payload["run_id"] in known_ids:
+                        raise LedgerIntegrityError("run_id already exists; ledger is append-only")
+                    if payload["parent_run_id"] is not None and payload["parent_run_id"] not in known_ids:
+                        raise LedgerIntegrityError("parent_run_id does not reference an earlier run")
+                    entry_hash = hashlib.sha256(
+                        bytes.fromhex(previous_hash) + _canonical(payload)
+                    ).hexdigest()
+                    entry = {
+                        "previous_hash": previous_hash,
+                        "record": payload,
+                        "hash": entry_hash,
+                    }
+                    serialized = json.dumps(
+                        entry, sort_keys=True, ensure_ascii=False, allow_nan=False
+                    )
+                    encoded_entry = serialized.encode("utf-8")
+                    if len(encoded_entry) > self.max_entry_bytes:
+                        raise LedgerIntegrityError(
+                            f"new entry exceeds {self.max_entry_bytes} bytes"
+                        )
+                    return entry_hash, encoded_entry
+
+                digest, encoded = build_entry(previous, existing_ids)
+
+                if descriptor is None:
+                    # Create only after the first entry has passed size and lineage
+                    # validation. Re-scan after opening in case a file appeared
+                    # between the initial no-follow lookup and exclusive creation.
+                    descriptor, created = _open_ledger_file(
+                        self.path, parent_fd, create=True, writable=True
+                    )
+                    _, existing_ids, previous, _ = self._scan(descriptor=descriptor)
+                    digest, encoded = build_entry(previous, existing_ids)
 
                 stream = os.fdopen(descriptor, "ab")
                 descriptor = None
