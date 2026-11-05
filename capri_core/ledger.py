@@ -161,5 +161,7 @@ class HashChainLedger:
         return {"valid": True, "records": count, "head_hash": head_hash if count else None}
 
     def records(self) -> list[EvaluationRecord]:
+        if not self.path.exists() or not self.path.is_file():
+            raise LedgerIntegrityError("ledger is not an existing regular file")
         entries, _, _, _ = self._scan(collect_entries=True)
         return [EvaluationRecord.from_dict(entry["record"]) for entry in entries]
