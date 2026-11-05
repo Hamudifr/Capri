@@ -2,7 +2,7 @@ name: Non-X5 quality checks
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "recovery/non-x5-foundation"]
   pull_request:
     branches: ["main"]
   workflow_dispatch:
