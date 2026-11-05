@@ -264,6 +264,18 @@ class LedgerTests(unittest.TestCase):
             with self.assertRaises(LedgerIntegrityError):
                 ledger.verify()
 
+    def test_deeply_nested_json_fails_as_ledger_integrity_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "runs.jsonl"
+            nested = b"[" * 1200 + b"0" + b"]" * 1200
+            line = (
+                b'{"hash":"' + b"0" * 64 + b'","previous_hash":"' +
+                b"0" * 64 + b'","record":' + nested + b"}\\n"
+            )
+            path.write_bytes(line)
+            with self.assertRaises(LedgerIntegrityError):
+                HashChainLedger(path).verify()
+
     def test_entry_size_limit_requires_positive_non_boolean_integer(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "runs.jsonl"
