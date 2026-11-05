@@ -480,6 +480,24 @@ class DoctorTests(unittest.TestCase):
             self.assertIn("[FAIL] Recovery CI coverage", output.getvalue())
 
 
+    def test_doctor_rejects_job_level_permissions_as_workflow_policy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_repository(root)
+            workflow = root / ".github/workflows/quality.yml"
+            content = workflow.read_text(encoding="utf-8")
+            content = content.replace("permissions:\\n  contents: read\\n", "")
+            content = content.replace(
+                "  test:\\n    steps:\\n",
+                "  test:\\n    permissions:\\n      contents: read\\n    steps:\\n",
+            )
+            workflow.write_text(content, encoding="utf-8")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["doctor", "--root", str(root)])
+            self.assertEqual(code, 1)
+            self.assertIn("[FAIL] CI permissions", output.getvalue())
+
     def test_doctor_rejects_additional_workflow_write_permissions(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
