@@ -155,6 +155,8 @@ class HashChainLedger:
             return digest
 
     def verify(self) -> dict[str, Any]:
+        if not self.path.exists() or not self.path.is_file():
+            raise LedgerIntegrityError("ledger is not an existing regular file")
         _, _, head_hash, count = self._scan()
         return {"valid": True, "records": count, "head_hash": head_hash if count else None}
 
