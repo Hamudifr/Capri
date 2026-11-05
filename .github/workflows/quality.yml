@@ -1,0 +1,26 @@
+name: Non-X5 quality checks
+
+on:
+  push:
+    branches: ["main", "recovery/**"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repository-contract:
+    name: Repository contract (non-X5 only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run structural contract tests
+        run: python -m unittest discover -s tests -v
