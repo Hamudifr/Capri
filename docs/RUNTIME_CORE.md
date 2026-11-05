@@ -32,7 +32,7 @@ The runtime commits a user/assistant pair only after a successful adapter respon
 | `max_output_chars` | 64,000 | Reject larger adapter output before transcript commit |
 | `max_session_messages` | 200 | Reject a turn that would exceed the limit; no automatic truncation |
 
-The store independently enforces all three per-message/history limits inside its commit lock. This matters because callers can access `SessionStore.commit_turn` directly; runtime-only checks are not a storage boundary. Boolean, non-integer, or non-positive resource limits are rejected. An injected `SessionStore` must have the same input, output, and history limits configured on the `Runtime`. Limits count Python string characters, not UTF-8 bytes or provider tokens.
+The store independently enforces input/output character limits at the `commit_turn` boundary and rechecks the history limit under its commit lock. This matters because callers can access `SessionStore.commit_turn` directly; runtime-only checks are not a storage boundary. Boolean, non-integer, or non-positive resource limits are rejected. An injected `SessionStore` must have the same input, output, and history limits configured on the `Runtime`. Limits count Python string characters, not UTF-8 bytes or provider tokens.
 
 The store still has no aggregate session-count or total-memory quota. Session creation is therefore unbounded, and closed sessions remain resident in memory. This is an explicit prototype limitation: session expiry, deletion, cleanup, and retention semantics remain unresolved in the non-X5 specification and are not inferred or implemented here.
 
