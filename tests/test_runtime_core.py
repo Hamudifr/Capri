@@ -47,6 +47,12 @@ class CLITests(unittest.TestCase):
             with self.assertRaises(LedgerIntegrityError):
                 HashChainLedger(path).verify()
 
+    def test_records_rejects_missing_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "missing.jsonl"
+            with self.assertRaises(LedgerIntegrityError):
+                HashChainLedger(path).records()
+
     def test_verify_cli_rejects_missing_file(self):
         with tempfile.TemporaryDirectory() as directory:
             output = io.StringIO()
