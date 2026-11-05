@@ -36,4 +36,8 @@ This contract applies to non-X5 evaluation metadata only. Do not export or store
 - Aggregates must disclose filters, timestamp, and denominator.
 - Conflicting or duplicate run identifiers fail validation.
 
+### Implementation note
+
+The contract requires `parent_run_id` for a retest/correction execution. The current validator checks that a supplied parent is non-empty and that the ledger parent exists earlier, but it does not require a parent based solely on `status = Retest Needed`. This is intentionally left as an explicit contract gap until the product owner confirms whether that status describes (a) an outcome that requests a future retest, or (b) a retest execution that must itself link to a prior run. Do not infer one meaning from the label alone.
+
 The current Notion source schema may use different property names and optional fields. Map to this contract explicitly; do not mutate source records merely to fit this document.
