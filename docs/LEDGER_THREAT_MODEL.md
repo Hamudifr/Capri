@@ -31,7 +31,7 @@ Do not store protected blind-evaluation content, credentials, secrets, or person
 - Existing file modes are tightened only after the ledger chain, record validation, lineage, and new-entry size checks succeed; a rejected append does not change permissions.
 - Ledger reads and writes reject symlink path components and non-regular final files. On POSIX systems with `dir_fd`, `O_DIRECTORY`, and `O_NOFOLLOW`, parent components are traversed without following symlinks and the final file is opened with `O_NOFOLLOW`, then checked with `fstat`. Platforms without those primitives use pre-open `lstat` checks; a concurrent path swap remains possible, so this fallback is not equivalent protection. Parent-directory ownership and trust remain operator responsibilities.
 - Writes flush and call `fsync` before returning.
-- First-time file creation fsyncs the ledger file and then its containing directory on POSIX; ordinary appends fsync only the file.
+- First-time file creation fsyncs the ledger file and then its containing directory on POSIX; every newly created parent directory is also fsynced together with the directory containing it. Ordinary appends fsync only the file.
 - A write, flush, or fsync failure after writing begins latches the path as uncertain in the current process. Further append, verify, and records calls fail closed. The latch is process-local and is lost on restart; preserve the original file and inspect a copy before retrying after any such failure.
 - The in-process reentrant lock serializes threads sharing this module instance.
 - Verification and append validation scan the JSONL file line by line; append/verify retain run IDs for duplicate and parent checks rather than retaining every decoded entry.
