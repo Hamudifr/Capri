@@ -78,9 +78,13 @@ def build_health_report(
     components: list[dict[str, Any]] = []
     for spec in _COMPONENTS:
         own_check = check_map.get(spec["check"]) if spec["check"] else None
-        candidates = [_state_for_check(own_check)]
+        candidates = [_state_for_check(own_check)] if spec["check"] else []
         candidates.extend(states[dependency] for dependency in spec["depends_on"])
-        state = max(candidates, key=lambda candidate: _RANK[candidate])
+        state = (
+            max(candidates, key=lambda candidate: _RANK[candidate])
+            if candidates
+            else HealthState.UNKNOWN
+        )
         states[spec["id"]] = state
         components.append({
             "id": spec["id"],
