@@ -11,7 +11,7 @@ Capri Doctor reports local repository health, not general system or production h
 
 ## Dependency propagation
 
-The current graph covers the Python environment, repository structure, CI workflow, action pinning, CI permissions, recovery-branch CI coverage, and an aggregate developer baseline. Recovery coverage is checked separately under the top-level `push` and `pull_request` event mappings; unrelated `branches` lists elsewhere in the workflow do not count. The checker supports explicit inline and block branch lists and fails closed when those filters are missing or use unsupported YAML constructs. It is a deliberately narrow syntax check, not a general YAML parser. A component inherits the most severe state among its own observation and its dependencies.
+The current graph covers the Python environment, repository structure, CI workflow, action pinning, CI permissions, recovery-branch CI coverage, and an aggregate developer baseline. Recovery coverage is checked separately under the top-level `push` and `pull_request` event mappings; unrelated `branches` lists elsewhere in the workflow do not count. Duplicate top-level `on:` blocks or duplicate direct event mappings fail closed rather than allowing an ambiguous first match. The checker supports explicit inline and block branch lists and fails closed when those filters are missing or use unsupported YAML constructs. It is a deliberately narrow syntax check, not a general YAML parser. A component inherits the most severe state among its own observation and its dependencies.
 
 Each component includes a stable ID, dependency IDs, observation timestamp, and evidence reference to the diagnostic check when one exists. The aggregate baseline has no direct check; it derives its state from dependencies.
 
