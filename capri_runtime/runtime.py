@@ -71,7 +71,16 @@ class ModelAdapter(Protocol):
 class SessionStore:
     """Thread-safe, process-local session store with optimistic turn commits."""
 
-    def __init__(self) -> None:
+    def __init__(self, max_session_messages: int = 200) -> None:
+        if (
+            isinstance(max_session_messages, bool)
+            or not isinstance(max_session_messages, int)
+            or max_session_messages < 2
+        ):
+            raise ValidationError(
+                "max_session_messages must be an integer of at least 2"
+            )
+        self.max_session_messages = max_session_messages
         self._sessions: dict[str, Session] = {}
         self._lock = RLock()
 
@@ -130,6 +139,8 @@ class SessionStore:
                 raise SessionClosedError("session is closed")
             if current.version != expected_version:
                 raise SessionConflictError("session changed during model execution")
+            if len(current.messages) + 2 > self.max_session_messages:
+                raise SessionLimitError("session message limit reached")
             updated = replace(
                 current,
                 updated_at=self._now(),
@@ -166,8 +177,16 @@ class Runtime:
                 raise ValidationError(f"{name} must be a positive integer")
         if max_session_messages < 2:
             raise ValidationError("max_session_messages must allow at least one turn")
+        if store is not None and not isinstance(store, SessionStore):
+            raise ValidationError("store must be a SessionStore instance")
+        if store is not None and store.max_session_messages != max_session_messages:
+            raise ValidationError(
+                "store max_session_messages must match runtime configuration"
+            )
         self.adapter = adapter
-        self.store = store if store is not None else SessionStore()
+        self.store = store if store is not None else SessionStore(
+            max_session_messages=max_session_messages
+        )
         self.max_input_chars = max_input_chars
         self.max_output_chars = max_output_chars
         self.max_session_messages = max_session_messages
