@@ -41,6 +41,7 @@ def run_doctor(root: Path, json_output: bool = False) -> int:
     if workflow_path.is_file():
         try:
             workflow = workflow_path.read_text(encoding="utf-8")
+            checks.append(("CI workflow readable", True, "workflow file is readable"))
         except (OSError, UnicodeError) as exc:
             checks.append(("CI workflow readable", False, type(exc).__name__))
         else:
