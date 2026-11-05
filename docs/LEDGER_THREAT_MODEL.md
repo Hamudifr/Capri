@@ -28,7 +28,10 @@ Do not store protected blind-evaluation content, credentials, secrets, or person
 - SHA-256 hash chaining detects accidental or partial modification of existing entries.
 - Run identifiers are unique within a ledger; retest parents must precede children.
 - Newly created ledger parent directories request mode `0700`; ledger files are created with mode `0600` and, on POSIX, existing file modes are tightened to `0600` on append. This is filesystem-mode hardening, not user/tenant authorization; existing parent directories remain operator-owned.
+- Ledger reads and writes reject symlink path components and non-regular final files. On POSIX systems with `dir_fd`, `O_DIRECTORY`, and `O_NOFOLLOW`, parent components are traversed without following symlinks and the final file is opened with `O_NOFOLLOW`, then checked with `fstat`. Platforms without those primitives use pre-open `lstat` checks; a concurrent path swap remains possible, so this fallback is not equivalent protection. Parent-directory ownership and trust remain operator responsibilities.
 - Writes flush and call `fsync` before returning.
+- First-time file creation fsyncs the ledger file and then its containing directory on POSIX; ordinary appends fsync only the file.
+- A write, flush, or fsync failure after writing begins latches the path as uncertain in the current process. Further append, verify, and records calls fail closed. The latch is process-local and is lost on restart; preserve the original file and inspect a copy before retrying after any such failure.
 - The in-process reentrant lock serializes threads sharing this module instance.
 - Verification and append validation scan the JSONL file line by line; append/verify retain run IDs for duplicate and parent checks rather than retaining every decoded entry.
 - Binary bounded reads enforce a configurable per-entry byte ceiling before decoding/parsing (default: 1 MiB); writes enforce the same ceiling.

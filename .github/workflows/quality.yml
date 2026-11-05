@@ -2,9 +2,9 @@ name: Non-X5 quality checks
 
 on:
   push:
-    branches: ["main", "recovery/non-x5-foundation"]
+    branches: ["main", "recovery/non-x5-foundation", "security/ledger-path-hardening"]
   pull_request:
-    branches: ["main", "recovery/non-x5-foundation"]
+    branches: ["main", "recovery/non-x5-foundation", "security/ledger-private-permissions-v2"]
   workflow_dispatch:
 
 permissions:
