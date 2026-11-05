@@ -126,7 +126,7 @@ class ValidationTests(unittest.TestCase):
     def test_lone_unicode_surrogates_are_rejected_before_ledger_serialization(self):
         for field in ("run_id", "scenario_id", "evidence_ref", "parent_run_id", "rubric_version"):
             with self.subTest(field=field):
-                record = replace(passing(), **{field: "invalid-\\ud800"})
+                record = replace(passing(), **{field: "invalid-\ud800"})
                 with self.assertRaises(RecordValidationError):
                     validate_record(record)
                 with tempfile.TemporaryDirectory() as directory:
