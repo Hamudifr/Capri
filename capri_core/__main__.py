@@ -70,7 +70,11 @@ def run_doctor(root: Path, json_output: bool = False) -> int:
                 "contents: read is explicitly scoped"
                 if least_privilege else "expected explicit contents: read permission",
             ))
-            recovery_triggers = workflow.count('branches: ["main", "recovery/non-x5-foundation"]')
+            branch_lists = re.findall(r"branches:\s*\[([^\]]+)\]", workflow)
+            recovery_triggers = sum(
+                '"main"' in branch_list and '"recovery/non-x5-foundation"' in branch_list
+                for branch_list in branch_lists
+            )
             checks.append((
                 "Recovery CI coverage",
                 recovery_triggers >= 2,

@@ -2,9 +2,9 @@ name: Non-X5 quality checks
 
 on:
   push:
-    branches: ["main", "recovery/non-x5-foundation"]
+    branches: ["main", "recovery/non-x5-foundation", "feature/capri-health-model"]
   pull_request:
-    branches: ["main", "recovery/non-x5-foundation"]
+    branches: ["main", "recovery/non-x5-foundation", "feature/capri-doctor"]
   workflow_dispatch:
 
 permissions:
