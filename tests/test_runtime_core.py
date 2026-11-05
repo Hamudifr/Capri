@@ -487,5 +487,27 @@ class LedgerPathSafetyTests(unittest.TestCase):
         )
 
 
+    @unittest.skipUnless(os.name == "posix", "POSIX directory fsync is required")
+    def test_nested_new_parent_directories_are_synced_before_file_creation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "first" / "second" / "runs.jsonl"
+            real_fsync = os.fsync
+            observed = []
+
+            def record_fsync(descriptor):
+                mode = os.fstat(descriptor).st_mode
+                observed.append("directory" if stat.S_ISDIR(mode) else "file")
+                return real_fsync(descriptor)
+
+            with mock.patch.object(ledger_module.os, "fsync", side_effect=record_fsync):
+                HashChainLedger(path).append(passing("nested-first"))
+
+            self.assertEqual(
+                observed,
+                ["directory", "directory", "directory", "directory", "file", "directory"],
+            )
+            self.assertEqual(HashChainLedger(path).verify()["records"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()
