@@ -36,7 +36,9 @@ Known historical snapshot (2026-11-05, metadata-only, protected scenario exclude
 - [x] Add a minimal provider-neutral session runtime foundation on the recovery branch.
 - [x] Add in-memory session creation, retrieval, and closure.
 - [x] Add an injected model-adapter boundary without binding Capri to a provider or credentials.
-- [x] Add atomic turn commits, typed failures, input bounds, and optimistic concurrency conflict detection.
+- [x] Add atomic turn commits, typed failures, bounded input/output/session history, and optimistic concurrency conflict detection.
+- [x] Reject commits after a session is closed during adapter execution.
+- [x] Add dedicated regression tests for output/history limits, direct commit validation, boolean configuration, and close-during-generation.
 - [x] Add tests for session lifecycle, adapter failures, validation, and concurrent turns.
 - [ ] Obtain an authorized, completed non-protected product specification and ratify proposed defaults.
 - [ ] Define durable memory, tool authorization, identity/tenant isolation, and deployment from that specification.
