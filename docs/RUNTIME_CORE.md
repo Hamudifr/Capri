@@ -5,8 +5,8 @@ This is a deliberately narrow, dependency-free prototype for append-only executi
 ## Components
 
 - `EvaluationRecord`: immutable typed record with stable run/scenario identifiers, controlled status/evaluator/evidence-stage enums, timestamp, evidence reference, and optional retest parent.
-- `validate_record`: fail-closed validation. A Pass/Fail needs an evidence reference and captured evidence stage. Self-scoring cannot claim independent review. Independent evaluation must be explicitly represented as Independently Reviewed. Timestamps must include a timezone.
-- `HashChainLedger`: append-only JSONL storage. Each entry hashes the canonical record plus the previous hash. It rejects duplicate run IDs, unknown retest parents, malformed entries, broken links, and tampering.
+- `validate_record`: fail-closed runtime validation, including defensive type checks. Pass/Fail requires a non-empty evidence reference and a stage beyond Not Run/Attempted. Self-scoring cannot claim independent review. Independent evaluation must be represented as Independently Reviewed. Timestamps must be valid ISO 8601 values with an explicit timezone.
+- `HashChainLedger`: append-only JSONL storage. Each entry hashes the canonical record plus the previous hash. Both reads and writes validate record structure, evidence-stage consistency, unique run IDs, and retest-parent ordering. It rejects malformed entry shapes, malformed hashes, broken links, invalid records, and tampering.
 
 ## Minimal use
 
@@ -31,16 +31,21 @@ ledger.append(record)
 print(ledger.verify())
 ```
 
-Do not put protected evaluation instructions, rubrics, expected answers, scoring keys, secrets, or personal data in the ledger. Store only authorized references to evidence. The hash chain is tamper-evident, not an access-control system or a digital signature; an attacker able to rewrite the entire file can recompute it. Back up the ledger and restrict filesystem access in any deployment.
+## Integrity and operational limits
+
+The hash chain is tamper-evident, not an access-control system, digital signature, or proof of who authored a record. An attacker able to rewrite the entire file can recompute the chain. Back up the ledger and restrict filesystem access in any deployment.
+
+The implementation uses a process-local thread lock. **Use one writer process per ledger file.** It does not provide cross-process locking, distributed concurrency control, encryption, authentication, authorization, evidence fetching, or retention management. Do not use this prototype as a multi-user production store.
+
+Do not put protected evaluation instructions, rubrics, expected answers, scoring keys, secrets, or personal data in the ledger. Store only authorized references to evidence.
 
 ## Validation
 
-Run `python -m unittest discover -s tests -v`. The tests cover valid metadata, missing evidence, evaluator-stage mismatch, timezone enforcement, retest lineage, duplicate identifiers, unknown parents, and tamper detection.
+Run `python -m unittest discover -s tests -v`. Tests cover valid metadata, missing evidence, evaluator-stage mismatch, invalid field types, timezone enforcement, retest lineage, duplicate identifiers, unknown parents, malformed ledger entries, rehashed invalid records, and tamper detection.
 
-## Known limitations
+## Remaining runtime gaps
 
-- No multi-process file lock or distributed concurrency control; use a single writer.
-- No encryption, authentication, authorization, evidence fetching, or retention policy.
 - No runtime orchestration, model/tool adapter, session store, or deployment packaging.
 - No independent review is performed by this library.
 - The dimension vocabulary is intentionally limited to the six currently documented non-protected dimensions and must be versioned before changing.
+- The full runtime behavior must come from an authorized, non-protected specification; this prototype does not invent it.

@@ -29,15 +29,16 @@ Known historical snapshot (2026-11-05, metadata-only, protected scenario exclude
 ## Phase 3 — Runtime foundation
 
 - [x] Implement immutable evaluation metadata records.
-- [x] Implement fail-closed record validation.
+- [x] Implement fail-closed validation with defensive type checks.
 - [x] Implement a single-writer append-only JSONL ledger with SHA-256 hash chaining and integrity verification.
-- [x] Test missing evidence, evaluator-stage mismatch, timestamp validation, retest lineage, duplicate identifiers, unknown parents, and tamper detection.
+- [x] Validate stored records on read, including schema, evidence-stage consistency, unique IDs, and retest-parent ordering.
+- [x] Test missing evidence, evaluator-stage mismatch, invalid field types, timestamp validation, retest lineage, duplicate identifiers, unknown parents, malformed entries, rehashed invalid records, and tamper detection.
 - [ ] Obtain an authorized, non-protected Capri runtime specification.
 - [ ] Define actual runtime boundaries, interfaces, session state, and failure behavior from that specification.
 - [ ] Implement model/tool adapters, orchestration, persistence strategy, and deployment packaging.
 - [ ] Add security, privacy, resilience, and integration tests.
 
-The implemented ledger is a narrow reusable foundation, not a claim that the complete Capri runtime has been recovered. It has no distributed locking, authentication, encryption, model/tool integration, or session orchestration.
+The implemented ledger is a narrow reusable foundation, not a claim that the complete Capri runtime has been recovered. It is single-writer and process-local; it has no cross-process locking, authentication, encryption, model/tool integration, or session orchestration.
 
 ## Phase 4 — Independent verification and release
 
