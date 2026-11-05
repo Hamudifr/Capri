@@ -211,6 +211,38 @@ class LedgerTests(unittest.TestCase):
             self.assertEqual(result["records"], len(ledger.records()))
             self.assertTrue(result["valid"])
 
+    def test_ledger_entry_size_limit_is_validated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "runs.jsonl"
+            path.write_bytes(b"x" * 33 + b"\\n")
+            with self.assertRaises(LedgerIntegrityError):
+                HashChainLedger(path, max_entry_bytes=32).verify()
+
+    def test_append_rejects_entry_larger_than_configured_limit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "runs.jsonl"
+            ledger = HashChainLedger(path, max_entry_bytes=128)
+            with self.assertRaises(LedgerIntegrityError):
+                ledger.append(passing("large-record"))
+            self.assertFalse(path.exists())
+
+    def test_unterminated_final_line_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "runs.jsonl"
+            ledger = HashChainLedger(path)
+            ledger.append(passing("r1"))
+            path.write_bytes(path.read_bytes().rstrip(b"\\n"))
+            with self.assertRaises(LedgerIntegrityError):
+                ledger.verify()
+
+    def test_entry_size_limit_requires_positive_non_boolean_integer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "runs.jsonl"
+            for value in (0, -1, True, 1.5, "1024"):
+                with self.subTest(value=value):
+                    with self.assertRaises(ValueError):
+                        HashChainLedger(path, max_entry_bytes=value)
+
     def test_threaded_appends_preserve_a_valid_chain(self):
         with tempfile.TemporaryDirectory() as directory:
             ledger = HashChainLedger(Path(directory) / "runs.jsonl")
