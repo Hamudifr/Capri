@@ -305,5 +305,73 @@ class LedgerTests(unittest.TestCase):
             self.assertEqual(ledger.verify()["records"], 24)
 
 
+class DoctorTests(unittest.TestCase):
+    def _make_repository(self, root):
+        required = (
+            "README.md",
+            "capri_core/__main__.py",
+            "capri_core/ledger.py",
+            "capri_runtime/runtime.py",
+            "tests/test_runtime_core.py",
+            "tests/test_runtime.py",
+        )
+        for name in required:
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("# fixture\\n", encoding="utf-8")
+        workflow = root / ".github/workflows/quality.yml"
+        workflow.parent.mkdir(parents=True, exist_ok=True)
+        workflow.write_text(
+            "on:\\n"
+            "  push:\\n"
+            '    branches: ["main", "recovery/non-x5-foundation"]\\n'
+            "  pull_request:\\n"
+            '    branches: ["main", "recovery/non-x5-foundation"]\\n'
+            "permissions:\\n"
+            "  contents: read\\n"
+            "jobs:\\n"
+            "  test:\\n"
+            "    steps:\\n"
+            "      - uses: actions/checkout@"
+            + "a" * 40
+            + "\\n",
+            encoding="utf-8",
+        )
+
+    def test_doctor_passes_on_healthy_repository_fixture(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_repository(root)
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["doctor", "--root", str(root)])
+            self.assertEqual(code, 0, output.getvalue())
+            self.assertIn("Capri Doctor:", output.getvalue())
+            self.assertIn("Recovery CI coverage: push and pull_request", output.getvalue())
+
+    def test_doctor_fails_closed_on_missing_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["doctor", "--root", directory])
+            self.assertEqual(code, 1)
+            self.assertIn("[FAIL] Repository structure", output.getvalue())
+
+    def test_doctor_detects_unpinned_external_actions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_repository(root)
+            workflow = root / ".github/workflows/quality.yml"
+            workflow.write_text(
+                workflow.read_text(encoding="utf-8").replace("@" + "a" * 40, "@v6"),
+                encoding="utf-8",
+            )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["doctor", "--root", str(root)])
+            self.assertEqual(code, 1)
+            self.assertIn("[FAIL] CI actions pinned", output.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

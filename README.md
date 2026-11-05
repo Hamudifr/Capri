@@ -34,6 +34,15 @@ The repository has a reviewable foundation, a tested execution-ledger prototype,
 
 ## Run checks locally
 
+Run the read-only repository diagnostic before making changes:
+
+```bash
+python -m capri_core doctor
+```
+
+It checks required project files, Python version, pinned external CI actions, minimal workflow permissions, and recovery-branch CI triggers. It reads only those known project files and does not inspect transcripts, credentials, or arbitrary repository contents. Use `--root PATH` to check another working tree.
+
+
 ```bash
 python -m compileall -q capri_core capri_runtime tests
 python -m unittest discover -s tests -v
