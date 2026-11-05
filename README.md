@@ -17,6 +17,7 @@ Capri is a research and execution-assistance project. This repository contains a
 - `docs/RECOVERY_PLAN.md` — ordered recovery work and exit criteria.
 - `docs/EVALUATION_DATA_CONTRACT.md` — non-sensitive evaluation record contract.
 - `docs/RUNTIME_CORE.md` — narrow runtime-core prototype, API, limitations, and tests.
+- `docs/LEDGER_THREAT_MODEL.md` — explicit trust assumptions, controls, limitations, and operator guidance.
 - `capri_core/` — immutable evaluation records, fail-closed validation, and hash-chained append-only ledger.
 - `tests/` — deterministic structural and runtime-core tests.
 - `.github/workflows/quality.yml` — non-X5 documentation and test checks.
@@ -29,9 +30,10 @@ The repository now has a reviewable foundation and a small tested execution-ledg
 
 ```bash
 python -m unittest discover -s tests -v
+python -m capri_core verify path/to/runs.jsonl
 ```
 
-Python 3.11+ is recommended. CI runs the same checks.
+Python 3.11+ is supported; CI compiles and tests on Python 3.11, 3.12, and 3.13. The verification command is read-only and requires an existing ledger file.
 
 ## Change policy
 

@@ -1,10 +1,14 @@
 import hashlib
 import json
+import io
 import tempfile
+from contextlib import redirect_stderr, redirect_stdout
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
+
+from capri_core.__main__ import main as cli_main
 
 from capri_core import (
     EvaluationRecord, EvidenceStage, EvaluatorType, HashChainLedger,
@@ -20,6 +24,40 @@ def passing(run_id="r1", parent=None):
         evidence_ref="evidence://non-x5/example", run_at="2026-11-05T08:00:00Z",
         parent_run_id=parent,
     )
+
+
+class CLITests(unittest.TestCase):
+    def test_verify_cli_reports_metadata_only_and_does_not_modify_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "runs.jsonl"
+            ledger = HashChainLedger(path)
+            ledger.append(passing("cli-run"))
+            before = path.read_bytes()
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["verify", str(path)])
+            self.assertEqual(code, 0)
+            self.assertIn('"records": 1', output.getvalue())
+            self.assertNotIn("cli-run", output.getvalue())
+            self.assertEqual(path.read_bytes(), before)
+
+    def test_verify_cli_rejects_missing_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = io.StringIO()
+            with redirect_stderr(output):
+                code = cli_main(["verify", str(Path(directory) / "missing.jsonl")])
+            self.assertEqual(code, 2)
+            self.assertIn("not an existing regular file", output.getvalue())
+
+    def test_verify_cli_fails_on_corrupted_ledger(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "runs.jsonl"
+            path.write_text('{"bad":true}\\n', encoding="utf-8")
+            output = io.StringIO()
+            with redirect_stderr(output):
+                code = cli_main(["verify", str(path)])
+            self.assertEqual(code, 2)
+            self.assertIn("verification failed", output.getvalue())
 
 
 class ValidationTests(unittest.TestCase):
