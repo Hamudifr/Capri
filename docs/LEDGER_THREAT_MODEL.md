@@ -22,6 +22,7 @@ Do not store protected blind-evaluation content, credentials, secrets, or person
 ## Implemented controls
 
 - Runtime type and enum validation before append and after decode.
+- Lone Unicode surrogate code points are rejected before UTF-8 canonical serialization.
 - Strict JSON parsing rejects duplicate object keys and non-standard numeric constants.
 - Canonical JSON serialization is used as hash input.
 - SHA-256 hash chaining detects accidental or partial modification of existing entries.
