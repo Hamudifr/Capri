@@ -40,7 +40,7 @@ class DoctorHealthIntegrationTests(unittest.TestCase):
             report = json.loads(output.getvalue())
             self.assertEqual(exit_code, 0)
             self.assertEqual(report["health"]["scope"], "local_static_repository_checks")
-            self.assertEqual(report["health"]["status"], "healthy")
+            self.assertEqual(report["health"]["status"], "healthy", str(report["health"]))
             self.assertEqual(report["health"]["summary"]["components"], 7)
             self.assertEqual(report["health"]["summary"]["healthy"], 7)
             self.assertTrue(all(item["evidence"] is not None for item in report["health"]["components"][:-1]))
