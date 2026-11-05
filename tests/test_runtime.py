@@ -235,6 +235,27 @@ class RuntimeTests(unittest.TestCase):
         self.assertTrue(closed.closed)
         self.assertEqual(closed.messages, ())
 
+    def test_session_store_enforces_history_limit_for_direct_commits(self):
+        store = SessionStore(max_session_messages=2)
+        session = store.create()
+        store.commit_turn(session.session_id, 0, "first", "answer")
+        with self.assertRaises(SessionLimitError):
+            store.commit_turn(session.session_id, 1, "second", "answer")
+        unchanged = store.get(session.session_id)
+        self.assertEqual(unchanged.version, 1)
+        self.assertEqual(len(unchanged.messages), 2)
+
+    def test_runtime_rejects_store_with_mismatched_history_limit(self):
+        store = SessionStore(max_session_messages=10)
+        with self.assertRaises(ValidationError):
+            Runtime(EchoAdapter(), store, max_session_messages=2)
+
+    def test_session_store_rejects_invalid_history_limit(self):
+        for value in (True, 1, 0, -1, 2.5):
+            with self.subTest(value=value):
+                with self.assertRaises(ValidationError):
+                    SessionStore(max_session_messages=value)
+
     def test_all_resource_limits_reject_boolean_values(self):
         for kwargs in (
             {"max_input_chars": True},
