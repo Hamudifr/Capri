@@ -2,6 +2,7 @@ import hashlib
 import json
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 
@@ -127,6 +128,15 @@ class LedgerTests(unittest.TestCase):
             path.write_text(json.dumps({"record": {}, "hash": "0" * 64}) + "\n")
             with self.assertRaises(LedgerIntegrityError):
                 HashChainLedger(path).verify()
+
+
+    def test_threaded_appends_preserve_a_valid_chain(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ledger = HashChainLedger(Path(directory) / "runs.jsonl")
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                hashes = list(pool.map(lambda i: ledger.append(passing(f"thread-{i}")), range(24)))
+            self.assertEqual(len(set(hashes)), 24)
+            self.assertEqual(ledger.verify()["records"], 24)
 
 
 if __name__ == "__main__":
