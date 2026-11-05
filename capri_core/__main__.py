@@ -10,6 +10,38 @@ from .ledger import HashChainLedger, LedgerIntegrityError
 from .health import build_health_report
 
 
+def _workflow_permissions_are_read_only(workflow: str) -> bool:
+    """Accept only the explicit, single-scope contents: read permission block."""
+    lines = workflow.splitlines()
+    matches = [
+        index for index, line in enumerate(lines)
+        if re.fullmatch(r"permissions:\s*(?:#.*)?", line)
+    ]
+    if len(matches) != 1:
+        return False
+
+    start = matches[0]
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        line = lines[index]
+        if line.strip() and not line.lstrip().startswith("#"):
+            if len(line) - len(line.lstrip()) == 0:
+                end = index
+                break
+
+    scopes: list[str] = []
+    for line in lines[start + 1:end]:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if len(line) - len(line.lstrip()) != 2:
+            return False
+        match = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_-]*):\s*([^#]+?)\s*(?:#.*)?", line.strip())
+        if not match or match.group(1) != "contents" or match.group(2).strip() != "read":
+            return False
+        scopes.append(match.group(1))
+    return scopes == ["contents"]
+
+
 def _workflow_event_branches(workflow: str, event: str) -> set[str] | None:
     """Read a simple explicit branch filter under one top-level Actions event.
 
@@ -102,6 +134,8 @@ def _workflow_event_branches(workflow: str, event: str) -> set[str] | None:
         indent = len(line) - len(line.lstrip())
         if indent <= branch_indent:
             break
+        if indent != branch_indent + 2:
+            return None
         item_match = re.fullmatch(r"-\s*(.+?)\s*", line.strip())
         if not item_match:
             return None
@@ -167,10 +201,7 @@ def run_doctor(root: Path, json_output: bool = False) -> int:
                 if uses_lines and not unpinned
                 else "unpinned action references: " + "; ".join(unpinned or ["no action references found"]),
             ))
-            least_privilege = bool(re.search(
-                r"(?m)^permissions:\s*\n\s+contents:\s*read\s*$",
-                workflow,
-            ))
+            least_privilege = _workflow_permissions_are_read_only(workflow)
             checks.append((
                 "CI permissions",
                 least_privilege,
