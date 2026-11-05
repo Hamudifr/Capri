@@ -22,6 +22,7 @@ Capri is a research and execution-assistance project. This repository contains a
 - `docs/SECURITY_REVIEW.md` — non-X5 trust boundaries, verified controls, unresolved risks, and required abuse-case tests.
 - `docs/LEDGER_THREAT_MODEL.md` — ledger-specific security assumptions, bounded parsing, and crash behavior.
 - `docs/LEDGER_OPERATIONS.md` — backup verification, integrity-incident response, and controlled recovery runbook.
+- `docs/LEDGER_SCALING_DECISION.md` — proposed transactional storage migration, explicitly not implemented.
 - `capri_core/` — immutable evaluation records, fail-closed validation, and hash-chained append-only ledger.
 - `capri_runtime/` — in-memory session lifecycle and injected model-adapter boundary; no tools or durable memory.
 - `tests/` — deterministic structural, ledger, and runtime tests.
