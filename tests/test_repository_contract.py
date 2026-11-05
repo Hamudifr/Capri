@@ -33,6 +33,12 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("release gate not met", text)
         self.assertIn("not a claim that the complete Capri runtime has been recovered", text)
 
+    def test_local_secrets_and_runtime_data_are_ignored(self):
+        text = (ROOT / ".gitignore").read_text(encoding="utf-8")
+        for pattern in (".env", ".venv/", "data/", "*.jsonl", "*.sqlite3", "__pycache__/"):
+            with self.subTest(pattern=pattern):
+                self.assertIn(pattern, text)
+
     def test_no_protected_x5_artifact_paths(self):
         forbidden = {"x5_rubric", "x5_answers", "x5_expected", "x5_scoring"}
         paths = {p.as_posix().lower() for p in ROOT.rglob("*") if p.is_file()}
