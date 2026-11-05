@@ -25,6 +25,7 @@ Assets requiring protection as the runtime grows:
 ## Controls verified in the current foundation
 
 - Input, output, and session-history character/message bounds.
+- User input, adapter output, and direct session-store commits reject lone Unicode surrogate code points before transcript storage.
 - Evaluation metadata rejects lone Unicode surrogate code points before UTF-8 ledger serialization.
 - Session-history limit is enforced both before model invocation and atomically inside `SessionStore.commit_turn`.
 - An injected store must use the same history limit as its `Runtime`.

@@ -53,6 +53,7 @@ The adapter implements `complete(session_id, user_text, history)` and returns a 
 ## Failure and concurrency semantics
 
 - Invalid/blank/oversized input is rejected before adapter invocation.
+- Lone UTF-16 surrogate code points in user input, adapter output, or direct store commits are rejected before they can enter a transcript.
 - A session that would exceed `max_session_messages` is rejected before adapter invocation.
 - Non-positive or boolean resource-limit configuration is rejected.
 - Oversized adapter output raises `SessionLimitError` and is not committed.

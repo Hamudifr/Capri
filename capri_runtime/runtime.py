@@ -11,6 +11,11 @@ from typing import Protocol
 from uuid import uuid4
 
 
+def _contains_surrogate(value: str) -> bool:
+    """Return True for lone UTF-16 surrogate code points."""
+    return any(0xD800 <= ord(character) <= 0xDFFF for character in value)
+
+
 class RuntimeErrorBase(Exception):
     """Base class for expected runtime failures."""
 
@@ -132,6 +137,8 @@ class SessionStore:
             raise ValidationError("user_text must be a non-empty string")
         if not isinstance(assistant_text, str) or not assistant_text.strip():
             raise ValidationError("assistant_text must be a non-empty string")
+        if _contains_surrogate(user_text) or _contains_surrogate(assistant_text):
+            raise ValidationError("messages must contain valid Unicode scalar values")
 
         with self._lock:
             current = self.get(session_id)
@@ -203,6 +210,8 @@ class Runtime:
     def respond(self, session_id: str, user_text: str) -> Session:
         if not isinstance(user_text, str) or not user_text.strip():
             raise ValidationError("user_text must be a non-empty string")
+        if _contains_surrogate(user_text):
+            raise ValidationError("user_text must contain valid Unicode scalar values")
         if len(user_text) > self.max_input_chars:
             raise ValidationError("user_text exceeds max_input_chars")
 
@@ -224,6 +233,8 @@ class Runtime:
 
         if not isinstance(answer, str) or not answer.strip():
             raise ValidationError("adapter must return non-empty assistant text")
+        if _contains_surrogate(answer):
+            raise ValidationError("adapter output must contain valid Unicode scalar values")
         if len(answer) > self.max_output_chars:
             raise SessionLimitError("adapter output exceeds max_output_chars")
 
