@@ -52,15 +52,18 @@ class HashChainLedger:
     or cross-process locking.
     """
 
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, *, max_entry_bytes: int = 1_048_576):
+        if isinstance(max_entry_bytes, bool) or not isinstance(max_entry_bytes, int) or max_entry_bytes < 1:
+            raise ValueError("max_entry_bytes must be a positive integer")
         self.path = Path(path)
+        self.max_entry_bytes = max_entry_bytes
 
     def _scan(self, collect_entries: bool = False) -> tuple[list[dict[str, Any]], set[str], str, int]:
-        """Validate the complete chain while retaining only IDs unless requested.
+        """Validate a bounded JSONL stream, retaining IDs and optionally entries.
 
-        Iterating the file avoids holding both its full text and all decoded
-        entries in memory. The ID set remains O(number of records) because
-        duplicate and parent-lineage checks require historical membership.
+        Binary bounded reads enforce the per-entry byte ceiling before UTF-8
+        decoding or JSON parsing. The ID set remains O(number of records)
+        because duplicate and parent-lineage checks require historical membership.
         """
         entries: list[dict[str, Any]] = []
         seen_runs: set[str] = set()
@@ -70,12 +73,26 @@ class HashChainLedger:
             return entries, seen_runs, previous, count
 
         try:
-            with self.path.open("r", encoding="utf-8", newline="") as stream:
-                for line_number, line in enumerate(stream, 1):
-                    # Accept the same LF/CRLF line endings as splitlines(), but
-                    # do not silently skip blank records.
-                    line = line.rstrip("\r\n")
+            with self.path.open("rb") as stream:
+                line_number = 0
+                while True:
+                    raw_line = stream.readline(self.max_entry_bytes + 3)
+                    if not raw_line:
+                        break
+                    line_number += 1
+                    # Permit at most max bytes plus CRLF. The extra byte makes
+                    # an oversized line detectable without unbounded readline().
+                    if len(raw_line) > self.max_entry_bytes + 2:
+                        raise LedgerIntegrityError(f"entry exceeds {self.max_entry_bytes} bytes at line {line_number}")
+                    if not raw_line.endswith(b"\\n"):
+                        raise LedgerIntegrityError(f"unterminated ledger entry at line {line_number}")
+                    raw_line = raw_line[:-1]
+                    if raw_line.endswith(b"\\r"):
+                        raw_line = raw_line[:-1]
+                    if len(raw_line) > self.max_entry_bytes:
+                        raise LedgerIntegrityError(f"entry exceeds {self.max_entry_bytes} bytes at line {line_number}")
                     try:
+                        line = raw_line.decode("utf-8")
                         entry = json.loads(
                             line, object_pairs_hook=_unique_object, parse_constant=_reject_constant
                         )
@@ -103,7 +120,7 @@ class HashChainLedger:
                             raise LedgerIntegrityError(f"unknown parent_run_id at line {line_number}")
                     except LedgerIntegrityError:
                         raise
-                    except (json.JSONDecodeError, KeyError, TypeError, ValueError, RecordValidationError) as exc:
+                    except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError, ValueError, RecordValidationError) as exc:
                         raise LedgerIntegrityError(f"invalid ledger entry at line {line_number}") from exc
 
                     seen_runs.add(run_id)
@@ -111,8 +128,8 @@ class HashChainLedger:
                     count += 1
                     if collect_entries:
                         entries.append(entry)
-        except UnicodeDecodeError as exc:
-            raise LedgerIntegrityError("ledger is not valid UTF-8") from exc
+        except OSError as exc:
+            raise LedgerIntegrityError("ledger could not be read completely") from exc
         return entries, seen_runs, previous, count
 
     def append(self, record: EvaluationRecord) -> str:
@@ -127,8 +144,12 @@ class HashChainLedger:
             digest = hashlib.sha256(bytes.fromhex(previous) + _canonical(payload)).hexdigest()
             entry = {"previous_hash": previous, "record": payload, "hash": digest}
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            with self.path.open("a", encoding="utf-8", newline="\n") as stream:
-                stream.write(json.dumps(entry, sort_keys=True, ensure_ascii=False, allow_nan=False) + "\n")
+            serialized = json.dumps(entry, sort_keys=True, ensure_ascii=False, allow_nan=False)
+            encoded = serialized.encode("utf-8")
+            if len(encoded) > self.max_entry_bytes:
+                raise LedgerIntegrityError(f"new entry exceeds {self.max_entry_bytes} bytes")
+            with self.path.open("ab") as stream:
+                stream.write(encoded + b"\\n")
                 stream.flush()
                 os.fsync(stream.fileno())
             return digest
