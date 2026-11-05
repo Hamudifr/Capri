@@ -74,7 +74,7 @@ class HashChainLedger:
                 for line_number, line in enumerate(stream, 1):
                     # Accept the same LF/CRLF line endings as splitlines(), but
                     # do not silently skip blank records.
-                    line = line.rstrip("\\r\\n")
+                    line = line.rstrip("\r\n")
                     try:
                         entry = json.loads(
                             line, object_pairs_hook=_unique_object, parse_constant=_reject_constant
@@ -127,8 +127,8 @@ class HashChainLedger:
             digest = hashlib.sha256(bytes.fromhex(previous) + _canonical(payload)).hexdigest()
             entry = {"previous_hash": previous, "record": payload, "hash": digest}
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            with self.path.open("a", encoding="utf-8", newline="\\n") as stream:
-                stream.write(json.dumps(entry, sort_keys=True, ensure_ascii=False, allow_nan=False) + "\\n")
+            with self.path.open("a", encoding="utf-8", newline="\n") as stream:
+                stream.write(json.dumps(entry, sort_keys=True, ensure_ascii=False, allow_nan=False) + "\n")
                 stream.flush()
                 os.fsync(stream.fileno())
             return digest
