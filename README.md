@@ -40,7 +40,7 @@ Run the read-only repository diagnostic before making changes:
 python -m capri_core doctor
 ```
 
-It checks required project files, Python version, pinned external CI actions, minimal workflow permissions, and recovery-branch CI triggers. It reads only those known project files and does not inspect transcripts, credentials, or arbitrary repository contents. Use `--root PATH` to check another working tree. Add `--json` for a versioned machine-readable report (`schema_version: 1`) with per-check status and aggregate counts.
+It checks required project files, Python version, pinned external CI actions, minimal workflow permissions, and recovery-branch CI triggers. Its report also includes a dependency-aware operational health graph; use `--json` to consume it programmatically. It reads only those known project files and does not inspect transcripts, credentials, or arbitrary repository contents. Use `--root PATH` to check another working tree. Add `--json` for a versioned machine-readable report (`schema_version: 1`) with per-check status and aggregate counts.
 
 
 ```bash

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Sequence
 
 from .ledger import HashChainLedger, LedgerIntegrityError
+from .health import build_health_report
 
 
 def run_doctor(root: Path, json_output: bool = False) -> int:
@@ -97,6 +98,10 @@ def run_doctor(root: Path, json_output: bool = False) -> int:
         for name, passed, detail in checks
     ]
     failed = sum(item["status"] == "fail" for item in report_checks)
+    health_report = build_health_report([
+        {"id": item["id"], "status": item["status"]}
+        for item in report_checks
+    ])
     if json_output:
         report = {
             "schema_version": 1,
@@ -108,12 +113,17 @@ def run_doctor(root: Path, json_output: bool = False) -> int:
                 "total": len(report_checks),
             },
             "checks": report_checks,
+            "health": health_report,
         }
         print(json.dumps(report, sort_keys=True))
     else:
         for item in report_checks:
             print(f"[{item['status'].upper()}] {item['name']}: {item['detail']}")
         print(f"\nCapri Doctor: {len(report_checks) - failed}/{len(report_checks)} checks passed")
+        print(
+            f"Operational health: {health_report['status']} "
+            f"({health_report['summary']['healthy']}/{health_report['summary']['components']} components healthy)"
+        )
     return 0 if failed == 0 else 1
 
 
