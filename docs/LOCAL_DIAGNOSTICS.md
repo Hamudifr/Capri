@@ -6,7 +6,7 @@ Run the read-only Capri Doctor from the repository root:
 python -m capri_core doctor
 ```
 
-Use `python -m capri_core doctor --root /path/to/Capri` to inspect another checkout.
+Use `python -m capri_core doctor --root /path/to/Capri` to inspect another checkout. Add `--json` to emit a versioned JSON report (`schema_version: 1`) containing stable check IDs, per-check status and details, overall status, and passed/failed/total counts.
 
 ## Checks
 
