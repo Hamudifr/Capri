@@ -224,6 +224,23 @@ class LedgerTests(unittest.TestCase):
             with self.assertRaises(LedgerIntegrityError):
                 HashChainLedger(path, max_entry_bytes=32).verify()
 
+    def test_ledger_accepts_crlf_line_endings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "runs.jsonl"
+            ledger = HashChainLedger(path)
+            ledger.append(passing("r1"))
+            path.write_bytes(path.read_bytes().replace(b"\\n", b"\\r\\n"))
+            self.assertEqual(ledger.verify()["records"], 1)
+
+    def test_entry_at_exact_configured_byte_limit_is_accepted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "runs.jsonl"
+            HashChainLedger(path).append(passing("r1"))
+            entry_size = len(path.read_bytes().rstrip(b"\\n"))
+            self.assertEqual(HashChainLedger(path, max_entry_bytes=entry_size).verify()["records"], 1)
+            with self.assertRaises(LedgerIntegrityError):
+                HashChainLedger(path, max_entry_bytes=entry_size - 1).verify()
+
     def test_append_rejects_entry_larger_than_configured_limit(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "runs.jsonl"
