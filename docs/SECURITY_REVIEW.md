@@ -66,7 +66,7 @@ Use harmless fixtures and instrumented fake adapters/tools. Do not use real dest
 
 ## CI supply-chain posture
 
-The quality workflow uses minimal `contents: read` permissions and immutable action commit references. The referenced action commits were resolved from the official `actions/checkout` v4 and `actions/setup-python` v5 Git refs during this change. Review action updates as code changes and keep references immutable.
+The quality workflow uses minimal `contents: read` permissions and immutable action commit references. The current references were verified against the official `actions/checkout` v6 and `actions/setup-python` v7 Git tags; their action metadata declares the Node.js 24 runtime. Review action updates as code changes and keep references immutable.
 
 ## Release position
 
