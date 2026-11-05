@@ -480,5 +480,41 @@ class DoctorTests(unittest.TestCase):
             self.assertIn("[FAIL] Recovery CI coverage", output.getvalue())
 
 
+    def test_doctor_rejects_additional_workflow_write_permissions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_repository(root)
+            workflow = root / ".github/workflows/quality.yml"
+            content = workflow.read_text(encoding="utf-8").replace(
+                "  contents: read\n",
+                "  contents: read\n  issues: write\n",
+            )
+            workflow.write_text(content, encoding="utf-8")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["doctor", "--root", str(root)])
+            self.assertEqual(code, 1)
+            self.assertIn("[FAIL] CI permissions", output.getvalue())
+
+    def test_doctor_rejects_nested_branch_list_lookalikes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_repository(root)
+            workflow = root / ".github/workflows/quality.yml"
+            content = workflow.read_text(encoding="utf-8").replace(
+                'branches: ["main", "recovery/non-x5-foundation"]',
+                "branches:\n"
+                "      - include:\n"
+                "          - main\n"
+                "          - recovery/non-x5-foundation",
+            )
+            workflow.write_text(content, encoding="utf-8")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["doctor", "--root", str(root)])
+            self.assertEqual(code, 1)
+            self.assertIn("[FAIL] Recovery CI coverage", output.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()
