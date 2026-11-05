@@ -190,6 +190,27 @@ class LedgerTests(unittest.TestCase):
                 HashChainLedger(path).verify()
 
 
+    def test_append_after_corrupted_tail_fails_without_modifying_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "runs.jsonl"
+            ledger = HashChainLedger(path)
+            ledger.append(passing("r1"))
+            with path.open("ab") as stream:
+                stream.write(b'{"partial":')
+            before = path.read_bytes()
+            with self.assertRaises(LedgerIntegrityError):
+                ledger.append(passing("r2"))
+            self.assertEqual(path.read_bytes(), before)
+
+    def test_streaming_verify_and_records_agree(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ledger = HashChainLedger(Path(directory) / "runs.jsonl")
+            ledger.append(passing("r1"))
+            ledger.append(passing("r2", parent="r1"))
+            result = ledger.verify()
+            self.assertEqual(result["records"], len(ledger.records()))
+            self.assertTrue(result["valid"])
+
     def test_threaded_appends_preserve_a_valid_chain(self):
         with tempfile.TemporaryDirectory() as directory:
             ledger = HashChainLedger(Path(directory) / "runs.jsonl")
