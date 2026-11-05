@@ -92,13 +92,13 @@ class RuntimeTests(unittest.TestCase):
         runtime = Runtime(NeverCall())
         session = runtime.create_session()
         with self.assertRaises(ValidationError):
-            runtime.respond(session.session_id, "bad-\\ud800")
+            runtime.respond(session.session_id, "bad-\ud800")
         self.assertEqual(runtime.get_session(session.session_id).messages, ())
 
     def test_lone_surrogate_adapter_output_rejected_without_commit(self):
         class InvalidUnicodeAdapter:
             def complete(self, *args):
-                return "bad-\\ud800"
+                return "bad-\ud800"
 
         runtime = Runtime(InvalidUnicodeAdapter())
         session = runtime.create_session()
@@ -111,8 +111,8 @@ class RuntimeTests(unittest.TestCase):
     def test_direct_store_commit_rejects_lone_surrogates(self):
         session = self.runtime.create_session()
         for user_text, assistant_text in (
-            ("bad-\\ud800", "answer"),
-            ("user", "bad-\\ud800"),
+            ("bad-\ud800", "answer"),
+            ("user", "bad-\ud800"),
         ):
             with self.subTest(user_text=user_text, assistant_text=assistant_text):
                 with self.assertRaises(ValidationError):
