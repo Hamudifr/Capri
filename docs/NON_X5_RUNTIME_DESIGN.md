@@ -42,6 +42,7 @@ It does not provide:
 ## API
 
 - `Runtime(adapter, store=None, max_input_chars=16000, max_output_chars=64000, max_session_messages=200)`
+- `SessionStore(max_session_messages=200)`
 - `create_session() -> Session`
 - `get_session(session_id) -> Session`
 - `close_session(session_id) -> Session`
@@ -59,7 +60,8 @@ The adapter implements `complete(session_id, user_text, history)` and returns a 
 - Adapter exceptions are wrapped as `RuntimeExecutionError`; no turn is committed.
 - Empty or non-string adapter output is rejected; no turn is committed.
 - A successful adapter call is committed only if the session version is unchanged from the snapshot supplied to the adapter and the session remains open. Otherwise `SessionConflictError` or `SessionClosedError` is raised and no messages from that turn are committed.
-- Direct store commits independently validate version type/range and non-empty user/assistant text.
+- Direct store commits independently validate version type/range and non-empty user/assistant text, and enforce the store's own history limit under the same lock as the commit.
+- When a store is injected into a runtime, its configured history limit must exactly match the runtime limit; mismatches fail during construction.
 - A caller may choose to retry a conflict, but should not automatically replay non-idempotent model-provider work without considering provider semantics.
 
 ## Security notes
@@ -77,4 +79,4 @@ python -m unittest discover -s tests -v
 python -m compileall -q capri_core capri_runtime tests
 ```
 
-The current regression suite contains 43 tests and CI runs it on Python 3.11, 3.12, and 3.13. The latest verified run for commit `edecd19b5c6ce7cd6a46bb85e7341eb29f985ef4` passed 43/43 tests in each matrix job. This slice is suitable for further integration work and review, not production deployment. Durable storage, tool execution, authorization, deployment, and operational policies remain explicit design gates.
+CI runs the regression suite on Python 3.11, 3.12, and 3.13. The exact test count and commit-specific results are recorded in the current GitHub Actions run and recovery PR, rather than hard-coded here. This slice is suitable for further integration work and review, not production deployment. Durable storage, tool execution, authorization, deployment, and operational policies remain explicit design gates.
