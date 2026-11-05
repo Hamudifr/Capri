@@ -52,7 +52,7 @@ def _workflow_event_branches(workflow: str, event: str) -> set[str] | None:
     lines = workflow.splitlines()
     on_blocks = [
         index for index, line in enumerate(lines)
-        if re.fullmatch(r"on:\\s*(?:#.*)?", line)
+        if re.fullmatch(r"on:\s*(?:#.*)?", line)
     ]
     if len(on_blocks) != 1:
         return None
@@ -81,7 +81,7 @@ def _workflow_event_branches(workflow: str, event: str) -> set[str] | None:
         if not line.strip() or line.lstrip().startswith("#"):
             continue
         indent = len(line) - len(line.lstrip())
-        if indent == event_level_indent and re.fullmatch(rf"{re.escape(event)}:\\s*(?:#.*)?", line.strip()):
+        if indent == event_level_indent and re.fullmatch(rf"{re.escape(event)}:\s*(?:#.*)?", line.strip()):
             event_indices.append(index)
     if len(event_indices) != 1:
         return None
