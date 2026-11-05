@@ -1,6 +1,8 @@
 import hashlib
 import json
 import io
+import os
+import stat
 import tempfile
 from contextlib import redirect_stderr, redirect_stdout
 import unittest
@@ -137,6 +139,25 @@ class ValidationTests(unittest.TestCase):
 
 
 class LedgerTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "posix", "POSIX file modes required")
+    def test_new_ledger_uses_private_file_and_parent_permissions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "private" / "runs.jsonl"
+            HashChainLedger(path).append(passing("private-run"))
+            self.assertEqual(stat.S_IMODE(path.parent.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX file modes required")
+    def test_append_tightens_existing_ledger_file_permissions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "runs.jsonl"
+            ledger = HashChainLedger(path)
+            ledger.append(passing("first"))
+            path.chmod(0o644)
+            ledger.append(passing("second", parent="first"))
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            self.assertEqual(ledger.verify()["records"], 2)
+
     def test_append_verify_and_retest_lineage(self):
         with tempfile.TemporaryDirectory() as directory:
             ledger = HashChainLedger(Path(directory) / "runs.jsonl")

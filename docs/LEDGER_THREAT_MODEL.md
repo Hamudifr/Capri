@@ -27,6 +27,7 @@ Do not store protected blind-evaluation content, credentials, secrets, or person
 - Canonical JSON serialization is used as hash input.
 - SHA-256 hash chaining detects accidental or partial modification of existing entries.
 - Run identifiers are unique within a ledger; retest parents must precede children.
+- Newly created ledger parent directories request mode `0700`; ledger files are created with mode `0600` and, on POSIX, existing file modes are tightened to `0600` on append. This is filesystem-mode hardening, not user/tenant authorization; existing parent directories remain operator-owned.
 - Writes flush and call `fsync` before returning.
 - The in-process reentrant lock serializes threads sharing this module instance.
 - Verification and append validation scan the JSONL file line by line; append/verify retain run IDs for duplicate and parent checks rather than retaining every decoded entry.
@@ -37,7 +38,7 @@ Do not store protected blind-evaluation content, credentials, secrets, or person
 ## Known limitations
 
 - **No authenticity:** an attacker who can rewrite the entire file can recompute every hash. A hash chain is not a digital signature or trusted timestamp.
-- **No access control:** file permissions, user identity, and host hardening are external responsibilities.
+- **No application access control:** POSIX file modes reduce accidental local disclosure, but user identity, authorization, ownership, parent-directory permissions for existing paths, host hardening, and non-POSIX ACL behavior remain operator responsibilities. The ledger remains plaintext.
 - **No encryption:** the ledger is plaintext JSONL.
 - **Single writer only:** the lock is process-local. Multiple processes or hosts can race and corrupt ordering.
 - **No transactional storage:** a process or machine failure can leave a partial final line. Verification and subsequent appends fail closed; recovery/repair tooling is not implemented. Preserve the original and recover only from a verified backup or a separately reviewed copy—never auto-truncate.
@@ -49,7 +50,7 @@ Do not store protected blind-evaluation content, credentials, secrets, or person
 
 ## Operational guidance
 
-1. Keep the ledger in a directory writable only by its service account.
+1. Keep the ledger in a directory writable only by its service account. New ledger files use POSIX mode `0600`, and a newly created immediate parent directory requests `0700`; verify existing directory ownership/permissions and non-POSIX ACLs separately.
 2. Enforce one writer process per file; do not share a writable ledger over a network filesystem.
 3. Back up the file before upgrades and verify the backup.
 4. Treat verification failures as integrity incidents. Preserve the original file and investigate a copy; do not silently rewrite or truncate it.
