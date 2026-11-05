@@ -59,5 +59,14 @@ class HealthModelTests(unittest.TestCase):
             build_health_report(checks(), observed_at="2026-11-05T12:00:00")
 
 
+    def test_empty_timestamp_is_rejected(self):
+        with self.assertRaises(ValueError):
+            build_health_report(checks(), observed_at="")
+
+    def test_non_mapping_health_observation_is_rejected(self):
+        with self.assertRaises(ValueError):
+            build_health_report([None])
+
+
 if __name__ == "__main__":
     unittest.main()
