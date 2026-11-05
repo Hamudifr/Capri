@@ -136,7 +136,7 @@ def _open_parent_directory(path: Path, *, create: bool) -> int:
             info = current.lstat()
         if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
             raise LedgerIntegrityError("ledger parent path must contain only real directories")
-        if created_child:
+        if created_child and os.name == "posix":
             child_fd = os.open(current, directory_flags)
             parent_fd = os.open(current.parent, directory_flags)
             try:
