@@ -20,6 +20,7 @@ Capri is a research and execution-assistance project. This repository contains a
 - `docs/NON_X5_RUNTIME_SPEC_TEMPLATE.md` — product-owner specification template; blank decisions remain blockers.
 - `docs/NON_X5_RUNTIME_DESIGN.md` — conservative proposed defaults and implemented runtime slice.
 - `docs/SECURITY_REVIEW.md` — non-X5 trust boundaries, verified controls, unresolved risks, and required abuse-case tests.
+- `docs/LEDGER_THREAT_MODEL.md` — ledger-specific security assumptions, bounded parsing, crash behavior, and operational recovery guidance.
 - `capri_core/` — immutable evaluation records, fail-closed validation, and hash-chained append-only ledger.
 - `capri_runtime/` — in-memory session lifecycle and injected model-adapter boundary; no tools or durable memory.
 - `tests/` — deterministic structural, ledger, and runtime tests.
@@ -27,7 +28,7 @@ Capri is a research and execution-assistance project. This repository contains a
 
 ## Current status
 
-The repository has a reviewable foundation, a tested execution-ledger prototype, and a minimal provider-neutral runtime slice. The runtime currently supports in-memory sessions and an injected text adapter only. It does not include a concrete model provider, tool execution, durable memory, authentication, cross-process storage, or deployment packaging. These are explicit gaps, not implied capabilities. No X5 work is included.
+The repository has a reviewable foundation, a tested execution-ledger prototype, and a minimal provider-neutral runtime slice. Ledger entries are limited to 1 MiB by default (configurable per `HashChainLedger` instance); each JSONL record must end with a newline, and incomplete tails fail closed. Verification and append remain linear scans with an in-memory run-ID set, and the ledger supports only one writer process. The runtime currently supports in-memory sessions and an injected text adapter only. It does not include a concrete model provider, tool execution, durable memory, authentication, cross-process storage, or deployment packaging. These are explicit gaps, not implied capabilities. No X5 work is included.
 
 ## Run checks locally
 
