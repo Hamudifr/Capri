@@ -8,6 +8,7 @@ from capri_runtime import (
     SessionClosedError,
     SessionConflictError,
     SessionNotFoundError,
+    SessionLimitError,
     SessionStore,
     ValidationError,
 )
