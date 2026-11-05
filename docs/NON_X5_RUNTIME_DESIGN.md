@@ -35,25 +35,31 @@ It does not provide:
 | Turn commit | User and assistant messages committed together after adapter success | Adapter failure leaves session unchanged |
 | Concurrency | Version check at commit | Concurrent requests cannot silently overwrite each other; loser receives conflict |
 | Input bound | 16,000 characters by default | Defensive bound, configurable by host |
+| Output bound | 64,000 characters by default | Oversized adapter output is rejected before transcript commit |
+| Session history bound | 200 messages by default (100 turns) | A new turn is rejected before adapter invocation when it would exceed the bound |
 | Failure | Typed exceptions; no partial transcript commit | Caller owns retry/UI behavior |
 
 ## API
 
-- `Runtime(adapter, store=None, max_input_chars=16000)`
+- `Runtime(adapter, store=None, max_input_chars=16000, max_output_chars=64000, max_session_messages=200)`
 - `create_session() -> Session`
 - `get_session(session_id) -> Session`
 - `close_session(session_id) -> Session`
 - `respond(session_id, user_text) -> Session`
 
-The adapter implements `complete(session_id, user_text, history)` and returns a non-empty assistant string. It receives an immutable history snapshot. The runtime does not pass secrets, hidden prompts, or tool permissions.
+The adapter implements `complete(session_id, user_text, history)` and returns a non-empty assistant string. It receives an immutable history snapshot. The runtime does not pass secrets, hidden prompts, or tool permissions. The package exports `RuntimeErrorBase`, `ValidationError`, `SessionNotFoundError`, `SessionClosedError`, `SessionConflictError`, `SessionLimitError`, and `RuntimeExecutionError` alongside the runtime, store, session, message, and adapter protocol.
 
 ## Failure and concurrency semantics
 
 - Invalid/blank/oversized input is rejected before adapter invocation.
+- A session that would exceed `max_session_messages` is rejected before adapter invocation.
+- Non-positive or boolean resource-limit configuration is rejected.
+- Oversized adapter output raises `SessionLimitError` and is not committed.
 - Missing or closed sessions are rejected before adapter invocation.
 - Adapter exceptions are wrapped as `RuntimeExecutionError`; no turn is committed.
 - Empty or non-string adapter output is rejected; no turn is committed.
-- A successful adapter call is committed only if the session version is unchanged from the snapshot supplied to the adapter. Otherwise `SessionConflictError` is raised and no messages from that turn are committed.
+- A successful adapter call is committed only if the session version is unchanged from the snapshot supplied to the adapter and the session remains open. Otherwise `SessionConflictError` or `SessionClosedError` is raised and no messages from that turn are committed.
+- Direct store commits independently validate version type/range and non-empty user/assistant text.
 - A caller may choose to retry a conflict, but should not automatically replay non-idempotent model-provider work without considering provider semantics.
 
 ## Security notes
@@ -71,4 +77,4 @@ python -m unittest discover -s tests -v
 python -m compileall -q capri_core capri_runtime tests
 ```
 
-This slice is suitable for further integration work and review, not production deployment. Durable storage, tool execution, authorization, deployment, and operational policies remain explicit design gates.
+The current regression suite contains 43 tests and CI runs it on Python 3.11, 3.12, and 3.13. The latest verified run for commit `edecd19b5c6ce7cd6a46bb85e7341eb29f985ef4` passed 43/43 tests in each matrix job. This slice is suitable for further integration work and review, not production deployment. Durable storage, tool execution, authorization, deployment, and operational policies remain explicit design gates.
