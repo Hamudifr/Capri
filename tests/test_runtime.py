@@ -161,5 +161,90 @@ class RuntimeTests(unittest.TestCase):
             Runtime(EchoAdapter(), max_input_chars=True)
 
 
+    def test_output_limit_rejects_without_committing_turn(self):
+        class LargeAdapter:
+            def complete(self, session_id, user_text, history):
+                return "12345"
+
+        runtime = Runtime(LargeAdapter(), max_output_chars=4)
+        session = runtime.create_session()
+        with self.assertRaises(SessionLimitError):
+            runtime.respond(session.session_id, "hello")
+        unchanged = runtime.get_session(session.session_id)
+        self.assertEqual(unchanged.version, 0)
+        self.assertEqual(unchanged.messages, ())
+
+    def test_session_message_limit_rejects_before_adapter(self):
+        class NeverCall:
+            def complete(self, *args):
+                raise AssertionError("adapter must not be called")
+
+        runtime = Runtime(NeverCall(), max_session_messages=2)
+        session = runtime.create_session()
+        runtime.store.commit_turn(session.session_id, 0, "first", "answer")
+        with self.assertRaises(SessionLimitError):
+            runtime.respond(session.session_id, "second")
+        self.assertEqual(runtime.get_session(session.session_id).version, 1)
+
+    def test_direct_commit_rejects_invalid_version_and_empty_messages(self):
+        session = self.runtime.create_session()
+        invalid_calls = (
+            (True, "user", "assistant"),
+            (-1, "user", "assistant"),
+            (0, " ", "assistant"),
+            (0, "user", ""),
+        )
+        for version, user_text, assistant_text in invalid_calls:
+            with self.subTest(version=version, user_text=user_text):
+                with self.assertRaises(ValidationError):
+                    self.runtime.store.commit_turn(
+                        session.session_id, version, user_text, assistant_text
+                    )
+        self.assertEqual(self.runtime.get_session(session.session_id).version, 0)
+
+    def test_close_during_generation_prevents_turn_commit(self):
+        entered = threading.Event()
+        release = threading.Event()
+
+        class BlockingAdapter:
+            def complete(self, session_id, user_text, history):
+                entered.set()
+                release.wait(timeout=2)
+                return "late answer"
+
+        runtime = Runtime(BlockingAdapter())
+        session = runtime.create_session()
+        outcome = []
+
+        def run_turn():
+            try:
+                outcome.append(runtime.respond(session.session_id, "hello"))
+            except Exception as exc:
+                outcome.append(exc)
+
+        worker = threading.Thread(target=run_turn)
+        worker.start()
+        self.assertTrue(entered.wait(timeout=2))
+        runtime.close_session(session.session_id)
+        release.set()
+        worker.join(timeout=2)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(len(outcome), 1)
+        self.assertIsInstance(outcome[0], SessionClosedError)
+        closed = runtime.get_session(session.session_id)
+        self.assertTrue(closed.closed)
+        self.assertEqual(closed.messages, ())
+
+    def test_all_resource_limits_reject_boolean_values(self):
+        for kwargs in (
+            {"max_input_chars": True},
+            {"max_output_chars": True},
+            {"max_session_messages": True},
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValidationError):
+                    Runtime(EchoAdapter(), **kwargs)
+
+
 if __name__ == "__main__":
     unittest.main()
