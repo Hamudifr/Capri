@@ -366,6 +366,37 @@ class LedgerPathSafetyTests(unittest.TestCase):
                 HashChainLedger(path).append(passing("rejected-record"))
             self.assertTrue(path.is_dir())
 
+
+    def test_missing_file_scan_closes_parent_descriptor(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "missing.jsonl"
+            opened = []
+            real_open = os.open
+
+            def tracked_open(*args, **kwargs):
+                descriptor = real_open(*args, **kwargs)
+                opened.append(descriptor)
+                return descriptor
+
+            with mock.patch.object(ledger_module.os, "open", side_effect=tracked_open):
+                with self.assertRaises(LedgerIntegrityError):
+                    HashChainLedger(path).verify()
+
+            for descriptor in opened:
+                with self.assertRaises(OSError):
+                    os.fstat(descriptor)
+
+    def test_invalid_ledger_is_not_repermissioned_by_failed_append(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "runs.jsonl"
+            path.write_bytes(b"not-a-valid-ledger\\n")
+            path.chmod(0o644)
+
+            with self.assertRaises(LedgerIntegrityError):
+                HashChainLedger(path).append(passing("rejected-record"))
+
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o644)
+
     @unittest.skipUnless(os.name == "posix", "POSIX directory fsync is required")
     def test_first_creation_fsyncs_file_then_parent_directory(self):
         with tempfile.TemporaryDirectory() as directory:

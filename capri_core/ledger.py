@@ -184,8 +184,6 @@ def _open_ledger_file(
     try:
         if not stat.S_ISREG(os.fstat(descriptor).st_mode):
             raise LedgerIntegrityError("ledger path is not an existing regular file")
-        if writable and os.name == "posix" and hasattr(os, "fchmod"):
-            os.fchmod(descriptor, 0o600)
         return descriptor, created
     except BaseException:
         _close_fd(descriptor)
@@ -266,24 +264,20 @@ class HashChainLedger:
         owned_parent_fd: int | None = None
         owned_file_fd: int | None = None
 
-        if descriptor is None:
-            _assert_not_uncertain(self.path)
-            try:
-                owned_parent_fd = _open_parent_directory(self.path.parent, create=False)
-                owned_file_fd, _ = _open_ledger_file(
-                    self.path, owned_parent_fd, create=False, writable=False
-                )
-                descriptor = owned_file_fd
-            except FileNotFoundError as exc:
-                if missing_ok:
-                    return entries, seen_runs, previous, count
-                raise LedgerIntegrityError("ledger is not an existing regular file") from exc
-            except LedgerIntegrityError:
-                raise
-            except (OSError, TypeError, ValueError) as exc:
-                raise LedgerIntegrityError("ledger could not be opened safely") from exc
-
         try:
+            if descriptor is None:
+                _assert_not_uncertain(self.path)
+                try:
+                    owned_parent_fd = _open_parent_directory(self.path.parent, create=False)
+                    owned_file_fd, _ = _open_ledger_file(
+                        self.path, owned_parent_fd, create=False, writable=False
+                    )
+                    descriptor = owned_file_fd
+                except FileNotFoundError as exc:
+                    if missing_ok:
+                        return entries, seen_runs, previous, count
+                    raise LedgerIntegrityError("ledger is not an existing regular file") from exc
+
             with os.fdopen(os.dup(descriptor), "rb") as stream:
                 line_number = 0
                 while True:
@@ -430,6 +424,10 @@ class HashChainLedger:
                     _, existing_ids, previous, _ = self._scan(descriptor=descriptor)
                     digest, encoded = build_entry(previous, existing_ids)
 
+                # Tighten an existing file only after integrity, lineage, and size checks pass.
+                if os.name == "posix" and hasattr(os, "fchmod"):
+                    os.fchmod(descriptor, 0o600)
+
                 stream = os.fdopen(descriptor, "ab")
                 descriptor = None
                 write_started = True
@@ -460,9 +458,11 @@ class HashChainLedger:
                 _close_fd(parent_fd)
 
     def verify(self) -> dict[str, Any]:
-        _, _, head_hash, count = self._scan(missing_ok=False)
-        return {"valid": True, "records": count, "head_hash": head_hash if count else None}
+        with _LOCK:
+            _, _, head_hash, count = self._scan(missing_ok=False)
+            return {"valid": True, "records": count, "head_hash": head_hash if count else None}
 
     def records(self) -> list[EvaluationRecord]:
-        entries, _, _, _ = self._scan(collect_entries=True, missing_ok=False)
-        return [EvaluationRecord.from_dict(entry["record"]) for entry in entries]
+        with _LOCK:
+            entries, _, _, _ = self._scan(collect_entries=True, missing_ok=False)
+            return [EvaluationRecord.from_dict(entry["record"]) for entry in entries]
