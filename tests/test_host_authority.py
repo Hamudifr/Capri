@@ -26,7 +26,7 @@ class HostAuthorityResolverTests(unittest.TestCase):
         seen_principals = []
 
         def authenticate(credential):
-            return {"valid-session-token": "alice"}.get(credential)
+            return {"valid-session-token": "alice", "bob-session-token": "bob"}.get(credential)
 
         def permissions_for(principal_id):
             seen_principals.append(principal_id)
@@ -37,9 +37,11 @@ class HostAuthorityResolverTests(unittest.TestCase):
         self.assertEqual(alice, ExecutionContext("alice", frozenset({"private:read"})))
         self.assertEqual(executor.execute("read_private", {}, alice), {"ok": True})
 
-        bob = resolver.resolve("bob-token") if False else None
+        bob = resolver.resolve("bob-session-token")
+        with self.assertRaises(PermissionDeniedError):
+            executor.execute("read_private", {}, bob)
         self.assertEqual(calls, [True])
-        self.assertEqual(seen_principals, ["alice"])
+        self.assertEqual(seen_principals, ["alice", "bob"])
 
     def test_authentication_and_policy_failures_fail_closed_without_leaking_details(self):
         resolver = HostAuthorityResolver(
