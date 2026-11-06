@@ -38,7 +38,7 @@ class SQLiteSessionStoreTests(unittest.TestCase):
         if os.name == "posix":
             os.chmod(self.temp.name, 0o700)
         self.path = os.path.join(self.temp.name, "sessions.sqlite3")
-        self.store = SQLiteSessionStore(self.path, max_output_chars=131_072)
+        self.store = SQLiteSessionStore(self.path)
 
     def tearDown(self):
         self.temp.cleanup()
@@ -244,15 +244,16 @@ class SQLiteSessionStoreTests(unittest.TestCase):
         orchestrator = ToolOrchestrator(BlockingAdapter(), bridge)
         first_coordinator = SessionTurnCoordinator(lease_seconds=3)
         second_coordinator = SessionTurnCoordinator(lease_seconds=3)
-        other_store = SQLiteSessionStore(self.path)
-        session = self.store.create()
+        coordinator_store = SQLiteSessionStore(self.path, max_output_chars=131_072)
+        other_store = SQLiteSessionStore(self.path, max_output_chars=131_072)
+        session = coordinator_store.create()
         context = ExecutionContext("host-user", frozenset())
         outcome = []
 
         def first_turn():
             try:
                 outcome.append(first_coordinator.run_and_commit(
-                    orchestrator, self.store, session.session_id, "first", context
+                    orchestrator, coordinator_store, session.session_id, "first", context
                 ))
             except Exception as exc:
                 outcome.append(exc)
