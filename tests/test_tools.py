@@ -523,6 +523,10 @@ class SessionTurnCoordinatorTests(unittest.TestCase):
             with self.subTest(value=value):
                 with self.assertRaises(ToolOrchestrationError):
                     SessionTurnCoordinator(value)
+        for value in (True, 0, 2, 3601, float("inf"), 10**1000):
+            with self.subTest(lease_seconds=value):
+                with self.assertRaises(ToolOrchestrationError):
+                    SessionTurnCoordinator(lease_seconds=value)
 
     def test_store_output_limit_is_checked_before_model_or_tool_execution(self):
         class NeverCall:
