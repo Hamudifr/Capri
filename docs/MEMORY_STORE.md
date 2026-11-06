@@ -4,7 +4,9 @@
 
 `capri_runtime.memory` provides a provider-neutral record model and a bounded local SQLite store for non-sensitive project knowledge. It is an internal building block, not a connected Notion client or a model orchestration layer.
 
-The current store supports:
+The current memory subsystem has two provider paths: `SQLiteMemoryStore` for private local persistence and `NotionMemoryAdapter` for the Capri Durable Memory data source. `NotionRESTTransport` supplies the concrete HTTP transport when the host provides `NOTION_API_TOKEN` and `CAPRI_MEMORY_DATA_SOURCE_ID`. The repository contains these adapters; this does not mean the connected Notion workspace is automatically synchronized by a running Capri host process.
+
+The local SQLite store supports:
 - create and retrieve records with source, confidence, scope, type, explicit non-sensitive classification, tags, retention, timestamps, and expiry metadata;
 - deterministic token-AND search with bounded offset pagination and exact provenance fields;
 - corrections as new records linked to the prior record, which is archived rather than silently overwritten;
@@ -26,8 +28,8 @@ The current store supports:
 
 ## Current limitations
 
-- No Notion synchronization adapter is implemented yet. The existing Notion database remains the project-level source of non-sensitive operating memory until a separately tested host adapter is connected.
-- No encryption/key management, multi-user tenant isolation, embedding/vector search, semantic ranking, background expiry worker, conflict-resolution protocol, or cross-provider sync is implemented.
+- The Notion provider adapter and standard-library REST transport are implemented, but live host configuration and synchronization are not verified in this environment. The optional live smoke test remains disabled unless `CAPRI_NOTION_LIVE_TESTS=true`, `CAPRI_MEMORY_DATA_SOURCE_ID`, and the `NOTION_API_TOKEN` secret are configured in GitHub Actions. A connected Notion workspace and the repository's REST client are separate integration paths; no always-on Capri process syncing them is established here.
+- No encryption/key management, multi-user tenant isolation, embedding/vector search, semantic ranking, background expiry worker, or cross-provider conflict-resolution protocol is implemented. The Notion adapter has review-first supersession handling, but there is no general cross-provider conflict-resolution or continuous synchronization service.
 - Search is deterministic substring matching: every query token must occur in title, content, or scope. It is not semantic retrieval.
 - Expiry is evaluated at retrieval time and by an explicit `expire()` sweep; no background scheduler is started.
 - Retention labels are metadata. Callers must supply an expiry timestamp for `expire_30d` and `expire_90d`; the store does not infer or silently assign dates.
