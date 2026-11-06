@@ -24,7 +24,7 @@ Capri is a research and execution-assistance project. This repository contains a
 - `docs/LEDGER_OPERATIONS.md` — backup verification, integrity-incident response, and controlled recovery runbook.
 - `docs/LEDGER_SCALING_DECISION.md` — proposed transactional storage migration, explicitly not implemented.
 - `capri_core/` — immutable evaluation records, fail-closed validation, and hash-chained append-only ledger.
-- `capri_runtime/` — provider-neutral sessions, permissioned tool execution, durable task execution, and bounded SQLite memory.
+- `capri_runtime/` — provider-neutral sessions, permissioned tool execution and model-call bridge, durable task execution, and bounded SQLite memory.
 - `docs/TOOL_EXECUTION.md` — trust model, schema subset, approvals, audit behavior, and limitations for tool execution.
 - `docs/MEMORY_STORE.md` — durable memory contract, trust rules, privacy constraints, and limitations.
 - `tests/` — deterministic structural, ledger, and runtime tests.
@@ -50,7 +50,7 @@ Next capabilities: Notion host-adapter synchronization, cryptographically authen
 
 This is a growing internal prototype, not a claim of AGI or public/multi-tenant production readiness. No X5 work is included.
 
-## Durable task execution and recovery
+## Model-to-tool orchestration\n\nThe provider-neutral `ToolExecutionBridge` validates bounded structured call batches and routes requests through the trusted `ToolExecutor`. It exposes only tools permitted by the host context, never derives authority from model output, preserves one-use approval requirements, and marks audit failures as uncertain rather than retrying. It is not yet wired to a model provider or automatic conversation loop. See [docs/TOOL_EXECUTION.md](docs/TOOL_EXECUTION.md).\n\n## Durable task execution and recovery
 
 The provider-neutral task engine in `capri_runtime.tasks` provides persistent ordered plans, atomic SQLite worker leases, per-step checkpoints, bounded retries with exponential backoff, cooperative cancellation, and lease-expiry recovery. It uses stable per-step idempotency keys and uses bounded retry delivery that may invoke a handler zero or multiple times across crash windows—not exactly-once side effects. See [docs/TASK_EXECUTION.md](docs/TASK_EXECUTION.md) for the handler contract, security boundaries, and limitations. The engine includes an explicit host-started TaskWorker polling loop with graceful stop-event handling and concurrent lease heartbeats; the host remains responsible for process supervision, scheduling policy, authenticated context, and permissioned handler integration. Shutdown is cooperative between tasks; an active handler is not forcibly interrupted.
 

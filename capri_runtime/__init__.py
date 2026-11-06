@@ -33,6 +33,13 @@ from .tools import (
     ToolSpec,
     ToolValidationError,
 )
+from .tool_bridge import (
+    ToolBridgeValidationError,
+    ToolCallOutcome,
+    ToolCallRequest,
+    ToolDefinition,
+    ToolExecutionBridge,
+)
 from .security_store import SQLiteSecurityStore
 from .memory import MemoryErrorBase, MemoryNotFoundError, MemoryProvider, MemoryRecord, MemoryValidationError, SQLiteMemoryStore
 from .tasks import (
@@ -87,6 +94,11 @@ __all__ = [
     "TaskRecord",
     "TaskValidationError",
     "TaskWorker",
+    "ToolBridgeValidationError",
+    "ToolCallOutcome",
+    "ToolCallRequest",
+    "ToolDefinition",
+    "ToolExecutionBridge",
     "ToolBoundaryError",
     "ToolExecutionError",
     "ToolExecutor",
