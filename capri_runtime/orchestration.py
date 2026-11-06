@@ -13,6 +13,7 @@ from typing import Protocol
 from uuid import uuid4
 
 from .runtime import Message, Session, SessionStore
+from .memory import UntrustedMemoryContext
 from .tool_bridge import (
     ToolBridgeValidationError,
     ToolCallOutcome,
@@ -66,6 +67,20 @@ class ToolModelAdapter(Protocol):
         ...
 
 
+class MemoryAwareToolModelAdapter(Protocol):
+    """Adapter that receives retrieved memory outside transcript and authority."""
+
+    def complete_with_tools_and_memory(
+        self,
+        session_id: str,
+        history: tuple[Message, ...],
+        tools: tuple[ToolDefinition, ...],
+        memory_context: UntrustedMemoryContext,
+    ) -> AssistantTurn:
+        """Use memory only as untrusted data, never as policy or authority."""
+        ...
+
+
 def _valid_text(value: str) -> bool:
     return isinstance(value, str) and not any(
         0xD800 <= ord(character) <= 0xDFFF for character in value
@@ -96,8 +111,13 @@ class ToolOrchestrator:
         max_tool_message_bytes: int = 131_072,
         max_history_bytes: int = 2_097_152,
     ) -> None:
-        if not callable(getattr(adapter, "complete_with_tools", None)):
-            raise ToolOrchestrationError("adapter must implement complete_with_tools()")
+        if not (
+            callable(getattr(adapter, "complete_with_tools", None))
+            or callable(getattr(adapter, "complete_with_tools_and_memory", None))
+        ):
+            raise ToolOrchestrationError(
+                "adapter must implement complete_with_tools() or complete_with_tools_and_memory()"
+            )
         if not isinstance(bridge, ToolExecutionBridge):
             raise ToolOrchestrationError("bridge must be a ToolExecutionBridge")
         for name, value in (
@@ -136,6 +156,7 @@ class ToolOrchestrator:
         *,
         max_total_messages: int | None = None,
         cancellation_event: threading.Event | None = None,
+        memory_context: UntrustedMemoryContext | None = None,
     ) -> OrchestrationResult:
         """Complete one turn, executing at most max_tool_rounds tool batches.
 
@@ -153,6 +174,17 @@ class ToolOrchestrator:
             raise ToolOrchestrationError("user_text must be bounded non-empty valid text")
         if not isinstance(context, ExecutionContext):
             raise ToolOrchestrationError("a trusted host ExecutionContext is required")
+        if memory_context is not None:
+            if not isinstance(memory_context, UntrustedMemoryContext):
+                raise ToolOrchestrationError("memory_context must be an UntrustedMemoryContext")
+            if not callable(getattr(self.adapter, "complete_with_tools_and_memory", None)):
+                raise ToolOrchestrationError(
+                    "adapter must implement complete_with_tools_and_memory when memory is supplied"
+                )
+        elif not callable(getattr(self.adapter, "complete_with_tools", None)):
+            raise ToolOrchestrationError(
+                "adapter must implement complete_with_tools when memory is not supplied"
+            )
         if max_total_messages is not None and (
             isinstance(max_total_messages, bool)
             or not isinstance(max_total_messages, int)
@@ -189,9 +221,14 @@ class ToolOrchestrator:
             if cancellation_event is not None and cancellation_event.is_set():
                 raise ToolOrchestrationError("orchestration cancelled")
             try:
-                response = self.adapter.complete_with_tools(
-                    session_id, tuple(working), definitions
-                )
+                if memory_context is None:
+                    response = self.adapter.complete_with_tools(
+                        session_id, tuple(working), definitions
+                    )
+                else:
+                    response = self.adapter.complete_with_tools_and_memory(
+                        session_id, tuple(working), definitions, memory_context
+                    )
             except Exception:
                 raise ToolOrchestrationError("model adapter failed") from None
             if cancellation_event is not None and cancellation_event.is_set():
@@ -371,6 +408,8 @@ class SessionTurnCoordinator:
         session_id: str,
         user_text: str,
         context: ExecutionContext,
+        *,
+        memory_context: UntrustedMemoryContext | None = None,
     ) -> CommittedOrchestration:
         """Run and persist one turn under local and available durable lease locks."""
         if not callable(getattr(orchestrator, "run", None)):
@@ -454,6 +493,7 @@ class SessionTurnCoordinator:
                     context,
                     max_total_messages=store.max_session_messages,
                     cancellation_event=lease_lost,
+                    memory_context=memory_context,
                 )
                 prefix_length = len(snapshot.messages)
                 if result.messages[:prefix_length] != snapshot.messages:

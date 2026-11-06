@@ -52,6 +52,7 @@ from .orchestration import (
     OrchestrationResult,
     SessionTurnCoordinator,
     ToolModelAdapter,
+    MemoryAwareToolModelAdapter,
     ToolOrchestrationError,
     ToolOrchestrator,
 )
@@ -59,7 +60,7 @@ from .host import HostToolGateway
 from .approval import ApprovalChallenge, HostApprovalService, SQLiteApprovalChallengeStore
 from .sqlite_sessions import SQLiteSessionStore
 from .security_store import SQLiteSecurityStore
-from .memory import MemoryErrorBase, MemoryNotFoundError, MemoryProvider, MemoryRecord, MemoryValidationError, SQLiteMemoryStore
+from .memory import MemoryErrorBase, MemoryNotFoundError, MemoryProvider, MemoryRecord, MemoryValidationError, SQLiteMemoryStore, UntrustedMemoryContext
 from .notion_memory import MemorySyncError, NotionMemoryAdapter, NotionMemoryTransport
 from .notion_rest import NotionRateLimitError, NotionRESTTransport, NotionTransportError
 from .tasks import (
@@ -81,6 +82,7 @@ __all__ = [
     "OrchestrationResult",
     "SessionTurnCoordinator",
     "ToolModelAdapter",
+    "MemoryAwareToolModelAdapter",
     "ToolOrchestrationError",
     "ToolOrchestrator",
     "ApprovalChallenge",
@@ -104,6 +106,7 @@ __all__ = [
     "MemoryNotFoundError",
     "MemoryProvider",
     "MemoryRecord",
+    "UntrustedMemoryContext",
     "MemoryValidationError",
     "MemorySyncError",
     "NotionMemoryAdapter",
