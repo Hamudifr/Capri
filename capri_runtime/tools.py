@@ -58,7 +58,7 @@ def _canonical_json(value: Any, *, max_bytes: int, label: str) -> tuple[str, byt
             separators=(",", ":"),
         )
         raw = encoded.encode("utf-8", errors="strict")
-    except (TypeError, ValueError, UnicodeEncodeError):
+    except (TypeError, ValueError, UnicodeEncodeError, RecursionError):
         raise ToolValidationError(f"{label} must be valid JSON with Unicode scalar values") from None
     if len(raw) > max_bytes:
         raise ToolValidationError(f"{label} exceeds the configured byte limit")
@@ -73,7 +73,7 @@ def _validate_schema_definition(schema: Any, *, root: bool = False, depth: int =
     if set(schema) - _SCHEMA_KEYS:
         raise ToolValidationError("schema contains unsupported keywords")
     kind = schema.get("type")
-    if kind not in _TYPES:
+    if not isinstance(kind, str) or kind not in _TYPES:
         raise ToolValidationError("schema nodes require one supported type")
     if root and kind != "object":
         raise ToolValidationError("tool argument schema must have type object")
@@ -362,6 +362,8 @@ class ToolExecutor:
         raise ApprovalRequiredError("a matching, unexpired, unused host approval is required")
 
     def execute(self, name: str, arguments: Any, context: ExecutionContext) -> Any:
+        if not isinstance(name, str) or not _NAME_RE.fullmatch(name):
+            raise ToolValidationError("tool name must be a lowercase identifier")
         if not isinstance(context, ExecutionContext):
             raise ToolValidationError("a trusted ExecutionContext is required")
         if not isinstance(context.principal_id, str) or not context.principal_id.strip():
@@ -395,6 +397,7 @@ class ToolExecutor:
             result_json, _ = _canonical_json(
                 result, max_bytes=self.max_result_bytes, label="tool result"
             )
+            _assert_json_object_keys(json.loads(result_json))
         except ToolValidationError:
             self._audit(context.principal_id, spec.name, digest, "result_rejected", "invalid_or_oversized_result")
             raise
