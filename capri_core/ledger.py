@@ -21,6 +21,11 @@ _ZERO_HASH = "0" * 64
 _ENTRY_KEYS = {"previous_hash", "record", "hash"}
 _UNCERTAIN_PATHS: set[str] = set()
 _UNCERTAIN_INODES: set[tuple[int, int]] = set()
+# Keep one duplicate descriptor open for each uncertain inode. This pins the
+# inode until process exit, preventing inode-number reuse from poisoning an
+# unrelated ledger later in the same process.
+_UNCERTAIN_INODE_FDS: dict[tuple[int, int], int] = {}
+_MAX_UNCERTAIN_INODE_GUARDS = 128
 _UNCERTAIN_ALL = False
 
 
@@ -413,6 +418,7 @@ class HashChainLedger:
             descriptor: int | None = None
             stream: Any = None
             file_identity: tuple[int, int] | None = None
+            identity_guard_fd: int | None = None
             write_started = False
             try:
                 parent_fd = _open_parent_directory(self.path.parent, create=True)
@@ -430,6 +436,7 @@ class HashChainLedger:
                     previous = _ZERO_HASH
                 else:
                     file_identity = _file_identity(descriptor)
+                    identity_guard_fd = os.dup(descriptor)
                     _assert_not_uncertain(self.path, identity=file_identity)
                     _, existing_ids, previous, _ = self._scan(descriptor=descriptor)
 
@@ -468,6 +475,7 @@ class HashChainLedger:
                         self.path, parent_fd, create=True, writable=True
                     )
                     file_identity = _file_identity(descriptor)
+                    identity_guard_fd = os.dup(descriptor)
                     _assert_not_uncertain(self.path, identity=file_identity)
                     _, existing_ids, previous, _ = self._scan(descriptor=descriptor)
                     digest, encoded = build_entry(previous, existing_ids)
@@ -490,12 +498,22 @@ class HashChainLedger:
             except BaseException as exc:
                 if write_started:
                     _UNCERTAIN_PATHS.add(key)
-                    if file_identity is None:
+                    if file_identity is None or identity_guard_fd is None:
                         # We must never continue when a write may have reached a
-                        # file whose identity we failed to capture.
+                        # file whose identity we failed to pin safely.
                         _UNCERTAIN_ALL = True
                     else:
                         _UNCERTAIN_INODES.add(file_identity)
+                        if file_identity in _UNCERTAIN_INODE_FDS:
+                            _close_fd(identity_guard_fd)
+                            identity_guard_fd = None
+                        elif len(_UNCERTAIN_INODE_FDS) >= _MAX_UNCERTAIN_INODE_GUARDS:
+                            # Bound descriptor use. Once the cap is reached, fail
+                            # closed for all ledgers rather than risk inode reuse.
+                            _UNCERTAIN_ALL = True
+                        else:
+                            _UNCERTAIN_INODE_FDS[file_identity] = identity_guard_fd
+                            identity_guard_fd = None
                 if isinstance(exc, OSError):
                     raise LedgerIntegrityError(
                         "ledger append failed after opening the file; preserve it and inspect a copy before retrying"
@@ -509,6 +527,7 @@ class HashChainLedger:
                         if write_started:
                             _UNCERTAIN_PATHS.add(key)
                 _close_fd(descriptor)
+                _close_fd(identity_guard_fd)
                 _close_fd(parent_fd)
 
     def verify(self) -> dict[str, Any]:
