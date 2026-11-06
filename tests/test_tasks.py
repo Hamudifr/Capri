@@ -121,7 +121,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         self.assertEqual(second.result, ({"prepared": True}, {"finished": "two"}))
         self.assertEqual(calls[0][1], f"{task.task_id}:0")
 
-    def test_handler_failure_is_suppressed_and_retried(self):
+    def test_handler_failure_is_suppressed_and_terminal_after_attempt_limit(self):
         def broken(_data, _key):
             raise RuntimeError("must not leak")
         engine = TaskEngine(self.store, {"prepare": broken}, "worker")
@@ -134,7 +134,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
     def test_missing_handler_fails_without_retry(self):
         engine = TaskEngine(self.store, {}, "worker")
         self.store.create([{"tool": "missing", "input": {}, "max_attempts": 5}], now=NOW)
-        result = engine.run_once()
+        result = engine.run_once(now=NOW)
         self.assertEqual(result.state, "failed")
         self.assertEqual(result.error_code, "unknown_handler")
 
