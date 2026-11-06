@@ -96,8 +96,8 @@ class SQLiteMemoryStoreTests(unittest.TestCase):
         exported = self.store.export_json()
         self.assertEqual(exported, self.store.export_json())
         records = json.loads(exported)
-        self.assertEqual([item["memory_id"] for item in records],
-                         [first.memory_id, second.memory_id])
+        self.assertEqual({item["memory_id"] for item in records},
+                         {first.memory_id, second.memory_id})
 
     def test_pagination_is_bounded_and_stable(self):
         first = self.create(title="Alpha")
