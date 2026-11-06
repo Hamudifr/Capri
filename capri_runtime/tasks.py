@@ -16,8 +16,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Mapping
 from uuid import uuid4
 
-from .tools import ToolValidationError
-
 
 class TaskError(Exception):
     """Base class for expected task-engine failures."""
@@ -475,7 +473,8 @@ class SQLiteTaskStore:
                 connection.close()
 
     def fail_step(self, claim: TaskClaim, error_code: str = "handler_failed",
-                  retry_delay_seconds: int = 5, now: datetime | None = None) -> TaskRecord:
+                  retry_delay_seconds: int = 5, now: datetime | None = None,
+                  retryable: bool = True) -> TaskRecord:
         _text(error_code, "error_code", 64)
         if not error_code.replace("_", "").isalnum():
             raise TaskValidationError("error_code must be a simple identifier")
@@ -499,7 +498,7 @@ class SQLiteTaskStore:
                 if _parse_time(until) <= _parse_time(stamp):
                     raise TaskConflictError("task lease expired before failure was recorded")
                 plan = json.loads(plan_json)
-                retry = claim.attempt < plan[index]["max_attempts"]
+                retry = retryable and claim.attempt < plan[index]["max_attempts"]
                 next_state = "retry_wait" if retry else "failed"
                 delay = min(retry_delay_seconds * (2 ** max(0, claim.attempt - 1)), 3600)
                 available = _iso(current + timedelta(seconds=delay)) if retry else stamp
@@ -581,7 +580,7 @@ class TaskEngine:
             return None
         handler = self.handlers.get(claim.tool)
         if handler is None:
-            return self.store.fail_step(claim, "unknown_handler", retry_delay_seconds=0, now=now)
+            return self.store.fail_step(claim, "unknown_handler", retry_delay_seconds=0, now=now, retryable=False)
         try:
             result = handler(dict(claim.input), claim.idempotency_key)
             _json(result, label="handler result")
