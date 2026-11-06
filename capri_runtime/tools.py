@@ -6,11 +6,12 @@ or performs shell, filesystem, or network operations on its own.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import re
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from itertools import islice
 from typing import Any, Callable, Mapping
 from uuid import uuid4
@@ -239,6 +240,84 @@ class ApprovalGrant:
     tool_name: str
     argument_digest: str
     expires_at: str
+    signature: str | None = None
+
+
+class HmacApprovalAuthority:
+    """Issue and verify HMAC-authenticated approval grants using a host-held key.
+
+    Keep the key outside source control and request payloads. Production hosts
+    should inject it from a secret manager or hardware-backed key service.
+    """
+
+    def __init__(
+        self,
+        key: bytes,
+        *,
+        clock: Callable[[], datetime] | None = None,
+        max_ttl_seconds: int = 3600,
+    ) -> None:
+        if not isinstance(key, bytes) or len(key) < 32:
+            raise ToolValidationError("approval signing key must contain at least 32 bytes")
+        if isinstance(max_ttl_seconds, bool) or not isinstance(max_ttl_seconds, int) or not 1 <= max_ttl_seconds <= 86_400:
+            raise ToolValidationError("max_ttl_seconds must be between 1 and 86400")
+        self._key = bytes(key)
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self.max_ttl_seconds = max_ttl_seconds
+
+    @staticmethod
+    def _payload(grant: ApprovalGrant) -> bytes:
+        return json.dumps(
+            {
+                "grant_id": grant.grant_id,
+                "principal_id": grant.principal_id,
+                "tool_name": grant.tool_name,
+                "argument_digest": grant.argument_digest,
+                "expires_at": grant.expires_at,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+
+    def issue(
+        self,
+        principal_id: str,
+        tool_name: str,
+        argument_digest: str,
+        *,
+        ttl_seconds: int = 300,
+    ) -> ApprovalGrant:
+        if (not isinstance(principal_id, str) or not principal_id.strip()
+                or len(principal_id) > 256 or _contains_surrogate(principal_id)):
+            raise ToolValidationError("approval principal is invalid")
+        if not isinstance(tool_name, str) or not _NAME_RE.fullmatch(tool_name):
+            raise ToolValidationError("approval tool name is invalid")
+        if not isinstance(argument_digest, str) or not _DIGEST_RE.fullmatch(argument_digest):
+            raise ToolValidationError("approval argument digest is invalid")
+        if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int) or not 1 <= ttl_seconds <= self.max_ttl_seconds:
+            raise ToolValidationError("approval TTL exceeds the configured limit")
+        now = self._clock()
+        if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
+            raise ToolValidationError("approval clock must return a timezone-aware datetime")
+        expiry = (now.astimezone(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+        unsigned = ApprovalGrant(str(uuid4()), principal_id, tool_name, argument_digest, expiry)
+        signature = hmac.new(self._key, self._payload(unsigned), hashlib.sha256).hexdigest()
+        return ApprovalGrant(
+            unsigned.grant_id, unsigned.principal_id, unsigned.tool_name,
+            unsigned.argument_digest, unsigned.expires_at, signature,
+        )
+
+    def verify(self, grant: ApprovalGrant) -> bool:
+        if (not isinstance(grant, ApprovalGrant)
+                or not isinstance(grant.signature, str)
+                or not _DIGEST_RE.fullmatch(grant.signature)):
+            return False
+        try:
+            expected = hmac.new(self._key, self._payload(grant), hashlib.sha256).hexdigest()
+        except (TypeError, ValueError, UnicodeEncodeError):
+            return False
+        return hmac.compare_digest(expected, grant.signature)
 
 
 @dataclass(frozen=True, slots=True)
