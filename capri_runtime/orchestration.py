@@ -13,6 +13,7 @@ from typing import Protocol
 from uuid import uuid4
 
 from .runtime import Message, Session, SessionStore
+from .memory import UntrustedMemoryContext
 from .tool_bridge import (
     ToolBridgeValidationError,
     ToolCallOutcome,
@@ -63,6 +64,20 @@ class ToolModelAdapter(Protocol):
         tools: tuple[ToolDefinition, ...],
     ) -> AssistantTurn:
         """Return assistant text or structured tool calls for the next turn."""
+        ...
+
+
+class MemoryAwareToolModelAdapter(Protocol):
+    """Adapter that receives retrieved memory outside transcript and authority."""
+
+    def complete_with_tools_and_memory(
+        self,
+        session_id: str,
+        history: tuple[Message, ...],
+        tools: tuple[ToolDefinition, ...],
+        memory_context: UntrustedMemoryContext,
+    ) -> AssistantTurn:
+        """Use memory only as untrusted data, never as policy or authority."""
         ...
 
 
@@ -136,6 +151,7 @@ class ToolOrchestrator:
         *,
         max_total_messages: int | None = None,
         cancellation_event: threading.Event | None = None,
+        memory_context: UntrustedMemoryContext | None = None,
     ) -> OrchestrationResult:
         """Complete one turn, executing at most max_tool_rounds tool batches.
 
@@ -153,6 +169,13 @@ class ToolOrchestrator:
             raise ToolOrchestrationError("user_text must be bounded non-empty valid text")
         if not isinstance(context, ExecutionContext):
             raise ToolOrchestrationError("a trusted host ExecutionContext is required")
+        if memory_context is not None:
+            if not isinstance(memory_context, UntrustedMemoryContext):
+                raise ToolOrchestrationError("memory_context must be an UntrustedMemoryContext")
+            if not callable(getattr(self.adapter, "complete_with_tools_and_memory", None)):
+                raise ToolOrchestrationError(
+                    "adapter must implement complete_with_tools_and_memory when memory is supplied"
+                )
         if max_total_messages is not None and (
             isinstance(max_total_messages, bool)
             or not isinstance(max_total_messages, int)
@@ -189,9 +212,14 @@ class ToolOrchestrator:
             if cancellation_event is not None and cancellation_event.is_set():
                 raise ToolOrchestrationError("orchestration cancelled")
             try:
-                response = self.adapter.complete_with_tools(
-                    session_id, tuple(working), definitions
-                )
+                if memory_context is None:
+                    response = self.adapter.complete_with_tools(
+                        session_id, tuple(working), definitions
+                    )
+                else:
+                    response = self.adapter.complete_with_tools_and_memory(
+                        session_id, tuple(working), definitions, memory_context
+                    )
             except Exception:
                 raise ToolOrchestrationError("model adapter failed") from None
             if cancellation_event is not None and cancellation_event.is_set():
