@@ -297,6 +297,7 @@ class SQLiteSessionStore(SessionStore):
             turn_messages,
             max_input_chars=self.max_input_chars,
             max_output_chars=self.max_output_chars,
+            max_tool_chars=self.max_tool_chars,
         )
         if isinstance(expected_version, bool) or not isinstance(expected_version, int) or expected_version < 0:
             raise ValidationError("expected_version must be a non-negative integer")
