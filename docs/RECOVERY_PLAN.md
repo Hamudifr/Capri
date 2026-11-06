@@ -20,14 +20,15 @@ The latest metadata-only Notion query returned 39 records across 22 distinct Sce
 
 ### Integrated repository state
 
-- Current recovery branch head: `602ba5d370982495486092019197f3577974c355`.
+- Current `main` head after integration: `d42bfbb2f59a31c713b03f09d074da77b8fb6250` (merge commit for PR #1).
 - The assembled branch contains the original recovery foundation plus the integrated Doctor/operational-health stack, private ledger permissions, path/symlink protections, crash-durability handling, hard-link/inode uncertainty latching, and store-level input/output/history limits.
 - The Doctor/health stack (#5/#6) was merged through PR #6. PR #5 was closed as superseded.
 - Ledger permissions (#4) were merged. The ledger path/durability changes from #10, inode identity guard from #14, and additional failure-stage regression tests from #15 were integrated into the same recovery branch; those PRs were closed as superseded after integration.
 - Runtime store-level message bounds from #12 were integrated; #12 was closed as superseded.
 - Current integrated CI: push run [42280421240](https://github.com/Hamudifr/Capri/actions/runs/42280421240) and PR run [42280430210](https://github.com/Hamudifr/Capri/actions/runs/42280430210). Both passed compileall, Capri Doctor 6/6, operational health 7/7, and 114 tests on each actual Python 3.11, 3.12, and 3.13 interpreter. All six job logs were inspected.
-- PR #1 is the integration PR from recovery to `main`; it is currently open and Draft, with clean mergeability and the same 114-test exact-head CI. It is the next delivery action.
-- `main` remains at `228669ed8b0c02db669cc082ac256e7491a26201` until the integration PR is merged. It is currently unprotected. GitHub's rulesets endpoint returned HTTP 403 because rulesets require a paid plan or a public repository; do not upgrade or publish merely to obtain them.
+- PR #1 was marked ready and merged into `main` at `d42bfbb2f59a31c713b03f09d074da77b8fb6250` on 2026-11-06 19:39 UTC. The PR is closed/merged.
+- Post-merge `main` CI run [42281548990](https://github.com/Hamudifr/Capri/actions/runs/42281548990) passed compileall, Capri Doctor 6/6, operational health 7/7, and 114 tests on actual Python 3.11, 3.12, and 3.13. All three logs inspected.
+- `main` is currently unprotected. GitHub's rulesets endpoint returned HTTP 403 because rulesets require a paid plan or a public repository; do not upgrade or publish merely to obtain them.
 
 ### Current implementation limits and next priorities
 
@@ -53,7 +54,7 @@ The integrated recovery branch is a tested internal prototype, not a public or m
 - [x] Add repository purpose, operating model, and evaluation data contract.
 - [x] Add deterministic structural tests.
 - [x] Add CI for non-protected checks.
-- [ ] Obtain human review and merge through a pull request.
+- [x] Perform Capri's internal review, validate the integrated PR, and merge the recovery foundation into `main` through PR #1.
 
 ## Phase 2 — Reconcile evaluation evidence
 
@@ -104,7 +105,7 @@ External independent review is not a prerequisite for routine internal implement
 
 ## Exit criteria
 
-Internal engineering recovery is complete when the current code and docs are integrated into main, reproducible tests pass, critical risks are documented, and the implemented capabilities meet their stated boundaries. Production deployment is a separate gate requiring identity, authorization, privacy/retention, budgets, monitoring, backup, rollback, and adversarial validation. The protected blind evaluation remains separate and may only be run through its authorized process.
+The initial non-X5 recovery foundation is now integrated into `main` and passes the post-merge three-version CI suite. Broader agent engineering remains in progress until permissioned tool execution, durable memory, task recovery, identity/tenant isolation, and observability are implemented and tested. Production deployment is a separate gate requiring privacy/retention, budgets, monitoring, backup, rollback, and adversarial validation. The protected blind evaluation remains separate and may only be run through its authorized process.
 
 
 ## Exact-head refresh — 2026-11-06 19:42 UTC
