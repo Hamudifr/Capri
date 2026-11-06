@@ -132,6 +132,21 @@ class ApprovalLifecycleTests(unittest.TestCase):
             )
         self.assertEqual(self.challenge_store.get(challenge.challenge_id, later).status, "expired")
 
+    def test_expiry_is_rechecked_after_authentication_callbacks(self):
+        challenge = self.create()
+        current = [self.now]
+        def authenticate(credential):
+            current[0] = self.now + timedelta(seconds=301)
+            return "reviewer"
+        delayed = HostApprovalService(
+            self.challenge_store, self.signer, authenticate,
+            lambda approver, item: True,
+            clock=lambda: current[0],
+        )
+        with self.assertRaises(ToolValidationError):
+            delayed.approve("approver-token", challenge.challenge_id)
+        self.assertEqual(self.challenge_store.get(challenge.challenge_id, current[0]).status, "expired")
+
     def test_concurrent_duplicate_approvals_return_one_identical_grant(self):
         challenge = self.create()
         stores = [SQLiteApprovalChallengeStore(SQLiteSecurityStore(self.path)) for _ in range(4)]
