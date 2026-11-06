@@ -117,7 +117,7 @@ class NotionRESTTransport:
                 "Confidence":option("Confidence","select"),"Retention":option("Retention","select"),
                 "Tags":[x.get("name") for x in tags if isinstance(x,Mapping) and isinstance(x.get("name"),str)] if isinstance(tags,list) else [],
                 "Status":status,"Expires":expiry.get("start") if isinstance(expiry,Mapping) else None,
-                "Supersedes":cls._plain(p("Supersedes").get("rich_text")),
+                "Supersedes":cls._plain(p("Supersedes").get("rich_text")) or None,
             }
         }
 
@@ -180,8 +180,13 @@ class NotionRESTTransport:
             payload["start_cursor"]=cursor
         raw=self._request("POST",f"/data_sources/{self.data_source_id}/query",payload)
         results=raw.get("results")
-        if not isinstance(results,list): raise NotionTransportError("Notion query returned malformed results")
-        return {"results":[self._normalize_page(x) for x in results if isinstance(x,Mapping)],"next_cursor":raw.get("next_cursor") if raw.get("has_more") is True else None}
+        if not isinstance(results,list) or any(not isinstance(x,Mapping) for x in results):
+            raise NotionTransportError("Notion query returned malformed results")
+        has_more = raw.get("has_more") is True
+        next_cursor = raw.get("next_cursor") if has_more else None
+        if has_more and (not isinstance(next_cursor,str) or not next_cursor):
+            raise NotionTransportError("Notion query omitted its continuation cursor")
+        return {"results":[self._normalize_page(x) for x in results],"next_cursor":next_cursor}
 
     def update_page(self, page_id: str, properties: Mapping[str,object]) -> Mapping[str,object]:
         if not isinstance(page_id,str) or not re.fullmatch(r"[0-9a-fA-F-]{32,36}",page_id): raise MemoryValidationError("Notion page ID is invalid")
