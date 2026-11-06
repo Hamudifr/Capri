@@ -77,6 +77,30 @@ class SQLiteSessionStoreTests(unittest.TestCase):
         self.assertEqual(self.store.get(session.session_id).version, 0)
         self.assertEqual(self.store.get(session.session_id).messages, ())
 
+    def test_tool_messages_have_separate_persisted_size_budget(self):
+        path = os.path.join(self.temp.name, "tool-size.sqlite3")
+        store = SQLiteSessionStore(
+            path, max_input_chars=10, max_output_chars=10, max_tool_chars=100
+        )
+        session = store.create()
+        turn = (
+            Message(role="user", content="go"),
+            Message(role="assistant", content="call"),
+            Message(role="tool", content="x" * 50),
+            Message(role="assistant", content="done"),
+        )
+        updated = store.commit_turn_messages(session.session_id, 0, turn)
+        self.assertEqual(len(updated.messages[2].content), 50)
+        reopened = SQLiteSessionStore(
+            path, max_input_chars=10, max_output_chars=10, max_tool_chars=100
+        )
+        self.assertEqual(reopened.get(session.session_id), updated)
+        too_small = SQLiteSessionStore(
+            path, max_input_chars=10, max_output_chars=10, max_tool_chars=20
+        )
+        with self.assertRaises(ValidationError):
+            too_small.get(session.session_id)
+
     def test_runtime_accepts_durable_store_and_recovers_history(self):
         runtime = Runtime(EchoAdapter(), self.store)
         session = runtime.create_session()
