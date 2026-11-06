@@ -353,6 +353,42 @@ class ToolOrchestrationTests(unittest.TestCase):
         self.assertEqual(adapter.histories[0], expected)
         self.assertEqual(result.messages[:2], expected)
 
+    def test_aggregate_history_byte_limit_is_checked_before_adapter(self):
+        adapter = ScriptedToolModelAdapter(AssistantTurn(content="done"))
+        history = (Message(role="user", content="x" * 200),)
+        with self.assertRaises(ToolOrchestrationError):
+            ToolOrchestrator(
+                adapter, self.bridge, max_history_bytes=100
+            ).run("s", "go", history, self.context)
+        self.assertEqual(adapter.histories, [])
+
+    def test_tool_result_budget_is_reserved_before_handler_execution(self):
+        adapter = ScriptedToolModelAdapter(
+            AssistantTurn(tool_calls=(ToolCallRequest("call", "echo", {"value": "x"}),))
+        )
+        with self.assertRaises(ToolOrchestrationError):
+            ToolOrchestrator(
+                adapter, self.bridge, max_history_bytes=100_000
+            ).run("s", "go", (), self.context)
+        self.assertEqual(self.calls, [])
+
+    def test_final_transcript_byte_limit_is_enforced(self):
+        adapter = ScriptedToolModelAdapter(AssistantTurn(content="x" * 100))
+        with self.assertRaises(ToolOrchestrationError):
+            ToolOrchestrator(
+                adapter, self.bridge, max_history_bytes=100
+            ).run("s", "go", (), self.context)
+        self.assertEqual(len(adapter.histories), 1)
+
+    def test_history_byte_limit_configuration_is_bounded(self):
+        for value in (True, 0, 16_777_217):
+            with self.subTest(value=value):
+                with self.assertRaises(ToolOrchestrationError):
+                    ToolOrchestrator(
+                        ScriptedToolModelAdapter(), self.bridge,
+                        max_history_bytes=value,
+                    )
+
     def test_tool_message_limit_must_cover_executor_result_limit(self):
         with self.assertRaises(ToolOrchestrationError):
             ToolOrchestrator(

@@ -61,6 +61,16 @@ def _valid_text(value: str) -> bool:
     )
 
 
+def _history_size(messages: list[Message]) -> int:
+    """Count UTF-8 transcript bytes plus small per-message framing overhead."""
+    return sum(
+        len(message.role.encode("utf-8"))
+        + len(message.content.encode("utf-8"))
+        + 16
+        for message in messages
+    )
+
+
 class ToolOrchestrator:
     """Run a bounded model/tool loop without creating or escalating authority."""
 
@@ -73,6 +83,7 @@ class ToolOrchestrator:
         max_history_messages: int = 64,
         max_output_chars: int = 64_000,
         max_tool_message_bytes: int = 131_072,
+        max_history_bytes: int = 2_097_152,
     ) -> None:
         if not callable(getattr(adapter, "complete_with_tools", None)):
             raise ToolOrchestrationError("adapter must implement complete_with_tools()")
@@ -83,6 +94,7 @@ class ToolOrchestrator:
             ("max_history_messages", max_history_messages),
             ("max_output_chars", max_output_chars),
             ("max_tool_message_bytes", max_tool_message_bytes),
+            ("max_history_bytes", max_history_bytes),
         ):
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ToolOrchestrationError(f"{name} must be a positive integer")
@@ -90,6 +102,8 @@ class ToolOrchestrator:
             raise ToolOrchestrationError("configured orchestration limit exceeds the hard maximum")
         if max_output_chars > 1_000_000 or max_tool_message_bytes > 1_048_576:
             raise ToolOrchestrationError("configured message limit exceeds the hard maximum")
+        if max_history_bytes > 16_777_216:
+            raise ToolOrchestrationError("configured history byte limit exceeds the hard maximum")
         if max_tool_message_bytes < bridge.executor.max_result_bytes + 2_048:
             raise ToolOrchestrationError(
                 "tool message limit must exceed the executor result limit by at least 2048 bytes"
@@ -100,6 +114,7 @@ class ToolOrchestrator:
         self.max_history_messages = max_history_messages
         self.max_output_chars = max_output_chars
         self.max_tool_message_bytes = max_tool_message_bytes
+        self.max_history_bytes = max_history_bytes
 
     def run(
         self,
@@ -134,6 +149,8 @@ class ToolOrchestrator:
                 raise ToolOrchestrationError("history contains an invalid message")
         working = list(history)
         working.append(Message(role="user", content=user_text))
+        if _history_size(working) > self.max_history_bytes:
+            raise ToolOrchestrationError("conversation history exceeds the configured byte limit")
         outcomes: list[ToolCallOutcome] = []
         seen_call_ids: set[str] = set()
         tool_rounds = 0
@@ -161,7 +178,10 @@ class ToolOrchestrator:
                     raise ToolOrchestrationError("adapter must return final text or tool calls")
                 if len(working) + 1 > self.max_history_messages:
                     raise ToolOrchestrationError("conversation history limit reached")
-                working.append(Message(role="assistant", content=response.content))
+                final_message = Message(role="assistant", content=response.content)
+                if _history_size(working + [final_message]) > self.max_history_bytes:
+                    raise ToolOrchestrationError("final transcript exceeds the configured byte limit")
+                working.append(final_message)
                 return OrchestrationResult(
                     response.content,
                     tuple(working),
@@ -211,6 +231,20 @@ class ToolOrchestrator:
             if len(call_bytes) > self.max_tool_message_bytes:
                 raise ToolOrchestrationError("tool-call message exceeds the configured byte limit")
 
+            # Reserve the maximum permitted result envelope for every call before
+            # any handler runs. This prevents successful side effects from being
+            # followed by an unreturnable transcript due solely to history growth.
+            projected_bytes = (
+                _history_size(working)
+                + len(call_bytes)
+                + 16
+                + len(response.tool_calls) * (self.max_tool_message_bytes + 16)
+            )
+            if projected_bytes > self.max_history_bytes:
+                raise ToolOrchestrationError(
+                    "tool-call batch could exceed the remaining transcript byte budget"
+                )
+
             if duplicate_prior_id:
                 batch_outcomes = [
                     ToolCallOutcome(
@@ -254,6 +288,10 @@ class ToolOrchestrator:
             working.extend(
                 Message(role="tool", content=item) for item in encoded_results
             )
+            if _history_size(working) > self.max_history_bytes:
+                # Defensive invariant; the pre-execution reservation should make
+                # this unreachable for executor-bounded results.
+                raise ToolOrchestrationError("conversation history byte limit reached")
             outcomes.extend(batch_outcomes)
             tool_rounds += 1
 
