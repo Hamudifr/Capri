@@ -54,6 +54,7 @@ from .orchestration import (
     ToolOrchestrator,
 )
 from .host import HostToolGateway
+from .approval import ApprovalChallenge, HostApprovalService, SQLiteApprovalChallengeStore
 from .sqlite_sessions import SQLiteSessionStore
 from .security_store import SQLiteSecurityStore
 from .memory import MemoryErrorBase, MemoryNotFoundError, MemoryProvider, MemoryRecord, MemoryValidationError, SQLiteMemoryStore
@@ -80,6 +81,7 @@ __all__ = [
     "ToolModelAdapter",
     "ToolOrchestrationError",
     "ToolOrchestrator",
+    "ApprovalChallenge",
     "ApprovalGrant",
     "ApprovalRequiredError",
     "ApprovalStore",
@@ -90,6 +92,7 @@ __all__ = [
     "ExecutionContext",
     "HostAuthorityError",
     "HostAuthorityResolver",
+    "HostApprovalService",
     "HostToolGateway",
     "InMemoryAuditSink",
     "InMemoryApprovalStore",
@@ -117,6 +120,7 @@ __all__ = [
     "SessionNotFoundError",
     "SessionLimitError",
     "SessionStore",
+    "SQLiteApprovalChallengeStore",
     "SQLiteSecurityStore",
     "SQLiteSessionStore",
     "SQLiteTaskStore",
