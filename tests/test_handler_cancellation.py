@@ -9,6 +9,7 @@ from capri_runtime.tools import (
     ToolExecutor,
     ToolRegistry,
     ToolSpec,
+    ToolValidationError,
 )
 
 
@@ -75,7 +76,7 @@ class HandlerCancellationTests(unittest.TestCase):
             cancellation_event=threading.Event(),
         )
         self.assertEqual(outcomes[0].status, "succeeded")
-        with self.assertRaises(Exception):
+        with self.assertRaises(ToolValidationError):
             ToolSpec("bad", "tools:run", SCHEMA, cooperative_cancellation="yes")
 
 
