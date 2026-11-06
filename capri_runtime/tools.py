@@ -270,6 +270,8 @@ class HmacApprovalKeyRing:
     Retain old verification keys only for the maximum lifetime of grants they signed.
     """
 
+    __slots__ = ("_keys", "_active_key_id")
+
     _KEY_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 
     def __init__(self, keys: Mapping[str, bytes], *, active_key_id: str) -> None:
@@ -286,8 +288,15 @@ class HmacApprovalKeyRing:
             if not isinstance(key, bytes) or len(key) < 32:
                 raise ToolValidationError("each approval key must contain at least 32 bytes")
             copied[key_id] = bytes(key)
-        self._keys = MappingProxyType(copied)
-        self.active_key_id = active_key_id
+        object.__setattr__(self, "_keys", MappingProxyType(copied))
+        object.__setattr__(self, "_active_key_id", active_key_id)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        raise AttributeError("approval key rings are immutable")
+
+    @property
+    def active_key_id(self) -> str:
+        return self._active_key_id
 
     def _key_for(self, key_id: str) -> bytes | None:
         """Return only the specifically requested key; never try other keys."""
