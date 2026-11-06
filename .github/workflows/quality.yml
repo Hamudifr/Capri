@@ -1,11 +1,10 @@
 name: Non-X5 quality checks
 
 on:
-  # The recovery branch is PR #1's head; pull_request covers its commits without a duplicate push matrix.
   push:
-    branches: ["main"]
+    branches: ["main", "recovery/non-x5-foundation"]
   pull_request:
-    branches: ["main", "recovery/non-x5-foundation", "feature/capri-doctor"]
+    branches: ["main", "recovery/non-x5-foundation"]
   workflow_dispatch:
 
 permissions:
