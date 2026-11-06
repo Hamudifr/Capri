@@ -47,6 +47,7 @@ from .orchestration import (
     ToolOrchestrationError,
     ToolOrchestrator,
 )
+from .sqlite_sessions import SQLiteSessionStore
 from .security_store import SQLiteSecurityStore
 from .memory import MemoryErrorBase, MemoryNotFoundError, MemoryProvider, MemoryRecord, MemoryValidationError, SQLiteMemoryStore
 from .notion_memory import MemorySyncError, NotionMemoryAdapter, NotionMemoryTransport
@@ -104,6 +105,7 @@ __all__ = [
     "SessionLimitError",
     "SessionStore",
     "SQLiteSecurityStore",
+    "SQLiteSessionStore",
     "SQLiteTaskStore",
     "TaskClaim",
     "TaskConflictError",
