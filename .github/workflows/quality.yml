@@ -1,8 +1,9 @@
 name: Non-X5 quality checks
 
 on:
+  # PR heads are validated by pull_request; keep push checks for the integration branches.
   push:
-    branches: ["main", "recovery/non-x5-foundation", "feature/capri-health-model"]
+    branches: ["main", "recovery/non-x5-foundation"]
   pull_request:
     branches: ["main", "recovery/non-x5-foundation", "feature/capri-doctor"]
   workflow_dispatch:
