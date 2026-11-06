@@ -186,6 +186,22 @@ class SignedApprovalTests(unittest.TestCase):
         )
         self.assertFalse(authority.verify(grant))
 
+    def test_key_ring_configuration_cannot_be_reassigned(self):
+        ring = HmacApprovalKeyRing({"active": b"a" * 32}, active_key_id="active")
+        with self.assertRaises(AttributeError):
+            ring.active_key_id = "other"
+        with self.assertRaises(AttributeError):
+            ring._active_key_id = "other"
+        with self.assertRaises(AttributeError):
+            ring._keys = {"other": b"b" * 32}
+        with self.assertRaises(AttributeError):
+            ring.other_attribute = "value"
+        self.assertEqual(ring.active_key_id, "active")
+        authority = HmacApprovalAuthority(ring)
+        grant = authority.issue("alice", "delete_record", "a" * 64)
+        self.assertTrue(authority.verify(grant))
+        self.assertEqual(grant.key_id, "active")
+
     def test_key_ring_rejects_invalid_configuration(self):
         for keys, active in (
             ({}, "missing"),
