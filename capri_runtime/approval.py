@@ -228,6 +228,8 @@ class SQLiteApprovalChallengeStore:
                     raise ToolValidationError("approval challenge was not found")
                 record = self._from_row(row)
                 if record.status == "approved":
+                    if decision != "approve":
+                        raise ToolValidationError("approval challenge is already approved")
                     if record.grant is None or _utc(
                         datetime.fromisoformat(record.grant.expires_at.replace("Z", "+00:00")),
                         "stored grant expiry",
