@@ -272,6 +272,30 @@ class RuntimeTests(unittest.TestCase):
         self.assertTrue(closed.closed)
         self.assertEqual(closed.messages, ())
 
+    def test_session_store_commits_complete_tool_transcript_turn(self):
+        store = SessionStore()
+        session = store.create()
+        turn = (
+            Message(role="user", content="search"),
+            Message(role="assistant", content="tool call"),
+            Message(role="tool", content="tool result"),
+            Message(role="assistant", content="final"),
+        )
+        updated = store.commit_turn_messages(session.session_id, 0, turn)
+        self.assertEqual(updated.version, 1)
+        self.assertEqual(updated.messages, turn)
+
+    def test_session_store_rejects_incomplete_tool_transcript(self):
+        store = SessionStore()
+        session = store.create()
+        with self.assertRaises(ValidationError):
+            store.commit_turn_messages(
+                session.session_id,
+                0,
+                (Message(role="user", content="search"), Message(role="tool", content="orphan")),
+            )
+        self.assertEqual(store.get(session.session_id).version, 0)
+
     def test_session_store_preserves_positional_history_limit_argument(self):
         store = SessionStore(2)
         self.assertEqual(store.max_session_messages, 2)

@@ -22,8 +22,10 @@ from .runtime import (
     SessionLimitError,
     SessionNotFoundError,
     SessionStore,
+    SessionLimitError,
     ValidationError,
     _contains_surrogate,
+    _validate_turn_messages,
 )
 
 
@@ -180,15 +182,27 @@ class SQLiteSessionStore(SessionStore):
                 or isinstance(closed, bool)
                 or not isinstance(closed, int)
                 or closed not in (0, 1)
-                or len(messages) != version * 2
                 or len(messages) > self.max_session_messages
+                or sum(message.role == "user" for message in messages) != version
             ):
                 raise ValueError("invalid session metadata")
-            for index, message in enumerate(messages):
-                expected_role = "user" if index % 2 == 0 else "assistant"
-                limit = self.max_input_chars if expected_role == "user" else self.max_output_chars
-                if message.role != expected_role or not message.content.strip() or len(message.content) > limit:
-                    raise ValueError("invalid transcript sequence or message size")
+            if messages:
+                turn_start = 0
+                for index in range(1, len(messages)):
+                    if messages[index].role == "user":
+                        _validate_turn_messages(
+                            messages[turn_start:index],
+                            max_input_chars=self.max_input_chars,
+                            max_output_chars=self.max_output_chars,
+                        )
+                        turn_start = index
+                _validate_turn_messages(
+                    messages[turn_start:],
+                    max_input_chars=self.max_input_chars,
+                    max_output_chars=self.max_output_chars,
+                )
+            elif version != 0:
+                raise ValueError("nonzero session version requires transcript messages")
             return Session(
                 session_id=session_id,
                 created_at=created_at,
@@ -269,25 +283,19 @@ class SQLiteSessionStore(SessionStore):
             finally:
                 connection.close()
 
-    def commit_turn(
+    def commit_turn_messages(
         self,
         session_id: str,
         expected_version: int,
-        user_text: str,
-        assistant_text: str,
+        turn_messages: tuple[Message, ...],
     ) -> Session:
+        validated = _validate_turn_messages(
+            turn_messages,
+            max_input_chars=self.max_input_chars,
+            max_output_chars=self.max_output_chars,
+        )
         if isinstance(expected_version, bool) or not isinstance(expected_version, int) or expected_version < 0:
             raise ValidationError("expected_version must be a non-negative integer")
-        if not isinstance(user_text, str) or not user_text.strip():
-            raise ValidationError("user_text must be a non-empty string")
-        if not isinstance(assistant_text, str) or not assistant_text.strip():
-            raise ValidationError("assistant_text must be a non-empty string")
-        if _contains_surrogate(user_text) or _contains_surrogate(assistant_text):
-            raise ValidationError("messages must contain valid Unicode scalar values")
-        if len(user_text) > self.max_input_chars:
-            raise SessionLimitError("user_text exceeds max_input_chars")
-        if len(assistant_text) > self.max_output_chars:
-            raise SessionLimitError("assistant_text exceeds max_output_chars")
 
         with self._lock:
             connection = self._connect()
@@ -305,26 +313,23 @@ class SQLiteSessionStore(SessionStore):
                     raise SessionClosedError("session is closed")
                 if current.version != expected_version:
                     raise SessionConflictError("session changed during model execution")
-                if len(current.messages) + 2 > self.max_session_messages:
+                if len(current.messages) + len(validated) > self.max_session_messages:
                     raise SessionLimitError("session message limit reached")
                 updated_at = self._now()
-                messages = current.messages + (
-                    Message(role="user", content=user_text),
-                    Message(role="assistant", content=assistant_text),
-                )
+                messages = current.messages + validated
                 encoded = json.dumps(
                     [{"role": item.role, "content": item.content} for item in messages],
                     ensure_ascii=False,
                     allow_nan=False,
                     separators=(",", ":"),
                 )
-                connection.execute(
+                cursor = connection.execute(
                     """UPDATE sessions
                     SET updated_at = ?, version = version + 1, messages_json = ?
                     WHERE session_id = ? AND version = ? AND closed = 0""",
                     (updated_at, encoded, session_id, expected_version),
                 )
-                if connection.total_changes != 1:
+                if cursor.rowcount != 1:
                     raise SessionConflictError("session changed during model execution")
                 connection.execute("COMMIT")
                 return replace(

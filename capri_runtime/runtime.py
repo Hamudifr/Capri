@@ -60,6 +60,54 @@ class Session:
     messages: tuple[Message, ...] = ()
 
 
+
+def _validate_turn_messages(
+    turn_messages: tuple[Message, ...],
+    *,
+    max_input_chars: int,
+    max_output_chars: int,
+) -> tuple[Message, ...]:
+    """Validate one user turn with optional assistant/tool exchanges."""
+    if not isinstance(turn_messages, tuple) or len(turn_messages) < 2:
+        raise ValidationError("turn_messages must contain a complete user and assistant turn")
+    validated = []
+    previous_role = None
+    for index, message in enumerate(turn_messages):
+        if not isinstance(message, Message):
+            raise ValidationError("turn_messages must contain Message records")
+        if (
+            not isinstance(message.role, str)
+            or not message.role
+            or len(message.role) > 32
+            or _contains_surrogate(message.role)
+            or not isinstance(message.content, str)
+            or not message.content.strip()
+            or _contains_surrogate(message.content)
+        ):
+            raise ValidationError("turn_messages contain invalid text")
+        if index == 0:
+            if message.role != "user":
+                raise ValidationError("a turn must begin with a user message")
+            limit = max_input_chars
+        elif message.role == "user":
+            raise ValidationError("a committed turn may contain only one user message")
+        elif message.role == "tool":
+            if previous_role not in {"assistant", "tool"}:
+                raise ValidationError("tool messages must follow an assistant tool request")
+            limit = max_output_chars
+        elif message.role == "assistant":
+            limit = max_output_chars
+        else:
+            raise ValidationError("turn message role is not supported")
+        if len(message.content) > limit:
+            raise SessionLimitError("turn message exceeds its configured character limit")
+        validated.append(message)
+        previous_role = message.role
+    if validated[-1].role != "assistant":
+        raise ValidationError("a committed turn must end with an assistant message")
+    return tuple(validated)
+
+
 class ModelAdapter(Protocol):
     """Host-supplied model adapter; implementation owns provider credentials."""
 
@@ -138,20 +186,27 @@ class SessionStore:
         user_text: str,
         assistant_text: str,
     ) -> Session:
-        if isinstance(expected_version, bool) or not isinstance(expected_version, int):
+        """Commit a simple user/assistant turn."""
+        return self.commit_turn_messages(
+            session_id,
+            expected_version,
+            (Message(role="user", content=user_text), Message(role="assistant", content=assistant_text)),
+        )
+
+    def commit_turn_messages(
+        self,
+        session_id: str,
+        expected_version: int,
+        turn_messages: tuple[Message, ...],
+    ) -> Session:
+        """Atomically append one complete user turn, including optional tool messages."""
+        validated = _validate_turn_messages(
+            turn_messages,
+            max_input_chars=self.max_input_chars,
+            max_output_chars=self.max_output_chars,
+        )
+        if isinstance(expected_version, bool) or not isinstance(expected_version, int) or expected_version < 0:
             raise ValidationError("expected_version must be a non-negative integer")
-        if expected_version < 0:
-            raise ValidationError("expected_version must be a non-negative integer")
-        if not isinstance(user_text, str) or not user_text.strip():
-            raise ValidationError("user_text must be a non-empty string")
-        if not isinstance(assistant_text, str) or not assistant_text.strip():
-            raise ValidationError("assistant_text must be a non-empty string")
-        if _contains_surrogate(user_text) or _contains_surrogate(assistant_text):
-            raise ValidationError("messages must contain valid Unicode scalar values")
-        if len(user_text) > self.max_input_chars:
-            raise SessionLimitError("user_text exceeds max_input_chars")
-        if len(assistant_text) > self.max_output_chars:
-            raise SessionLimitError("assistant_text exceeds max_output_chars")
 
         with self._lock:
             current = self.get(session_id)
@@ -159,16 +214,13 @@ class SessionStore:
                 raise SessionClosedError("session is closed")
             if current.version != expected_version:
                 raise SessionConflictError("session changed during model execution")
-            if len(current.messages) + 2 > self.max_session_messages:
+            if len(current.messages) + len(validated) > self.max_session_messages:
                 raise SessionLimitError("session message limit reached")
             updated = replace(
                 current,
                 updated_at=self._now(),
                 version=current.version + 1,
-                messages=current.messages + (
-                    Message(role="user", content=user_text),
-                    Message(role="assistant", content=assistant_text),
-                ),
+                messages=current.messages + validated,
             )
             self._sessions[session_id] = updated
             return updated
