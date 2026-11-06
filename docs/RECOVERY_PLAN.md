@@ -41,7 +41,7 @@ The tool boundary is a host-invoked execution gate, not a sandbox and not a mode
 
 ### Delivery and production position
 
-The recovery foundation and first tool-execution gate are integrated and CI-verified on three Python versions. This is meaningful internal capability progress, not a claim of AGI or public/multi-tenant production readiness. Public/hosted deployment remains a separate engineering gate until identity/authorization, tenant isolation, secrets handling, retention/deletion, provider budgets, monitoring, backups, rollback, handler isolation, durable audit/replay protection, and adversarial end-to-end validation are implemented. No protected X5 access or evaluation is authorized by ordinary engineering work.
+The recovery foundation and first tool-execution gate are integrated and CI-verified on three Python versions. This is meaningful internal capability progress, not a claim of AGI or public/multi-tenant production readiness. Production release gate not met: public/hosted deployment remains a separate engineering gate until identity/authorization, tenant isolation, secrets handling, retention/deletion, provider budgets, monitoring, backups, rollback, handler isolation, durable audit/replay protection, and adversarial end-to-end validation are implemented. No protected X5 access or evaluation is authorized by ordinary engineering work.
 
 ## Phase 0 — Preserve boundaries
 
