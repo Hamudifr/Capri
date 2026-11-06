@@ -227,7 +227,7 @@ class ScriptedToolModelAdapter:
         self.histories = []
         self.tool_definitions = []
 
-    def complete_with_tools(self, session_id, user_text, history, tools):
+    def complete_with_tools(self, session_id, history, tools):
         self.histories.append(history)
         self.tool_definitions.append(tools)
         if not self.responses:
@@ -269,7 +269,10 @@ class ToolOrchestrationTests(unittest.TestCase):
         self.assertEqual(result.tool_rounds, 1)
         self.assertEqual(result.tool_outcomes[0].status, "succeeded")
         self.assertEqual(self.calls, [{"value": "hi"}])
-        self.assertEqual([m.role for m in result.messages], ["assistant", "tool", "assistant"])
+        self.assertEqual([m.role for m in result.messages], ["user", "assistant", "tool", "assistant"])
+        self.assertEqual(result.messages[0].content, "echo hi")
+        self.assertEqual(adapter.histories[0].count(Message(role="user", content="echo hi")), 1)
+        self.assertEqual(adapter.histories[1].count(Message(role="user", content="echo hi")), 1)
         self.assertIn('"echo":"hi"', adapter.histories[1][-1].content)
         self.assertEqual([tool.name for tool in adapter.tool_definitions[0]], ["echo"])
 
@@ -346,8 +349,9 @@ class ToolOrchestrationTests(unittest.TestCase):
         prior = (Message(role="user", content="earlier"),)
         adapter = ScriptedToolModelAdapter(AssistantTurn(content="done"))
         result = ToolOrchestrator(adapter, self.bridge).run("s", "go", prior, self.context)
-        self.assertEqual(adapter.histories[0], prior)
-        self.assertEqual(result.messages[0], prior[0])
+        expected = prior + (Message(role="user", content="go"),)
+        self.assertEqual(adapter.histories[0], expected)
+        self.assertEqual(result.messages[:2], expected)
 
     def test_tool_message_limit_must_cover_executor_result_limit(self):
         with self.assertRaises(ToolOrchestrationError):
