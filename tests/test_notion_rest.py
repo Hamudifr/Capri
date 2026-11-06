@@ -1,7 +1,7 @@
 import io, json, os, unittest
 from urllib.error import HTTPError
 from capri_runtime.memory import MemoryNotFoundError, MemoryValidationError
-from capri_runtime.notion_rest import NOTION_API_VERSION, NotionRateLimitError, NotionRESTTransport, NotionTransportError
+from capri_runtime.notion_rest import NOTION_API_VERSION, NotionRateLimitError, NotionRESTTransport, NotionTransportError, _NoRedirectHandler
 
 PAGE_ID="b55c9c91-384d-452b-81db-d1ef79372b75"
 DATA_SOURCE_ID="435a6e29-3b57-4637-908b-a07761e0df0f"
@@ -92,6 +92,14 @@ class NotionRESTTransportTests(unittest.TestCase):
         with self.assertRaises(NotionTransportError) as caught: t.get_page(PAGE_ID)
         self.assertNotIn("private detail",str(caught.exception))
         self.assertNotIn("test-secret",str(caught.exception))
+
+    def test_default_redirect_handler_refuses_cross_origin_redirects(self):
+        handler = _NoRedirectHandler()
+        from urllib.request import Request
+        self.assertIsNone(handler.redirect_request(
+            Request("https://api.notion.com/v1/pages"), None, 302, "Found", {},
+            "https://attacker.example/steal",
+        ))
 
     def test_redirects_to_untrusted_origin_and_trashed_pages_rejected(self):
         t,op=self.make(); op.response=FakeResponse(page(),url="https://attacker.example/steal")
