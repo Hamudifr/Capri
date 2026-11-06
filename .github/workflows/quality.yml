@@ -4,7 +4,8 @@ on:
   push:
     branches: ["main", "recovery/non-x5-foundation", "security/ledger-path-hardening"]
   pull_request:
-    branches: ["main", "recovery/non-x5-foundation", "security/ledger-private-permissions-v2", "security/ledger-path-hardening"]
+    # Include the inode-hardening branch as a base so its stacked regression PR receives CI.
+    branches: ["main", "recovery/non-x5-foundation", "security/ledger-private-permissions-v2", "security/ledger-path-hardening", "fix/ledger-inode-uncertainty-rebased-2026-11-06"]
   workflow_dispatch:
 
 permissions:
@@ -24,8 +25,6 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
-        with:
-          python-version: ${{ matrix.python-version }}
       - name: Compile source and tests
         run: python -m compileall -q capri_core capri_runtime tests
       - name: Run non-X5 contract and runtime tests
