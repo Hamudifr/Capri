@@ -66,6 +66,7 @@ def _validate_turn_messages(
     *,
     max_input_chars: int,
     max_output_chars: int,
+    max_tool_chars: int,
 ) -> tuple[Message, ...]:
     """Validate one user turn with optional assistant/tool exchanges."""
     if not isinstance(turn_messages, tuple) or len(turn_messages) < 2:
@@ -94,7 +95,7 @@ def _validate_turn_messages(
         elif message.role == "tool":
             if previous_role not in {"assistant", "tool"}:
                 raise ValidationError("tool messages must follow an assistant tool request")
-            limit = max_output_chars
+            limit = max_tool_chars
         elif message.role == "assistant":
             limit = max_output_chars
         else:
@@ -129,10 +130,12 @@ class SessionStore:
         max_session_messages: int = 200,
         max_input_chars: int = 16_000,
         max_output_chars: int = 64_000,
+        max_tool_chars: int = 131_072,
     ) -> None:
         limits = {
             "max_input_chars": max_input_chars,
             "max_output_chars": max_output_chars,
+            "max_tool_chars": max_tool_chars,
             "max_session_messages": max_session_messages,
         }
         for name, value in limits.items():
@@ -142,6 +145,7 @@ class SessionStore:
             raise ValidationError("max_session_messages must allow at least one turn")
         self.max_input_chars = max_input_chars
         self.max_output_chars = max_output_chars
+        self.max_tool_chars = max_tool_chars
         self.max_session_messages = max_session_messages
         self._sessions: dict[str, Session] = {}
         self._lock = RLock()
@@ -204,6 +208,7 @@ class SessionStore:
             turn_messages,
             max_input_chars=self.max_input_chars,
             max_output_chars=self.max_output_chars,
+            max_tool_chars=self.max_tool_chars,
         )
         if isinstance(expected_version, bool) or not isinstance(expected_version, int) or expected_version < 0:
             raise ValidationError("expected_version must be a non-negative integer")
