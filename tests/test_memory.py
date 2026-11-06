@@ -1,5 +1,6 @@
 import json
 import os
+import sqlite3
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -51,6 +52,32 @@ class SQLiteMemoryStoreTests(unittest.TestCase):
             self.create(tags=("security", "security"))
         with self.assertRaises(TypeError):
             self.create(sensitivity="sensitive")
+
+    def test_legacy_database_schema_is_upgraded(self):
+        legacy_temp = tempfile.TemporaryDirectory()
+        try:
+            legacy_path = os.path.join(legacy_temp.name, "legacy.sqlite3")
+            db = sqlite3.connect(legacy_path)
+            db.execute("""CREATE TABLE memories (
+                memory_id TEXT PRIMARY KEY, title TEXT NOT NULL, content TEXT NOT NULL,
+                record_type TEXT NOT NULL, scope TEXT NOT NULL, source TEXT NOT NULL,
+                confidence TEXT NOT NULL, retention TEXT NOT NULL, created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL, expires_at TEXT, status TEXT NOT NULL,
+                supersedes_id TEXT REFERENCES memories(memory_id)
+            )""")
+            db.commit()
+            db.close()
+            upgraded = SQLiteMemoryStore(legacy_path)
+            record = upgraded.create(
+                title="Legacy upgrade", content="Schema migration test",
+                record_type="project_fact", scope="Capri System",
+                source="https://github.com/Hamudifr/Capri", confidence="verified",
+            )
+            self.assertEqual(record.sensitivity, "non_sensitive")
+            self.assertEqual(record.tags, ())
+            self.assertEqual(upgraded.get(record.memory_id), record)
+        finally:
+            legacy_temp.cleanup()
 
     def test_database_is_private_on_posix(self):
         if os.name == "posix":
