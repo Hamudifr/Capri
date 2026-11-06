@@ -326,7 +326,7 @@ class DoctorTests(unittest.TestCase):
             "  push:\n"
             '    branches: ["main", "recovery/non-x5-foundation"]\n'
             "  pull_request:\n"
-            '    branches: ["main", "recovery/non-x5-foundation"]\n'
+            '    branches: ["main", "recovery/non-x5-foundation", "feature/capri-doctor"]\n'
             "permissions:\n"
             "  contents: read\n"
             "jobs:\n"
