@@ -1,7 +1,8 @@
-"""Private SQLite-backed audit and approval replay storage.
+"""Private SQLite-backed audit, approval replay, and challenge storage.
 
-This store persists only redacted audit metadata and consumed approval identifiers.
-It does not store tool arguments, results, prompts, credentials, or transcripts.
+Approval challenge records contain bounded identity/operation metadata and signed
+grant material. Raw tool arguments, results, prompts, credentials, and transcripts
+are not stored. The database is private but not encrypted at rest.
 """
 from __future__ import annotations
 
