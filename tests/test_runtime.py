@@ -272,6 +272,12 @@ class RuntimeTests(unittest.TestCase):
         self.assertTrue(closed.closed)
         self.assertEqual(closed.messages, ())
 
+    def test_session_store_preserves_positional_history_limit_argument(self):
+        store = SessionStore(2)
+        self.assertEqual(store.max_session_messages, 2)
+        self.assertEqual(store.max_input_chars, 16_000)
+        self.assertEqual(store.max_output_chars, 64_000)
+
     def test_session_store_enforces_history_limit_for_direct_commits(self):
         store = SessionStore(max_session_messages=2)
         session = store.create()
@@ -282,10 +288,46 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(unchanged.version, 1)
         self.assertEqual(len(unchanged.messages), 2)
 
-    def test_runtime_rejects_store_with_mismatched_history_limit(self):
-        store = SessionStore(max_session_messages=10)
-        with self.assertRaises(ValidationError):
-            Runtime(EchoAdapter(), store, max_session_messages=2)
+    def test_runtime_rejects_store_with_mismatched_resource_limits(self):
+        stores = (
+            SessionStore(max_input_chars=10),
+            SessionStore(max_output_chars=10),
+            SessionStore(max_session_messages=10),
+        )
+        for store, kwargs in (
+            (stores[0], {"max_input_chars": 20}),
+            (stores[1], {"max_output_chars": 20}),
+            (stores[2], {"max_session_messages": 20}),
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValidationError):
+                    Runtime(EchoAdapter(), store, **kwargs)
+
+    def test_direct_store_commit_enforces_input_and_output_character_limits(self):
+        store = SessionStore(
+            max_input_chars=3,
+            max_output_chars=4,
+            max_session_messages=4,
+        )
+        session = store.create()
+        with self.assertRaises(SessionLimitError):
+            store.commit_turn(session.session_id, 0, "four", "ok")
+        with self.assertRaises(SessionLimitError):
+            store.commit_turn(session.session_id, 0, "ok", "12345")
+        unchanged = store.get(session.session_id)
+        self.assertEqual(unchanged.version, 0)
+        self.assertEqual(unchanged.messages, ())
+
+    def test_session_store_rejects_invalid_message_limits(self):
+        for kwargs in (
+            {"max_input_chars": True},
+            {"max_input_chars": 0},
+            {"max_output_chars": False},
+            {"max_output_chars": -1},
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValidationError):
+                    SessionStore(**kwargs)
 
     def test_session_store_rejects_invalid_history_limit(self):
         for value in (True, 1, 0, -1, 2.5):
