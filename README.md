@@ -1,6 +1,6 @@
 # Capri
 
-Capri is a research and execution-assistance project. This repository contains a non-X5 recovery foundation, a narrow execution-ledger prototype, and a minimal provider-neutral session runtime foundation; it does not contain an authorized X5 test specification or an X5 execution result.
+Capri is a research and execution-assistance project. This repository contains a hardened non-X5 recovery foundation, a narrow execution-ledger prototype, a provider-neutral session runtime, and an initial permissioned tool-execution boundary; it does not contain an authorized X5 test specification or an X5 execution result.
 
 ## Operating principles
 
@@ -24,13 +24,26 @@ Capri is a research and execution-assistance project. This repository contains a
 - `docs/LEDGER_OPERATIONS.md` — backup verification, integrity-incident response, and controlled recovery runbook.
 - `docs/LEDGER_SCALING_DECISION.md` — proposed transactional storage migration, explicitly not implemented.
 - `capri_core/` — immutable evaluation records, fail-closed validation, and hash-chained append-only ledger.
-- `capri_runtime/` — in-memory session lifecycle and injected model-adapter boundary; no tools or durable memory.
+- `capri_runtime/` — in-memory session lifecycle, injected model-adapter boundary, and permissioned host-injected tool execution gate.
+- `docs/TOOL_EXECUTION.md` — trust model, schema subset, approvals, audit behavior, and limitations for tool execution.
 - `tests/` — deterministic structural, ledger, and runtime tests.
 - `.github/workflows/quality.yml` — non-X5 documentation and test checks.
 
 ## Current status
 
-`main` now contains the integrated non-X5 recovery foundation: a hardened append-only ledger (bounded JSONL parsing, private file permissions, symlink/path checks, crash-durability handling, hard-link/inode uncertainty latching), read-only Capri Doctor diagnostics, dependency-aware operational health, and a provider-neutral in-memory session runtime. The runtime enforces input/output/history limits both at the Runtime boundary and at direct SessionStore commits. Post-merge CI run [42281548990](https://github.com/Hamudifr/Capri/actions/runs/42281548990) passed 114 tests on each actual Python 3.11, 3.12, and 3.13 interpreter; Doctor 6/6 and operational health 7/7. The ledger remains plaintext and single-writer; the runtime still has no concrete provider, permissioned tool execution, durable memory, host authentication/tenant isolation, or deployment packaging. These are explicit next capabilities, not implied features. No X5 work is included.
+Current `main` is `35ddc8408a2389dff8594283d40d37b66905c0dc`. It contains the integrated recovery foundation and the first permissioned tool-execution boundary.
+
+- Recovery foundation merged in PR #1: `d42bfbb2f59a31c713b03f09d074da77b8fb6250`.
+- Permissioned tool boundary merged in PR #17: `35ddc8408a2389dff8594283d40d37b66905c0dc`.
+- Post-merge CI [42284195885](https://github.com/Hamudifr/Capri/actions/runs/42284195885) passed compileall, Capri Doctor 6/6, operational health 7/7, and 129 tests on each actual Python 3.11, 3.12, and 3.13 interpreter; all three job logs inspected.
+
+Implemented: hardened append-only hash-chain ledger; read-only Doctor diagnostics; dependency-aware operational health; provider-neutral in-memory sessions with optimistic concurrency and direct-store resource limits; explicit tool registry; bounded strict schemas; host permission checks; one-use action-bound approvals; bounded JSON/Unicode; and redacted audit events.
+
+The tool boundary is not a sandbox or provider integration. The host must authenticate principals and construct trusted execution contexts. Approval replay prevention is process-local, the supplied audit sink is in-memory/development-only, and handlers run with process privileges. No shell, filesystem, network, dynamic import, automatic plugin discovery, or X5 access is exposed.
+
+Next capabilities: durable user-controlled memory, task planning/recovery, durable audit and cross-process approval replay protection, host identity/tenant isolation, model-to-tool orchestration, budgets, observability, and deployment packaging. Capri performs its own internal engineering/security reviews; external independent review is not a prerequisite for ordinary internal implementation. Never mislabel self-review as independent assurance.
+
+This is a growing internal prototype, not a claim of AGI or public/multi-tenant production readiness. No X5 work is included.
 
 ## Run checks locally
 
