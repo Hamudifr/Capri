@@ -26,18 +26,19 @@ The owner delegates routine engineering direction to Capri: choose priorities, a
 - Read-only Capri Doctor and dependency-aware operational health.
 - Provider-neutral in-memory sessions with optimistic concurrency and input/output/history limits enforced at Runtime and direct SessionStore commit boundaries.
 - Permissioned tool execution in `capri_runtime.tools`: explicit registry, trusted handler injection, bounded strict schema subset, exact host permission checks, principal/tool/argument-digest-bound expiring one-use approval grants, strict JSON/Unicode and byte limits, redacted audit events, and fail-closed audit-start persistence.
+- Durable local tool-security metadata in `capri_runtime.security_store.SQLiteSecurityStore`: SQLite WAL/FULL synchronous audit persistence and atomic cross-executor/process approval replay prevention; private POSIX directory/file checks and symlink/hard-link rejection.
 
 ### Permissioned tool execution — scope and limits
 
-The tool boundary is a host-invoked execution gate, not a sandbox and not a model-provider integration. The model cannot grant itself permissions or approvals. Host code must authenticate the principal and construct trusted `ExecutionContext` and `ApprovalGrant` objects. The included approval replay set is process-local; the included in-memory audit sink is development-only. Handlers run with Python process privileges and must be trusted. No shell, filesystem, network, dynamic import, automatic plugin discovery, or X5 access is included.
+The tool boundary is a host-invoked execution gate, not a sandbox and not a model-provider integration. The model cannot grant itself permissions or approvals. Host code must authenticate the principal and construct trusted `ExecutionContext` and `ApprovalGrant` objects. The default in-memory approval store and audit sink are development-only. `SQLiteSecurityStore` provides durable local audit/replay metadata but is not encrypted and requires host-managed backups, retention, monitoring, and restore testing. Handlers run with Python process privileges and must be trusted. No shell, filesystem, network, dynamic import, automatic plugin discovery, or X5 access is included.
 
 ### Remaining engineering priorities
 
 1. Durable, user-controllable memory with explicit export/deletion/retention controls.
 2. Task planning, execution state, idempotency, retries, cancellation, and recovery.
-3. Durable audit storage and cross-process approval replay prevention.
-4. Host identity/authorization and tenant isolation before any hosted multi-user deployment.
-5. End-to-end model-to-tool orchestration with untrusted-content isolation, provider-aware budgets, observability, packaging, backup, and rollback.
+3. Host identity/authorization and tenant isolation before any hosted multi-user deployment.
+4. End-to-end model-to-tool orchestration with untrusted-content isolation, provider-aware budgets, observability, packaging, backup, and rollback.
+5. Audit-store backup/restore, retention/compaction, monitoring, and same-host tamper-resilience.
 
 ### Delivery and production position
 

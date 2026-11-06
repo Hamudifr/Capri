@@ -27,7 +27,7 @@ Supported schema keywords are `type`, `properties`, `required`, `additionalPrope
 
 - Permission strings and the principal identity come from the host, never from model output.
 - An approval grant is scoped to one principal, one tool, one exact argument digest, and an expiry.
-- Grants are one-use within a single `ToolExecutor` instance. A production host must persist/reconcile grant consumption across processes and restarts.
+- With the default in-memory store, grants are one-use within one executor instance unless the same store is shared. Inject `SQLiteSecurityStore` as both `audit_sink` and `approval_store` to persist consumed grant IDs across executor instances and processes.
 - The grant dataclass is not a cryptographic signature. Only trusted host code may construct grants after authenticating the user's approval. Do not deserialize arbitrary model/user JSON directly into an `ExecutionContext` or `ApprovalGrant`.
 - A permission check is not a substitute for per-resource authorization. A handler must still enforce ownership, tenant scope, and domain invariants before performing its action.
 - The executor is not a sandbox. Handlers execute with the Python process's privileges. Register only trusted, reviewed host functions.
@@ -36,10 +36,14 @@ Supported schema keywords are `type`, `properties`, `required`, `additionalPrope
 
 Audit events contain event ID, UTC timestamp, principal ID, tool name, canonical argument digest, status, and a bounded error code. They deliberately omit raw arguments, prompts, outputs, credentials, and secrets.
 
-The supplied `InMemoryAuditSink` is for tests and development only. It is process-local, non-durable, and capacity-bounded. Production use requires a host-provided durable sink with access controls, retention, integrity protection, monitoring, and backup. Audit persistence is fail-closed before handler invocation. A completion-audit failure after a handler returns is inherently an uncertain-outcome case; callers must not blindly retry non-idempotent actions.
+The supplied `InMemoryAuditSink` and default `InMemoryApprovalStore` are process-local, non-durable development implementations; the default approval store is scoped to one executor unless deliberately shared. `SQLiteSecurityStore` is now available as a standard-library durable implementation of both `AuditSink` and `ApprovalStore`. It requires an existing private directory, rejects symlink/non-regular database paths, enforces POSIX directory ownership/private mode and database mode 0600, uses SQLite WAL with full synchronous commits, and atomically consumes grant IDs with `BEGIN IMMEDIATE` plus a unique primary key. Its audit table stores only redacted metadata. Hosts still own backup, retention, access control, integrity monitoring, and key/host security. Audit persistence is fail-closed before handler invocation. A completion-audit failure after a handler returns is inherently an uncertain-outcome case; callers must not blindly retry non-idempotent actions.
 
 ## Explicit non-goals and next hardening
 
 Not implemented: cryptographically authenticated approvals, durable cross-process replay prevention, handler sandboxing, cancellation/timeouts, per-tool rate limits, per-principal quotas, tenant identity, durable audit storage, tool discovery, model-provider integration, or automatic retries.
 
 Before exposing consequential handlers to an actual model, add host authentication and authorization, durable grant replay protection, durable audit storage, idempotency keys for side effects, rate/resource budgets, handler timeouts/cancellation, and adversarial integration tests. Keep dangerous capabilities absent by default.
+
+## Durable store verification
+
+`SQLiteSecurityStore` is covered by `tests/test_security_store.py`: database permissions, integrity check, audit readback across instances, durable approval replay prevention, concurrent single-winner consumption, expiry, symlink rejection, and unsafe/missing parent directories. The SQLite store does not encrypt data; its database contains only redacted operational metadata and consumed grant identifiers. The host must keep the parent directory private and provide backups/retention controls.

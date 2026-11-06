@@ -49,6 +49,11 @@ _SCHEMA_KEYS = {
 }
 _TYPES = {"object", "array", "string", "integer", "number", "boolean", "null"}
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
+_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _contains_surrogate(value: str) -> bool:
+    return any(0xD800 <= ord(character) <= 0xDFFF for character in value)
 
 
 def _canonical_json(value: Any, *, max_bytes: int, label: str) -> tuple[str, bytes]:
@@ -248,6 +253,38 @@ class AuditSink:
         raise NotImplementedError
 
 
+class ApprovalStore:
+    """Host-provided atomic one-use approval consumption."""
+
+    def consume(self, grant: ApprovalGrant, now: datetime) -> bool:
+        raise NotImplementedError
+
+
+class InMemoryApprovalStore(ApprovalStore):
+    """Process-local approval replay protection for tests and single-process prototypes."""
+
+    def __init__(self) -> None:
+        self._consumed: set[str] = set()
+        self._lock = threading.Lock()
+
+    def consume(self, grant: ApprovalGrant, now: datetime) -> bool:
+        if not isinstance(grant, ApprovalGrant):
+            return False
+        try:
+            expiry = datetime.fromisoformat(grant.expires_at.replace("Z", "+00:00"))
+        except (AttributeError, TypeError, ValueError):
+            return False
+        if expiry.tzinfo is None or expiry.utcoffset() is None or expiry <= now:
+            return False
+        if not isinstance(grant.grant_id, str) or not grant.grant_id:
+            return False
+        with self._lock:
+            if grant.grant_id in self._consumed:
+                return False
+            self._consumed.add(grant.grant_id)
+            return True
+
+
 class InMemoryAuditSink(AuditSink):
     """Thread-safe test/development sink. Production hosts should inject durable storage."""
 
@@ -307,9 +344,12 @@ class ToolExecutor:
         max_argument_bytes: int = 16_384,
         max_result_bytes: int = 65_536,
         clock: Callable[[], datetime] | None = None,
+        approval_store: ApprovalStore | None = None,
     ) -> None:
         if not isinstance(registry, ToolRegistry) or not callable(getattr(audit_sink, "write", None)):
             raise ToolValidationError("registry and audit sink are required")
+        if approval_store is not None and not callable(getattr(approval_store, "consume", None)):
+            raise ToolValidationError("approval_store must implement consume()")
         for name, value in (("max_argument_bytes", max_argument_bytes), ("max_result_bytes", max_result_bytes)):
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ToolValidationError(f"{name} must be a positive integer")
@@ -318,8 +358,7 @@ class ToolExecutor:
         self.max_argument_bytes = max_argument_bytes
         self.max_result_bytes = max_result_bytes
         self._clock = clock or (lambda: datetime.now(timezone.utc))
-        self._consumed_grants: set[str] = set()
-        self._approval_lock = threading.Lock()
+        self.approval_store = approval_store if approval_store is not None else InMemoryApprovalStore()
 
     def _now(self) -> datetime:
         value = self._clock()
@@ -347,24 +386,21 @@ class ToolExecutor:
         matching = [
             grant for grant in context.approvals
             if isinstance(grant, ApprovalGrant)
+            and isinstance(grant.grant_id, str) and 0 < len(grant.grant_id) <= 128
+            and isinstance(grant.principal_id, str) and len(grant.principal_id) <= 256
+            and isinstance(grant.tool_name, str) and _NAME_RE.fullmatch(grant.tool_name)
+            and isinstance(grant.argument_digest, str) and _DIGEST_RE.fullmatch(grant.argument_digest)
+            and isinstance(grant.expires_at, str) and len(grant.expires_at) <= 64
             and grant.principal_id == context.principal_id
             and grant.tool_name == spec.name
             and grant.argument_digest == digest
         ]
-        with self._approval_lock:
-            for grant in matching:
-                if not isinstance(grant.grant_id, str) or not grant.grant_id:
-                    continue
-                if grant.grant_id in self._consumed_grants:
-                    continue
-                try:
-                    expiry = datetime.fromisoformat(grant.expires_at.replace("Z", "+00:00"))
-                except (AttributeError, TypeError, ValueError):
-                    continue
-                if expiry.tzinfo is None or expiry.utcoffset() is None or expiry <= now:
-                    continue
-                self._consumed_grants.add(grant.grant_id)
-                return
+        for grant in matching:
+            try:
+                if self.approval_store.consume(grant, now):
+                    return
+            except Exception:
+                raise AuditError("approval state persistence failed; execution was blocked") from None
         raise ApprovalRequiredError("a matching, unexpired, unused host approval is required")
 
     def execute(self, name: str, arguments: Any, context: ExecutionContext) -> Any:
@@ -372,12 +408,15 @@ class ToolExecutor:
             raise ToolValidationError("tool name must be a lowercase identifier")
         if not isinstance(context, ExecutionContext):
             raise ToolValidationError("a trusted ExecutionContext is required")
-        if not isinstance(context.principal_id, str) or not context.principal_id.strip():
-            raise ToolValidationError("host principal_id must be non-empty")
-        if not isinstance(context.permissions, frozenset) or any(not isinstance(x, str) for x in context.permissions):
-            raise ToolValidationError("host permissions must be a frozenset of strings")
-        if not isinstance(context.approvals, tuple):
-            raise ToolValidationError("host approvals must be a tuple")
+        if (not isinstance(context.principal_id, str) or not context.principal_id.strip()
+                or len(context.principal_id) > 256 or _contains_surrogate(context.principal_id)):
+            raise ToolValidationError("host principal_id must be valid non-empty text of at most 256 characters")
+        if (not isinstance(context.permissions, frozenset)
+                or any(not isinstance(x, str) or not x or len(x) > 128 or _contains_surrogate(x)
+                       for x in context.permissions)):
+            raise ToolValidationError("host permissions must be a frozenset of bounded valid strings")
+        if not isinstance(context.approvals, tuple) or len(context.approvals) > 32:
+            raise ToolValidationError("host approvals must be a tuple of at most 32 grants")
         spec, handler = self.registry.resolve(name)
         if spec.permission not in context.permissions:
             raise PermissionDeniedError("host context lacks the required tool permission")

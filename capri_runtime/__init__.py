@@ -17,6 +17,8 @@ from .runtime import (
 from .tools import (
     ApprovalGrant,
     ApprovalRequiredError,
+    ApprovalStore,
+    InMemoryApprovalStore,
     AuditError,
     AuditEvent,
     AuditSink,
@@ -31,15 +33,18 @@ from .tools import (
     ToolSpec,
     ToolValidationError,
 )
+from .security_store import SQLiteSecurityStore
 
 __all__ = [
     "ApprovalGrant",
     "ApprovalRequiredError",
+    "ApprovalStore",
     "AuditError",
     "AuditEvent",
     "AuditSink",
     "ExecutionContext",
     "InMemoryAuditSink",
+    "InMemoryApprovalStore",
     "Message",
     "ModelAdapter",
     "PermissionDeniedError",
@@ -52,6 +57,7 @@ __all__ = [
     "SessionNotFoundError",
     "SessionLimitError",
     "SessionStore",
+    "SQLiteSecurityStore",
     "ToolBoundaryError",
     "ToolExecutionError",
     "ToolExecutor",
