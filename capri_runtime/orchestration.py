@@ -9,7 +9,7 @@ import json
 import math
 import threading
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 from uuid import uuid4
 
 from .runtime import Message, Session, SessionStore
@@ -33,6 +33,7 @@ class AssistantTurn:
 
     content: str = ""
     tool_calls: tuple[ToolCallRequest, ...] = ()
+    provider_data: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,6 +203,12 @@ class ToolOrchestrator:
                 raise ToolOrchestrationError("adapter content is invalid or oversized")
             if not isinstance(response.tool_calls, tuple):
                 raise ToolOrchestrationError("adapter tool_calls must be a tuple")
+            if not isinstance(response.provider_data, tuple) or any(
+                not isinstance(item, dict) for item in response.provider_data
+            ):
+                raise ToolOrchestrationError("adapter provider_data must be a tuple of JSON objects")
+            if response.provider_data and not response.tool_calls:
+                raise ToolOrchestrationError("provider_data is only valid with tool calls")
 
             if not response.tool_calls:
                 if not response.content.strip():
@@ -256,6 +263,8 @@ class ToolOrchestrator:
                     for call in response.tool_calls
                 ],
             }
+            if response.provider_data:
+                call_payload["provider_data"] = response.provider_data
             try:
                 encoded_calls = json.dumps(
                     call_payload, ensure_ascii=False, allow_nan=False,
