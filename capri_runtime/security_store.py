@@ -1,0 +1,198 @@
+"""Private SQLite-backed audit and approval replay storage.
+
+This store persists only redacted audit metadata and consumed approval identifiers.
+It does not store tool arguments, results, prompts, credentials, or transcripts.
+"""
+from __future__ import annotations
+
+import os
+import sqlite3
+import stat
+import threading
+from datetime import datetime
+from typing import Any
+
+from .tools import ApprovalGrant, ApprovalStore, AuditEvent, AuditSink, ToolValidationError
+
+
+class SQLiteSecurityStore(AuditSink, ApprovalStore):
+    """Durable, cross-process audit sink and one-use approval replay store.
+
+    The database must live in an existing private directory. On POSIX the directory
+    must be owned by the current user and have no group/other permission bits; the
+    database file is forced to mode 0600. SQLite WAL transactions coordinate writers.
+    """
+
+    def __init__(self, path: str) -> None:
+        if not isinstance(path, str) or not path.strip():
+            raise ToolValidationError("database path must be a non-empty string")
+        absolute = os.path.abspath(path)
+        parent = os.path.dirname(absolute)
+        if not os.path.isdir(parent):
+            raise ToolValidationError("database parent directory must already exist")
+        if os.path.realpath(parent) != parent:
+            raise ToolValidationError("database parent path must not traverse symlinks")
+        parent_stat = os.stat(parent, follow_symlinks=False)
+        if not stat.S_ISDIR(parent_stat.st_mode):
+            raise ToolValidationError("database parent must be a directory")
+        if os.name == "posix":
+            if parent_stat.st_uid != os.geteuid():
+                raise ToolValidationError("database parent must be owned by the current user")
+            if stat.S_IMODE(parent_stat.st_mode) & 0o077:
+                raise ToolValidationError("database parent directory must be private (0700 or stricter)")
+
+        if os.path.lexists(absolute):
+            existing = os.lstat(absolute)
+            if not stat.S_ISREG(existing.st_mode):
+                raise ToolValidationError("database path must be a regular non-symlink file")
+            if os.name == "posix" and existing.st_uid != os.geteuid():
+                raise ToolValidationError("database file must be owned by the current user")
+
+        flags = os.O_RDWR | os.O_CREAT
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        try:
+            descriptor = os.open(absolute, flags, 0o600)
+        except OSError:
+            raise ToolValidationError("database file could not be opened safely") from None
+        try:
+            opened = os.fstat(descriptor)
+            if not stat.S_ISREG(opened.st_mode):
+                raise ToolValidationError("database path must be a regular file")
+            if os.name == "posix":
+                if opened.st_uid != os.geteuid():
+                    raise ToolValidationError("database file must be owned by the current user")
+                os.fchmod(descriptor, 0o600)
+        finally:
+            os.close(descriptor)
+
+        self.path = absolute
+        self._lock = threading.RLock()
+        self._initialize()
+
+    def _connect(self) -> sqlite3.Connection:
+        current = os.lstat(self.path)
+        if not stat.S_ISREG(current.st_mode):
+            raise ToolValidationError("database file changed to a non-regular path")
+        if os.name == "posix":
+            if current.st_uid != os.geteuid() or stat.S_IMODE(current.st_mode) & 0o077:
+                raise ToolValidationError("database ownership or permissions changed")
+        connection = sqlite3.connect(self.path, timeout=5.0, isolation_level=None)
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute("PRAGMA trusted_schema=OFF")
+        connection.execute("PRAGMA synchronous=FULL")
+        return connection
+
+    def _initialize(self) -> None:
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute("PRAGMA journal_mode=WAL")
+                connection.execute(
+                    """CREATE TABLE IF NOT EXISTS audit_events (
+                        event_id TEXT PRIMARY KEY,
+                        timestamp TEXT NOT NULL,
+                        principal_id TEXT NOT NULL,
+                        tool_name TEXT NOT NULL,
+                        argument_digest TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        error_code TEXT
+                    )"""
+                )
+                connection.execute(
+                    """CREATE TABLE IF NOT EXISTS consumed_approvals (
+                        grant_id TEXT PRIMARY KEY,
+                        principal_id TEXT NOT NULL,
+                        tool_name TEXT NOT NULL,
+                        argument_digest TEXT NOT NULL,
+                        expires_at TEXT NOT NULL,
+                        consumed_at TEXT NOT NULL
+                    )"""
+                )
+            finally:
+                connection.close()
+
+    def write(self, event: AuditEvent) -> None:
+        if not isinstance(event, AuditEvent):
+            raise ToolValidationError("audit sink accepts AuditEvent records only")
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute(
+                    """INSERT INTO audit_events
+                    (event_id, timestamp, principal_id, tool_name, argument_digest, status, error_code)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        event.event_id,
+                        event.timestamp,
+                        event.principal_id,
+                        event.tool_name,
+                        event.argument_digest,
+                        event.status,
+                        event.error_code,
+                    ),
+                )
+            finally:
+                connection.close()
+
+    def consume(self, grant: ApprovalGrant, now: datetime) -> bool:
+        if not isinstance(grant, ApprovalGrant):
+            return False
+        if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
+            raise ToolValidationError("approval consumption requires a timezone-aware time")
+        try:
+            expiry = datetime.fromisoformat(grant.expires_at.replace("Z", "+00:00"))
+        except (AttributeError, TypeError, ValueError):
+            return False
+        if expiry.tzinfo is None or expiry.utcoffset() is None or expiry <= now:
+            return False
+        if not isinstance(grant.grant_id, str) or not grant.grant_id:
+            return False
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                cursor = connection.execute(
+                    """INSERT OR IGNORE INTO consumed_approvals
+                    (grant_id, principal_id, tool_name, argument_digest, expires_at, consumed_at)
+                    VALUES (?, ?, ?, ?, ?, ?)""",
+                    (
+                        grant.grant_id,
+                        grant.principal_id,
+                        grant.tool_name,
+                        grant.argument_digest,
+                        expiry.isoformat(),
+                        now.isoformat(),
+                    ),
+                )
+                connection.execute("COMMIT")
+                return cursor.rowcount == 1
+            except Exception:
+                try:
+                    connection.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+                raise
+            finally:
+                connection.close()
+
+    def events(self) -> tuple[AuditEvent, ...]:
+        with self._lock:
+            connection = self._connect()
+            try:
+                rows = connection.execute(
+                    """SELECT event_id, timestamp, principal_id, tool_name,
+                    argument_digest, status, error_code FROM audit_events ORDER BY rowid"""
+                ).fetchall()
+                return tuple(AuditEvent(*row) for row in rows)
+            finally:
+                connection.close()
+
+    def integrity_check(self) -> str:
+        with self._lock:
+            connection = self._connect()
+            try:
+                row = connection.execute("PRAGMA integrity_check").fetchone()
+                return str(row[0]) if row else "no result"
+            finally:
+                connection.close()
