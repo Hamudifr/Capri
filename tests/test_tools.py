@@ -1,10 +1,17 @@
 import hashlib
 import json
+import threading
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from capri_runtime.orchestration import AssistantTurn, ToolOrchestrationError, ToolOrchestrator
-from capri_runtime.runtime import Message
+from capri_runtime.orchestration import (
+    AssistantTurn,
+    SessionTurnCoordinator,
+    ToolOrchestrationError,
+    ToolOrchestrator,
+)
+from capri_runtime.runtime import Message, SessionClosedError, SessionStore
 from capri_runtime.tool_bridge import ToolCallRequest, ToolExecutionBridge
 from capri_runtime.tools import (
     ApprovalGrant,
@@ -394,6 +401,128 @@ class ToolOrchestrationTests(unittest.TestCase):
             ToolOrchestrator(
                 ScriptedToolModelAdapter(), self.bridge, max_tool_message_bytes=65_536
             )
+
+
+
+class SessionTurnCoordinatorTests(unittest.TestCase):
+    def _build(self, adapter, store=None):
+        calls = []
+        registry = ToolRegistry()
+        registry.register(
+            ToolSpec(
+                "echo",
+                "tools:echo",
+                {
+                    "type": "object",
+                    "properties": {"value": {"type": "string", "minLength": 1, "maxLength": 40}},
+                    "required": ["value"],
+                    "additionalProperties": False,
+                },
+            ),
+            lambda args: calls.append(args["value"]) or {"echo": args["value"]},
+        )
+        bridge = ToolExecutionBridge(ToolExecutor(registry, InMemoryAuditSink()))
+        orchestrator = ToolOrchestrator(adapter, bridge)
+        return calls, orchestrator, store or SessionStore()
+
+    def test_same_session_turns_are_serialized_before_tools_execute(self):
+        entered = threading.Event()
+        release = threading.Event()
+        histories = []
+
+        class BlockingAdapter:
+            def complete_with_tools(self, session_id, history, tools):
+                histories.append(history)
+                last = history[-1]
+                if last.role == "user":
+                    if last.content == "first":
+                        entered.set()
+                        if not release.wait(timeout=3):
+                            raise RuntimeError("test release timeout")
+                    return AssistantTurn(
+                        tool_calls=(
+                            ToolCallRequest(f"{last.content}-call", "echo", {"value": last.content}),
+                        )
+                    )
+                return AssistantTurn(content="completed")
+
+        adapter = BlockingAdapter()
+        store = SessionStore()
+        session = store.create()
+        calls, orchestrator, _ = self._build(adapter, store)
+        coordinator = SessionTurnCoordinator()
+        results = []
+
+        def run_turn(text):
+            try:
+                results.append(coordinator.run_and_commit(
+                    orchestrator, store, session.session_id, text,
+                    ExecutionContext("host-user", frozenset({"tools:echo"})),
+                ))
+            except Exception as exc:
+                results.append(exc)
+
+        first = threading.Thread(target=run_turn, args=("first",))
+        second = threading.Thread(target=run_turn, args=("second",))
+        first.start()
+        self.assertTrue(entered.wait(timeout=2))
+        second.start()
+        time.sleep(0.05)
+        release.set()
+        first.join(timeout=4)
+        second.join(timeout=4)
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        self.assertEqual(len(results), 2)
+        self.assertTrue(all(not isinstance(item, Exception) for item in results))
+        final = store.get(session.session_id)
+        self.assertEqual(final.version, 2)
+        self.assertEqual([m.content for m in final.messages if m.role == "user"], ["first", "second"])
+        self.assertEqual(calls, ["first", "second"])
+        second_first_call_history = next(
+            history for history in histories
+            if history[-1].role == "user" and history[-1].content == "second"
+        )
+        self.assertTrue(any(m.role == "user" and m.content == "first" for m in second_first_call_history))
+
+    def test_session_capacity_is_checked_before_tool_side_effect(self):
+        class OneToolAdapter:
+            def complete_with_tools(self, session_id, history, tools):
+                return AssistantTurn(
+                    tool_calls=(ToolCallRequest("one-call", "echo", {"value": "x"}),)
+                )
+
+        store = SessionStore(max_session_messages=3)
+        session = store.create()
+        calls, orchestrator, _ = self._build(OneToolAdapter(), store)
+        with self.assertRaises(ToolOrchestrationError):
+            SessionTurnCoordinator().run_and_commit(
+                orchestrator, store, session.session_id, "go",
+                ExecutionContext("host-user", frozenset({"tools:echo"})),
+            )
+        self.assertEqual(calls, [])
+        self.assertEqual(store.get(session.session_id).version, 0)
+
+    def test_closed_session_is_not_sent_to_adapter(self):
+        class NeverCall:
+            def complete_with_tools(self, *args):
+                raise AssertionError("closed session must not invoke adapter")
+
+        store = SessionStore()
+        session = store.create()
+        store.close(session.session_id)
+        _, orchestrator, _ = self._build(NeverCall(), store)
+        with self.assertRaises(ToolOrchestrationError):
+            SessionTurnCoordinator().run_and_commit(
+                orchestrator, store, session.session_id, "go",
+                ExecutionContext("host-user", frozenset()),
+            )
+
+    def test_lock_stripe_configuration_is_bounded(self):
+        for value in (True, 0, 4097):
+            with self.subTest(value=value):
+                with self.assertRaises(ToolOrchestrationError):
+                    SessionTurnCoordinator(value)
 
 
 if __name__ == "__main__":

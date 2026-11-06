@@ -93,3 +93,9 @@ Autonomy does not bypass least privilege, privacy, platform controls, protected 
 \n\n## Durable conversation sessions\n\n`SQLiteSessionStore` provides private SQLite persistence for conversation transcripts and optimistic version checks across process restarts. The database must live in an existing private directory; contents are plaintext, so hosts must protect backups and device access.\n
 
 The session stores also expose `commit_turn_messages` for atomically persisting a complete model/tool transcript (user message, assistant tool-call messages, tool results, and final assistant response) as one versioned turn. Hosts must serialize same-session orchestration before executing tools; the optimistic commit detects stale versions but cannot reverse side effects.
+
+
+`SessionTurnCoordinator` can wrap the orchestration and transcript commit under one per-session process-local lock. It prevents same-process concurrent tool execution for the same session and checks transcript message capacity before side effects. Multi-process deployments still require a distributed pre-execution lease or strict session routing; optimistic database commits alone do not prevent duplicate side effects.
+
+
+Session stores apply a separate `max_tool_chars` limit to persisted tool-result messages (default 131,072 characters), distinct from assistant-output limits.

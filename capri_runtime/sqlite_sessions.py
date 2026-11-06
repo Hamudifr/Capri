@@ -42,11 +42,13 @@ class SQLiteSessionStore(SessionStore):
         max_session_messages: int = 200,
         max_input_chars: int = 16_000,
         max_output_chars: int = 64_000,
+        max_tool_chars: int = 131_072,
     ) -> None:
         super().__init__(
             max_session_messages=max_session_messages,
             max_input_chars=max_input_chars,
             max_output_chars=max_output_chars,
+            max_tool_chars=max_tool_chars,
         )
         if not isinstance(path, str) or not path.strip():
             raise ValidationError("database path must be non-empty text")
@@ -194,12 +196,14 @@ class SQLiteSessionStore(SessionStore):
                             messages[turn_start:index],
                             max_input_chars=self.max_input_chars,
                             max_output_chars=self.max_output_chars,
+                            max_tool_chars=self.max_tool_chars,
                         )
                         turn_start = index
                 _validate_turn_messages(
                     messages[turn_start:],
                     max_input_chars=self.max_input_chars,
                     max_output_chars=self.max_output_chars,
+                    max_tool_chars=self.max_tool_chars,
                 )
             elif version != 0:
                 raise ValueError("nonzero session version requires transcript messages")
@@ -211,7 +215,7 @@ class SQLiteSessionStore(SessionStore):
                 closed=bool(closed),
                 messages=messages,
             )
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError, ValidationError, SessionLimitError):
             raise ValidationError("persisted session record is invalid") from None
 
     def create(self) -> Session:
@@ -293,6 +297,7 @@ class SQLiteSessionStore(SessionStore):
             turn_messages,
             max_input_chars=self.max_input_chars,
             max_output_chars=self.max_output_chars,
+            max_tool_chars=self.max_tool_chars,
         )
         if isinstance(expected_version, bool) or not isinstance(expected_version, int) or expected_version < 0:
             raise ValidationError("expected_version must be a non-negative integer")

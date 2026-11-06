@@ -348,6 +348,8 @@ class RuntimeTests(unittest.TestCase):
             {"max_input_chars": 0},
             {"max_output_chars": False},
             {"max_output_chars": -1},
+            {"max_tool_chars": True},
+            {"max_tool_chars": 0},
         ):
             with self.subTest(kwargs=kwargs):
                 with self.assertRaises(ValidationError):
