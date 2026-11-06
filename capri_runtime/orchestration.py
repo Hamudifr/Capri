@@ -176,15 +176,22 @@ class ToolOrchestrator:
             if len(working) + 1 + len(response.tool_calls) > self.max_history_messages:
                 raise ToolOrchestrationError("conversation history limit reached")
 
-            duplicate_id = False
+            duplicate_prior_id = False
+            duplicate_batch_id = False
+            batch_call_ids: set[str] = set()
             for call in response.tool_calls:
                 if not isinstance(call, ToolCallRequest):
                     raise ToolOrchestrationError("adapter returned an invalid tool call")
                 if not isinstance(call.call_id, str):
                     raise ToolOrchestrationError("adapter returned an invalid tool call ID")
+                if call.call_id in batch_call_ids:
+                    duplicate_batch_id = True
                 if call.call_id in seen_call_ids:
-                    duplicate_id = True
-                seen_call_ids.add(call.call_id)
+                    duplicate_prior_id = True
+                batch_call_ids.add(call.call_id)
+            if duplicate_batch_id:
+                raise ToolOrchestrationError("tool call IDs must be unique within each batch")
+            seen_call_ids.update(batch_call_ids)
 
             call_payload = {
                 "content": response.content,
@@ -204,7 +211,7 @@ class ToolOrchestrator:
             if len(call_bytes) > self.max_tool_message_bytes:
                 raise ToolOrchestrationError("tool-call message exceeds the configured byte limit")
 
-            if duplicate_id:
+            if duplicate_prior_id:
                 batch_outcomes = [
                     ToolCallOutcome(
                         call.call_id, call.name, "invalid_request",
