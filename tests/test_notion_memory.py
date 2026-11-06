@@ -99,6 +99,7 @@ class NotionMemoryAdapterTests(unittest.TestCase):
     def test_repeated_pagination_cursor_fails_closed(self):
         self.create()
         self.create(title="Another record")
+        self.create(title="Third record")
         self.transport.repeat_cursor = True
         with self.assertRaises(MemoryValidationError):
             self.store.search("untrusted")
