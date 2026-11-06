@@ -334,12 +334,12 @@ class SQLiteSessionStore(SessionStore):
             or _contains_surrogate(session_id)
         ):
             raise ValidationError("session_id must be bounded valid text")
-        now = self._lease_now()
-        expires_at = (now + timedelta(seconds=lease_seconds)).isoformat()
         with self._lock:
             connection = self._connect()
             try:
                 connection.execute("BEGIN IMMEDIATE")
+                now = self._lease_now()
+                expires_at = (now + timedelta(seconds=lease_seconds)).isoformat()
                 session = connection.execute(
                     "SELECT closed FROM sessions WHERE session_id = ?",
                     (session_id,),
@@ -398,12 +398,12 @@ class SQLiteSessionStore(SessionStore):
             or _contains_surrogate(session_id)
         ):
             raise ValidationError("session_id must be bounded valid text")
-        now = self._lease_now()
-        expires_at = (now + timedelta(seconds=lease_seconds)).isoformat()
         with self._lock:
             connection = self._connect()
             try:
                 connection.execute("BEGIN IMMEDIATE")
+                now = self._lease_now()
+                expires_at = (now + timedelta(seconds=lease_seconds)).isoformat()
                 current = connection.execute(
                     "SELECT owner_token, expires_at FROM session_turn_leases WHERE session_id = ?",
                     (session_id,),
