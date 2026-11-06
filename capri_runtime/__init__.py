@@ -42,7 +42,9 @@ from .tool_bridge import (
 )
 from .orchestration import (
     AssistantTurn,
+    CommittedOrchestration,
     OrchestrationResult,
+    SessionTurnCoordinator,
     ToolModelAdapter,
     ToolOrchestrationError,
     ToolOrchestrator,
@@ -67,7 +69,9 @@ from .tasks import (
 
 __all__ = [
     "AssistantTurn",
+    "CommittedOrchestration",
     "OrchestrationResult",
+    "SessionTurnCoordinator",
     "ToolModelAdapter",
     "ToolOrchestrationError",
     "ToolOrchestrator",
