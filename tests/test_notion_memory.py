@@ -149,6 +149,18 @@ class NotionMemoryAdapterTests(unittest.TestCase):
         with self.assertRaises(MemoryValidationError):
             self.store.get(record.memory_id)
 
+    def test_date_only_expiry_normalizes_to_end_of_day_utc(self):
+        record = self.create(retention="expire_30d", expires_at="2026-11-06")
+        self.assertEqual(record.expires_at, "2026-11-06T23:59:59.999999+00:00")
+
+    def test_unhashable_options_fail_with_validation_error(self):
+        with self.assertRaises(MemoryValidationError):
+            self.create(record_type=[])
+        with self.assertRaises(MemoryValidationError):
+            self.create(confidence=[])
+        with self.assertRaises(MemoryValidationError):
+            self.create(retention=[])
+
     def test_rejects_unsupported_properties_and_non_http_sources(self):
         with self.assertRaises(MemoryValidationError):
             self.create(source="file:///tmp/secret")
