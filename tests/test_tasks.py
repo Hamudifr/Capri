@@ -1,7 +1,9 @@
 import os
 import tempfile
+import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from threading import Event, Thread
 from datetime import datetime, timedelta, timezone
 
 from capri_runtime.tasks import (
@@ -10,6 +12,7 @@ from capri_runtime.tasks import (
     TaskEngine,
     TaskIdempotencyConflict,
     TaskValidationError,
+    TaskWorker,
 )
 
 NOW = datetime(2026, 11, 6, 21, 0, tzinfo=timezone.utc)
@@ -250,6 +253,59 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             self.store.renew_lease(
                 old, lease_seconds=60, now=NOW + timedelta(seconds=7)
             )
+
+
+    def test_managed_worker_renews_lease_during_long_handler(self):
+        started = Event()
+        release = Event()
+        outcomes = []
+
+        def slow_handler(_data, _key):
+            started.set()
+            release.wait(timeout=8)
+            return {"completed": True}
+
+        self.store.create(
+            [{"tool": "slow", "input": {}, "max_attempts": 2}],
+            now=datetime.now(timezone.utc),
+        )
+        engine = TaskEngine(
+            self.store, {"slow": slow_handler}, "worker-a", lease_seconds=5
+        )
+        worker = TaskWorker(
+            engine, poll_interval_seconds=0.05, heartbeat_interval_seconds=0.1
+        )
+        thread = Thread(target=lambda: outcomes.append(worker.run_once()))
+        thread.start()
+        self.assertTrue(started.wait(timeout=2))
+        time.sleep(5.2)
+        competing = self.store.claim_next(
+            "worker-b", lease_seconds=5, now=datetime.now(timezone.utc)
+        )
+        self.assertIsNone(competing)
+        release.set()
+        thread.join(timeout=3)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(outcomes[0].state, "succeeded")
+
+    def test_managed_worker_stops_polling_when_stop_event_is_set(self):
+        worker = TaskWorker(
+            TaskEngine(self.store, {}, "worker"),
+            poll_interval_seconds=0.05,
+            heartbeat_interval_seconds=0.1,
+        )
+        stop = Event()
+        thread = Thread(target=lambda: worker.run_forever(stop))
+        thread.start()
+        time.sleep(0.1)
+        stop.set()
+        thread.join(timeout=2)
+        self.assertFalse(thread.is_alive())
+
+    def test_managed_worker_rejects_heartbeat_interval_not_shorter_than_lease(self):
+        engine = TaskEngine(self.store, {}, "worker", lease_seconds=5)
+        with self.assertRaises(TaskValidationError):
+            TaskWorker(engine, heartbeat_interval_seconds=5)
 
 
 if __name__ == "__main__":
