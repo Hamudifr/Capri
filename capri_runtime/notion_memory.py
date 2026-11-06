@@ -21,7 +21,6 @@ from .memory import (
     MemoryValidationError,
     _ALLOWED_CONFIDENCE,
     _ALLOWED_RETENTION,
-    _ALLOWED_TAGS,
     _ALLOWED_TYPES,
     _iso,
     _now,
@@ -151,7 +150,7 @@ class NotionMemoryAdapter:
         if not isinstance(props, Mapping):
             raise MemoryValidationError("Notion page properties are missing")
         title = _validate_text(props.get("Name"), "title", 200)
-        content = _validate_text(props.get("Content"), "content", 20_000, empty=True)
+        content = _validate_text(props.get("Content"), "content", 20_000)
         type_label = props.get("Type")
         if not isinstance(type_label, str):
             raise MemoryValidationError("Notion Type property is unsupported")
@@ -229,7 +228,7 @@ class NotionMemoryAdapter:
         supersedes_id: str | None = None,
     ) -> MemoryRecord:
         _validate_text(title, "title", 200)
-        _validate_text(content, "content", 20_000, empty=True)
+        _validate_text(content, "content", 20_000)
         if not isinstance(record_type, str) or record_type not in _ALLOWED_TYPES:
             raise MemoryValidationError("unsupported record_type")
         _validate_text(scope, "scope", 100)
