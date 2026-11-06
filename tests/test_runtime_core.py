@@ -908,7 +908,7 @@ class LedgerPathSafetyTests(unittest.TestCase):
             self.assertEqual(HashChainLedger(path).verify()["records"], 1)
 
 
-@unittest.skipUnless(os.name == "posix", "POSIX hard links are required")
+    @unittest.skipUnless(os.name == "posix", "POSIX hard links are required")
     def test_z_hard_link_alias_is_latched_after_uncertain_append(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
