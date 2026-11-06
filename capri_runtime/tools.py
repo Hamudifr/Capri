@@ -300,7 +300,7 @@ class HmacApprovalKeyRing:
         return hmac.new(key, payload, hashlib.sha256).digest()
 
     def verify(self, key_id: str, payload: bytes, signature: bytes) -> bool:
-        key = self.key_for(key_id)
+        key = self._key_for(key_id)
         if key is None or not isinstance(payload, bytes) or not isinstance(signature, bytes):
             return False
         expected = hmac.new(key, payload, hashlib.sha256).digest()
