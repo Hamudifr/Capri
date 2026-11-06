@@ -536,6 +536,10 @@ class LedgerPathSafetyTests(unittest.TestCase):
                 alias.append(passing("blocked"))
             with self.assertRaisesRegex(LedgerIntegrityError, "previous append failed"):
                 original.verify()
+            with self.assertRaisesRegex(LedgerIntegrityError, "previous append failed"):
+                original.records()
+            with self.assertRaisesRegex(LedgerIntegrityError, "previous append failed"):
+                original.append(passing("blocked-original"))
 
             descriptor = os.open(alias_path, os.O_RDONLY)
             try:
