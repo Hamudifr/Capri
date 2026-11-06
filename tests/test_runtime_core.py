@@ -509,5 +509,36 @@ class LedgerPathSafetyTests(unittest.TestCase):
             self.assertEqual(HashChainLedger(path).verify()["records"], 1)
 
 
+    @unittest.skipUnless(os.name == "posix", "POSIX hard links required")
+    def test_hard_link_alias_fails_closed_after_uncertain_append(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path_a = Path(directory) / "ledger-a.jsonl"
+            alias_b = Path(directory) / "ledger-b.jsonl"
+            ledger_a = HashChainLedger(path_a)
+            ledger_a.append(passing("first"))
+            os.link(path_a, alias_b)
+            self.assertEqual(
+                (os.stat(path_a).st_dev, os.stat(path_a).st_ino),
+                (os.stat(alias_b).st_dev, os.stat(alias_b).st_ino),
+            )
+
+            with mock.patch.object(
+                ledger_module, "_fsync_file", side_effect=OSError("injected file fsync failure")
+            ):
+                with self.assertRaises(LedgerIntegrityError):
+                    ledger_a.append(passing("second", parent="first"))
+
+            ledger_b = HashChainLedger(alias_b)
+            before = path_a.read_bytes()
+            with self.assertRaisesRegex(LedgerIntegrityError, "previous append failed"):
+                ledger_b.append(passing("third", parent="first"))
+            with self.assertRaisesRegex(LedgerIntegrityError, "previous append failed"):
+                ledger_b.verify()
+            with self.assertRaisesRegex(LedgerIntegrityError, "previous append failed"):
+                ledger_b.records()
+            self.assertEqual(alias_b.read_bytes(), before)
+            self.assertEqual(path_a.read_bytes(), before)
+
+
 if __name__ == "__main__":
     unittest.main()

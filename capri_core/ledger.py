@@ -20,6 +20,7 @@ _LOCK = RLock()
 _ZERO_HASH = "0" * 64
 _ENTRY_KEYS = {"previous_hash", "record", "hash"}
 _UNCERTAIN_PATHS: set[str] = set()
+_UNCERTAIN_IDENTITIES: set[tuple[int, int]] = set()
 
 
 def _absolute_path(path: str | Path) -> Path:
@@ -41,6 +42,46 @@ def _assert_not_uncertain(path: str | Path) -> None:
         raise LedgerIntegrityError(
             "a previous append failed after writing began; preserve the ledger and inspect a copy before further use"
         )
+
+
+def _descriptor_identity(descriptor: int) -> tuple[int, int] | None:
+    """Return the (st_dev, st_ino) identity of an open descriptor, or None.
+
+    Inode identity, not the pathname, is the authoritative key: two hard-link
+    names for the same inode share one identity, so a latch recorded through
+    one name is visible through every alias.
+    """
+    try:
+        info = os.fstat(descriptor)
+    except OSError:
+        return None
+    return (info.st_dev, info.st_ino)
+
+
+def _assert_descriptor_not_uncertain(descriptor: int) -> None:
+    """Fail closed on a descriptor whose inode identity is latched as uncertain.
+
+    If the identity cannot be captured at all, fail closed too: a check that
+    silently continues without identity verification reintroduces the
+    hard-link alias gap this guard exists to close.
+    """
+    identity = _descriptor_identity(descriptor)
+    if identity is None:
+        raise LedgerIntegrityError(
+            "ledger identity could not be confirmed; preserve the ledger and inspect a copy before further use"
+        )
+    if identity in _UNCERTAIN_IDENTITIES:
+        raise LedgerIntegrityError(
+            "a previous append failed after writing began; preserve the ledger and inspect a copy before further use"
+        )
+
+
+def _stream_identity(stream: Any) -> tuple[int, int] | None:
+    """Best-effort identity capture from a stream that may already be broken."""
+    try:
+        return _descriptor_identity(stream.fileno())
+    except (OSError, ValueError, AttributeError):
+        return None
 
 
 def _close_fd(descriptor: int | None) -> None:
@@ -296,6 +337,11 @@ class HashChainLedger:
                         return entries, seen_runs, previous, count
                     raise LedgerIntegrityError("ledger is not an existing regular file") from exc
 
+            # Enforce inode identity at every opened-descriptor boundary: a
+            # descriptor-based scan must not bypass the uncertainty latch that a
+            # pathname precheck would otherwise provide.
+            _assert_descriptor_not_uncertain(descriptor)
+
             with os.fdopen(os.dup(descriptor), "rb") as stream:
                 line_number = 0
                 while True:
@@ -460,6 +506,12 @@ class HashChainLedger:
             except BaseException as exc:
                 if write_started:
                     _UNCERTAIN_PATHS.add(key)
+                    # Capture inode identity while the failed stream is still
+                    # available; hard-link aliases share this identity, so the
+                    # latch must not depend on the pathname alone.
+                    identity = _stream_identity(stream)
+                    if identity is not None:
+                        _UNCERTAIN_IDENTITIES.add(identity)
                 if isinstance(exc, OSError):
                     raise LedgerIntegrityError(
                         "ledger append failed after opening the file; preserve it and inspect a copy before retrying"
@@ -472,6 +524,9 @@ class HashChainLedger:
                     except OSError:
                         if write_started:
                             _UNCERTAIN_PATHS.add(key)
+                            identity = _stream_identity(stream)
+                            if identity is not None:
+                                _UNCERTAIN_IDENTITIES.add(identity)
                 _close_fd(descriptor)
                 _close_fd(parent_fd)
 
