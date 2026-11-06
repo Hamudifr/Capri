@@ -99,7 +99,7 @@ The current tool gate:
 
 PR #17 merge commit: `35ddc8408a2389dff8594283d40d37b66905c0dc`. PR CI [42284054149](https://github.com/Hamudifr/Capri/actions/runs/42284054149) and post-merge CI [42284195885](https://github.com/Hamudifr/Capri/actions/runs/42284195885) passed compileall, Doctor 6/6, operational health 7/7, and 129 tests on each actual Python 3.11/3.12/3.13 interpreter; all six logs inspected.
 
-The gate is not a sandbox or provider integration. Host authentication and trusted context construction remain external; approval replay protection is process-local; the included audit sink is in-memory/development-only; and handlers run with process privileges. No shell, filesystem, network, dynamic import, or protected X5 access is exposed.
+The gate is not a sandbox or provider integration. Host authentication and trusted context construction remain external; the default in-memory approval/audit stores are development-only, while `SQLiteSecurityStore` provides durable local audit and cross-executor/process replay metadata without encryption; and handlers run with process privileges. No shell, filesystem, network, dynamic import, or protected X5 access is exposed.
 
 The v0.2 product proposal below remains a historical proposal for the narrow session-runtime slice; its approval status is not retroactively changed by the owner's broad engineering delegation. That does not prevent Capri from implementing bounded, separately documented internal capabilities under the owner's current direction.
 
