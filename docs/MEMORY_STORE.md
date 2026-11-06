@@ -15,7 +15,7 @@ The current store supports:
 
 ## Trust and privacy rules
 
-- Every record is marked `sensitivity='non_sensitive'`, and the SQLite schema constrains that field to the same value. This is a caller-declared classification, not an automatic content classifier: callers must screen text before storing it; the store cannot reliably infer whether arbitrary content contains sensitive information. There is no secret-storage mode. This is a usage policy, not an automatic content classifier: callers must screen text before storing it; the store cannot reliably infer whether arbitrary content contains sensitive information.
+- Every record is marked `sensitivity='non_sensitive'`, and the SQLite schema constrains that field to the same value. This is a caller-declared classification, not an automatic content classifier: callers must screen text before storing it; the store cannot reliably infer whether arbitrary content contains sensitive information. There is no secret-storage mode.
 - Retrieved text is untrusted data. It cannot alter system/user authority, authorize tools, or bypass the execution gate.
 - Do not deserialize memory content into execution contexts, approval grants, permissions, or executable code.
 - Provider adapters own their authentication and transport. No Notion credentials or provider SDK are embedded in this repository.
