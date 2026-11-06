@@ -303,7 +303,9 @@ class ToolOrchestrationTests(unittest.TestCase):
                     inner.received = []
                 def complete_with_tools_and_memory(inner, session_id, history, tools, memory_context):
                     inner.received.append((history, tools, memory_context))
-                    return AssistantTurn(tool_calls=(ToolCallRequest("try", "echo", {"value": "x"}),))
+                    if len(inner.received) == 1:
+                        return AssistantTurn(tool_calls=(ToolCallRequest("try", "echo", {"value": "x"}),))
+                    return AssistantTurn(content="The host denied the tool request.")
             adapter = MemoryAdapter()
             denied_context = ExecutionContext("host-user", frozenset())
             result = ToolOrchestrator(adapter, self.bridge).run(
