@@ -321,10 +321,10 @@ class ToolRegistry:
     """Explicit allowlist; handlers are supplied by trusted application code."""
 
     def __init__(self) -> None:
-        self._entries: dict[str, tuple[ToolSpec, Callable[[dict[str, Any]], Any]]] = {}
+        self._entries: dict[str, tuple[ToolSpec, Callable[..., Any]]] = {}
         self._lock = threading.RLock()
 
-    def register(self, spec: ToolSpec, handler: Callable[[dict[str, Any]], Any]) -> None:
+    def register(self, spec: ToolSpec, handler: Callable[..., Any]) -> None:
         if not isinstance(spec, ToolSpec) or not callable(handler):
             raise ToolValidationError("registration requires a ToolSpec and callable handler")
         with self._lock:
@@ -458,7 +458,10 @@ class ToolExecutor:
         handler_cancelled = False
         try:
             if spec.cooperative_cancellation:
-                result = handler(json.loads(encoded), cancellation_event)
+                result = handler(
+                    json.loads(encoded),
+                    cancellation_event if cancellation_event is not None else threading.Event(),
+                )
             else:
                 result = handler(json.loads(encoded))
         except ToolCancelledError:
