@@ -62,8 +62,11 @@ def build_health_report(
         if not isinstance(check, dict):
             raise ValueError("each health check must be a mapping")
         check_id = check.get("id")
-        if not isinstance(check_id, str) or not check_id:
+        if not isinstance(check_id, str) or not check_id.strip():
             raise ValueError("each health check must have a non-empty id")
+        status = check.get("status")
+        if status not in ("pass", "fail", "unavailable", "unknown"):
+            raise ValueError("each health check must have a supported status")
         if check_id in check_map:
             raise ValueError(f"duplicate health check id: {check_id}")
         check_map[check_id] = check
