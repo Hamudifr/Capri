@@ -75,6 +75,8 @@ from .tasks import (
     TaskWorker,
 )
 
+from .openai_responses import OpenAIResponsesAdapter, OpenAIResponsesAdapterError
+
 __all__ = [
     "AssistantTurn",
     "CommittedOrchestration",
@@ -155,4 +157,3 @@ __all__ = [
     "ValidationError",
 ]
 
-from .openai_responses import OpenAIResponsesAdapter, OpenAIResponsesAdapterError
