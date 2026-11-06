@@ -215,7 +215,7 @@ class SQLiteSessionStore(SessionStore):
                 closed=bool(closed),
                 messages=messages,
             )
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError, ValidationError, SessionLimitError):
             raise ValidationError("persisted session record is invalid") from None
 
     def create(self) -> Session:
