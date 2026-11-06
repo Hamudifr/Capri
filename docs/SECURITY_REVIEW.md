@@ -37,6 +37,8 @@ Assets requiring protection as the runtime grows:
 - Consequential tool specs require a one-use approval bound to principal, tool, canonical argument digest, and expiry.
 - Tool arguments/results are byte-bounded and checked for strict JSON/Unicode; handler exception details are suppressed.
 - Redacted audit-start persistence must succeed before a handler is invoked; a post-handler audit failure is surfaced as an uncertain outcome.
+- `SQLiteSecurityStore` persists redacted audit events and consumed approval IDs using SQLite transactions, a unique grant-ID constraint, and `BEGIN IMMEDIATE` for atomic cross-executor/process replay prevention.
+- On POSIX, the SQLite store requires a current-user-owned private parent directory, rejects symlink/non-regular and hard-linked database paths, and enforces database mode 0600; it rechecks parent/file permissions before each connection.
 - The runtime does not log transcript content or provider credentials.
 - CI declares `contents: read` and pins checkout/setup-python actions to immutable commit SHAs.
 
@@ -53,7 +55,7 @@ These controls reduce accidental resource abuse and concurrency defects; they do
 | Adapter timeout/cancellation | No runtime timeout | Define adapter cancellation contract and provider-specific timeout behavior |
 | Token/cost budget | Character limits only | Define provider-aware token, spend, and request budgets |
 | Rate limiting | Not implemented | Define per-user/tenant/IP quotas at host boundary |
-| Tool execution | Initial provider-neutral gate implemented; not wired to model provider and not sandboxed | Add durable approval replay prevention, durable audit sink, per-resource authorization inside handlers, timeouts/isolation, budgets, and end-to-end host integration |
+| Tool execution | Provider-neutral gate and SQLite durable audit/approval store implemented; not wired to model provider and not sandboxed | Add per-resource authorization inside handlers, timeouts/isolation, budgets, host integration, backup/retention, and stronger same-host tamper controls |
 | Retrieval/prompt injection | No retrieval path | Treat retrieved material as untrusted data; test direct and indirect injection at every action boundary |
 | Observability | Minimal | Define redacted structured metadata, retention, alerting, and incident response |
 
@@ -65,6 +67,7 @@ Use harmless fixtures and instrumented fake adapters/tools. Do not use real dest
 - User-supplied or retrieved instructions cannot change tool authorization.
 - Untrusted content cannot trigger an unauthorized tool call.
 - Tool arguments are validated against strict schemas and caller permissions. Covered in `tests/test_tools.py`; add integration tests when a real host/model adapter is connected.
+- Consumed approval IDs persist across executor/store instances and concurrent consumers have one winner. Covered in `tests/test_security_store.py`.
 - Memory poisoning and cross-session transcript leakage are rejected.
 - Model output cannot reach HTML, SQL, shell, or filesystem sinks without destination-specific validation.
 - Repeated retries, recursive tool calls, and expensive outputs hit bounded budgets.
@@ -77,7 +80,7 @@ The quality workflow uses minimal `contents: read` permissions and immutable act
 
 ## Release position
 
-The runtime is not approved for public or multi-tenant deployment. The tool executor is not a sandbox and its in-memory audit sink/process-local approval replay state are development foundations only. Public or multi-tenant deployment requires host-level identity and authorization, tenant isolation, explicit retention/deletion behavior, operational budgets, provider integration, durable audit and approval replay controls, handler isolation/timeouts, end-to-end/adversarial tests, observability, backup and rollback capability, and a documented Capri internal release review. External independent review is not a prerequisite for ordinary internal engineering; retain it only when a specific contract, regulation, customer commitment, or protected evaluation explicitly requires it. This document is Capri's internal review, not a security certification.
+The runtime is not approved for public or multi-tenant deployment. The tool executor is not a sandbox. The in-memory audit sink/default approval store are development foundations; `SQLiteSecurityStore` supplies durable local audit/replay metadata but is not encrypted and still requires host-managed backup, retention, monitoring, and private filesystem ownership. Public or multi-tenant deployment requires host-level identity and authorization, tenant isolation, explicit retention/deletion behavior, operational budgets, provider integration, durable audit and approval replay controls, handler isolation/timeouts, end-to-end/adversarial tests, observability, backup and rollback capability, and a documented Capri internal release review. External independent review is not a prerequisite for ordinary internal engineering; retain it only when a specific contract, regulation, customer commitment, or protected evaluation explicitly requires it. This document is Capri's internal review, not a security certification.
 
 No X5 instructions, rubrics, expected answers, hidden criteria, scoring keys, or evidence are part of this document or the implementation.
 
@@ -89,3 +92,10 @@ Capri reviewed the implemented tool gate and its negative tests before integrati
 Residual risks are material and intentionally visible: trusted host code can construct execution contexts and approval objects; the grant object is not a cryptographic signature; replay prevention is not durable across process restarts or multiple executors; the included audit sink is in-memory; handlers are not sandboxed and run with process privileges; and the gate is not connected to a model provider. Do not register untrusted handlers or expose consequential tools to model-driven calls until durable replay/audit controls, host identity/authorization, idempotency, budgets, and handler isolation are implemented.
 
 This is Capri's internal security review, not a security certification. External independent review is not a prerequisite for ordinary internal engineering or merging.
+
+
+## Durable tool-security store self-review — 2026-11-06
+
+Capri reviewed the SQLite implementation and added tests for database mode 0600, private parent-directory ownership/mode, permission revalidation on each connection, symlink and hard-link rejection, audit readback across reopened instances, durable grant replay prevention, expiry, and concurrent single-winner consumption. SQLite uses WAL and FULL synchronous commits. The stored data is restricted to redacted audit metadata and consumed grant identifiers.
+
+Residual risks: the database is not encrypted; SQLite durability is limited by the host filesystem and hardware; backups, retention/compaction, monitoring, and restore drills are host responsibilities; and a malicious process running as the same OS user remains within the host trust boundary. This does not sandbox handlers or replace host authentication/authorization.
