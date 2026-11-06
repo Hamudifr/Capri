@@ -243,7 +243,16 @@ class ToolOrchestrationTests(unittest.TestCase):
         self.calls = []
         registry = ToolRegistry()
         registry.register(
-            ToolSpec("echo", "tools:echo", SCHEMA),
+            ToolSpec(
+                "echo",
+                "tools:echo",
+                {
+                    "type": "object",
+                    "properties": {"value": {"type": "string", "minLength": 1, "maxLength": 20}},
+                    "required": ["value"],
+                    "additionalProperties": False,
+                },
+            ),
             lambda args: self.calls.append(args) or {"echo": args["value"]},
         )
         self.executor = ToolExecutor(registry, InMemoryAuditSink())
