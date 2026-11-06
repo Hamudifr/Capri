@@ -12,11 +12,12 @@ The owner delegates routine engineering direction to Capri: choose priorities, a
 
 ### Current mainline state
 
-- Current `main`: `35ddc8408a2389dff8594283d40d37b66905c0dc`.
+- Current `main`: `ed530c8f3fbcea993a2577b87b2b9ab98bb16921`.
 - PR #1 integrated the recovery foundation: `d42bfbb2f59a31c713b03f09d074da77b8fb6250`.
 - PR #17 integrated the permissioned tool-execution boundary: `35ddc8408a2389dff8594283d40d37b66905c0dc`.
-- PR #17 exact-head run [42284054149](https://github.com/Hamudifr/Capri/actions/runs/42284054149) and post-merge main run [42284195885](https://github.com/Hamudifr/Capri/actions/runs/42284195885) both passed compileall, Capri Doctor 6/6, operational health 7/7, and 129 tests on each actual Python 3.11, 3.12, and 3.13 interpreter. All six job logs were inspected.
-- PR #17 is closed/merged. Implementation issue #16 is closed. No open PR remains from this delivery.
+- PR #18 integrated durable audit and approval replay storage: `ed530c8f3fbcea993a2577b87b2b9ab98bb16921`.
+- PR #18 exact-head run [42286374983](https://github.com/Hamudifr/Capri/actions/runs/42286374983) and post-merge main run [42286526969](https://github.com/Hamudifr/Capri/actions/runs/42286526969) both passed compileall, Capri Doctor 6/6, operational health 7/7, and 141 tests on each actual Python 3.11, 3.12, and 3.13 interpreter. All six job logs were inspected.
+- PR #17 and #18 are closed/merged; implementation issue #16 is closed. No open PR remains from these deliveries.
 - Repository remains private; `main` is unprotected under the current free/private configuration. Do not pay or publish merely to obtain rulesets.
 
 ### Implemented capabilities
@@ -38,11 +39,11 @@ The tool boundary is a host-invoked execution gate, not a sandbox and not a mode
 2. Task planning, execution state, idempotency, retries, cancellation, and recovery.
 3. Host identity/authorization and tenant isolation before any hosted multi-user deployment.
 4. End-to-end model-to-tool orchestration with untrusted-content isolation, provider-aware budgets, observability, packaging, backup, and rollback.
-5. Audit-store backup/restore, retention/compaction, monitoring, and same-host tamper-resilience.
+5. Audit-store backup/restore, retention/compaction, monitoring, cryptographically authenticated approvals, and same-host tamper-resilience.
 
 ### Delivery and production position
 
-The recovery foundation and first tool-execution gate are integrated and CI-verified on three Python versions. This is meaningful internal capability progress, not a claim of AGI or public/multi-tenant production readiness. Production release gate not met: public/hosted deployment remains a separate engineering gate until identity/authorization, tenant isolation, secrets handling, retention/deletion, provider budgets, monitoring, backups, rollback, handler isolation, durable audit/replay protection, and adversarial end-to-end validation are implemented. No protected X5 access or evaluation is authorized by ordinary engineering work.
+The recovery foundation and first tool-execution gate are integrated and CI-verified on three Python versions. This is meaningful internal capability progress, not a claim of AGI or public/multi-tenant production readiness. Production release gate not met: public/hosted deployment remains a separate engineering gate until identity/authorization, tenant isolation, secrets handling, retention/deletion, provider budgets, monitoring, backups, rollback, handler isolation, audit-store recovery/retention, cryptographically authenticated approvals, and adversarial end-to-end validation are implemented. No protected X5 access or evaluation is authorized by ordinary engineering work.
 
 ## Phase 0 — Preserve boundaries
 
@@ -99,7 +100,7 @@ The session runtime is intentionally process-local and memory-only. A separate p
 - [x] Perform Capri's own design, code, security, integration, and operational self-review for the current integrated foundation.
 - [x] Run the assembled repository suite on Python 3.11, 3.12, and 3.13; inspect every job log and record the exact commit/run evidence.
 - [x] Implement and test the first permissioned tool-execution boundary; see `docs/TOOL_EXECUTION.md`.
-- [ ] Implement durable user-controlled memory, identity/tenant isolation, task recovery, budgets, durable audit/replay protection, and observability.
+- [ ] Implement durable user-controlled memory, identity/tenant isolation, task recovery, budgets, cryptographically authenticated approvals, and observability.
 - [ ] Complete adversarial and end-to-end tests for the implemented agent capabilities.
 - [ ] Verify backups, recovery, rollback, deployment configuration, and data-retention/deletion behavior before public or multi-tenant deployment.
 - [ ] Run the protected blind evaluation only through its authorized designated environment and procedure.
