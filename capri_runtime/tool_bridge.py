@@ -18,6 +18,7 @@ from .tools import (
     ExecutionContext,
     PermissionDeniedError,
     ToolExecutionError,
+    ToolCancelledError,
     ToolExecutor,
     ToolNotFoundError,
     ToolValidationError,
@@ -183,7 +184,21 @@ class ToolExecutionBridge:
                 )
                 break
             try:
-                result = self.executor.execute(name, arguments, context)
+                result = self.executor.execute(
+                    name, arguments, context, cancellation_event=cancellation_event
+                )
+            except ToolCancelledError as exc:
+                if exc.outcome_uncertain:
+                    outcomes.append(ToolCallOutcome(
+                        call_id, name, "outcome_uncertain",
+                        error_code="handler_cancelled_outcome_uncertain",
+                        argument_digest=digest,
+                    ))
+                else:
+                    outcomes.append(ToolCallOutcome(
+                        call_id, name, "cancelled", error_code="cancelled",
+                        argument_digest=digest,
+                    ))
             except ApprovalRequiredError:
                 outcomes.append(ToolCallOutcome(
                     call_id, name, "approval_required",
