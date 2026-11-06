@@ -42,6 +42,7 @@ from .tool_bridge import (
 )
 from .security_store import SQLiteSecurityStore
 from .memory import MemoryErrorBase, MemoryNotFoundError, MemoryProvider, MemoryRecord, MemoryValidationError, SQLiteMemoryStore
+from .notion_memory import MemorySyncError, NotionMemoryAdapter, NotionMemoryTransport
 from .tasks import (
     SQLiteTaskStore,
     TaskClaim,
@@ -70,6 +71,9 @@ __all__ = [
     "MemoryProvider",
     "MemoryRecord",
     "MemoryValidationError",
+    "MemorySyncError",
+    "NotionMemoryAdapter",
+    "NotionMemoryTransport",
     "SQLiteMemoryStore",
     "Message",
     "ModelAdapter",
