@@ -50,6 +50,32 @@ class HealthModelTests(unittest.TestCase):
         self.assertEqual(states["ci_actions"], "unavailable")
         self.assertEqual(states["developer_baseline"], "unavailable")
 
+    def test_blank_check_ids_are_rejected(self):
+        observation = checks()[0]
+        observation["id"] = "   "
+        with self.assertRaises(ValueError):
+            build_health_report([observation])
+
+    def test_unsupported_check_statuses_are_rejected(self):
+        for status in ("pas", None, 1, {}, []):
+            with self.subTest(status=status):
+                observation = checks()[0]
+                observation["status"] = status
+                with self.assertRaises(ValueError):
+                    build_health_report([observation])
+
+    def test_explicit_unknown_status_propagates_without_becoming_healthy(self):
+        observations = [
+            {**item, "status": "unknown"} if item["id"] == "ci_workflow_readable" else item
+            for item in checks()
+        ]
+        report = build_health_report(observations)
+        states = {item["id"]: item["status"] for item in report["components"]}
+        self.assertEqual(states["ci_workflow"], "unknown")
+        self.assertEqual(states["ci_actions"], "unknown")
+        self.assertEqual(states["developer_baseline"], "unknown")
+        self.assertEqual(report["status"], "unknown")
+
     def test_duplicate_check_ids_are_rejected(self):
         with self.assertRaises(ValueError):
             build_health_report(checks() + [checks()[0]])
