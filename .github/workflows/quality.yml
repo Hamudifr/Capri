@@ -37,7 +37,7 @@ jobs:
 
   notion-live-smoke:
     name: Optional live Notion REST smoke test
-    if: ${{ vars.CAPRI_NOTION_LIVE_TESTS == 'true' }}
+    if: ${{ vars.CAPRI_NOTION_LIVE_TESTS == 'true' && github.ref == 'refs/heads/main' }}
     needs: repository-contract
     runs-on: ubuntu-latest
     timeout-minutes: 3
