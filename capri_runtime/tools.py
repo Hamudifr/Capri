@@ -205,6 +205,7 @@ class ToolSpec:
     argument_schema: Mapping[str, Any]
     requires_approval: bool = False
     cooperative_cancellation: bool = False
+    resource_authorizer: Callable[[dict[str, Any], ExecutionContext], bool] | None = None
     _schema_json: str = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -216,6 +217,8 @@ class ToolSpec:
             raise ToolValidationError("requires_approval must be boolean")
         if not isinstance(self.cooperative_cancellation, bool):
             raise ToolValidationError("cooperative_cancellation must be boolean")
+        if self.resource_authorizer is not None and not callable(self.resource_authorizer):
+            raise ToolValidationError("resource_authorizer must be callable when provided")
         schema = dict(self.argument_schema) if isinstance(self.argument_schema, Mapping) else None
         _validate_schema_definition(schema, root=True)
         encoded, _ = _canonical_json(schema, max_bytes=32_768, label="tool schema")
@@ -448,6 +451,22 @@ class ToolExecutor:
         _assert_json_object_keys(arguments)
         _validate_value(json.loads(encoded), spec.schema())
         digest = hashlib.sha256(raw).hexdigest()
+        if spec.resource_authorizer is not None:
+            authorization_failed = False
+            try:
+                authorized = spec.resource_authorizer(json.loads(encoded), context)
+            except Exception:
+                authorized = False
+                authorization_failed = True
+            if authorized is not True:
+                self._audit(
+                    context.principal_id,
+                    spec.name,
+                    digest,
+                    "permission_denied",
+                    "resource_authorization_failed" if authorization_failed else "resource_authorization_denied",
+                )
+                raise PermissionDeniedError("host context is not authorized for this resource") from None
         if spec.requires_approval:
             self._consume_approval(context, spec, digest)
         self._audit(context.principal_id, spec.name, digest, "started")
