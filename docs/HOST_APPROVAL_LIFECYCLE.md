@@ -103,3 +103,20 @@ Do not delete consumed grant IDs merely because the grant expires; retention/com
 ## Deployment gate
 
 Do not expose consequential tools to an external model until the host has a real identity provider, protected signing-key custody, authenticated approval UX, durable SQLite replay/challenge storage, handler idempotency, resource authorization, and operational backup/retention controls. This library is a framework component, not a deployed production approval service.
+
+
+## Implemented library API (PR #50)
+
+The following host-side library components now implement the core lifecycle:
+
+- `SQLiteApprovalChallengeStore(SQLiteSecurityStore)` creates the challenge table in the existing hardened security database. It does not open a second database.
+- `HostApprovalService` accepts a trusted store, host-held `HmacApprovalAuthority`, an approver-authentication callback, and an approver-authorization callback.
+- `create_challenge(context, outcome, operation_id)` accepts only an `ExecutionContext` and a `ToolCallOutcome` whose status is `approval_required`. The host must call this after the bridge returns that outcome and provide an operation ID stable in its own idempotency domain.
+- `approve(opaque_credential, challenge_id)` and `reject(opaque_credential, challenge_id)` authenticate and authorize the approver. Callback exceptions and non-exact-True authorization results deny.
+- Self-approval is denied by default. A host may deliberately opt in with `allow_self_approval=True`; consequential tools should retain the default.
+- Grant creation occurs inside the same SQLite `BEGIN IMMEDIATE` transaction as the state transition. The signed grant is persisted before it is returned. Authorized repeated approval returns the same persisted grant rather than minting another.
+- Challenge creation, approval, rejection, and expiry emit redacted audit events. The challenge row stores approver identity and signed grant material; it never stores raw tool arguments, credentials, prompts, or results.
+
+The service is a trusted host API, not a model-facing endpoint. The application must keep it and the signer private, authenticate users with a real identity provider, implement its own approval UI and policy, and pass the resulting grant only through the host's normal authority-resolution path. The existing executor still performs signature verification and durable one-use consumption before a handler runs.
+
+The store currently uses the existing SQLiteSecurityStore's internal connection and lock hooks so it shares its filesystem protections and transaction database. Keep these classes in the same trusted package boundary; do not hand the store, signer, or service object to model-generated code or untrusted clients. SQLite database contents are not encrypted at rest.
