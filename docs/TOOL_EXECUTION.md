@@ -40,9 +40,9 @@ The supplied `InMemoryAuditSink` and default `InMemoryApprovalStore` are process
 
 ## Explicit non-goals and next hardening
 
-Not implemented: cryptographically authenticated approvals, durable cross-process replay prevention, handler sandboxing, cancellation/timeouts, per-tool rate limits, per-principal quotas, tenant identity, durable audit storage, tool discovery, model-provider integration, or automatic retries.
+Not implemented: cryptographically authenticated approvals, handler sandboxing, cancellation/timeouts, per-tool rate limits, per-principal quotas, tenant identity, tool discovery, model-provider integration, or automatic retries. Durable local audit and cross-executor/process approval replay metadata are implemented by `SQLiteSecurityStore`; encryption, backup/restore automation, retention/compaction, and monitoring are not.
 
-Before exposing consequential handlers to an actual model, add host authentication and authorization, durable grant replay protection, durable audit storage, idempotency keys for side effects, rate/resource budgets, handler timeouts/cancellation, and adversarial integration tests. Keep dangerous capabilities absent by default.
+Before exposing consequential handlers to an actual model, add host authentication and authorization, cryptographically authenticated approval issuance, idempotency keys for side effects, rate/resource budgets, handler timeouts/cancellation, audit-store backup/restore and retention controls, and adversarial integration tests. Keep dangerous capabilities absent by default.
 
 ## Durable store verification
 
