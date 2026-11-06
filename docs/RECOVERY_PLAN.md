@@ -10,14 +10,22 @@ The live Notion enabled-skills registry returned **five enabled Capri skills** o
 
 ### Evaluation evidence
 
-A fresh metadata-only query of the Capri Evaluation Runs data source returned 39 records across 22 distinct Scenario IDs: 37 Pass, 2 Not Run, 0 Fail, 0 Retest Needed; 37 Self / Self-Scored; 0 Independent and 0 Independently Reviewed; 2 evaluator types untyped. Five-field evidence completeness is 26/39. M4 and X5 remain Not Run. The protected X5 page and criteria were not opened. Self-scored Pass labels are provisional and do not satisfy independent evaluation.
+The latest metadata-only query of the Capri Evaluation Runs data source returned 39 records across 22 distinct Scenario IDs: 37 Pass, 2 Not Run, 0 Fail, 0 Retest Needed; 37 Self / Self-Scored; 0 Independent and 0 Independently Reviewed; 2 evaluator types untyped. Five-field evidence completeness is 26/39. M4 and X5 remain Not Run. The protected X5 page and criteria were not opened. Self-scored Pass labels are provisional and do not satisfy independent evaluation.
 
 ### Repository and release state
 
-- Seven open Draft/unmerged PRs: #1, #4, #5, #6, #10, #12, #14.
+- **Eight open Draft/unmerged PRs:** #1, #4, #5, #6, #10, #12, #14, #15.
 - PR #11 is closed as superseded by #12; PR #13 is closed as superseded by #14.
-- PR #6's current head is `ca245a18533f7e9084a5bbbf81df595fb73fae28`; exact-head Actions run [42241949677](https://github.com/Hamudifr/Capri/actions/runs/42241949677) passed compileall, Capri Doctor, and 92 tests on each of Python 3.11, 3.12, and 3.13. All three logs were inspected; Doctor 6/6 and operational health 7/7. The health-model contract now rejects blank IDs and unsupported status values; regression tests cover malformed values and unknown-state propagation.
-- CI trigger duplication was reduced on PR #1, #6, and #10 heads: commits `fed330e03a3e55ecc1f5307e684fbc842eddea29`, `75ebc6fb44c628620d036f3fdb111ab0a2ea422c`, and `27cc8ab7e25c84381db572285ba1bdd6d6d3a3a5` each now use one `pull_request` matrix for PR-head updates; exact runs `42241438580`, `42241341292`, and `42241452411` passed.
+- PR #6 current head: `803be03306ad44de7d24cbd59de8a89ca8e0f15a`; exact-head run [42242311834](https://github.com/Hamudifr/Capri/actions/runs/42242311834) passed compileall, Capri Doctor 6/6, operational health 7/7, and 92 tests on each actual Python 3.11/3.12/3.13 job (276 executions). All three logs inspected.
+- Ledger stack #4 → #10 → #14 → #15 is now ancestry-reconciled:
+  - PR #10 head `b97aff61c79dbbf53ab2f65ba499290281c30919`; run [42270848931](https://github.com/Hamudifr/Capri/actions/runs/42270848931) passed 75 tests per actual Python version.
+  - PR #14 head `35fcc988d9a5babeae2636d1b198c280200194be`; 10 commits ahead / 0 behind its PR #10 base; run [42271093562](https://github.com/Hamudifr/Capri/actions/runs/42271093562) passed 77 tests per actual Python version.
+  - PR #15 head `5265ce5be3c0ca2d6ff8c5ee78441b58aaa5fb0a`; 4 commits ahead / 0 behind its PR #14 base; only `tests/test_runtime_core.py` changes in its PR diff; run [42271543329](https://github.com/Hamudifr/Capri/actions/runs/42271543329) passed 80 tests per actual Python version.
+  - All three ledger runs passed compileall; all nine logs were inspected and confirmed the actual interpreter versions. The workflow explicitly sets `python-version: ${{ matrix.python-version }}`.
+- The earlier PR #10 run [42241452411](https://github.com/Hamudifr/Capri/actions/runs/42241452411) is superseded for multi-interpreter claims because its setup-python step omitted the matrix input. The omission has been corrected and the current heads revalidated.
+- PR #15 covers hard-link aliases after partial-write, flush, file-fsync, and first-create directory-fsync failures; blocked alias operations preserve bytes and leave an unrelated ledger usable.
+- The independent ledger security-review packet is prepared in Notion: [review handoff](https://app.notion.com/p/410ac6905d2681ef8551f668cd52e252?pvs=204). It is not an independent review. PR #14 and #15 have zero submitted reviews.
+- `main` remains unchanged at `228669ed8b0c02db669cc082ac256e7491a26201`. All PRs remain Draft/unmerged.
 - Release gate remains **NOT MET** pending independent security review, authorized non-X5 specification approval, assembled-stack integration/acceptance, independent non-X5 acceptance, and governance evidence. Do not merge or deploy from CI alone.
 
 ## Phase 0 — Preserve boundaries
