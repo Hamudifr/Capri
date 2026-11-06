@@ -4,7 +4,7 @@
 
 `NotionMemoryAdapter` implements the durable `MemoryProvider` contract using an injected `NotionMemoryTransport`. It deliberately contains no Notion SDK, credentials, HTTP client, or network access. The host supplies a transport backed by its approved Notion connector.
 
-The existing `Capri Durable Memory` data source is the canonical project-memory source. Its schema includes Name, Content, Type, Scope, Sensitive, Source, Confidence, Retention, Tags, Status, Expires, and Supersedes.
+The existing `Capri Durable Memory` data source is the canonical project-memory source. Its schema includes Name, Content, Type, Scope, Sensitive, Source, Confidence, Retention, Tags, Status, Expires, and Supersedes. The `Supersedes` rich-text property was added to preserve correction lineage.
 
 ## Transport contract
 
