@@ -48,6 +48,35 @@ class SQLiteSessionStoreTests(unittest.TestCase):
             ),
         )
 
+    def test_complete_tool_transcript_turn_persists_and_reopens(self):
+        session = self.store.create()
+        turn = (
+            Message(role="user", content="search for something"),
+            Message(role="assistant", content='{"tool_calls":[{"id":"c1"}]}'),
+            Message(role="tool", content='{"call_id":"c1","status":"succeeded"}'),
+            Message(role="assistant", content="Here is the result."),
+        )
+        updated = self.store.commit_turn_messages(session.session_id, 0, turn)
+        reopened = SQLiteSessionStore(self.path)
+        self.assertEqual(reopened.get(session.session_id), updated)
+        self.assertEqual(updated.version, 1)
+        self.assertEqual(updated.messages, turn)
+
+    def test_invalid_tool_transcript_rejected_before_commit(self):
+        session = self.store.create()
+        invalid_turns = (
+            (Message(role="user", content="ask"), Message(role="tool", content="bad"), Message(role="assistant", content="done")),
+            (Message(role="user", content="ask"), Message(role="assistant", content="call"), Message(role="tool", content="result")),
+            (Message(role="assistant", content="missing user"),),
+            (Message(role="user", content="one"), Message(role="user", content="two"), Message(role="assistant", content="done")),
+        )
+        for turn in invalid_turns:
+            with self.subTest(turn=turn):
+                with self.assertRaises(ValidationError):
+                    self.store.commit_turn_messages(session.session_id, 0, turn)
+        self.assertEqual(self.store.get(session.session_id).version, 0)
+        self.assertEqual(self.store.get(session.session_id).messages, ())
+
     def test_runtime_accepts_durable_store_and_recovers_history(self):
         runtime = Runtime(EchoAdapter(), self.store)
         session = runtime.create_session()
