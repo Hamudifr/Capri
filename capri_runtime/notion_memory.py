@@ -152,27 +152,39 @@ class NotionMemoryAdapter:
             raise MemoryValidationError("Notion page properties are missing")
         title = _validate_text(props.get("Name"), "title", 200)
         content = _validate_text(props.get("Content"), "content", 20_000, empty=True)
-        record_type = _LABEL_TO_TYPE.get(props.get("Type"))
+        type_label = props.get("Type")
+        if not isinstance(type_label, str):
+            raise MemoryValidationError("Notion Type property is unsupported")
+        record_type = _LABEL_TO_TYPE.get(type_label)
         if record_type not in _ALLOWED_TYPES:
             raise MemoryValidationError("Notion Type property is unsupported")
         scope = _validate_text(props.get("Scope"), "scope", 100)
         if scope not in _ALLOWED_SCOPES:
             raise MemoryValidationError("Notion Scope property is unsupported")
         sensitive = props.get("Sensitive", False)
-        if sensitive is True or sensitive == "__YES__":
+        if sensitive not in (False, None, "__NO__"):
             raise MemoryValidationError("sensitive Notion memory is not permitted")
         source = cls._source(props.get("Source"))
-        confidence = _LABEL_TO_CONFIDENCE.get(props.get("Confidence"))
+        confidence_label = props.get("Confidence")
+        if not isinstance(confidence_label, str):
+            raise MemoryValidationError("Notion Confidence property is unsupported")
+        confidence = _LABEL_TO_CONFIDENCE.get(confidence_label)
         if confidence not in _ALLOWED_CONFIDENCE:
             raise MemoryValidationError("Notion Confidence property is unsupported")
-        retention = _LABEL_TO_RETENTION.get(props.get("Retention"))
+        retention_label = props.get("Retention")
+        if not isinstance(retention_label, str):
+            raise MemoryValidationError("Notion Retention property is unsupported")
+        retention = _LABEL_TO_RETENTION.get(retention_label)
         if retention not in _ALLOWED_RETENTION:
             raise MemoryValidationError("Notion Retention property is unsupported")
         tags_value = props.get("Tags", [])
         if not isinstance(tags_value, (list, tuple)):
             raise MemoryValidationError("Notion Tags property must be a list")
         tags = _validate_tags(tags_value)
-        status = _LABEL_TO_STATUS.get(props.get("Status", "Active"))
+        status_label = props.get("Status", "Active")
+        if not isinstance(status_label, str):
+            raise MemoryValidationError("Notion Status property is unsupported")
+        status = _LABEL_TO_STATUS.get(status_label)
         if status not in _STATUS_TO_LABEL:
             raise MemoryValidationError("Notion Status property is unsupported")
         expires_at = cls._expiry(props.get("Expires"))
@@ -218,17 +230,17 @@ class NotionMemoryAdapter:
     ) -> MemoryRecord:
         _validate_text(title, "title", 200)
         _validate_text(content, "content", 20_000, empty=True)
-        if record_type not in _ALLOWED_TYPES:
+        if not isinstance(record_type, str) or record_type not in _ALLOWED_TYPES:
             raise MemoryValidationError("unsupported record_type")
         _validate_text(scope, "scope", 100)
         if scope not in _ALLOWED_SCOPES:
             raise MemoryValidationError("unsupported scope")
         source = self._source(source)
-        if confidence not in _ALLOWED_CONFIDENCE:
+        if not isinstance(confidence, str) or confidence not in _ALLOWED_CONFIDENCE:
             raise MemoryValidationError("unsupported confidence")
-        if retention not in _ALLOWED_RETENTION:
+        if not isinstance(retention, str) or retention not in _ALLOWED_RETENTION:
             raise MemoryValidationError("unsupported retention")
-        if status not in _STATUS_TO_LABEL:
+        if not isinstance(status, str) or status not in _STATUS_TO_LABEL:
             raise MemoryValidationError("unsupported status")
         tags = _validate_tags(tags)
         expires_at = self._expiry(expires_at)
