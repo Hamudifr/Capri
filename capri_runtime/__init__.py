@@ -34,6 +34,7 @@ from .tools import (
     ToolValidationError,
 )
 from .security_store import SQLiteSecurityStore
+from .memory import MemoryErrorBase, MemoryNotFoundError, MemoryProvider, MemoryRecord, MemoryValidationError, SQLiteMemoryStore
 from .tasks import (
     SQLiteTaskStore,
     TaskClaim,
@@ -56,6 +57,12 @@ __all__ = [
     "ExecutionContext",
     "InMemoryAuditSink",
     "InMemoryApprovalStore",
+    "MemoryErrorBase",
+    "MemoryNotFoundError",
+    "MemoryProvider",
+    "MemoryRecord",
+    "MemoryValidationError",
+    "SQLiteMemoryStore",
     "Message",
     "ModelAdapter",
     "PermissionDeniedError",
