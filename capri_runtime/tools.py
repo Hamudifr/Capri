@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from itertools import islice
 from typing import Any, Callable, Mapping
+from types import MappingProxyType
 from uuid import uuid4
 
 
@@ -267,7 +268,7 @@ class HmacApprovalKeyRing:
             if not isinstance(key, bytes) or len(key) < 32:
                 raise ToolValidationError("each approval key must contain at least 32 bytes")
             copied[key_id] = bytes(key)
-        self._keys = copied
+        self._keys = MappingProxyType(copied)
         self.active_key_id = active_key_id
 
     def key_for(self, key_id: str) -> bytes | None:
