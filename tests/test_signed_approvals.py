@@ -86,7 +86,7 @@ class SignedApprovalTests(unittest.TestCase):
         with self.assertRaises(ToolValidationError):
             HmacApprovalAuthority(b"short")
         with self.assertRaises(ToolValidationError):
-            self.authority.issue("alice", "delete_record", argument_digest(self.arguments), ttl_seconds=1200)
+            self.authority.issue("alice", "delete_record", argument_digest(self.arguments), ttl_seconds=3601)
         with self.assertRaises(ToolValidationError):
             ToolExecutor(
                 ToolRegistry(), InMemoryAuditSink(), require_signed_approvals=True
