@@ -332,7 +332,7 @@ class ToolRegistry:
                 raise ToolValidationError("duplicate tool registration")
             self._entries[spec.name] = (spec, handler)
 
-    def resolve(self, name: str) -> tuple[ToolSpec, Callable[[dict[str, Any]], Any]]:
+    def resolve(self, name: str) -> tuple[ToolSpec, Callable[..., Any]]:
         with self._lock:
             try:
                 return self._entries[name]
