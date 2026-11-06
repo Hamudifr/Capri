@@ -2,6 +2,7 @@ import hashlib
 import json
 import threading
 import time
+import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 
@@ -285,7 +286,7 @@ class ToolOrchestrationTests(unittest.TestCase):
         self.assertEqual([tool.name for tool in adapter.tool_definitions[0]], ["echo"])
 
     def test_memory_is_passed_separately_and_cannot_grant_tool_authority(self):
-        temp = __import__("tempfile").TemporaryDirectory()
+        temp = tempfile.TemporaryDirectory()
         try:
             store = SQLiteMemoryStore(temp.name + "/memory.sqlite3")
             record = store.create(
