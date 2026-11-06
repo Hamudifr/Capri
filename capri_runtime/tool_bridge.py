@@ -146,13 +146,18 @@ class ToolExecutionBridge:
                 raise ToolBridgeValidationError("tool names must be lowercase identifiers")
             if not isinstance(arguments, Mapping) or not isinstance(arguments, dict):
                 raise ToolBridgeValidationError("tool arguments must be JSON objects")
-            encoded, raw = _canonical_json(
-                arguments,
-                max_bytes=self.executor.max_argument_bytes,
-                label="arguments",
-            )
-            _assert_json_object_keys(arguments)
-            normalized = json.loads(encoded)
+            try:
+                encoded, raw = _canonical_json(
+                    arguments,
+                    max_bytes=self.executor.max_argument_bytes,
+                    label="arguments",
+                )
+                _assert_json_object_keys(arguments)
+                normalized = json.loads(encoded)
+            except ToolValidationError:
+                raise ToolBridgeValidationError(
+                    "tool arguments must be bounded valid JSON objects"
+                ) from None
             digest = hashlib.sha256(raw).hexdigest()
             request_bytes = len(call_id.encode("utf-8")) + len(name.encode("utf-8")) + len(raw) + 16
             total_bytes += request_bytes
