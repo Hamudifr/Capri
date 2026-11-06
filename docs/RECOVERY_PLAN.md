@@ -101,3 +101,16 @@ This section supersedes the PR #6 head and workflow evidence stated in the earli
 - Current open Draft PR inventory remains #1, #4, #5, #6, #10, #12, #14, and #15. PR #11 and #13 are superseded/closed. Ledger heads and CI evidence are listed in the current reconciliation block above and remain separately verified.
 
 This refresh is documentation and evidence reconciliation only. It does not convert internal checks into independent review, approve the non-X5 product specification, satisfy independent evaluation, or authorize a merge/release. All PRs remain Draft/unmerged and the release gate remains NOT MET.
+
+
+## PR #6 base-stack reconciliation — 2026-11-06 20:05 UTC
+
+The current PR #6 branch has been reconciled with the latest PR #5 / recovery base. This section supersedes the earlier PR #6 head reference `7db0e784a78191fc502f443ad5d38460e99d25e0` above.
+
+- Current PR #6 head before this documentation refresh: `f2676812d8530391069b9061c3748c92aca579e2`.
+- Current base PR #5 head: `1b7ac13c9fe2de10d24703008084144726886ac7`.
+- The PR #6 tree now includes the reconciled PR #5 head as an ancestor (compare: 46 ahead / 0 behind). The current non-X5 design document was synchronized into the PR #6 tree; its recovery plan, operating model, health implementation, and tests are preserved.
+- Exact-head run [42274055988](https://github.com/Hamudifr/Capri/actions/runs/42274055988) passed compileall, Capri Doctor 6/6, operational health 7/7, and 92 tests on actual Python 3.11, 3.12, and 3.13 (276 executions). All three job logs inspected.
+- The current PR #6 head remains Draft/open/unmerged. No merge, deployment, or release is authorized by this reconciliation.
+
+The release gate remains NOT MET pending independent review, explicit non-X5 specification approval, assembled-stack acceptance, independent non-X5 evaluation, and governance evidence.
