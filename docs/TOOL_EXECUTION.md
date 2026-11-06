@@ -4,11 +4,11 @@
 
 `capri_runtime.tools` provides a provider-neutral execution gate between model-proposed tool calls and host-implemented handlers. A model-generated name and argument object are only a request. They are never authority.
 
-This is an internal capability foundation. It does not connect a model provider, discover plugins, execute shell commands, perform network requests, read/write files, or authenticate a person. The host application remains responsible for trusted identity, permission issuance, user approval UX, and durable audit storage.
+This is an internal capability foundation. It does not connect a model provider, discover plugins, execute shell commands, perform network requests, or read/write files. `HostAuthorityResolver` supplies a narrow callback contract for trusted host authentication and policy lookup; it is not an identity provider, credential validator, session manager, or cryptographic trust boundary. The host application remains responsible for those systems, approval UX, and durable audit storage.
 
 ## Execution sequence
 
-1. The host resolves the authenticated principal and constructs an immutable `ExecutionContext`.
+1. The host authenticates the opaque request credential with its own identity system. It may use `HostAuthorityResolver` to call trusted authentication, permission-policy, and optional approval-resolution callbacks, producing an immutable `ExecutionContext`. Never accept a caller- or model-constructed context as proof of identity.
 2. The host registers explicit `ToolSpec` objects with injected Python handlers in a `ToolRegistry`.
 3. The executor resolves the exact tool name. Unknown tools fail closed.
 4. The executor checks the exact permission string in the trusted host context. If the `ToolSpec` defines a trusted `resource_authorizer`, it receives a fresh validated argument object and the trusted `ExecutionContext`; only an exact boolean `True` authorizes the resource. Exceptions and non-boolean results fail closed and are recorded as redacted permission-denied audit events. Resource authorization runs before approval consumption.
@@ -25,7 +25,7 @@ Supported schema keywords are `type`, `properties`, `required`, `additionalPrope
 
 ## Approval and authority model
 
-- Permission strings and the principal identity come from the host, never from model output.
+- Permission strings and the principal identity come from trusted host callbacks, never from model output or request-supplied permission fields. `HostAuthorityResolver` fails closed on authentication/policy exceptions, invalid principal IDs, malformed permission collections, and approval grants belonging to another principal. The resolver is only as trustworthy as the callbacks installed by the host; callbacks must be fixed during application startup and must not be user-configurable.
 - An approval grant is scoped to one principal, one tool, one exact argument digest, and an expiry.
 - With the default in-memory store, grants are one-use within one executor instance unless the same store is shared. Inject `SQLiteSecurityStore` as both `audit_sink` and `approval_store` to persist consumed grant IDs across executor instances and processes.
 - The grant dataclass is not a cryptographic signature. Only trusted host code may construct grants after authenticating the user's approval. Do not deserialize arbitrary model/user JSON directly into an `ExecutionContext` or `ApprovalGrant`.
@@ -40,9 +40,9 @@ The supplied `InMemoryAuditSink` and default `InMemoryApprovalStore` are process
 
 ## Explicit non-goals and next hardening
 
-Not implemented: cryptographically authenticated approvals, handler sandboxing, cancellation/timeouts, per-tool rate limits, per-principal quotas, tenant identity, tool discovery, model-provider integration, or automatic retries. Durable local audit and cross-executor/process approval replay metadata are implemented by `SQLiteSecurityStore`; encryption, backup/restore automation, retention/compaction, and monitoring are not.
+Not implemented: a concrete identity provider/session validator, cryptographically authenticated approvals, handler sandboxing, handler timeouts, per-tool rate limits, per-principal quotas, tenant identity provider, tool discovery, model-provider integration, or automatic retries. Cooperative cancellation plumbing exists for opted-in handlers, but handlers must implement and poll it. Durable local audit and cross-executor/process approval replay metadata are implemented by `SQLiteSecurityStore`; encryption, backup/restore automation, retention/compaction, and monitoring are not.
 
-Before exposing consequential handlers to an actual model, add host authentication and authorization, cryptographically authenticated approval issuance, idempotency keys for side effects, rate/resource budgets, handler timeouts/cancellation, audit-store backup/restore and retention controls, and adversarial integration tests. Keep dangerous capabilities absent by default.
+Before exposing consequential handlers to an actual model, connect a real host identity provider to the resolver, add cryptographically authenticated approval issuance, idempotency keys for side effects, rate/resource budgets, enforce handler timeout/process isolation where needed, audit-store backup/restore and retention controls, and adversarial integration tests. Keep dangerous capabilities absent by default.
 
 ## Durable store verification
 
