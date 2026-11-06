@@ -82,6 +82,13 @@ class SQLiteMemoryStoreTests(unittest.TestCase):
         self.assertEqual(self.store.events(record.memory_id)[-1][0], "deleted")
         self.assertNotIn(record.content, self.store.export_json())
 
+    def test_deleting_superseded_record_preserves_corrected_record(self):
+        original = self.create()
+        corrected = self.store.correct(original.memory_id, content="Updated safe policy.")
+        self.store.delete(original.memory_id)
+        self.assertIsNone(self.store.get(corrected.memory_id).supersedes_id)
+        self.assertEqual(self.store.get(corrected.memory_id).content, "Updated safe policy.")
+
     def test_expiry_sweep_archives_due_records(self):
         past = datetime.now(timezone.utc) - timedelta(seconds=1)
         record = self.create(expires_at=past.isoformat(), retention="expire_30d")
