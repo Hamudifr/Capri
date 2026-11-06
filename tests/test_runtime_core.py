@@ -509,5 +509,49 @@ class LedgerPathSafetyTests(unittest.TestCase):
             self.assertEqual(HashChainLedger(path).verify()["records"], 1)
 
 
+    @unittest.skipUnless(os.name == "posix", "POSIX hard links are required")
+    def test_z_hard_link_alias_is_latched_after_uncertain_append(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original_path = root / "runs.jsonl"
+            alias_path = root / "alias.jsonl"
+            original = HashChainLedger(original_path)
+
+            with mock.patch.object(
+                ledger_module, "_fsync_file", side_effect=OSError("injected file fsync failure")
+            ):
+                with self.assertRaises(LedgerIntegrityError):
+                    original.append(passing("uncertain"))
+
+            alias_path.hardlink_to(original_path)
+            before = original_path.read_bytes()
+            self.assertEqual(alias_path.read_bytes(), before)
+            alias = HashChainLedger(alias_path)
+
+            with self.assertRaisesRegex(LedgerIntegrityError, "previous append failed"):
+                alias.verify()
+            with self.assertRaisesRegex(LedgerIntegrityError, "previous append failed"):
+                alias.records()
+            with self.assertRaisesRegex(LedgerIntegrityError, "previous append failed"):
+                alias.append(passing("blocked"))
+            with self.assertRaisesRegex(LedgerIntegrityError, "previous append failed"):
+                original.verify()
+
+            descriptor = os.open(alias_path, os.O_RDONLY)
+            try:
+                with self.assertRaisesRegex(LedgerIntegrityError, "previous append failed"):
+                    alias._scan(descriptor=descriptor)
+            finally:
+                os.close(descriptor)
+
+            self.assertEqual(original_path.read_bytes(), before)
+            self.assertEqual(alias_path.read_bytes(), before)
+
+            independent_path = root / "independent.jsonl"
+            independent = HashChainLedger(independent_path)
+            independent.append(passing("independent"))
+            self.assertTrue(independent.verify()["valid"])
+
+
 if __name__ == "__main__":
     unittest.main()
