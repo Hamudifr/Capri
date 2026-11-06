@@ -163,11 +163,22 @@ class SQLiteSessionStore(SessionStore):
                 raise ValueError("invalid message text")
             if (
                 not isinstance(session_id, str)
+                or not session_id.strip()
+                or len(session_id) > 256
+                or _contains_surrogate(session_id)
                 or not isinstance(created_at, str)
+                or not created_at
+                or len(created_at) > 64
+                or _contains_surrogate(created_at)
                 or not isinstance(updated_at, str)
+                or not updated_at
+                or len(updated_at) > 64
+                or _contains_surrogate(updated_at)
                 or isinstance(version, bool)
                 or not isinstance(version, int)
                 or version < 0
+                or isinstance(closed, bool)
+                or not isinstance(closed, int)
                 or closed not in (0, 1)
                 or len(messages) != version * 2
                 or len(messages) > self.max_session_messages
