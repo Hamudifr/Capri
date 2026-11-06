@@ -49,6 +49,7 @@ _SCHEMA_KEYS = {
 }
 _TYPES = {"object", "array", "string", "integer", "number", "boolean", "null"}
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
+_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _canonical_json(value: Any, *, max_bytes: int, label: str) -> tuple[str, bytes]:
@@ -381,6 +382,11 @@ class ToolExecutor:
         matching = [
             grant for grant in context.approvals
             if isinstance(grant, ApprovalGrant)
+            and isinstance(grant.grant_id, str) and 0 < len(grant.grant_id) <= 128
+            and isinstance(grant.principal_id, str) and len(grant.principal_id) <= 256
+            and isinstance(grant.tool_name, str) and _NAME_RE.fullmatch(grant.tool_name)
+            and isinstance(grant.argument_digest, str) and _DIGEST_RE.fullmatch(grant.argument_digest)
+            and isinstance(grant.expires_at, str) and len(grant.expires_at) <= 64
             and grant.principal_id == context.principal_id
             and grant.tool_name == spec.name
             and grant.argument_digest == digest
@@ -398,12 +404,15 @@ class ToolExecutor:
             raise ToolValidationError("tool name must be a lowercase identifier")
         if not isinstance(context, ExecutionContext):
             raise ToolValidationError("a trusted ExecutionContext is required")
-        if not isinstance(context.principal_id, str) or not context.principal_id.strip():
-            raise ToolValidationError("host principal_id must be non-empty")
-        if not isinstance(context.permissions, frozenset) or any(not isinstance(x, str) for x in context.permissions):
-            raise ToolValidationError("host permissions must be a frozenset of strings")
-        if not isinstance(context.approvals, tuple):
-            raise ToolValidationError("host approvals must be a tuple")
+        if (not isinstance(context.principal_id, str) or not context.principal_id.strip()
+                or len(context.principal_id) > 256 or _contains_surrogate(context.principal_id)):
+            raise ToolValidationError("host principal_id must be valid non-empty text of at most 256 characters")
+        if (not isinstance(context.permissions, frozenset)
+                or any(not isinstance(x, str) or not x or len(x) > 128 or _contains_surrogate(x)
+                       for x in context.permissions)):
+            raise ToolValidationError("host permissions must be a frozenset of bounded valid strings")
+        if not isinstance(context.approvals, tuple) or len(context.approvals) > 32:
+            raise ToolValidationError("host approvals must be a tuple of at most 32 grants")
         spec, handler = self.registry.resolve(name)
         if spec.permission not in context.permissions:
             raise PermissionDeniedError("host context lacks the required tool permission")
