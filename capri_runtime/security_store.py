@@ -11,6 +11,7 @@ import re
 import sqlite3
 import stat
 import threading
+import tempfile
 from datetime import datetime
 
 from .tools import ApprovalGrant, ApprovalStore, AuditEvent, AuditSink, ToolValidationError
@@ -226,6 +227,108 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
                 return tuple(AuditEvent(*row) for row in rows)
             finally:
                 connection.close()
+
+    def backup_to(self, destination_path: str) -> str:
+        """Create a consistent, private, standalone SQLite backup atomically.
+
+        The destination directory must already exist and be private. Existing
+        destinations are never overwritten. SQLite's online backup API captures
+        a consistent snapshot, including committed WAL content, without copying
+        live database sidecar files.
+        """
+        if not isinstance(destination_path, str) or not destination_path.strip():
+            raise ToolValidationError("backup destination must be a non-empty path")
+        absolute = os.path.abspath(destination_path)
+        if absolute == self.path:
+            raise ToolValidationError("backup destination must differ from the live database")
+        parent = os.path.dirname(absolute)
+        if not os.path.isdir(parent) or os.path.realpath(parent) != parent:
+            raise ToolValidationError("backup parent must be an existing non-symlink directory")
+        parent_stat = os.stat(parent, follow_symlinks=False)
+        if not stat.S_ISDIR(parent_stat.st_mode):
+            raise ToolValidationError("backup parent must be a directory")
+        if os.name == "posix" and (
+            parent_stat.st_uid != os.geteuid()
+            or stat.S_IMODE(parent_stat.st_mode) & 0o077
+        ):
+            raise ToolValidationError("backup parent must be owned by the current user and private")
+        if os.path.lexists(absolute):
+            raise ToolValidationError("backup destination already exists")
+
+        descriptor, temporary_path = tempfile.mkstemp(
+            prefix=".capri-security-backup-", suffix=".sqlite3", dir=parent
+        )
+        os.close(descriptor)
+        source = None
+        destination = None
+        published = False
+        try:
+            with self._lock:
+                source = self._connect()
+                destination = sqlite3.connect(
+                    temporary_path, timeout=5.0, isolation_level=None
+                )
+                destination.execute("PRAGMA foreign_keys=ON")
+                destination.execute("PRAGMA trusted_schema=OFF")
+                destination.execute("PRAGMA synchronous=FULL")
+                source.backup(destination)
+                check = destination.execute("PRAGMA integrity_check").fetchone()
+                if not check or check[0] != "ok":
+                    raise ToolValidationError("SQLite backup integrity check failed")
+                destination.close()
+                destination = None
+                source.close()
+                source = None
+
+            flags = os.O_RDONLY
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+            backup_fd = os.open(temporary_path, flags)
+            try:
+                info = os.fstat(backup_fd)
+                if not stat.S_ISREG(info.st_mode):
+                    raise ToolValidationError("temporary backup is not a regular file")
+                if os.name == "posix":
+                    if info.st_uid != os.geteuid() or info.st_nlink != 1:
+                        raise ToolValidationError("temporary backup ownership or link count is invalid")
+                    os.fchmod(backup_fd, 0o600)
+                os.fsync(backup_fd)
+            finally:
+                os.close(backup_fd)
+
+            # link() publishes without replacing a destination created in a race.
+            os.link(temporary_path, absolute, follow_symlinks=False)
+            published = True
+            os.unlink(temporary_path)
+            if os.name == "posix":
+                directory_fd = os.open(parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+            return absolute
+        except Exception:
+            if destination is not None:
+                destination.close()
+            if source is not None:
+                source.close()
+            for candidate in (
+                temporary_path, temporary_path + "-journal",
+                temporary_path + "-wal", temporary_path + "-shm",
+            ):
+                try:
+                    os.unlink(candidate)
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    pass
+            if published:
+                # Publication succeeded but a later durability step failed. Keep
+                # the complete backup: deleting it could destroy the only copy.
+                raise ToolValidationError(
+                    "backup was published but directory durability could not be confirmed"
+                ) from None
+            raise
 
     def integrity_check(self) -> str:
         with self._lock:
