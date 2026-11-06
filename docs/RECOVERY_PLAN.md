@@ -1,10 +1,28 @@
 # Capri recovery plan
 
-This plan is ordered by dependency. Statuses describe verified deliverables, not a claim that the whole Capri system is complete.
+## Current reconciliation — 2026-11-06
+
+This dated section supersedes older status snapshots below where they conflict. Historical records remain intact for audit purposes.
+
+### Skill registry
+
+The live Notion enabled-skills registry returned **five enabled Capri skills** on 2026-11-06: Identity and Session Continuity; Agency and Self-Direction; Adversarial Research and Verification; Execution Memory and Process Ledger; and Engineering and Security Release Operations. This is a Notion registry observation. It must not be conflated with any separate agent-role architecture or treated as authorization to add more skills. Keep the existing set stable while independent evaluation remains incomplete.
+
+### Evaluation evidence
+
+A fresh metadata-only query of the Capri Evaluation Runs data source returned 39 records across 22 distinct Scenario IDs: 37 Pass, 2 Not Run, 0 Fail, 0 Retest Needed; 37 Self / Self-Scored; 0 Independent and 0 Independently Reviewed; 2 evaluator types untyped. Five-field evidence completeness is 26/39. M4 and X5 remain Not Run. The protected X5 page and criteria were not opened. Self-scored Pass labels are provisional and do not satisfy independent evaluation.
+
+### Repository and release state
+
+- Seven open Draft/unmerged PRs: #1, #4, #5, #6, #10, #12, #14.
+- PR #11 is closed as superseded by #12; PR #13 is closed as superseded by #14.
+- PR #6's current head is `595d9cb4cac9bc8e13f72aa727b5f29693414b84`; exact-head Actions run [42240709305](https://github.com/Hamudifr/Capri/actions/runs/42240709305) passed compileall, Capri Doctor, and 89 tests on each of Python 3.11, 3.12, and 3.13. All three logs were inspected; Doctor 6/6 and operational health 7/7.
+- `main` remains unchanged at `228669ed8b0c02db669cc082ac256e7491a26201`.
+- Release gate remains **NOT MET** pending independent security review, authorized non-X5 specification approval, assembled-stack integration/acceptance, independent non-X5 acceptance, and governance evidence. Do not merge or deploy from CI alone.
 
 ## Phase 0 — Preserve boundaries
 
-- [x] Confirm four canonical Capri skills are enabled; do not modify them.
+- [x] Confirm the current five-skill Notion registry; do not add or modify skills without a separate governance decision.
 - [x] Establish protected blind-evaluation restrictions.
 - [x] Create an isolated recovery branch.
 - [ ] Maintain a minimal contamination log without protected content.
@@ -24,7 +42,7 @@ This plan is ordered by dependency. Statuses describe verified deliverables, not
 - [ ] Identify eligible records for a genuinely independent reviewer.
 - [ ] Record reviewer role and review artifacts; never self-label as independent.
 
-Known historical snapshot (2026-11-05, metadata-only, protected scenario excluded): 36 database records, all marked Pass, Self evaluator, Self-Scored stage; 16 records were marked as retests. This is 36 records, not 36 proven unique scenarios. No independent reviews were recorded. Evidence content could not be safely audited because protected-evaluation indicators appeared in retrieved material; inspection was stopped. Re-query and re-verify before relying on this snapshot.
+Known historical snapshot (2026-11-05, metadata-only, protected scenario excluded): 36 database records, all marked Pass, Self evaluator, Self-Scored stage; 16 records were marked as retests. This is 36 records, not 36 proven unique scenarios. No independent reviews were recorded. Evidence content could not be safely audited because protected-evaluation indicators appeared in retrieved material; inspection was stopped. The 2026-11-06 snapshot above supersedes these historical counts. Re-query and re-verify before relying on either snapshot.
 
 ## Phase 3 — Runtime foundation
 
