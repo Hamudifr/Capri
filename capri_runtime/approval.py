@@ -271,6 +271,7 @@ class SQLiteApprovalChallengeStore:
                     "grant_id": grant.grant_id, "principal_id": grant.principal_id,
                     "tool_name": grant.tool_name, "argument_digest": grant.argument_digest,
                     "expires_at": grant.expires_at, "signature": grant.signature,
+                    "key_id": grant.key_id,
                 }, sort_keys=True, separators=(",", ":")) if grant else None
                 connection.execute(
                     """UPDATE approval_challenges SET status=?,approver_id=?,grant_json=?
