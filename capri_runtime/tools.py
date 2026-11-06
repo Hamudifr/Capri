@@ -13,7 +13,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from itertools import islice
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Protocol
 from types import MappingProxyType
 from uuid import uuid4
 
@@ -245,6 +245,24 @@ class ApprovalGrant:
     key_id: str | None = None
 
 
+class ApprovalMacProvider(Protocol):
+    """Trusted host adapter for non-exportable HMAC keys.
+
+    Implementations may call a KMS/HSM/secret service. They must operate on the
+    exact key ID supplied and must never silently fall back to another key.
+    """
+
+    @property
+    def active_key_id(self) -> str:
+        """Return the immutable version identifier used for new grants."""
+
+    def sign(self, key_id: str, payload: bytes) -> bytes:
+        """Return the raw HMAC-SHA256 tag for exactly this key ID."""
+
+    def verify(self, key_id: str, payload: bytes, signature: bytes) -> bool:
+        """Verify with exactly this key ID; return an actual bool."""
+
+
 class HmacApprovalKeyRing:
     """Immutable host-configured HMAC key set with one active signing key.
 
@@ -275,6 +293,19 @@ class HmacApprovalKeyRing:
         """Return only the specifically requested key; never try other keys."""
         return self._keys.get(key_id)
 
+    def sign(self, key_id: str, payload: bytes) -> bytes:
+        key = self.key_for(key_id)
+        if key is None or not isinstance(payload, bytes):
+            raise ToolValidationError("approval signing key or payload is invalid")
+        return hmac.new(key, payload, hashlib.sha256).digest()
+
+    def verify(self, key_id: str, payload: bytes, signature: bytes) -> bool:
+        key = self.key_for(key_id)
+        if key is None or not isinstance(payload, bytes) or not isinstance(signature, bytes):
+            return False
+        expected = hmac.new(key, payload, hashlib.sha256).digest()
+        return hmac.compare_digest(expected, signature)
+
 
 class HmacApprovalAuthority:
     """Issue and verify HMAC-authenticated approval grants using a host-held key.
@@ -285,7 +316,7 @@ class HmacApprovalAuthority:
 
     def __init__(
         self,
-        key: bytes | HmacApprovalKeyRing,
+        key: bytes | HmacApprovalKeyRing | ApprovalMacProvider,
         *,
         clock: Callable[[], datetime] | None = None,
         max_ttl_seconds: int = 3600,
@@ -293,28 +324,26 @@ class HmacApprovalAuthority:
         if isinstance(key, bytes):
             if len(key) < 32:
                 raise ToolValidationError("approval signing key must contain at least 32 bytes")
-            self._key_ring = None
+            self._mac_provider = None
             self._legacy_key = bytes(key)
             self._active_key_id = "default"
         elif isinstance(key, HmacApprovalKeyRing):
-            self._key_ring = key
+            self._mac_provider = key
+            self._legacy_key = None
+            self._active_key_id = key.active_key_id
+        elif (callable(getattr(key, "sign", None))
+              and callable(getattr(key, "verify", None))
+              and isinstance(getattr(key, "active_key_id", None), str)
+              and HmacApprovalKeyRing._KEY_ID_RE.fullmatch(key.active_key_id)):
+            self._mac_provider = key
             self._legacy_key = None
             self._active_key_id = key.active_key_id
         else:
-            raise ToolValidationError("approval key must be bytes or a trusted HmacApprovalKeyRing")
+            raise ToolValidationError("approval key must be bytes or a trusted MAC provider")
         if isinstance(max_ttl_seconds, bool) or not isinstance(max_ttl_seconds, int) or not 1 <= max_ttl_seconds <= 86_400:
             raise ToolValidationError("max_ttl_seconds must be between 1 and 86400")
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self.max_ttl_seconds = max_ttl_seconds
-
-    def _key_for(self, key_id: str | None) -> bytes | None:
-        if key_id is None:
-            # Compatibility for grants issued before key IDs existed. Key rings
-            # deliberately reject these rather than guessing which key to try.
-            return self._legacy_key
-        if self._key_ring is None:
-            return self._legacy_key if key_id == self._active_key_id else None
-        return self._key_ring.key_for(key_id)
 
     @staticmethod
     def _payload(grant: ApprovalGrant) -> bytes:
@@ -357,10 +386,17 @@ class HmacApprovalAuthority:
             str(uuid4()), principal_id, tool_name, argument_digest, expiry,
             key_id=self._active_key_id,
         )
-        signing_key = self._key_for(self._active_key_id)
-        if signing_key is None:
-            raise ToolValidationError("active approval signing key is unavailable")
-        signature = hmac.new(signing_key, self._payload(unsigned), hashlib.sha256).hexdigest()
+        payload = self._payload(unsigned)
+        try:
+            if self._mac_provider is not None:
+                signature_bytes = self._mac_provider.sign(self._active_key_id, payload)
+            else:
+                signature_bytes = hmac.new(self._legacy_key, payload, hashlib.sha256).digest()
+            if not isinstance(signature_bytes, bytes) or len(signature_bytes) != 32:
+                raise ValueError("invalid MAC output")
+        except Exception:
+            raise ToolValidationError("approval signing provider failed") from None
+        signature = signature_bytes.hex()
         return ApprovalGrant(
             unsigned.grant_id, unsigned.principal_id, unsigned.tool_name,
             unsigned.argument_digest, unsigned.expires_at, signature,
@@ -372,14 +408,25 @@ class HmacApprovalAuthority:
                 or not isinstance(grant.signature, str)
                 or not _DIGEST_RE.fullmatch(grant.signature)):
             return False
-        signing_key = self._key_for(grant.key_id)
-        if signing_key is None:
-            return False
         try:
-            expected = hmac.new(signing_key, self._payload(grant), hashlib.sha256).hexdigest()
-        except (TypeError, ValueError, UnicodeEncodeError):
+            payload = self._payload(grant)
+            signature_bytes = bytes.fromhex(grant.signature)
+            if len(signature_bytes) != 32:
+                return False
+            if grant.key_id is None:
+                if self._legacy_key is None:
+                    return False
+                expected = hmac.new(self._legacy_key, payload, hashlib.sha256).digest()
+                return hmac.compare_digest(expected, signature_bytes)
+            if self._mac_provider is not None:
+                result = self._mac_provider.verify(grant.key_id, payload, signature_bytes)
+                return result is True
+            if self._legacy_key is None or grant.key_id != self._active_key_id:
+                return False
+            expected = hmac.new(self._legacy_key, payload, hashlib.sha256).digest()
+            return hmac.compare_digest(expected, signature_bytes)
+        except Exception:
             return False
-        return hmac.compare_digest(expected, grant.signature)
 
 
 @dataclass(frozen=True, slots=True)
