@@ -6,10 +6,10 @@ Capri is a research and execution-assistance project. This repository contains a
 
 - Evidence before claims: distinguish observed facts, hypotheses, plans, and verified outcomes.
 - Preserve history: append run records; do not rewrite past results to make a dashboard look healthier.
-- Separate evaluation from implementation: a self-assessment is not an independent review.
+- Capri performs and documents its own engineering/security reviews; external independent review is not a prerequisite for ordinary internal implementation or merging. Never mislabel self-review as independent assurance.
 - Fail closed: unknown, missing, ambiguous, or contaminated inputs do not become passes.
 - Protect blind evaluations: protected instructions, rubrics, expected answers, scoring keys, and evidence are out of scope for ordinary repository work and CI.
-- Keep canonical Capri skills unchanged unless explicitly authorized.
+- Add or improve Capri skills when a concrete capability gap justifies them; the owner has explicitly authorized this, and each skill must have a clear purpose and validation path.
 
 ## Repository map
 
@@ -30,7 +30,7 @@ Capri is a research and execution-assistance project. This repository contains a
 
 ## Current status
 
-The repository has a reviewable foundation, a tested execution-ledger prototype, and a minimal provider-neutral runtime slice. Ledger entries are limited to 1 MiB by default (configurable per `HashChainLedger` instance); each JSONL record must end with a newline, and incomplete tails fail closed. Verification and append remain linear scans with an in-memory run-ID set, and the ledger supports only one writer process. The runtime currently supports in-memory sessions and an injected text adapter only. It does not include a concrete model provider, tool execution, durable memory, authentication, cross-process storage, or deployment packaging. These are explicit gaps, not implied capabilities. No X5 work is included.
+The integrated recovery branch now includes a hardened append-only ledger (bounded JSONL parsing, private file permissions, symlink/path checks, crash-durability handling, hard-link/inode uncertainty latching), read-only Capri Doctor diagnostics, dependency-aware operational health, and a provider-neutral in-memory session runtime. The runtime enforces input/output/history limits both at the Runtime boundary and at direct SessionStore commits. The assembled branch passed 114 tests on each actual Python 3.11, 3.12, and 3.13 interpreter; Doctor 6/6 and operational health 7/7. The ledger remains plaintext and single-writer; the runtime still has no concrete provider, permissioned tool execution, durable memory, host authentication/tenant isolation, or deployment packaging. These are explicit next capabilities, not implied features. No X5 work is included.
 
 ## Run checks locally
 
@@ -53,4 +53,4 @@ Python 3.11+ is supported; CI compiles and tests on Python 3.11, 3.12, and 3.13.
 
 ## Change policy
 
-Work on feature branches and review changes before merging to `main`. Never place protected evaluation material, credentials, personal secrets, or private user data in this repository, test fixtures, logs, or CI artifacts.
+Use feature branches for isolation, perform Capri's own design/security/code review, run and inspect CI, then merge completed compatible work into `main`. Do not leave validated work stranded in Draft PRs indefinitely. Never place protected evaluation material, credentials, personal secrets, or private user data in this repository, test fixtures, logs, or CI artifacts.
