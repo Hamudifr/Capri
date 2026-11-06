@@ -557,6 +557,68 @@ class LedgerPathSafetyTests(unittest.TestCase):
             self.assertTrue(independent.verify()["valid"])
 
 
+    @unittest.skipUnless(os.name == "posix", "POSIX hard links and directory fsync are required")
+    def test_z_hard_link_alias_is_latched_after_first_create_directory_fsync_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original_path = root / "runs.jsonl"
+            alias_path = root / "alias.jsonl"
+            original = HashChainLedger(original_path)
+
+            with (
+                mock.patch.object(ledger_module, "_UNCERTAIN_ALL", False),
+                mock.patch.object(ledger_module, "_UNCERTAIN_PATHS", set()),
+                mock.patch.object(ledger_module, "_UNCERTAIN_INODES", set()),
+                mock.patch.object(ledger_module, "_UNCERTAIN_INODE_FDS", {}),
+            ):
+                try:
+                    # The file write and file fsync succeed; failure occurs only
+                    # after the stream has closed, while syncing the new directory entry.
+                    with mock.patch.object(
+                        ledger_module,
+                        "_fsync_directory",
+                        side_effect=OSError("injected first-create directory fsync failure"),
+                    ):
+                        with self.assertRaises(LedgerIntegrityError):
+                            original.append(passing("uncertain-directory-fsync"))
+
+                    alias_path.hardlink_to(original_path)
+                    before = original_path.read_bytes()
+                    self.assertEqual(alias_path.read_bytes(), before)
+                    alias = HashChainLedger(alias_path)
+
+                    with self.assertRaisesRegex(LedgerIntegrityError, "previous append failed"):
+                        alias.verify()
+                    with self.assertRaisesRegex(LedgerIntegrityError, "previous append failed"):
+                        alias.records()
+                    with self.assertRaisesRegex(LedgerIntegrityError, "previous append failed"):
+                        alias.append(passing("blocked-alias"))
+                    with self.assertRaisesRegex(LedgerIntegrityError, "previous append failed"):
+                        original.verify()
+                    with self.assertRaisesRegex(LedgerIntegrityError, "previous append failed"):
+                        original.records()
+                    with self.assertRaisesRegex(LedgerIntegrityError, "previous append failed"):
+                        original.append(passing("blocked-original"))
+
+                    descriptor = os.open(alias_path, os.O_RDONLY)
+                    try:
+                        with self.assertRaisesRegex(LedgerIntegrityError, "previous append failed"):
+                            alias._scan(descriptor=descriptor)
+                    finally:
+                        os.close(descriptor)
+
+                    self.assertEqual(original_path.read_bytes(), before)
+                    self.assertEqual(alias_path.read_bytes(), before)
+
+                    independent = HashChainLedger(root / "independent.jsonl")
+                    independent.append(passing("independent"))
+                    self.assertTrue(independent.verify()["valid"])
+                finally:
+                    # The uncertain-inode guard intentionally pins one descriptor
+                    # for process lifetime; close this test's isolated guard at teardown.
+                    for guard_fd in ledger_module._UNCERTAIN_INODE_FDS.values():
+                        os.close(guard_fd)
+
     @unittest.skipUnless(os.name == "posix", "POSIX descriptor semantics are required")
     def test_uncertain_inode_guard_cap_fails_closed_globally(self):
         with tempfile.TemporaryDirectory() as directory:
