@@ -16,6 +16,7 @@ from .runtime import (
 )
 from .tools import (
     ApprovalGrant,
+    ApprovalMacProvider,
     ApprovalRequiredError,
     ApprovalStore,
     HmacApprovalAuthority,
@@ -84,6 +85,7 @@ __all__ = [
     "ToolOrchestrator",
     "ApprovalChallenge",
     "ApprovalGrant",
+    "ApprovalMacProvider",
     "ApprovalRequiredError",
     "ApprovalStore",
     "HmacApprovalAuthority",
