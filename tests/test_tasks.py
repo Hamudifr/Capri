@@ -217,5 +217,40 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                     self.store.create(plan, now=NOW)
 
 
+    def test_live_lease_can_be_renewed_for_long_handler(self):
+        self.store.create([{"tool": "prepare", "input": {}, "max_attempts": 2}], now=NOW)
+        claim = self.store.claim_next("worker", lease_seconds=5, now=NOW)
+        renewed = self.store.renew_lease(
+            claim, lease_seconds=60, now=NOW + timedelta(seconds=4)
+        )
+        self.assertGreater(
+            datetime.fromisoformat(renewed.lease_until),
+            datetime.fromisoformat(claim.lease_until),
+        )
+        result = self.store.finish_step(
+            claim, {"completed": True}, now=NOW + timedelta(seconds=20)
+        )
+        self.assertEqual(result.state, "succeeded")
+
+    def test_expired_lease_cannot_be_renewed(self):
+        self.store.create(PLAN, now=NOW)
+        claim = self.store.claim_next("worker-a", lease_seconds=5, now=NOW)
+        with self.assertRaises(TaskConflictError):
+            self.store.renew_lease(
+                claim, lease_seconds=60, now=NOW + timedelta(seconds=6)
+            )
+
+    def test_stolen_lease_cannot_be_renewed_by_old_worker(self):
+        self.store.create(PLAN, now=NOW)
+        old = self.store.claim_next("worker-a", lease_seconds=5, now=NOW)
+        self.store.claim_next(
+            "worker-b", lease_seconds=30, now=NOW + timedelta(seconds=6)
+        )
+        with self.assertRaises(TaskConflictError):
+            self.store.renew_lease(
+                old, lease_seconds=60, now=NOW + timedelta(seconds=7)
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
