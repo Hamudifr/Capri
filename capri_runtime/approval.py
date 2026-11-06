@@ -362,7 +362,10 @@ class HostApprovalService:
                 item.principal_id, item.tool_name, item.argument_digest,
                 ttl_seconds=self._grant_ttl,
             )
-        return self._store.decide(challenge_id, approver_id, decision, now, factory)
+        # Re-read time after authentication/policy callbacks; the store checks it
+        # inside its serialized decision transaction, not at challenge display time.
+        decision_time = _utc(self._clock(), "host clock")
+        return self._store.decide(challenge_id, approver_id, decision, decision_time, factory)
 
     def approve(self, credential: Any, challenge_id: str) -> ApprovalChallenge:
         return self._decide(credential, challenge_id, "approve")
