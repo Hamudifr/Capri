@@ -43,6 +43,14 @@ class ToolExecutionError(ToolBoundaryError):
     """An injected handler failed; handler details are intentionally suppressed."""
 
 
+class ToolCancelledError(ToolExecutionError):
+    """A cooperative handler stopped after cancellation was signaled."""
+
+    def __init__(self, message: str = "tool handler cancelled", *, outcome_uncertain: bool = False):
+        super().__init__(message)
+        self.outcome_uncertain = outcome_uncertain
+
+
 _SCHEMA_KEYS = {
     "type", "properties", "required", "additionalProperties", "items", "enum",
     "minLength", "maxLength", "minimum", "maximum", "minItems", "maxItems",
@@ -196,6 +204,7 @@ class ToolSpec:
     permission: str
     argument_schema: Mapping[str, Any]
     requires_approval: bool = False
+    cooperative_cancellation: bool = False
     _schema_json: str = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -205,6 +214,8 @@ class ToolSpec:
             raise ToolValidationError("tool permission must be a non-empty string of at most 128 characters")
         if not isinstance(self.requires_approval, bool):
             raise ToolValidationError("requires_approval must be boolean")
+        if not isinstance(self.cooperative_cancellation, bool):
+            raise ToolValidationError("cooperative_cancellation must be boolean")
         schema = dict(self.argument_schema) if isinstance(self.argument_schema, Mapping) else None
         _validate_schema_definition(schema, root=True)
         encoded, _ = _canonical_json(schema, max_bytes=32_768, label="tool schema")
@@ -403,7 +414,18 @@ class ToolExecutor:
                 raise AuditError("approval state persistence failed; execution was blocked") from None
         raise ApprovalRequiredError("a matching, unexpired, unused host approval is required")
 
-    def execute(self, name: str, arguments: Any, context: ExecutionContext) -> Any:
+    def execute(
+        self,
+        name: str,
+        arguments: Any,
+        context: ExecutionContext,
+        *,
+        cancellation_event: threading.Event | None = None,
+    ) -> Any:
+        if cancellation_event is not None and not callable(getattr(cancellation_event, "is_set", None)):
+            raise ToolValidationError("cancellation_event must expose is_set()")
+        if cancellation_event is not None and cancellation_event.is_set():
+            raise ToolCancelledError(outcome_uncertain=False)
         if not isinstance(name, str) or not _NAME_RE.fullmatch(name):
             raise ToolValidationError("tool name must be a lowercase identifier")
         if not isinstance(context, ExecutionContext):
@@ -429,13 +451,25 @@ class ToolExecutor:
         if spec.requires_approval:
             self._consume_approval(context, spec, digest)
         self._audit(context.principal_id, spec.name, digest, "started")
+        if cancellation_event is not None and cancellation_event.is_set():
+            self._audit(context.principal_id, spec.name, digest, "cancelled", "cancelled_before_handler")
+            raise ToolCancelledError(outcome_uncertain=False) from None
         handler_failed = False
+        handler_cancelled = False
         try:
-            result = handler(json.loads(encoded))
+            if spec.cooperative_cancellation:
+                result = handler(json.loads(encoded), cancellation_event)
+            else:
+                result = handler(json.loads(encoded))
+        except ToolCancelledError:
+            handler_cancelled = True
         except Exception:
             # Leave the except block before raising so exception details are not
             # retained as an inspectable __context__ on the public error.
             handler_failed = True
+        if handler_cancelled:
+            self._audit(context.principal_id, spec.name, digest, "outcome_uncertain", "handler_cancelled_after_start")
+            raise ToolCancelledError(outcome_uncertain=True) from None
         if handler_failed:
             self._audit(context.principal_id, spec.name, digest, "handler_failed", "handler_error")
             raise ToolExecutionError("tool handler failed; details suppressed")
