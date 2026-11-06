@@ -249,6 +249,84 @@ class ExecutionContext:
     approvals: tuple[ApprovalGrant, ...] = ()
 
 
+class HostAuthorityError(ToolBoundaryError):
+    """The host could not establish a valid authenticated execution context."""
+
+
+class HostAuthorityResolver:
+    """Build execution authority from trusted authentication and policy callbacks.
+
+    The callbacks are installed by the host application, never supplied by a model
+    or request payload. Authentication returns a principal ID or None. Permission
+    and approval callbacks resolve current grants from authoritative host state.
+    """
+
+    def __init__(
+        self,
+        authenticate: Callable[[Any], str | None],
+        permissions_for: Callable[[str], Any],
+        approvals_for: Callable[[str], Any] | None = None,
+    ) -> None:
+        if not callable(authenticate) or not callable(permissions_for):
+            raise HostAuthorityError("trusted authentication and permission callbacks are required")
+        if approvals_for is not None and not callable(approvals_for):
+            raise HostAuthorityError("approval resolver must be callable")
+        self._authenticate = authenticate
+        self._permissions_for = permissions_for
+        self._approvals_for = approvals_for
+
+    def resolve(self, credential: Any) -> ExecutionContext:
+        """Authenticate opaque host input and resolve least-privilege grants.
+
+        Credentials and callback exception details are deliberately not retained
+        in errors or audit metadata.
+        """
+        try:
+            principal_id = self._authenticate(credential)
+        except Exception:
+            raise HostAuthorityError("host authentication failed") from None
+        if (not isinstance(principal_id, str) or not principal_id.strip()
+                or len(principal_id) > 256 or _contains_surrogate(principal_id)):
+            raise HostAuthorityError("host authentication failed")
+
+        try:
+            raw_permissions = self._permissions_for(principal_id)
+        except Exception:
+            raise HostAuthorityError("host permission resolution failed") from None
+        if isinstance(raw_permissions, (str, bytes, bytearray)):
+            raise HostAuthorityError("host permission resolution returned an invalid grant set")
+        try:
+            permissions = tuple(raw_permissions)
+        except Exception:
+            raise HostAuthorityError("host permission resolution returned an invalid grant set") from None
+        if (len(permissions) > 128
+                or any(not isinstance(item, str) or not item or len(item) > 128
+                       or _contains_surrogate(item) for item in permissions)
+                or len(set(permissions)) != len(permissions)):
+            raise HostAuthorityError("host permission resolution returned an invalid grant set")
+
+        approvals: tuple[ApprovalGrant, ...] = ()
+        if self._approvals_for is not None:
+            try:
+                raw_approvals = self._approvals_for(principal_id)
+                if isinstance(raw_approvals, (str, bytes, bytearray)):
+                    raise ValueError("invalid approval collection")
+                approvals = tuple(raw_approvals)
+            except Exception:
+                raise HostAuthorityError("host approval resolution failed") from None
+            if len(approvals) > 32 or any(
+                not isinstance(grant, ApprovalGrant)
+                or grant.principal_id != principal_id
+                or not isinstance(grant.grant_id, str) or not 0 < len(grant.grant_id) <= 128
+                or not isinstance(grant.tool_name, str) or not _NAME_RE.fullmatch(grant.tool_name)
+                or not isinstance(grant.argument_digest, str) or not _DIGEST_RE.fullmatch(grant.argument_digest)
+                or not isinstance(grant.expires_at, str) or not 0 < len(grant.expires_at) <= 64
+                for grant in approvals
+            ):
+                raise HostAuthorityError("host approval resolution returned invalid grants")
+        return ExecutionContext(principal_id, frozenset(permissions), approvals)
+
+
 @dataclass(frozen=True, slots=True)
 class AuditEvent:
     event_id: str
