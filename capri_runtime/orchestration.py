@@ -111,8 +111,13 @@ class ToolOrchestrator:
         max_tool_message_bytes: int = 131_072,
         max_history_bytes: int = 2_097_152,
     ) -> None:
-        if not callable(getattr(adapter, "complete_with_tools", None)):
-            raise ToolOrchestrationError("adapter must implement complete_with_tools()")
+        if not (
+            callable(getattr(adapter, "complete_with_tools", None))
+            or callable(getattr(adapter, "complete_with_tools_and_memory", None))
+        ):
+            raise ToolOrchestrationError(
+                "adapter must implement complete_with_tools() or complete_with_tools_and_memory()"
+            )
         if not isinstance(bridge, ToolExecutionBridge):
             raise ToolOrchestrationError("bridge must be a ToolExecutionBridge")
         for name, value in (
@@ -176,6 +181,10 @@ class ToolOrchestrator:
                 raise ToolOrchestrationError(
                     "adapter must implement complete_with_tools_and_memory when memory is supplied"
                 )
+        elif not callable(getattr(self.adapter, "complete_with_tools", None)):
+            raise ToolOrchestrationError(
+                "adapter must implement complete_with_tools when memory is not supplied"
+            )
         if max_total_messages is not None and (
             isinstance(max_total_messages, bool)
             or not isinstance(max_total_messages, int)
