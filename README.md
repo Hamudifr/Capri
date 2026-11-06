@@ -31,17 +31,18 @@ Capri is a research and execution-assistance project. This repository contains a
 
 ## Current status
 
-Current `main` is `35ddc8408a2389dff8594283d40d37b66905c0dc`. It contains the integrated recovery foundation and the first permissioned tool-execution boundary.
+Current `main` is `ed530c8f3fbcea993a2577b87b2b9ab98bb16921`. It contains the integrated recovery foundation, permissioned tool-execution boundary, and durable local audit/approval replay store.
 
 - Recovery foundation merged in PR #1: `d42bfbb2f59a31c713b03f09d074da77b8fb6250`.
 - Permissioned tool boundary merged in PR #17: `35ddc8408a2389dff8594283d40d37b66905c0dc`.
-- Post-merge CI [42284195885](https://github.com/Hamudifr/Capri/actions/runs/42284195885) passed compileall, Capri Doctor 6/6, operational health 7/7, and 129 tests on each actual Python 3.11, 3.12, and 3.13 interpreter; all three job logs inspected.
+- Durable SQLite audit/approval store merged in PR #18: `ed530c8f3fbcea993a2577b87b2b9ab98bb16921`.
+- Post-merge CI [42286526969](https://github.com/Hamudifr/Capri/actions/runs/42286526969) passed compileall, Capri Doctor 6/6, operational health 7/7, and 141 tests on each actual Python 3.11, 3.12, and 3.13 interpreter; all three job logs inspected.
 
 Implemented: hardened append-only hash-chain ledger; read-only Doctor diagnostics; dependency-aware operational health; provider-neutral in-memory sessions with optimistic concurrency and direct-store resource limits; explicit tool registry; bounded strict schemas; host permission checks; one-use action-bound approvals; bounded JSON/Unicode; redacted audit events; and a private SQLite store for durable audit metadata and cross-executor/process approval replay prevention.
 
 The tool boundary is not a sandbox or provider integration. The host must authenticate principals and construct trusted execution contexts. The in-memory audit/approval stores are development-only; `SQLiteSecurityStore` provides durable local metadata and replay prevention but is not encrypted and requires host-managed backup/retention. Handlers run with process privileges. No shell, filesystem, network, dynamic import, automatic plugin discovery, or X5 access is exposed.
 
-Next capabilities: durable user-controlled memory, task planning/recovery, durable audit and cross-process approval replay protection, host identity/tenant isolation, model-to-tool orchestration, budgets, observability, and deployment packaging. Capri performs its own internal engineering/security reviews; external independent review is not a prerequisite for ordinary internal implementation. Never mislabel self-review as independent assurance.
+Next capabilities: durable user-controlled memory, task planning/recovery, cryptographically authenticated approvals, host identity/tenant isolation, model-to-tool orchestration, budgets, observability, and deployment packaging. Audit/approval replay metadata now has a durable SQLite implementation; backup, retention, and restore operations remain to be built. Capri performs its own internal engineering/security reviews; external independent review is not a prerequisite for ordinary internal implementation. Never mislabel self-review as independent assurance.
 
 This is a growing internal prototype, not a claim of AGI or public/multi-tenant production readiness. No X5 work is included.
 
