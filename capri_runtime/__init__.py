@@ -40,6 +40,13 @@ from .tool_bridge import (
     ToolDefinition,
     ToolExecutionBridge,
 )
+from .orchestration import (
+    AssistantTurn,
+    OrchestrationResult,
+    ToolModelAdapter,
+    ToolOrchestrationError,
+    ToolOrchestrator,
+)
 from .security_store import SQLiteSecurityStore
 from .memory import MemoryErrorBase, MemoryNotFoundError, MemoryProvider, MemoryRecord, MemoryValidationError, SQLiteMemoryStore
 from .notion_memory import MemorySyncError, NotionMemoryAdapter, NotionMemoryTransport
@@ -57,6 +64,11 @@ from .tasks import (
 )
 
 __all__ = [
+    "AssistantTurn",
+    "OrchestrationResult",
+    "ToolModelAdapter",
+    "ToolOrchestrationError",
+    "ToolOrchestrator",
     "ApprovalGrant",
     "ApprovalRequiredError",
     "ApprovalStore",
