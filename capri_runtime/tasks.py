@@ -453,7 +453,7 @@ class SQLiteTaskStore:
                     next_state = "queued"
                 connection.execute(
                     """UPDATE tasks SET state=?,current_step=?,attempts=0,results_json=?,updated_at=?,
-                    available_at=?,lease_owner=NULL,lease_until=NULL WHERE task_id=?""",
+                    available_at=?,lease_owner=NULL,lease_until=NULL,error_code=NULL WHERE task_id=?""",
                     (next_state, next_index, json.dumps(results, ensure_ascii=False, allow_nan=False,
                      sort_keys=True, separators=(",", ":")), stamp, stamp, claim.task_id),
                 )
@@ -487,19 +487,19 @@ class SQLiteTaskStore:
             try:
                 connection.execute("BEGIN IMMEDIATE")
                 row = connection.execute(
-                    "SELECT state,lease_owner,lease_until,current_step,plan_json FROM tasks WHERE task_id=?",
+                    "SELECT state,lease_owner,lease_until,current_step,plan_json,cancel_requested FROM tasks WHERE task_id=?",
                     (claim.task_id,),
                 ).fetchone()
                 if not row:
                     raise TaskNotFoundError("task does not exist")
-                state, owner, until, index, plan_json = row
+                state, owner, until, index, plan_json, cancel = row
                 if state != "running" or owner != claim.executor_id or index != claim.step_index:
                     raise TaskConflictError("task lease is no longer owned by this executor")
                 if _parse_time(until) <= _parse_time(stamp):
                     raise TaskConflictError("task lease expired before failure was recorded")
                 plan = json.loads(plan_json)
-                retry = retryable and claim.attempt < plan[index]["max_attempts"]
-                next_state = "retry_wait" if retry else "failed"
+                retry = retryable and not cancel and claim.attempt < plan[index]["max_attempts"]
+                next_state = "cancelled" if cancel else ("retry_wait" if retry else "failed")
                 delay = min(retry_delay_seconds * (2 ** max(0, claim.attempt - 1)), 3600)
                 available = _iso(current + timedelta(seconds=delay)) if retry else stamp
                 connection.execute(
