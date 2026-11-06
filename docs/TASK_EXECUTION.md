@@ -46,7 +46,7 @@ Claims and state transitions use `BEGIN IMMEDIATE`, so concurrent workers cannot
 
 ## Delivery and idempotency semantics
 
-Execution is **at least once**, not exactly once. A process can perform a side effect and crash before persisting the step result. After the lease expires, another worker may execute that step again. Each step therefore receives the stable idempotency key `<task_id>:<step_index>`; handlers that perform side effects must enforce that key at the side-effect boundary. Do not blindly retry a non-idempotent handler.
+Execution is **bounded and may be repeated; it is not exactly once**. A process can crash after claiming a step but before invoking its handler, or after a side effect but before persisting the result. Depending on the crash point and remaining attempt budget, a handler may run zero, one, or multiple times. After lease expiry, another worker may retry the same step. Each step therefore receives the stable idempotency key `<task_id>:<step_index>`; handlers that perform side effects must enforce that key at the side-effect boundary. Do not blindly retry a non-idempotent handler.
 
 Leases are bounded to 5–3600 seconds. The current worker API does not provide automatic lease heartbeats or forcibly interrupt a running handler. Set lease duration above expected handler time, or add host-managed renewal before running long work. If a handler outlives its lease, a second worker may reclaim it; stable idempotency is mandatory.
 
