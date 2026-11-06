@@ -27,7 +27,7 @@ Capri is a research and execution-assistance project. This repository contains a
 - `capri_runtime/` — provider-neutral sessions, permissioned tool execution and model-call bridge, durable task execution, and bounded SQLite memory.
 - `docs/TOOL_EXECUTION.md` — trust model, schema subset, approvals, audit behavior, and limitations for tool execution.
 - `docs/MEMORY_STORE.md` — durable memory contract, trust rules, privacy constraints, and limitations.
-- `docs/NOTION_MEMORY_ADAPTER.md` — injected Notion transport contract, mapping, correction recovery, and host responsibilities.
+- `docs/NOTION_MEMORY_ADAPTER.md` — Notion REST transport setup, injected host contract, mapping, correction recovery, and limitations.
 - `tests/` — deterministic structural, ledger, and runtime tests.
 - `.github/workflows/quality.yml` — non-X5 documentation and test checks.
 
@@ -47,7 +47,7 @@ Implemented: hardened append-only hash-chain ledger; read-only Doctor diagnostic
 
 The tool boundary is not a sandbox or provider integration. The host must authenticate principals and construct trusted execution contexts. The in-memory audit/approval stores are development-only; `SQLiteSecurityStore` provides durable local metadata and replay prevention but is not encrypted and requires host-managed backup/retention. Handlers run with process privileges. No shell, filesystem, network, dynamic import, automatic plugin discovery, or X5 access is exposed.
 
-Next capabilities: concrete Notion connector transport wiring, cryptographically authenticated approvals, host identity/tenant isolation, model-provider adapter and conversation loop, budgets, observability, and deployment packaging. Audit/approval replay metadata now has a durable SQLite implementation; backup, retention, and restore operations remain to be built. Capri performs its own internal engineering/security reviews; external independent review is not a prerequisite for ordinary internal implementation. Never mislabel self-review as independent assurance.
+Next capabilities: live Notion token provisioning and workspace verification, cryptographically authenticated approvals, host identity/tenant isolation, model-provider adapter and conversation loop, budgets, observability, and deployment packaging. Audit/approval replay metadata now has a durable SQLite implementation; backup, retention, and restore operations remain to be built. Capri performs its own internal engineering/security reviews; external independent review is not a prerequisite for ordinary internal implementation. Never mislabel self-review as independent assurance.
 
 This is a growing internal prototype, not a claim of AGI or public/multi-tenant production readiness. No X5 work is included.
 

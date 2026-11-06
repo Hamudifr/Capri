@@ -274,11 +274,12 @@ class NotionMemoryAdapter:
     def _list_all(self) -> tuple[MemoryRecord, ...]:
         records: list[MemoryRecord] = []
         cursor: str | None = None
-        seen_cursors: set[str] = set()
+        page_requests = 0
         while True:
             page_size = min(100, self._max_records - len(records))
-            if page_size <= 0:
-                raise MemoryValidationError("Notion memory record capacity reached")
+            if page_size <= 0 or page_requests >= self._max_records:
+                raise MemoryValidationError("Notion memory pagination capacity reached")
+            page_requests += 1
             response = self._transport.list_pages(cursor=cursor, page_size=page_size)
             if not isinstance(response, Mapping) or not isinstance(response.get("results"), Sequence):
                 raise MemoryValidationError("Notion list response is malformed")
@@ -289,10 +290,9 @@ class NotionMemoryAdapter:
             next_cursor = response.get("next_cursor")
             if next_cursor is None:
                 return tuple(records)
-            _validate_text(next_cursor, "next_cursor", 256)
-            if next_cursor in seen_cursors or next_cursor == cursor:
-                raise MemoryValidationError("Notion pagination cursor repeated")
-            seen_cursors.add(next_cursor)
+            if not isinstance(next_cursor, str):
+                raise MemoryValidationError("Notion pagination cursor is malformed")
+            # Cursors are opaque API tokens: never parse, normalize, or persist them.
             cursor = next_cursor
 
     def search(self, query: str, *, limit: int = 20, offset: int = 0) -> tuple[MemoryRecord, ...]:
@@ -348,6 +348,7 @@ class NotionMemoryAdapter:
         )
 
     def delete(self, memory_id: str) -> None:
+        """Move the Notion page to trash; this is not secure or permanent erasure."""
         _validate_text(memory_id, "memory_id", 64)
         self._transport.delete_page(memory_id)
 

@@ -12,6 +12,7 @@ class FakeNotionTransport:
         self.fail_archive = False
         self.max_page_size = 2
         self.repeat_cursor = False
+        self.empty_repeated_cursor = False
 
     @staticmethod
     def _page(page_id, properties):
@@ -32,10 +33,12 @@ class FakeNotionTransport:
     def list_pages(self, *, cursor, page_size):
         ids = sorted(self.pages)
         offset = int(cursor or 0)
-        selected = ids[offset:offset + min(page_size, self.max_page_size)]
+        selected = [] if self.empty_repeated_cursor else ids[offset:offset + min(page_size, self.max_page_size)]
         next_offset = offset + len(selected)
         next_cursor = str(next_offset) if next_offset < len(ids) else None
-        if self.repeat_cursor and next_cursor is not None:
+        if self.empty_repeated_cursor:
+            next_cursor = cursor or "opaque-cursor"
+        elif self.repeat_cursor and next_cursor is not None:
             next_cursor = cursor or "0"
         return {
             "results": [self.pages[item] for item in selected],
@@ -96,13 +99,11 @@ class NotionMemoryAdapterTests(unittest.TestCase):
         self.create(title="Beta")
         self.assertEqual(self.store.export_json(), self.store.export_json())
 
-    def test_repeated_pagination_cursor_fails_closed(self):
-        self.create()
-        self.create(title="Another record")
-        self.create(title="Third record")
-        self.transport.repeat_cursor = True
+    def test_repeated_empty_cursor_is_bounded_without_parsing_cursor(self):
+        self.transport.empty_repeated_cursor = True
+        bounded = NotionMemoryAdapter(self.transport, max_records=3)
         with self.assertRaises(MemoryValidationError):
-            self.store.search("untrusted")
+            bounded.search("untrusted")
 
     def test_pagination_walks_multiple_pages(self):
         store = NotionMemoryAdapter(self.transport, max_records=3)
