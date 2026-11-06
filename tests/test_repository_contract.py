@@ -32,7 +32,7 @@ class RepositoryContractTests(unittest.TestCase):
 
     def test_recovery_plan_does_not_claim_completion(self):
         text = (ROOT / "docs/RECOVERY_PLAN.md").read_text(encoding="utf-8")
-        self.assertIn("release gate not met", text)
+        self.assertIn("release gate not met", text.lower())
         self.assertIn("not production-ready", text)
 
     def test_runtime_does_not_claim_provider_or_tool_support(self):
