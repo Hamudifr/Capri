@@ -35,7 +35,6 @@ class HostToolGateway:
             raise HostAuthorityError("a trusted HostAuthorityResolver is required")
         if not isinstance(bridge, ToolExecutionBridge):
             raise HostAuthorityError("a trusted ToolExecutionBridge is required")
-        configured = (approval_service, operation_id_resolver, on_approval_challenge)
         if approval_service is None:
             if operation_id_resolver is not None or on_approval_challenge is not None:
                 raise HostAuthorityError("approval callbacks require a trusted approval service")
