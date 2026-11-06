@@ -32,7 +32,7 @@ Capri is a research and execution-assistance project. This repository contains a
 
 ## Current status
 
-Current `main` is `6c01190033c7ade9bb40414a0d86f5444fca0b46`. It contains the integrated recovery foundation, permissioned tool boundary, durable SQLite task execution and lease renewal, durable audit/approval storage, and bounded local project memory.
+Current `main` contains the integrated recovery foundation, permissioned tool boundary, durable SQLite task execution and lease renewal, durable audit/approval storage, and bounded local project memory.
 
 - Recovery foundation merged in PR #1: `d42bfbb2f59a31c713b03f09d074da77b8fb6250`.
 - Permissioned tool boundary merged in PR #17: `35ddc8408a2389dff8594283d40d37b66905c0dc`.
