@@ -34,6 +34,18 @@ from .tools import (
     ToolValidationError,
 )
 from .security_store import SQLiteSecurityStore
+from .memory import MemoryErrorBase, MemoryNotFoundError, MemoryProvider, MemoryRecord, MemoryValidationError, SQLiteMemoryStore
+from .tasks import (
+    SQLiteTaskStore,
+    TaskClaim,
+    TaskConflictError,
+    TaskEngine,
+    TaskError,
+    TaskIdempotencyConflict,
+    TaskNotFoundError,
+    TaskRecord,
+    TaskValidationError,
+)
 
 __all__ = [
     "ApprovalGrant",
@@ -45,6 +57,12 @@ __all__ = [
     "ExecutionContext",
     "InMemoryAuditSink",
     "InMemoryApprovalStore",
+    "MemoryErrorBase",
+    "MemoryNotFoundError",
+    "MemoryProvider",
+    "MemoryRecord",
+    "MemoryValidationError",
+    "SQLiteMemoryStore",
     "Message",
     "ModelAdapter",
     "PermissionDeniedError",
@@ -58,6 +76,15 @@ __all__ = [
     "SessionLimitError",
     "SessionStore",
     "SQLiteSecurityStore",
+    "SQLiteTaskStore",
+    "TaskClaim",
+    "TaskConflictError",
+    "TaskEngine",
+    "TaskError",
+    "TaskIdempotencyConflict",
+    "TaskNotFoundError",
+    "TaskRecord",
+    "TaskValidationError",
     "ToolBoundaryError",
     "ToolExecutionError",
     "ToolExecutor",

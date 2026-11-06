@@ -24,27 +24,32 @@ Capri is a research and execution-assistance project. This repository contains a
 - `docs/LEDGER_OPERATIONS.md` — backup verification, integrity-incident response, and controlled recovery runbook.
 - `docs/LEDGER_SCALING_DECISION.md` — proposed transactional storage migration, explicitly not implemented.
 - `capri_core/` — immutable evaluation records, fail-closed validation, and hash-chained append-only ledger.
-- `capri_runtime/` — in-memory session lifecycle, injected model-adapter boundary, and permissioned host-injected tool execution gate.
+- `capri_runtime/` — provider-neutral sessions, permissioned tool execution, durable task execution, and bounded SQLite memory.
 - `docs/TOOL_EXECUTION.md` — trust model, schema subset, approvals, audit behavior, and limitations for tool execution.
+- `docs/MEMORY_STORE.md` — durable memory contract, trust rules, privacy constraints, and limitations.
 - `tests/` — deterministic structural, ledger, and runtime tests.
 - `.github/workflows/quality.yml` — non-X5 documentation and test checks.
 
 ## Current status
 
-Current `main` is `ed530c8f3fbcea993a2577b87b2b9ab98bb16921`. It contains the integrated recovery foundation, permissioned tool-execution boundary, and durable local audit/approval replay store.
+Current `main` is `9c058608686424b5345fd1a15efa5eee8272e845`. This change adds a bounded SQLite memory core with provenance, confidence, scope, sensitivity classification, tags, retention, expiry, and supersession metadata.
 
 - Recovery foundation merged in PR #1: `d42bfbb2f59a31c713b03f09d074da77b8fb6250`.
 - Permissioned tool boundary merged in PR #17: `35ddc8408a2389dff8594283d40d37b66905c0dc`.
 - Durable SQLite audit/approval store merged in PR #18: `ed530c8f3fbcea993a2577b87b2b9ab98bb16921`.
 - Post-merge CI [42286526969](https://github.com/Hamudifr/Capri/actions/runs/42286526969) passed compileall, Capri Doctor 6/6, operational health 7/7, and 141 tests on each actual Python 3.11, 3.12, and 3.13 interpreter; all three job logs inspected.
 
-Implemented: hardened append-only hash-chain ledger; read-only Doctor diagnostics; dependency-aware operational health; provider-neutral in-memory sessions with optimistic concurrency and direct-store resource limits; explicit tool registry; bounded strict schemas; host permission checks; one-use action-bound approvals; bounded JSON/Unicode; redacted audit events; and a private SQLite store for durable audit metadata and cross-executor/process approval replay prevention.
+Implemented: hardened append-only hash-chain ledger; read-only Doctor diagnostics; dependency-aware operational health; provider-neutral in-memory sessions with optimistic concurrency and direct-store resource limits; persistent SQLite task plans, worker leases, checkpoints, bounded retries, cancellation and lease recovery; explicit tool registry; bounded strict schemas; host permission checks; one-use action-bound approvals; bounded JSON/Unicode; redacted audit events; private SQLite audit/approval replay storage; and bounded local project memory.
 
 The tool boundary is not a sandbox or provider integration. The host must authenticate principals and construct trusted execution contexts. The in-memory audit/approval stores are development-only; `SQLiteSecurityStore` provides durable local metadata and replay prevention but is not encrypted and requires host-managed backup/retention. Handlers run with process privileges. No shell, filesystem, network, dynamic import, automatic plugin discovery, or X5 access is exposed.
 
-Next capabilities: durable user-controlled memory, task planning/recovery, cryptographically authenticated approvals, host identity/tenant isolation, model-to-tool orchestration, budgets, observability, and deployment packaging. Audit/approval replay metadata now has a durable SQLite implementation; backup, retention, and restore operations remain to be built. Capri performs its own internal engineering/security reviews; external independent review is not a prerequisite for ordinary internal implementation. Never mislabel self-review as independent assurance.
+Next capabilities: Notion host-adapter synchronization, cryptographically authenticated approvals, host identity/tenant isolation, model-to-tool orchestration, budgets, observability, and deployment packaging. Audit/approval replay metadata now has a durable SQLite implementation; backup, retention, and restore operations remain to be built. Capri performs its own internal engineering/security reviews; external independent review is not a prerequisite for ordinary internal implementation. Never mislabel self-review as independent assurance.
 
 This is a growing internal prototype, not a claim of AGI or public/multi-tenant production readiness. No X5 work is included.
+
+## Durable task execution and recovery
+
+The provider-neutral task engine in `capri_runtime.tasks` provides persistent ordered plans, atomic SQLite worker leases, per-step checkpoints, bounded retries with exponential backoff, cooperative cancellation, and lease-expiry recovery. It uses stable per-step idempotency keys and uses bounded retry delivery that may invoke a handler zero or multiple times across crash windows—not exactly-once side effects. See [docs/TASK_EXECUTION.md](docs/TASK_EXECUTION.md) for the handler contract, security boundaries, and limitations. The engine is a worker primitive; the host remains responsible for scheduling, authenticated context, and permissioned handler integration.
 
 ## Run checks locally
 
