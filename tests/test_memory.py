@@ -79,6 +79,17 @@ class SQLiteMemoryStoreTests(unittest.TestCase):
         finally:
             legacy_temp.cleanup()
 
+    def test_malformed_persisted_tags_fail_closed(self):
+        record = self.create()
+        db = sqlite3.connect(self.path)
+        try:
+            db.execute("UPDATE memories SET tags='{}' WHERE memory_id=?", (record.memory_id,))
+            db.commit()
+        finally:
+            db.close()
+        with self.assertRaises(MemoryValidationError):
+            self.store.get(record.memory_id)
+
     def test_database_is_private_on_posix(self):
         if os.name == "posix":
             import stat
