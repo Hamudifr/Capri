@@ -99,8 +99,13 @@ class UntrustedMemoryContext:
             if not isinstance(record.tags, tuple):
                 raise MemoryValidationError("memory context tags must be immutable")
             _validate_tags(record.tags)
-            _validate_expiry(record.created_at)
-            _validate_expiry(record.updated_at)
+            for timestamp_field in ("created_at", "updated_at"):
+                timestamp_value = getattr(record, timestamp_field)
+                if not isinstance(timestamp_value, str):
+                    raise MemoryValidationError(f"{timestamp_field} must be a required timezone-aware timestamp")
+                _validate_expiry(timestamp_value)
+            if record.supersedes_id is not None:
+                _validate_text(record.supersedes_id, "supersedes_id", 64)
             expiry = _validate_expiry(record.expires_at)
             if expiry is not None and datetime.fromisoformat(expiry) <= now:
                 raise MemoryValidationError("memory context excludes expired records")

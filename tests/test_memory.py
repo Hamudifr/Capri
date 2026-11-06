@@ -136,6 +136,19 @@ class SQLiteMemoryStoreTests(unittest.TestCase):
         with self.assertRaises(MemoryValidationError):
             UntrustedMemoryContext((archived,))
 
+    def test_untrusted_memory_context_rejects_malformed_timestamps_and_lineage(self):
+        record = self.create()
+        invalid_records = (
+            replace(record, created_at=None),
+            replace(record, updated_at=None),
+            replace(record, supersedes_id=object()),
+            replace(record, supersedes_id="x" * 65),
+        )
+        for invalid in invalid_records:
+            with self.subTest(record=invalid):
+                with self.assertRaises(MemoryValidationError):
+                    UntrustedMemoryContext((invalid,))
+
     def test_untrusted_memory_context_rejects_mutable_nested_metadata(self):
         record = self.create(tags=("security",))
         mutable_record = replace(record, tags=["security"])
