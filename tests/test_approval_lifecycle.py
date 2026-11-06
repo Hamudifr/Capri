@@ -102,6 +102,18 @@ class ApprovalLifecycleTests(unittest.TestCase):
         self.assertEqual(recovered.grant, approved.grant)
         self.assertTrue(self.signer.verify(recovered.grant))
 
+    def test_self_approval_is_denied_by_default(self):
+        challenge = self.create()
+        self_approver = HostApprovalService(
+            self.challenge_store, self.signer,
+            lambda credential: "alice" if credential == "self-token" else None,
+            lambda approver, item: True,
+            clock=lambda: self.now,
+        )
+        with self.assertRaises(HostAuthorityError):
+            self_approver.approve("self-token", challenge.challenge_id)
+        self.assertEqual(self.challenge_store.get(challenge.challenge_id, self.now).status, "pending")
+
     def test_rejection_is_terminal_and_never_mints_a_grant(self):
         challenge = self.create()
         rejected = self.service.reject("approver-token", challenge.challenge_id)
