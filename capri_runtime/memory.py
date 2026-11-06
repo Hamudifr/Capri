@@ -44,9 +44,11 @@ class MemoryRecord:
     content: str
     record_type: str
     scope: str
+    sensitivity: str
     source: str
     confidence: str
     retention: str
+    tags: tuple[str, ...]
     created_at: str
     updated_at: str
     expires_at: str | None = None
@@ -56,6 +58,7 @@ class MemoryRecord:
 _ALLOWED_TYPES = {"operating_directive", "architecture_decision", "project_fact", "security_boundary", "user_preference"}
 _ALLOWED_CONFIDENCE = {"user_directed", "verified", "inferred", "unverified"}
 _ALLOWED_RETENTION = {"keep", "expire_30d", "expire_90d", "archive_when_superseded"}
+_ALLOWED_TAGS = {"autonomy", "delivery", "security", "memory", "architecture", "tooling"}
 _MAX_TITLE = 200
 _MAX_CONTENT = 20_000
 _MAX_SOURCE = 2_048
@@ -76,6 +79,15 @@ def _validate_text(value: str, field: str, maximum: int, *, empty: bool = False)
     if not isinstance(value, str) or (not empty and not value.strip()) or len(value) > maximum or _SURROGATE.search(value):
         raise MemoryValidationError(f"{field} must be valid bounded Unicode text")
     return value
+
+def _validate_tags(value: tuple[str, ...] | list[str]) -> tuple[str, ...]:
+    if not isinstance(value, (tuple, list)) or len(value) > 20:
+        raise MemoryValidationError("tags must be a bounded list of supported tags")
+    if any(not isinstance(tag, str) or tag not in _ALLOWED_TAGS for tag in value):
+        raise MemoryValidationError("tags contain an unsupported value")
+    if len(set(value)) != len(value):
+        raise MemoryValidationError("tags must not contain duplicates")
+    return tuple(sorted(value))
 
 def _validate_expiry(value: str | None) -> str | None:
     if value is None:
@@ -158,11 +170,18 @@ class SQLiteMemoryStore:
                 db.execute("PRAGMA journal_mode=WAL")
                 db.execute("""CREATE TABLE IF NOT EXISTS memories (
                     memory_id TEXT PRIMARY KEY, title TEXT NOT NULL, content TEXT NOT NULL,
-                    record_type TEXT NOT NULL, scope TEXT NOT NULL, source TEXT NOT NULL,
-                    confidence TEXT NOT NULL, retention TEXT NOT NULL, created_at TEXT NOT NULL,
+                    record_type TEXT NOT NULL, scope TEXT NOT NULL,
+                    sensitivity TEXT NOT NULL DEFAULT 'non_sensitive' CHECK(sensitivity='non_sensitive'),
+                    source TEXT NOT NULL, confidence TEXT NOT NULL, retention TEXT NOT NULL,
+                    tags TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL, expires_at TEXT, status TEXT NOT NULL,
                     supersedes_id TEXT REFERENCES memories(memory_id)
                 )""")
+                columns = {row["name"] for row in db.execute("PRAGMA table_info(memories)")}
+                if "sensitivity" not in columns:
+                    db.execute("ALTER TABLE memories ADD COLUMN sensitivity TEXT NOT NULL DEFAULT 'non_sensitive' CHECK(sensitivity='non_sensitive')")
+                if "tags" not in columns:
+                    db.execute("ALTER TABLE memories ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'")
                 db.execute("CREATE INDEX IF NOT EXISTS memories_status_expiry ON memories(status, expires_at)")
                 db.execute("CREATE INDEX IF NOT EXISTS memories_supersedes ON memories(supersedes_id)")
                 db.execute("""CREATE TABLE IF NOT EXISTS memory_events (
@@ -174,11 +193,23 @@ class SQLiteMemoryStore:
 
     @staticmethod
     def _record(row: sqlite3.Row) -> MemoryRecord:
-        return MemoryRecord(**dict(row))
+        values = dict(row)
+        try:
+            values["tags"] = tuple(json.loads(values["tags"]))
+        except (TypeError, ValueError):
+            raise MemoryValidationError("stored memory tags are malformed") from None
+        return MemoryRecord(**values)
+
+    @staticmethod
+    def _db_values(record: MemoryRecord) -> tuple[object, ...]:
+        values = asdict(record)
+        values["tags"] = json.dumps(list(record.tags), ensure_ascii=False, separators=(",", ":"))
+        return tuple(values.values())
 
     def create(
         self, *, title: str, content: str, record_type: str, scope: str,
         source: str, confidence: str, retention: str = "keep",
+        tags: tuple[str, ...] | list[str] = (),
         expires_at: str | None = None,
     ) -> MemoryRecord:
         _validate_text(title, "title", _MAX_TITLE)
@@ -191,12 +222,13 @@ class SQLiteMemoryStore:
             raise MemoryValidationError("unsupported confidence")
         if not isinstance(retention, str) or retention not in _ALLOWED_RETENTION:
             raise MemoryValidationError("unsupported retention")
+        validated_tags = _validate_tags(tags)
         expiry = _validate_expiry(expires_at)
         if retention in {"expire_30d", "expire_90d"} and expiry is None:
             raise MemoryValidationError("expiring retention requires expires_at")
         now = _iso(_now())
-        record = MemoryRecord(str(uuid4()), title, content, record_type, scope, source,
-                              confidence, retention, now, now, expiry)
+        record = MemoryRecord(str(uuid4()), title, content, record_type, scope, "non_sensitive",
+                              source, confidence, retention, validated_tags, now, now, expiry)
         with self._lock:
             db = self._connect()
             try:
@@ -204,8 +236,13 @@ class SQLiteMemoryStore:
                 count = db.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
                 if count >= _MAX_RECORDS:
                     raise MemoryValidationError("memory record capacity reached")
-                db.execute("INSERT INTO memories VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                           tuple(asdict(record).values()))
+                db.execute(
+                    """INSERT INTO memories
+                    (memory_id, title, content, record_type, scope, sensitivity, source,
+                     confidence, retention, tags, created_at, updated_at, expires_at, status, supersedes_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    self._db_values(record),
+                )
                 self._event(db, record.memory_id, "created", now)
                 db.execute("COMMIT")
             except Exception:
@@ -254,7 +291,7 @@ class SQLiteMemoryStore:
                 ).fetchall()
                 ranked = []
                 for row in rows:
-                    haystack = (row["title"] + "\n" + row["content"] + "\n" + row["scope"]).casefold()
+                    haystack = (row["title"] + "\n" + row["content"] + "\n" + row["scope"] + "\n" + row["tags"]).casefold()
                     matched = sum(term in haystack for term in terms)
                     if matched == len(terms):
                         exact = int(row["title"].casefold() == query.casefold())
@@ -265,7 +302,7 @@ class SQLiteMemoryStore:
                 db.close()
 
     def correct(self, memory_id: str, **changes: str) -> MemoryRecord:
-        allowed = {"title", "content", "record_type", "scope", "source", "confidence", "retention", "expires_at"}
+        allowed = {"title", "content", "record_type", "scope", "source", "confidence", "retention", "tags", "expires_at"}
         if not changes or set(changes) - allowed:
             raise MemoryValidationError("correction must contain only supported fields")
         old = self.get(memory_id)
@@ -281,14 +318,15 @@ class SQLiteMemoryStore:
             raise MemoryValidationError("unsupported confidence")
         if not isinstance(values["retention"], str) or values["retention"] not in _ALLOWED_RETENTION:
             raise MemoryValidationError("unsupported retention")
+        validated_tags = _validate_tags(values["tags"])
         expiry = _validate_expiry(values["expires_at"])
         if values["retention"] in {"expire_30d", "expire_90d"} and expiry is None:
             raise MemoryValidationError("expiring retention requires expires_at")
         now = _iso(_now())
         corrected = MemoryRecord(
             str(uuid4()), values["title"], values["content"], values["record_type"],
-            values["scope"], values["source"], values["confidence"], values["retention"],
-            now, now, expiry, "active", memory_id,
+            values["scope"], "non_sensitive", values["source"], values["confidence"],
+            values["retention"], validated_tags, now, now, expiry, "active", memory_id,
         )
         with self._lock:
             db = self._connect()
@@ -301,8 +339,11 @@ class SQLiteMemoryStore:
                 if count >= _MAX_RECORDS:
                     raise MemoryValidationError("memory record capacity reached")
                 db.execute(
-                    "INSERT INTO memories VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    tuple(asdict(corrected).values()),
+                    """INSERT INTO memories
+                    (memory_id, title, content, record_type, scope, sensitivity, source,
+                     confidence, retention, tags, created_at, updated_at, expires_at, status, supersedes_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    self._db_values(corrected),
                 )
                 db.execute("UPDATE memories SET status='archived', updated_at=? WHERE memory_id=?",
                            (now, memory_id))
