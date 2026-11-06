@@ -5,6 +5,8 @@ import tempfile
 import threading
 import time
 import unittest
+from datetime import datetime, timezone
+from unittest.mock import patch
 
 from capri_runtime import (
     AssistantTurn,
@@ -199,6 +201,99 @@ class SQLiteSessionStoreTests(unittest.TestCase):
         )
         self.assertEqual(committed.version, 1)
 
+
+    def test_expired_lease_cannot_release_or_commit_without_reclaim(self):
+        session = self.store.create()
+        self.store.claim_turn_lease(session.session_id, "stale-owner", 3)
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute(
+                "UPDATE session_turn_leases SET expires_at = ? WHERE session_id = ?",
+                ("2000-01-01T00:00:00+00:00", session.session_id),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        self.assertFalse(self.store.release_turn_lease(session.session_id, "stale-owner"))
+        turn = (
+            Message(role="user", content="go"),
+            Message(role="assistant", content="done"),
+        )
+        with self.assertRaises(SessionConflictError):
+            self.store.commit_turn_messages(session.session_id, 0, turn)
+
+        self.store.claim_turn_lease(session.session_id, "new-owner", 3)
+        self.assertFalse(self.store.release_turn_lease(session.session_id, "stale-owner"))
+        committed = self.store.commit_turn_messages(
+            session.session_id, 0, turn, lease_owner="new-owner"
+        )
+        self.assertEqual(committed.version, 1)
+
+    def test_lease_renewal_samples_time_after_acquiring_sqlite_write_lock(self):
+        session = self.store.create()
+        self.store.claim_turn_lease(session.session_id, "worker", 3)
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute(
+                "UPDATE session_turn_leases SET expires_at = ? WHERE session_id = ?",
+                ("2030-01-01T00:00:00+00:00", session.session_id),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        before_expiry = datetime(2029, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
+        after_expiry = datetime(2030, 1, 1, 0, 0, 1, tzinfo=timezone.utc)
+        write_lock = sqlite3.connect(self.path, timeout=5, isolation_level=None)
+        write_lock.execute("BEGIN IMMEDIATE")
+        connection_opened = threading.Event()
+        clock_called = threading.Event()
+        lock_released = threading.Event()
+        outcomes = []
+        original_connect = self.store._connect
+
+        def tracked_connect():
+            connection = original_connect()
+            connection_opened.set()
+            return connection
+
+        self.store._connect = tracked_connect
+
+        def fake_now():
+            clock_called.set()
+            return after_expiry if lock_released.is_set() else before_expiry
+
+        def renew():
+            try:
+                outcomes.append(self.store.renew_turn_lease(session.session_id, "worker", 3))
+            except Exception as exc:
+                outcomes.append(exc)
+
+        with patch.object(SQLiteSessionStore, "_lease_now", new=staticmethod(fake_now)):
+            worker = threading.Thread(target=renew)
+            worker.start()
+            self.assertTrue(connection_opened.wait(timeout=1))
+            self.assertFalse(clock_called.is_set())
+            lock_released.set()
+            write_lock.execute("ROLLBACK")
+            worker.join(timeout=3)
+        self.store._connect = original_connect
+
+        write_lock.close()
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(len(outcomes), 1)
+        self.assertIsInstance(outcomes[0], SessionConflictError)
+
+    def test_lease_session_ids_are_bounded_and_valid_text(self):
+        for invalid in ("x" * 257, "bad\ud800"):
+            with self.subTest(session_id=repr(invalid)):
+                with self.assertRaises(ValidationError):
+                    self.store.claim_turn_lease(invalid, "owner", 3)
+                with self.assertRaises(ValidationError):
+                    self.store.renew_turn_lease(invalid, "owner", 3)
+                with self.assertRaises(ValidationError):
+                    self.store.release_turn_lease(invalid, "owner")
 
     def test_coordinator_renews_durable_lease_during_long_model_call(self):
         entered = threading.Event()

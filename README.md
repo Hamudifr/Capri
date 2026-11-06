@@ -92,7 +92,7 @@ Capri is expected to operate as the responsible technical agent for ordinary int
 Autonomy does not bypass least privilege, privacy, platform controls, protected evaluation boundaries, or the owner's no-paid-spend rule. Destructive/irreversible actions and externally consequential actions remain subject to the required authorization. Internal self-review must be labeled honestly.
 \n\n## Durable conversation sessions\n\n`SQLiteSessionStore` provides private SQLite persistence for conversation transcripts and optimistic version checks across process restarts. The database must live in an existing private directory; contents are plaintext, so hosts must protect backups and device access.\n
 
-The session stores also expose `commit_turn_messages` for atomically persisting a complete model/tool transcript (user message, assistant tool-call messages, tool results, and final assistant response) as one versioned turn. Hosts must serialize same-session orchestration before executing tools; the optimistic commit detects stale versions but cannot reverse side effects.
+The session stores expose `commit_turn_messages` for atomically persisting a complete model/tool transcript (user message, assistant tool-call messages, tool results, and final assistant response) as one versioned turn.
 
 
 `SessionTurnCoordinator` serializes orchestration and transcript commit under a bounded per-session lock. With `SQLiteSessionStore`, it also acquires and renews a durable cross-process lease and fences the transcript commit by owner token; the in-memory store provides process-local locking only. It checks message-count, assistant-output, tool-result, and user-input limits before side effects. Lease expiry cannot forcibly stop a paused handler, so external side effects still require idempotency and handler-level authorization.
@@ -100,5 +100,3 @@ The session stores also expose `commit_turn_messages` for atomically persisting 
 
 Session stores apply a separate `max_tool_chars` limit to persisted tool-result messages (default 131,072 characters), distinct from assistant-output limits.
 
-
-With `SQLiteSessionStore`, `SessionTurnCoordinator` acquires a durable per-session lease, renews it while the model/tool loop runs, and fences transcript commits by owner token. The in-memory store supports process-local serialization only. Lease expiry cannot forcibly stop a paused handler; external side effects still require idempotency and handler-level authorization.

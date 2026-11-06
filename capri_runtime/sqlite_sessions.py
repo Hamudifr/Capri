@@ -327,14 +327,19 @@ class SQLiteSessionStore(SessionStore):
     ) -> str:
         """Acquire a durable cross-process session-turn lease or fail if held."""
         owner_token, lease_seconds = self._lease_parameters(owner_token, lease_seconds)
-        if not isinstance(session_id, str) or not session_id.strip():
-            raise ValidationError("session_id must be non-empty text")
-        now = self._lease_now()
-        expires_at = (now + timedelta(seconds=lease_seconds)).isoformat()
+        if (
+            not isinstance(session_id, str)
+            or not session_id.strip()
+            or len(session_id) > 256
+            or _contains_surrogate(session_id)
+        ):
+            raise ValidationError("session_id must be bounded valid text")
         with self._lock:
             connection = self._connect()
             try:
                 connection.execute("BEGIN IMMEDIATE")
+                now = self._lease_now()
+                expires_at = (now + timedelta(seconds=lease_seconds)).isoformat()
                 session = connection.execute(
                     "SELECT closed FROM sessions WHERE session_id = ?",
                     (session_id,),
@@ -386,14 +391,19 @@ class SQLiteSessionStore(SessionStore):
     ) -> str:
         """Renew only a still-live lease owned by this exact worker token."""
         owner_token, lease_seconds = self._lease_parameters(owner_token, lease_seconds)
-        if not isinstance(session_id, str) or not session_id.strip():
-            raise ValidationError("session_id must be non-empty text")
-        now = self._lease_now()
-        expires_at = (now + timedelta(seconds=lease_seconds)).isoformat()
+        if (
+            not isinstance(session_id, str)
+            or not session_id.strip()
+            or len(session_id) > 256
+            or _contains_surrogate(session_id)
+        ):
+            raise ValidationError("session_id must be bounded valid text")
         with self._lock:
             connection = self._connect()
             try:
                 connection.execute("BEGIN IMMEDIATE")
+                now = self._lease_now()
+                expires_at = (now + timedelta(seconds=lease_seconds)).isoformat()
                 current = connection.execute(
                     "SELECT owner_token, expires_at FROM session_turn_leases WHERE session_id = ?",
                     (session_id,),
@@ -424,6 +434,8 @@ class SQLiteSessionStore(SessionStore):
         if (
             not isinstance(session_id, str)
             or not session_id.strip()
+            or len(session_id) > 256
+            or _contains_surrogate(session_id)
             or not isinstance(owner_token, str)
             or not owner_token
             or len(owner_token) > 128
@@ -433,11 +445,33 @@ class SQLiteSessionStore(SessionStore):
         with self._lock:
             connection = self._connect()
             try:
+                connection.execute("BEGIN IMMEDIATE")
+                current = connection.execute(
+                    "SELECT owner_token, expires_at FROM session_turn_leases WHERE session_id = ?",
+                    (session_id,),
+                ).fetchone()
+                if current is None or current[0] != owner_token:
+                    connection.execute("COMMIT")
+                    return False
+                try:
+                    current_expiry = datetime.fromisoformat(current[1])
+                except (TypeError, ValueError):
+                    raise ValidationError("persisted session lease is invalid") from None
+                if current_expiry.tzinfo is None or current_expiry.utcoffset() is None:
+                    raise ValidationError("persisted session lease is invalid")
+                if current_expiry <= self._lease_now():
+                    connection.execute("COMMIT")
+                    return False
                 cursor = connection.execute(
                     "DELETE FROM session_turn_leases WHERE session_id = ? AND owner_token = ?",
                     (session_id, owner_token),
                 )
+                connection.execute("COMMIT")
                 return cursor.rowcount == 1
+            except Exception:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
             finally:
                 connection.close()
 
@@ -486,14 +520,10 @@ class SQLiteSessionStore(SessionStore):
                         raise ValidationError("persisted session lease is invalid") from None
                     if lease_expiry.tzinfo is None or lease_expiry.utcoffset() is None:
                         raise ValidationError("persisted session lease is invalid")
-                    if lease_expiry > now and (
-                        not isinstance(lease_owner, str) or lease[0] != lease_owner
-                    ):
-                        raise SessionConflictError("an active session lease fences this commit")
-                    if lease_owner is not None and (
-                        lease[0] != lease_owner or lease_expiry <= now
-                    ):
-                        raise SessionConflictError("session turn lease ownership was lost")
+                    if lease_expiry <= now:
+                        raise SessionConflictError("expired session turn lease must be reclaimed before commit")
+                    if not isinstance(lease_owner, str) or lease[0] != lease_owner:
+                        raise SessionConflictError("an active session turn lease fences this commit")
                 elif lease_owner is not None:
                     raise SessionConflictError("session turn lease does not exist")
                 if len(current.messages) + len(validated) > self.max_session_messages:
