@@ -289,12 +289,12 @@ class HmacApprovalKeyRing:
         self._keys = MappingProxyType(copied)
         self.active_key_id = active_key_id
 
-    def key_for(self, key_id: str) -> bytes | None:
+    def _key_for(self, key_id: str) -> bytes | None:
         """Return only the specifically requested key; never try other keys."""
         return self._keys.get(key_id)
 
     def sign(self, key_id: str, payload: bytes) -> bytes:
-        key = self.key_for(key_id)
+        key = self._key_for(key_id)
         if key is None or not isinstance(payload, bytes):
             raise ToolValidationError("approval signing key or payload is invalid")
         return hmac.new(key, payload, hashlib.sha256).digest()
