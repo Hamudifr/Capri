@@ -102,8 +102,8 @@ class SQLiteMemoryStoreTests(unittest.TestCase):
     def test_pagination_is_bounded_and_stable(self):
         first = self.create(title="Alpha")
         second = self.create(title="Beta")
-        page_one = self.store.search("runtime security", limit=1, offset=0)
-        page_two = self.store.search("runtime security", limit=1, offset=1)
+        page_one = self.store.search("untrusted permissions", limit=1, offset=0)
+        page_two = self.store.search("untrusted permissions", limit=1, offset=1)
         self.assertEqual(len(page_one), 1)
         self.assertEqual(len(page_two), 1)
         self.assertNotEqual(page_one[0].memory_id, page_two[0].memory_id)
