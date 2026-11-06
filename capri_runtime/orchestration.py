@@ -73,7 +73,7 @@ class ToolOrchestrator:
         max_tool_rounds: int = 4,
         max_history_messages: int = 64,
         max_output_chars: int = 64_000,
-        max_tool_message_bytes: int = 65_536,
+        max_tool_message_bytes: int = 131_072,
     ) -> None:
         if not callable(getattr(adapter, "complete_with_tools", None)):
             raise ToolOrchestrationError("adapter must implement complete_with_tools()")
@@ -91,6 +91,10 @@ class ToolOrchestrator:
             raise ToolOrchestrationError("configured orchestration limit exceeds the hard maximum")
         if max_output_chars > 1_000_000 or max_tool_message_bytes > 1_048_576:
             raise ToolOrchestrationError("configured message limit exceeds the hard maximum")
+        if max_tool_message_bytes < bridge.executor.max_result_bytes + 2_048:
+            raise ToolOrchestrationError(
+                "tool message limit must exceed the executor result limit by at least 2048 bytes"
+            )
         self.adapter = adapter
         self.bridge = bridge
         self.max_tool_rounds = max_tool_rounds
@@ -167,19 +171,20 @@ class ToolOrchestrator:
 
             if turn_index >= self.max_tool_rounds:
                 raise ToolOrchestrationError("maximum tool-call rounds reached")
+            if len(response.tool_calls) > self.bridge.max_calls:
+                raise ToolOrchestrationError("adapter exceeded the maximum tool-call batch size")
+            if len(working) + 1 + len(response.tool_calls) > self.max_history_messages:
+                raise ToolOrchestrationError("conversation history limit reached")
+
+            duplicate_id = False
             for call in response.tool_calls:
                 if not isinstance(call, ToolCallRequest):
                     raise ToolOrchestrationError("adapter returned an invalid tool call")
-                if not isinstance(call.call_id, str) or call.call_id in seen_call_ids:
-                    raise ToolOrchestrationError("tool call IDs must be unique across the turn")
+                if not isinstance(call.call_id, str):
+                    raise ToolOrchestrationError("adapter returned an invalid tool call ID")
+                if call.call_id in seen_call_ids:
+                    duplicate_id = True
                 seen_call_ids.add(call.call_id)
-
-            try:
-                batch_outcomes = self.bridge.execute_batch(
-                    list(response.tool_calls), context
-                )
-            except ToolBridgeValidationError:
-                raise ToolOrchestrationError("model proposed an invalid tool-call batch") from None
 
             call_payload = {
                 "content": response.content,
@@ -188,33 +193,55 @@ class ToolOrchestrator:
                     for call in response.tool_calls
                 ],
             }
-            encoded_calls = json.dumps(
-                call_payload, ensure_ascii=False, allow_nan=False,
-                sort_keys=True, separators=(",", ":"),
-            )
-            encoded_results = [
-                json.dumps(
-                    {
-                        "call_id": item.call_id,
-                        "name": item.name,
-                        "status": item.status,
-                        "result": item.result,
-                        "error_code": item.error_code,
-                        "argument_digest": item.argument_digest,
-                    },
-                    ensure_ascii=False, allow_nan=False,
+            try:
+                encoded_calls = json.dumps(
+                    call_payload, ensure_ascii=False, allow_nan=False,
                     sort_keys=True, separators=(",", ":"),
                 )
-                for item in batch_outcomes
-            ]
-            added_messages = 1 + len(encoded_results)
-            if len(working) + added_messages > self.max_history_messages:
-                raise ToolOrchestrationError("conversation history limit reached")
-            if (
-                len(encoded_calls.encode("utf-8")) > self.max_tool_message_bytes
-                or any(len(item.encode("utf-8")) > self.max_tool_message_bytes for item in encoded_results)
-            ):
-                raise ToolOrchestrationError("tool transcript message exceeds the configured byte limit")
+                call_bytes = encoded_calls.encode("utf-8", errors="strict")
+            except (TypeError, ValueError, UnicodeEncodeError, RecursionError):
+                raise ToolOrchestrationError("model proposed a non-JSON tool-call batch") from None
+            if len(call_bytes) > self.max_tool_message_bytes:
+                raise ToolOrchestrationError("tool-call message exceeds the configured byte limit")
+
+            if duplicate_id:
+                batch_outcomes = [
+                    ToolCallOutcome(
+                        call.call_id, call.name, "invalid_request",
+                        error_code="duplicate_call_id",
+                    )
+                    for call in response.tool_calls
+                ]
+            else:
+                try:
+                    batch_outcomes = self.bridge.execute_batch(
+                        list(response.tool_calls), context
+                    )
+                except ToolBridgeValidationError:
+                    raise ToolOrchestrationError("model proposed an invalid tool-call batch") from None
+
+            encoded_results = []
+            for item in batch_outcomes:
+                try:
+                    encoded = json.dumps(
+                        {
+                            "call_id": item.call_id,
+                            "name": item.name,
+                            "status": item.status,
+                            "result": item.result,
+                            "error_code": item.error_code,
+                            "argument_digest": item.argument_digest,
+                        },
+                        ensure_ascii=False, allow_nan=False,
+                        sort_keys=True, separators=(",", ":"),
+                    )
+                    if len(encoded.encode("utf-8", errors="strict")) > self.max_tool_message_bytes:
+                        raise ValueError("tool result message too large")
+                    encoded_results.append(encoded)
+                except (TypeError, ValueError, UnicodeEncodeError, RecursionError):
+                    raise ToolOrchestrationError(
+                        "tool outcome could not be represented safely; inspect the audit record"
+                    ) from None
 
             working.append(Message(role="assistant", content=encoded_calls))
             working.extend(
