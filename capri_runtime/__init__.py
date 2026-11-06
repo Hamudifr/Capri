@@ -34,6 +34,17 @@ from .tools import (
     ToolValidationError,
 )
 from .security_store import SQLiteSecurityStore
+from .tasks import (
+    SQLiteTaskStore,
+    TaskClaim,
+    TaskConflictError,
+    TaskEngine,
+    TaskError,
+    TaskIdempotencyConflict,
+    TaskNotFoundError,
+    TaskRecord,
+    TaskValidationError,
+)
 
 __all__ = [
     "ApprovalGrant",
@@ -58,6 +69,15 @@ __all__ = [
     "SessionLimitError",
     "SessionStore",
     "SQLiteSecurityStore",
+    "SQLiteTaskStore",
+    "TaskClaim",
+    "TaskConflictError",
+    "TaskEngine",
+    "TaskError",
+    "TaskIdempotencyConflict",
+    "TaskNotFoundError",
+    "TaskRecord",
+    "TaskValidationError",
     "ToolBoundaryError",
     "ToolExecutionError",
     "ToolExecutor",

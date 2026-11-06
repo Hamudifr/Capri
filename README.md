@@ -46,6 +46,10 @@ Next capabilities: durable user-controlled memory, task planning/recovery, crypt
 
 This is a growing internal prototype, not a claim of AGI or public/multi-tenant production readiness. No X5 work is included.
 
+## Durable task execution and recovery
+
+The provider-neutral task engine in `capri_runtime.tasks` provides persistent ordered plans, atomic SQLite worker leases, per-step checkpoints, bounded retries with exponential backoff, cooperative cancellation, and lease-expiry recovery. It uses stable per-step idempotency keys and uses bounded retry delivery that may invoke a handler zero or multiple times across crash windows—not exactly-once side effects. See [docs/TASK_EXECUTION.md](docs/TASK_EXECUTION.md) for the handler contract, security boundaries, and limitations. The engine is a worker primitive; the host remains responsible for scheduling, authenticated context, and permissioned handler integration.
+
 ## Run checks locally
 
 Run the read-only repository diagnostic before making changes:
