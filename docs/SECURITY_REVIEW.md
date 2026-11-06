@@ -27,8 +27,9 @@ Assets requiring protection as the runtime grows:
 - Input, output, and session-history character/message bounds.
 - User input, adapter output, and direct session-store commits reject lone Unicode surrogate code points before transcript storage.
 - Evaluation metadata rejects lone Unicode surrogate code points before UTF-8 ledger serialization.
+- Input and output character limits are enforced before model invocation and again at the direct `SessionStore.commit_turn` boundary.
 - Session-history limit is enforced both before model invocation and atomically inside `SessionStore.commit_turn`.
-- An injected store must use the same history limit as its `Runtime`.
+- An injected store must use the same input, output, and history limits as its `Runtime`.
 - Immutable session/message snapshots and optimistic version checks.
 - A session closed while a model call is in progress cannot accept the late response.
 - Adapter exception details are suppressed from the public runtime exception.
@@ -72,6 +73,6 @@ The quality workflow uses minimal `contents: read` permissions and immutable act
 
 ## Release position
 
-The runtime is not approved for public or multi-tenant deployment. Production readiness requires an approved non-X5 product/security specification, host-level identity and authorization, retention/deletion decisions, operational budgets, provider integration, integration/adversarial tests, independent review, and deployment review.
+The runtime is not approved for public or multi-tenant deployment. Public or multi-tenant deployment requires host-level identity and authorization, tenant isolation, explicit retention/deletion behavior, operational budgets, provider integration, end-to-end/adversarial tests, observability, backup and rollback capability, and a documented Capri internal release review. External independent review is not a prerequisite for ordinary internal engineering; retain it only when a specific contract, regulation, customer commitment, or protected evaluation explicitly requires it. This document is Capri's internal review, not a security certification.
 
 No X5 instructions, rubrics, expected answers, hidden criteria, scoring keys, or evidence are part of this document or the implementation.
