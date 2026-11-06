@@ -41,6 +41,7 @@ class NotionRESTTransportTests(unittest.TestCase):
         t,op=self.make(); result=t.get_page(PAGE_ID); req,timeout=op.requests[0]
         self.assertEqual(result["properties"]["Name"],"Title")
         self.assertEqual(result["properties"]["Tags"],["memory"])
+        self.assertIsNone(result["properties"]["Supersedes"])
         self.assertEqual(req.get_header("Notion-version"),NOTION_API_VERSION)
         self.assertIn("Bearer test-secret",req.get_header("Authorization"))
         self.assertEqual(timeout,10.0)
@@ -61,6 +62,14 @@ class NotionRESTTransportTests(unittest.TestCase):
         self.assertEqual(body["start_cursor"],"not:to:parse?=")
         self.assertFalse(body["in_trash"])
         self.assertEqual(result["next_cursor"],"opaque+/cursor==")
+
+    def test_query_rejects_missing_cursor_and_malformed_page_items(self):
+        t,_=self.make({"results":[page()],"has_more":True,"next_cursor":None})
+        with self.assertRaises(NotionTransportError):
+            t.list_pages(cursor=None,page_size=20)
+        t,_=self.make({"results":[None],"has_more":False,"next_cursor":None})
+        with self.assertRaises(NotionTransportError):
+            t.list_pages(cursor=None,page_size=20)
 
     def test_update_status_and_trash_use_patch(self):
         t,op=self.make(); t.update_page(PAGE_ID,{"Status":"Archived"})
