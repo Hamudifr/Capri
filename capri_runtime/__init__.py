@@ -52,6 +52,7 @@ from .orchestration import (
     ToolOrchestrationError,
     ToolOrchestrator,
 )
+from .host import HostToolGateway
 from .sqlite_sessions import SQLiteSessionStore
 from .security_store import SQLiteSecurityStore
 from .memory import MemoryErrorBase, MemoryNotFoundError, MemoryProvider, MemoryRecord, MemoryValidationError, SQLiteMemoryStore
@@ -87,6 +88,7 @@ __all__ = [
     "ExecutionContext",
     "HostAuthorityError",
     "HostAuthorityResolver",
+    "HostToolGateway",
     "InMemoryAuditSink",
     "InMemoryApprovalStore",
     "MemoryErrorBase",
