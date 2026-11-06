@@ -54,6 +54,49 @@ class SQLiteSecurityStoreTests(unittest.TestCase):
             (self.now + timedelta(minutes=5)).isoformat(),
         )
 
+    def test_backup_is_consistent_private_and_restores_replay_state(self):
+        store = SQLiteSecurityStore(self.path)
+        event = AuditEvent(
+            "backup-event", self.now.isoformat(), "principal-1", "delete_item",
+            "a" * 64, "succeeded", None,
+        )
+        store.write(event)
+        grant = self.grant("backup-grant")
+        self.assertTrue(store.consume(grant, self.now))
+        backup_path = os.path.join(self.temp.name, "backup.sqlite3")
+        self.assertEqual(store.backup_to(backup_path), backup_path)
+        self.assertTrue(os.path.isfile(backup_path))
+        if os.name == "posix":
+            self.assertEqual(stat.S_IMODE(os.stat(backup_path).st_mode), 0o600)
+        restored = SQLiteSecurityStore(backup_path)
+        self.assertEqual(restored.integrity_check(), "ok")
+        self.assertIn(event, restored.events())
+        self.assertFalse(restored.consume(grant, self.now))
+
+    def test_backup_refuses_existing_symlink_and_live_database_destinations(self):
+        store = SQLiteSecurityStore(self.path)
+        with self.assertRaises(ToolValidationError):
+            store.backup_to(self.path)
+        existing = os.path.join(self.temp.name, "existing.sqlite3")
+        with open(existing, "wb") as stream:
+            stream.write(b"keep")
+        with self.assertRaises(ToolValidationError):
+            store.backup_to(existing)
+        link = os.path.join(self.temp.name, "link.sqlite3")
+        os.symlink(existing, link)
+        with self.assertRaises(ToolValidationError):
+            store.backup_to(link)
+        with open(existing, "rb") as stream:
+            self.assertEqual(stream.read(), b"keep")
+
+    @unittest.skipUnless(os.name == "posix", "POSIX filesystem permissions are required")
+    def test_backup_rejects_non_private_destination_directory(self):
+        store = SQLiteSecurityStore(self.path)
+        destination_dir = os.path.join(self.temp.name, "public")
+        os.mkdir(destination_dir, 0o755)
+        with self.assertRaises(ToolValidationError):
+            store.backup_to(os.path.join(destination_dir, "backup.sqlite3"))
+
     def test_database_is_private_and_integrity_check_passes(self):
         store = SQLiteSecurityStore(self.path)
         self.assertEqual(store.integrity_check(), "ok")
