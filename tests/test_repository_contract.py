@@ -33,12 +33,13 @@ class RepositoryContractTests(unittest.TestCase):
     def test_recovery_plan_does_not_claim_completion(self):
         text = (ROOT / "docs/RECOVERY_PLAN.md").read_text(encoding="utf-8")
         self.assertIn("release gate not met", text.lower())
-        self.assertIn("not production-ready", text)
+        self.assertIn("not a claim of AGI or public/multi-tenant production readiness", text)
 
-    def test_runtime_does_not_claim_provider_or_tool_support(self):
+    def test_runtime_tool_boundary_is_documented_without_provider_claims(self):
         text = (ROOT / "docs/NON_X5_RUNTIME_DESIGN.md").read_text(encoding="utf-8")
         self.assertIn("concrete model provider", text)
-        self.assertIn("tool/plugin invocation", text)
+        self.assertIn("not connected to a model provider", text)
+        self.assertIn("not a sandbox", text)
         self.assertIn("process-local", text)
 
     def test_local_secrets_and_runtime_data_are_ignored(self):
