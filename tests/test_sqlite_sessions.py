@@ -2,9 +2,20 @@ import os
 import sqlite3
 import stat
 import tempfile
+import threading
+import time
 import unittest
 
 from capri_runtime import (
+    AssistantTurn,
+    ExecutionContext,
+    InMemoryAuditSink,
+    SessionTurnCoordinator,
+    ToolExecutionBridge,
+    ToolExecutor,
+    ToolOrchestrator,
+    ToolOrchestrationError,
+    ToolRegistry,
     Message,
     Runtime,
     SessionClosedError,
@@ -130,6 +141,117 @@ class SQLiteSessionStoreTests(unittest.TestCase):
         with self.assertRaises(SessionConflictError):
             other.commit_turn(session.session_id, 0, "stale", "answer")
         self.assertEqual(other.get(session.session_id).version, 1)
+
+    def test_durable_turn_lease_is_exclusive_and_fences_commits(self):
+        session = self.store.create()
+        other = SQLiteSessionStore(self.path)
+        owner_one = "worker-one"
+        owner_two = "worker-two"
+        self.store.claim_turn_lease(session.session_id, owner_one, 3)
+        with self.assertRaises(SessionConflictError):
+            other.claim_turn_lease(session.session_id, owner_two, 3)
+        turn = (
+            Message(role="user", content="go"),
+            Message(role="assistant", content="done"),
+        )
+        with self.assertRaises(SessionConflictError):
+            other.commit_turn_messages(
+                session.session_id, 0, turn, lease_owner=owner_two
+            )
+        with self.assertRaises(SessionConflictError):
+            other.commit_turn_messages(session.session_id, 0, turn)
+        self.assertTrue(self.store.renew_turn_lease(session.session_id, owner_one, 3))
+        self.assertTrue(self.store.release_turn_lease(session.session_id, owner_one))
+        other.claim_turn_lease(session.session_id, owner_two, 3)
+        committed = other.commit_turn_messages(
+            session.session_id, 0, turn, lease_owner=owner_two
+        )
+        self.assertEqual(committed.version, 1)
+        self.assertTrue(other.release_turn_lease(session.session_id, owner_two))
+
+    def test_expired_lease_can_be_reclaimed_but_old_owner_is_fenced(self):
+        session = self.store.create()
+        self.store.claim_turn_lease(session.session_id, "old-owner", 3)
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute(
+                "UPDATE session_turn_leases SET expires_at = ? WHERE session_id = ?",
+                ("2000-01-01T00:00:00+00:00", session.session_id),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        with self.assertRaises(SessionConflictError):
+            self.store.renew_turn_lease(session.session_id, "old-owner", 3)
+        with self.assertRaises(SessionConflictError):
+            self.store.claim_turn_lease(session.session_id, "old-owner", 3)
+        self.store.claim_turn_lease(session.session_id, "new-owner", 3)
+        turn = (
+            Message(role="user", content="go"),
+            Message(role="assistant", content="done"),
+        )
+        with self.assertRaises(SessionConflictError):
+            self.store.commit_turn_messages(
+                session.session_id, 0, turn, lease_owner="old-owner"
+            )
+        committed = self.store.commit_turn_messages(
+            session.session_id, 0, turn, lease_owner="new-owner"
+        )
+        self.assertEqual(committed.version, 1)
+
+
+    def test_coordinator_renews_durable_lease_during_long_model_call(self):
+        entered = threading.Event()
+        release = threading.Event()
+
+        class BlockingAdapter:
+            def complete_with_tools(self, session_id, history, tools):
+                entered.set()
+                if not release.wait(timeout=6):
+                    raise RuntimeError("test release timeout")
+                return AssistantTurn(content="completed")
+
+        registry = ToolRegistry()
+        bridge = ToolExecutionBridge(ToolExecutor(registry, InMemoryAuditSink()))
+        orchestrator = ToolOrchestrator(BlockingAdapter(), bridge)
+        first_coordinator = SessionTurnCoordinator(lease_seconds=3)
+        second_coordinator = SessionTurnCoordinator(lease_seconds=3)
+        other_store = SQLiteSessionStore(self.path)
+        session = self.store.create()
+        context = ExecutionContext("host-user", frozenset())
+        outcome = []
+
+        def first_turn():
+            try:
+                outcome.append(first_coordinator.run_and_commit(
+                    orchestrator, self.store, session.session_id, "first", context
+                ))
+            except Exception as exc:
+                outcome.append(exc)
+
+        worker = threading.Thread(target=first_turn)
+        worker.start()
+        self.assertTrue(entered.wait(timeout=2))
+        time.sleep(3.2)
+        with self.assertRaises(ToolOrchestrationError):
+            second_coordinator.run_and_commit(
+                ToolOrchestrator(
+                    type("FinalAdapter", (), {
+                        "complete_with_tools": lambda self, *args: AssistantTurn(content="second")
+                    })(),
+                    bridge,
+                ),
+                other_store,
+                session.session_id,
+                "second",
+                context,
+            )
+        release.set()
+        worker.join(timeout=5)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(len(outcome), 1)
+        self.assertFalse(isinstance(outcome[0], Exception), repr(outcome[0]))
+        self.assertEqual(other_store.get(session.session_id).version, 1)
 
     def test_missing_session_raises_expected_error(self):
         with self.assertRaises(SessionNotFoundError):
