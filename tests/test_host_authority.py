@@ -1,3 +1,4 @@
+import itertools
 import unittest
 from datetime import datetime, timedelta, timezone
 
@@ -88,7 +89,7 @@ class HostAuthorityResolverTests(unittest.TestCase):
     def test_unbounded_permission_and_approval_iterables_are_consumed_only_to_limit(self):
         resolver = HostAuthorityResolver(
             lambda credential: "alice",
-            lambda principal: __import__("itertools").repeat("records:read"),
+            lambda principal: itertools.repeat("records:read"),
         )
         with self.assertRaises(HostAuthorityError):
             resolver.resolve("opaque")
