@@ -76,15 +76,24 @@ class ModelAdapter(Protocol):
 class SessionStore:
     """Thread-safe, process-local session store with optimistic turn commits."""
 
-    def __init__(self, max_session_messages: int = 200) -> None:
-        if (
-            isinstance(max_session_messages, bool)
-            or not isinstance(max_session_messages, int)
-            or max_session_messages < 2
-        ):
-            raise ValidationError(
-                "max_session_messages must be an integer of at least 2"
-            )
+    def __init__(
+        self,
+        max_session_messages: int = 200,
+        max_input_chars: int = 16_000,
+        max_output_chars: int = 64_000,
+    ) -> None:
+        limits = {
+            "max_input_chars": max_input_chars,
+            "max_output_chars": max_output_chars,
+            "max_session_messages": max_session_messages,
+        }
+        for name, value in limits.items():
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValidationError(f"{name} must be a positive integer")
+        if max_session_messages < 2:
+            raise ValidationError("max_session_messages must allow at least one turn")
+        self.max_input_chars = max_input_chars
+        self.max_output_chars = max_output_chars
         self.max_session_messages = max_session_messages
         self._sessions: dict[str, Session] = {}
         self._lock = RLock()
@@ -139,6 +148,10 @@ class SessionStore:
             raise ValidationError("assistant_text must be a non-empty string")
         if _contains_surrogate(user_text) or _contains_surrogate(assistant_text):
             raise ValidationError("messages must contain valid Unicode scalar values")
+        if len(user_text) > self.max_input_chars:
+            raise SessionLimitError("user_text exceeds max_input_chars")
+        if len(assistant_text) > self.max_output_chars:
+            raise SessionLimitError("assistant_text exceeds max_output_chars")
 
         with self._lock:
             current = self.get(session_id)
@@ -186,13 +199,19 @@ class Runtime:
             raise ValidationError("max_session_messages must allow at least one turn")
         if store is not None and not isinstance(store, SessionStore):
             raise ValidationError("store must be a SessionStore instance")
-        if store is not None and store.max_session_messages != max_session_messages:
+        if store is not None and (
+            store.max_input_chars != max_input_chars
+            or store.max_output_chars != max_output_chars
+            or store.max_session_messages != max_session_messages
+        ):
             raise ValidationError(
-                "store max_session_messages must match runtime configuration"
+                "store resource limits must match runtime configuration"
             )
         self.adapter = adapter
         self.store = store if store is not None else SessionStore(
-            max_session_messages=max_session_messages
+            max_input_chars=max_input_chars,
+            max_output_chars=max_output_chars,
+            max_session_messages=max_session_messages,
         )
         self.max_input_chars = max_input_chars
         self.max_output_chars = max_output_chars
