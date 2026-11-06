@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from typing import Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 from .memory import MemoryErrorBase, MemoryNotFoundError, MemoryValidationError
 from .notion_memory import NotionMemoryTransport
 
@@ -13,6 +13,13 @@ NOTION_API_VERSION = "2026-03-11"
 NOTION_API_BASE = "https://api.notion.com/v1"
 _MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 _MAX_RICH_TEXT_CHUNK = 2_000
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    """Refuse redirects so bearer credentials are never forwarded to another origin."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
 
 class NotionTransportError(MemoryErrorBase):
     """Redacted Notion REST transport failure."""
@@ -36,7 +43,7 @@ class NotionRESTTransport:
             raise MemoryValidationError("timeout must be between 1 and 30 seconds")
         self._token = api_token
         self._timeout = float(timeout)
-        self._opener = opener or urlopen
+        self._opener = opener or build_opener(_NoRedirectHandler()).open
 
     @classmethod
     def from_environment(cls, *, token_env: str = "NOTION_API_TOKEN", data_source_env: str = "CAPRI_MEMORY_DATA_SOURCE_ID", timeout: float = 10.0, opener: Callable[..., object] | None = None) -> "NotionRESTTransport":
