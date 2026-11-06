@@ -92,3 +92,6 @@ A host can persist a completed `ToolOrchestrator` result by loading the session 
 The coordinator also passes the store's message-count limit into the orchestrator. The orchestrator reserves room for the current tool-call messages, all corresponding tool results, and a final assistant message before executing a batch. This avoids performing side effects when the session cannot store the completed turn.
 
 **Multi-process limitation:** these locks are process-local. A deployment with multiple worker processes or hosts must route a session to one coordinator or add a distributed pre-execution lease with renewal and stale-owner fencing. SQLite optimistic version checks protect transcript integrity but cannot undo tool side effects performed before a losing commit. The coordinator is not a distributed lock service.
+
+
+Session stores enforce a separate `max_tool_chars` budget (default 131,072 characters) for tool-result messages; assistant text remains governed by `max_output_chars`. This keeps the persisted tool-result allowance aligned with the orchestrator's default tool-message budget instead of incorrectly applying the smaller assistant-output limit to tool payloads.
