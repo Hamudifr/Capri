@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 import json
 import unittest
 from dataclasses import replace
@@ -6,6 +7,7 @@ from datetime import datetime, timezone
 
 from capri_runtime.tools import (
     ApprovalGrant,
+    ApprovalMacProvider,
     ExecutionContext,
     HmacApprovalAuthority,
     HmacApprovalKeyRing,
@@ -122,6 +124,55 @@ class SignedApprovalTests(unittest.TestCase):
         self.assertFalse(authority.verify(replace(grant, key_id="other")))
         self.assertFalse(authority.verify(replace(grant, key_id="unknown")))
         self.assertFalse(authority.verify(replace(grant, key_id=None)))
+
+    def test_non_exportable_mac_provider_signs_and_verifies_exact_key_id(self):
+        class RemoteMacProvider:
+            active_key_id = "kms-key-version-7"
+
+            def __init__(self):
+                self.__secret = b"remote-provider-secret" * 2
+                self.signed = []
+                self.verified = []
+
+            def sign(self, key_id, payload):
+                self.signed.append(key_id)
+                return hmac.new(self.__secret, payload, hashlib.sha256).digest()
+
+            def verify(self, key_id, payload, signature):
+                self.verified.append(key_id)
+                expected = hmac.new(self.__secret, payload, hashlib.sha256).digest()
+                return hmac.compare_digest(expected, signature)
+
+        provider = RemoteMacProvider()
+        authority = HmacApprovalAuthority(provider, clock=lambda: self.now)
+        grant = authority.issue(
+            "alice", "delete_record", argument_digest(self.arguments), ttl_seconds=120
+        )
+        self.assertEqual(grant.key_id, "kms-key-version-7")
+        self.assertEqual(provider.signed, ["kms-key-version-7"])
+        self.assertTrue(authority.verify(grant))
+        self.assertEqual(provider.verified, ["kms-key-version-7"])
+        self.assertIsNone(authority._legacy_key)
+
+    def test_mac_provider_failures_are_closed(self):
+        class BrokenProvider:
+            active_key_id = "remote-v1"
+            def sign(self, key_id, payload):
+                raise RuntimeError("provider detail")
+            def verify(self, key_id, payload, signature):
+                raise RuntimeError("provider detail")
+
+        authority = HmacApprovalAuthority(BrokenProvider(), clock=lambda: self.now)
+        with self.assertRaises(ToolValidationError) as raised:
+            authority.issue(
+                "alice", "delete_record", argument_digest(self.arguments), ttl_seconds=120
+            )
+        self.assertNotIn("provider detail", str(raised.exception))
+        grant = ApprovalGrant(
+            "g", "alice", "delete_record", argument_digest(self.arguments),
+            "2026-11-06T13:00:00+00:00", "0" * 64, "remote-v1",
+        )
+        self.assertFalse(authority.verify(grant))
 
     def test_key_ring_rejects_invalid_configuration(self):
         for keys, active in (
