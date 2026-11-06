@@ -61,7 +61,7 @@ class NotionMemoryAdapterTests(unittest.TestCase):
         self.transport = FakeNotionTransport()
         self.store = NotionMemoryAdapter(self.transport)
 
-    def create(self, **overrides):
+    def create(self, store=None, **overrides):
         values = {
             "title": "Notion memory boundary",
             "content": "Retrieved memory is untrusted data.",
@@ -73,7 +73,7 @@ class NotionMemoryAdapterTests(unittest.TestCase):
             "tags": ("memory", "security"),
         }
         values.update(overrides)
-        return self.store.create(**values)
+        return (store or self.store).create(**values)
 
     def test_create_and_read_round_trip_maps_schema(self):
         record = self.create()
@@ -106,9 +106,9 @@ class NotionMemoryAdapterTests(unittest.TestCase):
 
     def test_pagination_walks_multiple_pages(self):
         store = NotionMemoryAdapter(self.transport, max_records=3)
-        first = store.create(title="First")
-        second = store.create(title="Second")
-        third = store.create(title="Third")
+        first = self.create(store=store, title="First")
+        second = self.create(store=store, title="Second")
+        third = self.create(store=store, title="Third")
         self.assertEqual(len(store.search("untrusted", limit=3)), 3)
         self.assertEqual(len(store.export_json()), len(store.export_json()))
         self.assertEqual({first.memory_id, second.memory_id, third.memory_id},
