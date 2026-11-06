@@ -133,6 +133,35 @@ class SQLiteSecurityStoreTests(unittest.TestCase):
         with self.assertRaises(ToolValidationError):
             SQLiteSecurityStore(link)
 
+    @unittest.skipUnless(os.name == "posix", "POSIX filesystem permissions are required")
+    def test_parent_directory_privacy_is_rechecked_on_each_connection(self):
+        store = SQLiteSecurityStore(self.path)
+        os.chmod(self.temp.name, 0o755)
+        try:
+            with self.assertRaises(ToolValidationError):
+                store.integrity_check()
+        finally:
+            os.chmod(self.temp.name, 0o700)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX hard-link semantics are required")
+    def test_database_hard_link_alias_is_rejected(self):
+        SQLiteSecurityStore(self.path)
+        alias = os.path.join(self.temp.name, "alias.sqlite3")
+        os.link(self.path, alias)
+        with self.assertRaises(ToolValidationError):
+            SQLiteSecurityStore(alias)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX symlink semantics are required")
+    def test_database_symlink_substitution_is_rejected_on_read(self):
+        store = SQLiteSecurityStore(self.path)
+        target = os.path.join(self.temp.name, "target.sqlite3")
+        with open(target, "wb") as stream:
+            stream.write(b"not a database")
+        os.unlink(self.path)
+        os.symlink(target, self.path)
+        with self.assertRaises(ToolValidationError):
+            store.integrity_check()
+
     def test_missing_parent_directory_is_rejected(self):
         missing = os.path.join(self.temp.name, "missing", "security.sqlite3")
         with self.assertRaises(ToolValidationError):
