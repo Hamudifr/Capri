@@ -21,9 +21,15 @@ def _workflow_permissions_are_read_only(workflow: str) -> bool:
             r"[{,]\s*\?\s*(?:permissions|[\"']permissions[\"'])\s*(?=:|$))",
             line,
         )
-        # Flow-mapping entries may continue at column zero. Reject a bare or
-        # quoted permissions key there; otherwise a job-level override can
-        # evade the indentation- and delimiter-aware checks above.
+        # Column-zero quoted keys (value may live on a later line). The
+        # legitimate top-level block is the unquoted form "permissions:" and
+        # is validated separately below; only quoted forms are treated as
+        # overrides here. This closes the multiline flow-mapping bypass.
+        or re.search(r"""^[\"']permissions[\"']\s*:""", line)
+        # Column-zero unquoted keys with an inline value are equally
+        # capable of overriding permissions inside a multiline flow
+        # mapping. The legitimate bare top-level block form carries no
+        # inline value, so it is unaffected and is validated below.
         or re.search(r"""^(?:permissions|["']permissions["'])\s*:\s*[^#\s]""", line)
         # GitHub Actions accepts YAML anchors/aliases, and YAML double-quoted
         # keys can use escapes (for example, "\\u0070ermissions"). Without
