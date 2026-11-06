@@ -709,7 +709,7 @@ class TaskWorker:
             heartbeat_stop.set()
             thread.join(timeout=max(1.0, self.heartbeat_interval_seconds * 2))
 
-    def run_forever(self, stop_event: Event) -> None:
+    def run_forever(self, stop_event: threading.Event) -> None:
         if not callable(getattr(stop_event, "is_set", None)) or not callable(
             getattr(stop_event, "wait", None)
         ):
