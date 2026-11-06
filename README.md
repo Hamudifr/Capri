@@ -24,14 +24,14 @@ Capri is a research and execution-assistance project. This repository contains a
 - `docs/LEDGER_OPERATIONS.md` — backup verification, integrity-incident response, and controlled recovery runbook.
 - `docs/LEDGER_SCALING_DECISION.md` — proposed transactional storage migration, explicitly not implemented.
 - `capri_core/` — immutable evaluation records, fail-closed validation, and hash-chained append-only ledger.
-- `capri_runtime/` — in-memory session lifecycle, injected model-adapter boundary, and permissioned host-injected tool execution gate.
-- `docs/TOOL_EXECUTION.md` — trust model, schema subset, approvals, audit behavior, and limitations for tool execution.
+- `capri_runtime/` — in-memory session lifecycle, injected model-adapter boundary, permissioned tool execution gate, and bounded SQLite memory store.
+- `docs/TOOL_EXECUTION.md` — trust model, schema subset, approvals, audit behavior, and limitations for tool execution.\n- `docs/MEMORY_STORE.md` — durable memory contract, trust rules, privacy constraints, and limitations.
 - `tests/` — deterministic structural, ledger, and runtime tests.
 - `.github/workflows/quality.yml` — non-X5 documentation and test checks.
 
 ## Current status
 
-Current `main` is `ed530c8f3fbcea993a2577b87b2b9ab98bb16921`. It contains the integrated recovery foundation, permissioned tool-execution boundary, and durable local audit/approval replay store.
+Current `main` is `f4bf01df25d93b7070ce3b29c8e7253735d6477d`. It contains the integrated recovery foundation, permissioned tool-execution boundary, and durable local audit/approval replay store. The `feature/durable-memory-core` branch adds a provider-neutral SQLite memory prototype; it is pending CI and is not yet part of main.
 
 - Recovery foundation merged in PR #1: `d42bfbb2f59a31c713b03f09d074da77b8fb6250`.
 - Permissioned tool boundary merged in PR #17: `35ddc8408a2389dff8594283d40d37b66905c0dc`.
@@ -42,7 +42,7 @@ Implemented: hardened append-only hash-chain ledger; read-only Doctor diagnostic
 
 The tool boundary is not a sandbox or provider integration. The host must authenticate principals and construct trusted execution contexts. The in-memory audit/approval stores are development-only; `SQLiteSecurityStore` provides durable local metadata and replay prevention but is not encrypted and requires host-managed backup/retention. Handlers run with process privileges. No shell, filesystem, network, dynamic import, automatic plugin discovery, or X5 access is exposed.
 
-Next capabilities: durable user-controlled memory, task planning/recovery, cryptographically authenticated approvals, host identity/tenant isolation, model-to-tool orchestration, budgets, observability, and deployment packaging. Audit/approval replay metadata now has a durable SQLite implementation; backup, retention, and restore operations remain to be built. Capri performs its own internal engineering/security reviews; external independent review is not a prerequisite for ordinary internal implementation. Never mislabel self-review as independent assurance.
+Next capabilities: Notion host-adapter synchronization, task planning/recovery, cryptographically authenticated approvals, host identity/tenant isolation, model-to-tool orchestration, budgets, observability, and deployment packaging. Audit/approval replay metadata now has a durable SQLite implementation; backup, retention, and restore operations remain to be built. Capri performs its own internal engineering/security reviews; external independent review is not a prerequisite for ordinary internal implementation. Never mislabel self-review as independent assurance.
 
 This is a growing internal prototype, not a claim of AGI or public/multi-tenant production readiness. No X5 work is included.
 
