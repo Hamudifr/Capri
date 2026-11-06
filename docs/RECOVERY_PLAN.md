@@ -126,3 +126,27 @@ This section supersedes the older #10/#14/#15 head references in the earlier rec
 - PR #15: `da2c3ec28412937c1993dcbe18132d73edeaa593`, based on current PR #14 head; 7 commits ahead / 0 behind; its PR diff remains only `tests/test_runtime_core.py`. Current tree `5322c19330c13181254f17927d10564d26befb5e` is identical to the tree tested by run [42274759020](https://github.com/Hamudifr/Capri/actions/runs/42274759020), which passed compileall and 80 tests per actual Python version.
 
 All nine job logs for runs 42274529813, 42274695527, and 42274759020 were inspected and confirmed the actual Python interpreter versions. These are automated tests, not independent security review or release acceptance. All PRs remain Draft/unmerged; `main` remains unchanged.
+
+
+## Full live PR inventory and stack validation — 2026-11-06 20:28 UTC
+
+This is the latest reconciled inventory and supersedes earlier head snapshots above.
+
+| PR | Current head | Base | Exact-head or identical-tree CI |
+|---|---|---|---|
+| #1 | `fed330e03a3e55ecc1f5307e684fbc842eddea29` | `main` | [42241438580](https://github.com/Hamudifr/Capri/actions/runs/42241438580): 61 tests per Python 3.11/3.12/3.13 |
+| #4 | `9bb4c021ccf7db24de6d4423816619a79ab6a459` | `recovery/non-x5-foundation` | [42273444013](https://github.com/Hamudifr/Capri/actions/runs/42273444013): 63 tests per version |
+| #5 | `1b7ac13c9fe2de10d24703008084144726886ac7` | `recovery/non-x5-foundation` | Tree-identical to [42273893547](https://github.com/Hamudifr/Capri/actions/runs/42273893547): Doctor 5/5 and 66 tests per version |
+| #6 | `f66cb8c1ce6165d0185b982ebd006fe397111984` | `feature/capri-doctor` | [42275074323](https://github.com/Hamudifr/Capri/actions/runs/42275074323): Doctor 6/6, health 7/7, and 92 tests per version |
+| #10 | `3697f6440d0b56fc83c17bbb53234acaeb613a64` | `security/ledger-private-permissions-v2` | [42274529813](https://github.com/Hamudifr/Capri/actions/runs/42274529813): 75 tests per version |
+| #12 | `7e37138b8dc3f353c300c8bca7a9bb8a3a74b5dc` | `recovery/non-x5-foundation` | Tree-identical to [42275168468](https://github.com/Hamudifr/Capri/actions/runs/42275168468): 64 tests per version |
+| #14 | `da25bff24a9c4fdcad997591caabfa193df35f21` | `security/ledger-path-hardening` | [42274695527](https://github.com/Hamudifr/Capri/actions/runs/42274695527): 77 tests per version |
+| #15 | `da2c3ec28412937c1993dcbe18132d73edeaa593` | `fix/ledger-inode-uncertainty-rebased-2026-11-06` | Tree-identical to [42274759020](https://github.com/Hamudifr/Capri/actions/runs/42274759020): 80 tests per version; test-only diff |
+
+The #4 → #10 → #14 → #15 ledger stack is ancestry-reconciled: each dependent PR includes its current base as an ancestor (PR #10: 12 ahead / 0 behind; PR #14: 12 ahead / 0 behind; PR #15: 7 ahead / 0 behind). The #1 → #5 → #6 Doctor/recovery stack is also reconciled; PR #6 contains current PR #5 head as an ancestor (46 ahead / 0 behind at its latest pre-documentation merge commit). PR #12 now includes current recovery base (10 ahead / 0 behind).
+
+All relevant three-version job logs were inspected. Each job installed and ran its labelled Python interpreter. The PR #10 matrix setup explicitly passes `matrix.python-version`. The earlier PR #10 run 42241452411 remains superseded for multi-interpreter claims. PR #5's failed intermediate run 42273662466 is retained in Actions history and documented in the PR description; subsequent tree-equivalent run 42273893547 passed Doctor 5/5. PR #15 and #12 final merge commits preserve the exact tested tree of their immediately preceding commits; their evidence is described as tree-equivalent rather than falsely attributed to a different commit SHA.
+
+Exactly eight PRs are open; all remain Draft and unmerged: #1, #4, #5, #6, #10, #12, #14, #15. `main` remains unchanged at `228669ed8b0c02db669cc082ac256e7491a26201` and is unprotected. Repository remains private. No paid upgrade, public exposure, merge, deployment, release, or protected X5 access occurred.
+
+Release gate remains **NOT MET** pending genuinely independent security review, explicit approval or replacement of non-X5 specification v0.2, assembled-stack acceptance, independent non-X5 evaluation, and governance evidence. The current Notion decision handoff is [here](https://app.notion.com/p/410ac6905d268165be22e79be52684b7); the independent ledger review packet is [here](https://app.notion.com/p/410ac6905d2681ef8551f668cd52e252).
