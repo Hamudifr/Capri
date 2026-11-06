@@ -391,8 +391,13 @@ class SQLiteSessionStore(SessionStore):
     ) -> str:
         """Renew only a still-live lease owned by this exact worker token."""
         owner_token, lease_seconds = self._lease_parameters(owner_token, lease_seconds)
-        if not isinstance(session_id, str) or not session_id.strip():
-            raise ValidationError("session_id must be non-empty text")
+        if (
+            not isinstance(session_id, str)
+            or not session_id.strip()
+            or len(session_id) > 256
+            or _contains_surrogate(session_id)
+        ):
+            raise ValidationError("session_id must be bounded valid text")
         now = self._lease_now()
         expires_at = (now + timedelta(seconds=lease_seconds)).isoformat()
         with self._lock:
