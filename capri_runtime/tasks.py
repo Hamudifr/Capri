@@ -641,16 +641,80 @@ class TaskEngine:
         self.executor_id = executor_id
         self.lease_seconds = lease_seconds
 
-    def run_once(self, now: datetime | None = None) -> TaskRecord | None:
-        claim = self.store.claim_next(self.executor_id, self.lease_seconds, now)
-        if claim is None:
-            return None
+    def execute_claim(self, claim: TaskClaim, now: datetime | None = None) -> TaskRecord:
+        if not isinstance(claim, TaskClaim) or claim.executor_id != self.executor_id:
+            raise TaskConflictError("claim does not belong to this task engine")
         handler = self.handlers.get(claim.tool)
         if handler is None:
-            return self.store.fail_step(claim, "unknown_handler", retry_delay_seconds=0, now=now, retryable=False)
+            return self.store.fail_step(
+                claim, "unknown_handler", retry_delay_seconds=0, now=now, retryable=False
+            )
         try:
             result = handler(dict(claim.input), claim.idempotency_key)
             _json(result, label="handler result")
         except Exception:
             return self.store.fail_step(claim, "handler_failed", now=now)
         return self.store.finish_step(claim, result, now=now)
+
+    def run_once(self, now: datetime | None = None) -> TaskRecord | None:
+        claim = self.store.claim_next(self.executor_id, self.lease_seconds, now)
+        if claim is None:
+            return None
+        return self.execute_claim(claim, now=now)
+
+
+class TaskWorker:
+    """Explicit host-managed polling worker with a concurrent lease heartbeat.
+
+    Constructing a worker starts no threads. The host calls run_once() or
+    run_forever(stop_event) and owns process lifecycle and shutdown.
+    """
+
+    def __init__(self, engine: TaskEngine, poll_interval_seconds: float = 1.0,
+                 heartbeat_interval_seconds: float = 10.0) -> None:
+        if not isinstance(engine, TaskEngine):
+            raise TaskValidationError("engine must be a TaskEngine")
+        if (isinstance(poll_interval_seconds, bool)
+                or not isinstance(poll_interval_seconds, (int, float))
+                or not 0.05 <= poll_interval_seconds <= 60):
+            raise TaskValidationError("poll interval must be between 0.05 and 60 seconds")
+        if (isinstance(heartbeat_interval_seconds, bool)
+                or not isinstance(heartbeat_interval_seconds, (int, float))
+                or not 0.05 <= heartbeat_interval_seconds < engine.lease_seconds):
+            raise TaskValidationError("heartbeat interval must be positive and shorter than the lease")
+        self.engine = engine
+        self.poll_interval_seconds = float(poll_interval_seconds)
+        self.heartbeat_interval_seconds = float(heartbeat_interval_seconds)
+
+    def run_once(self) -> TaskRecord | None:
+        engine = self.engine
+        claim = engine.store.claim_next(engine.executor_id, engine.lease_seconds)
+        if claim is None:
+            return None
+        heartbeat_stop = threading.Event()
+
+        def heartbeat() -> None:
+            while not heartbeat_stop.wait(self.heartbeat_interval_seconds):
+                try:
+                    engine.store.renew_lease(claim, engine.lease_seconds)
+                except Exception:
+                    # Completion will fail closed if the lease was lost or expired.
+                    return
+
+        thread = threading.Thread(target=heartbeat, name="capri-task-lease-heartbeat", daemon=True)
+        thread.start()
+        try:
+            return engine.execute_claim(claim)
+        finally:
+            heartbeat_stop.set()
+            thread.join(timeout=max(1.0, self.heartbeat_interval_seconds * 2))
+
+    def run_forever(self, stop_event: threading.Event) -> None:
+        if not callable(getattr(stop_event, "is_set", None)) or not callable(
+            getattr(stop_event, "wait", None)
+        ):
+            raise TaskValidationError("stop_event must provide is_set() and wait()")
+        while not stop_event.is_set():
+            result = self.run_once()
+            if result is None:
+                stop_event.wait(self.poll_interval_seconds)

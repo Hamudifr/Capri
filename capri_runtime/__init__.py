@@ -45,6 +45,7 @@ from .tasks import (
     TaskNotFoundError,
     TaskRecord,
     TaskValidationError,
+    TaskWorker,
 )
 
 __all__ = [
@@ -85,6 +86,7 @@ __all__ = [
     "TaskNotFoundError",
     "TaskRecord",
     "TaskValidationError",
+    "TaskWorker",
     "ToolBoundaryError",
     "ToolExecutionError",
     "ToolExecutor",
