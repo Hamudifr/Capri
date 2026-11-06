@@ -8,6 +8,7 @@ from capri_runtime.tools import (
     ApprovalGrant,
     ExecutionContext,
     HmacApprovalAuthority,
+    HmacApprovalKeyRing,
     InMemoryAuditSink,
     ToolExecutor,
     ToolRegistry,
@@ -81,6 +82,57 @@ class SignedApprovalTests(unittest.TestCase):
         with self.assertRaises(ApprovalRequiredError):
             self.executor.execute("delete_record", self.arguments, self.context_with(grant))
         self.assertEqual(self.calls, [])
+
+    def test_key_ring_rotation_verifies_old_key_by_explicit_id(self):
+        old_ring = HmacApprovalKeyRing({"old-v1": b"o" * 32}, active_key_id="old-v1")
+        old_authority = HmacApprovalAuthority(old_ring, clock=lambda: self.now)
+        grant = old_authority.issue(
+            "alice", "delete_record", argument_digest(self.arguments), ttl_seconds=120
+        )
+        self.assertEqual(grant.key_id, "old-v1")
+
+        rotated = HmacApprovalAuthority(
+            HmacApprovalKeyRing(
+                {"old-v1": b"o" * 32, "new-v2": b"n" * 32},
+                active_key_id="new-v2",
+            ),
+            clock=lambda: self.now,
+        )
+        self.assertTrue(rotated.verify(grant))
+        new_grant = rotated.issue(
+            "alice", "delete_record", argument_digest(self.arguments), ttl_seconds=120
+        )
+        self.assertEqual(new_grant.key_id, "new-v2")
+        self.assertTrue(rotated.verify(new_grant))
+
+        retired = HmacApprovalAuthority(
+            HmacApprovalKeyRing({"new-v2": b"n" * 32}, active_key_id="new-v2"),
+            clock=lambda: self.now,
+        )
+        self.assertFalse(retired.verify(grant))
+
+    def test_key_id_tampering_and_unknown_ids_fail_closed(self):
+        ring = HmacApprovalKeyRing(
+            {"active": b"a" * 32, "other": b"b" * 32}, active_key_id="active"
+        )
+        authority = HmacApprovalAuthority(ring, clock=lambda: self.now)
+        grant = authority.issue(
+            "alice", "delete_record", argument_digest(self.arguments), ttl_seconds=120
+        )
+        self.assertFalse(authority.verify(replace(grant, key_id="other")))
+        self.assertFalse(authority.verify(replace(grant, key_id="unknown")))
+        self.assertFalse(authority.verify(replace(grant, key_id=None)))
+
+    def test_key_ring_rejects_invalid_configuration(self):
+        for keys, active in (
+            ({}, "missing"),
+            ({"active": b"short"}, "active"),
+            ({"bad/id": b"a" * 32}, "bad/id"),
+            ({"active": b"a" * 32}, "missing"),
+        ):
+            with self.subTest(keys=keys, active=active):
+                with self.assertRaises(ToolValidationError):
+                    HmacApprovalKeyRing(keys, active_key_id=active)
 
     def test_signing_key_and_ttl_are_bounded(self):
         with self.assertRaises(ToolValidationError):
