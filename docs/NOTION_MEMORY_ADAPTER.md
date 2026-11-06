@@ -42,3 +42,14 @@ The REST transport pins `Notion-Version: 2026-03-11`, uses `POST /data_sources/{
 - The host is responsible for Notion integration sharing, token rotation, least-privilege scopes, and process supervision.
 
 Official references: [Notion versioning](https://developers.notion.com/reference/versioning), [query a data source](https://developers.notion.com/reference/query-a-data-source), [retrieve a page](https://developers.notion.com/reference/retrieve-a-page), and [update a page](https://developers.notion.com/reference/patch-page).
+
+
+## Optional live workspace verification
+
+The repository workflow includes a live smoke job that is disabled by default. To enable it, configure:
+
+- Repository variable `CAPRI_NOTION_LIVE_TESTS=true`.
+- Repository variable `CAPRI_MEMORY_DATA_SOURCE_ID=435a6e29-3b57-4637-908b-a07761e0df0f`.
+- Repository secret `NOTION_API_TOKEN` containing a least-privilege Notion integration token shared with the Capri Durable Memory data source.
+
+The smoke test creates a unique non-sensitive temporary record, reads it, corrects it through the supersession flow, searches it, archives it, and moves both temporary pages to Notion trash. It verifies that trashed pages are no longer retrievable. It does not permanently erase pages or store the token. Do not enable this job until the integration has the intended least-privilege access.
