@@ -38,6 +38,19 @@ class SQLiteMemoryStoreTests(unittest.TestCase):
         self.assertEqual(self.store.get(record.memory_id), record)
         self.assertEqual(record.status, "active")
         self.assertIsNone(record.supersedes_id)
+        self.assertEqual(record.sensitivity, "non_sensitive")
+        self.assertEqual(record.tags, ())
+
+    def test_tags_are_validated_and_persisted(self):
+        record = self.create(tags=("security", "memory"))
+        self.assertEqual(record.tags, ("memory", "security"))
+        self.assertEqual(self.store.get(record.memory_id).tags, ("memory", "security"))
+        with self.assertRaises(MemoryValidationError):
+            self.create(tags=("unknown",))
+        with self.assertRaises(MemoryValidationError):
+            self.create(tags=("security", "security"))
+        with self.assertRaises(TypeError):
+            self.create(sensitivity="sensitive")
 
     def test_database_is_private_on_posix(self):
         if os.name == "posix":
@@ -63,6 +76,8 @@ class SQLiteMemoryStoreTests(unittest.TestCase):
         corrected = self.store.correct(original.memory_id, content="Updated safe policy.")
         self.assertEqual(corrected.supersedes_id, original.memory_id)
         self.assertEqual(corrected.content, "Updated safe policy.")
+        self.assertEqual(corrected.sensitivity, "non_sensitive")
+        self.assertEqual(corrected.tags, original.tags)
         self.assertEqual(self.store.get(original.memory_id).status, "archived")
         self.assertEqual(self.store.search("Updated safe")[0].memory_id, corrected.memory_id)
         self.assertIn(("superseded", self.store.events(original.memory_id)[-1][1]),
