@@ -143,15 +143,28 @@ class HashChainLedger:
                 raise LedgerIntegrityError("parent_run_id does not reference an earlier run")
             digest = hashlib.sha256(bytes.fromhex(previous) + _canonical(payload)).hexdigest()
             entry = {"previous_hash": previous, "record": payload, "hash": digest}
-            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             serialized = json.dumps(entry, sort_keys=True, ensure_ascii=False, allow_nan=False)
             encoded = serialized.encode("utf-8")
             if len(encoded) > self.max_entry_bytes:
                 raise LedgerIntegrityError(f"new entry exceeds {self.max_entry_bytes} bytes")
-            with self.path.open("ab") as stream:
-                stream.write(encoded + b"\n")
-                stream.flush()
-                os.fsync(stream.fileno())
+            # Restrict newly created ledger files and tighten existing files
+            # on POSIX. Existing parent-directory permissions remain operator-owned.
+            flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
+            if hasattr(os, "O_BINARY"):
+                flags |= os.O_BINARY
+            descriptor = os.open(self.path, flags, 0o600)
+            try:
+                if hasattr(os, "fchmod"):
+                    os.fchmod(descriptor, 0o600)
+                with os.fdopen(descriptor, "ab") as stream:
+                    descriptor = -1
+                    stream.write(encoded + b"\n")
+                    stream.flush()
+                    os.fsync(stream.fileno())
+            finally:
+                if descriptor >= 0:
+                    os.close(descriptor)
             return digest
 
     def verify(self) -> dict[str, Any]:
