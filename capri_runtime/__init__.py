@@ -83,6 +83,8 @@ __all__ = [
     "ToolModelAdapter",
     "ToolOrchestrationError",
     "ToolOrchestrator",
+    "OpenAIResponsesAdapter",
+    "OpenAIResponsesAdapterError",
     "ApprovalChallenge",
     "ApprovalGrant",
     "ApprovalMacProvider",
@@ -152,3 +154,5 @@ __all__ = [
     "ToolValidationError",
     "ValidationError",
 ]
+
+from .openai_responses import OpenAIResponsesAdapter, OpenAIResponsesAdapterError
