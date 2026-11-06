@@ -32,7 +32,7 @@ Capri is a research and execution-assistance project. This repository contains a
 
 ## Current status
 
-Current `main` contains the integrated recovery foundation, permissioned tool boundary, durable SQLite task execution and lease renewal, durable audit/approval storage, and bounded local project memory.
+Current `main` contains the integrated recovery foundation, permissioned tool boundary, durable SQLite task execution, lease renewal and managed TaskWorker heartbeats, durable audit/approval storage, and bounded local project memory.
 
 - Recovery foundation merged in PR #1: `d42bfbb2f59a31c713b03f09d074da77b8fb6250`.
 - Permissioned tool boundary merged in PR #17: `35ddc8408a2389dff8594283d40d37b66905c0dc`.
@@ -40,8 +40,9 @@ Current `main` contains the integrated recovery foundation, permissioned tool bo
 - Durable project memory core merged in PR #24: `6c01190033c7ade9bb40414a0d86f5444fca0b46`.
 - Post-merge CI [42286526969](https://github.com/Hamudifr/Capri/actions/runs/42286526969) passed compileall, Capri Doctor 6/6, operational health 7/7, and 141 tests on each actual Python 3.11, 3.12, and 3.13 interpreter; all three job logs inspected.
 - Memory-core post-merge CI [42288996102](https://github.com/Hamudifr/Capri/actions/runs/42288996102) passed compileall, Capri Doctor, and 182 tests on each Python 3.11, 3.12, and 3.13 interpreter; all three job logs inspected.
+- Managed task-worker post-merge CI [42289268958](https://github.com/Hamudifr/Capri/actions/runs/42289268958) passed compileall, Capri Doctor, and 185 tests on each Python 3.11, 3.12, and 3.13 interpreter; all three job logs inspected.
 
-Implemented: hardened append-only hash-chain ledger; read-only Doctor diagnostics; dependency-aware operational health; provider-neutral in-memory sessions with optimistic concurrency and direct-store resource limits; explicit tool registry; bounded strict schemas; host permission checks; one-use action-bound approvals; bounded JSON/Unicode; redacted audit events; and a private SQLite store for durable audit metadata and cross-executor/process approval replay prevention.
+Implemented: hardened append-only hash-chain ledger; read-only Doctor diagnostics; dependency-aware operational health; provider-neutral in-memory sessions with optimistic concurrency and direct-store resource limits; explicit tool registry; bounded strict schemas; host permission checks; one-use action-bound approvals; bounded JSON/Unicode; redacted audit events; a private SQLite store for durable audit metadata and cross-executor/process approval replay prevention; and bounded local SQLite project memory with provenance, corrections, expiry, export, archive, and deletion.
 
 The tool boundary is not a sandbox or provider integration. The host must authenticate principals and construct trusted execution contexts. The in-memory audit/approval stores are development-only; `SQLiteSecurityStore` provides durable local metadata and replay prevention but is not encrypted and requires host-managed backup/retention. Handlers run with process privileges. No shell, filesystem, network, dynamic import, automatic plugin discovery, or X5 access is exposed.
 
