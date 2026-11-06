@@ -65,7 +65,9 @@ def _canonical_json(value: Any, *, max_bytes: int, label: str) -> tuple[str, byt
     return encoded, raw
 
 
-def _validate_schema_definition(schema: Any, *, root: bool = False) -> None:
+def _validate_schema_definition(schema: Any, *, root: bool = False, depth: int = 0) -> None:
+    if depth > 16:
+        raise ToolValidationError("schema nesting exceeds 16 levels")
     if not isinstance(schema, dict):
         raise ToolValidationError("schema nodes must be objects")
     if set(schema) - _SCHEMA_KEYS:
@@ -99,8 +101,8 @@ def _validate_schema_definition(schema: Any, *, root: bool = False) -> None:
     if kind == "object":
         properties = schema.get("properties", {})
         required = schema.get("required", [])
-        if not isinstance(properties, dict) or any(not isinstance(k, str) for k in properties):
-            raise ToolValidationError("object properties must be a string-keyed object")
+        if not isinstance(properties, dict) or len(properties) > 128 or any(not isinstance(k, str) for k in properties):
+            raise ToolValidationError("object properties must be a string-keyed object of at most 128 fields")
         if not isinstance(required, list) or any(not isinstance(x, str) for x in required):
             raise ToolValidationError("required must be a list of property names")
         if len(required) != len(set(required)) or any(x not in properties for x in required):
@@ -108,11 +110,24 @@ def _validate_schema_definition(schema: Any, *, root: bool = False) -> None:
         if schema.get("additionalProperties", False) is not False:
             raise ToolValidationError("additionalProperties must be false")
         for child in properties.values():
-            _validate_schema_definition(child)
+            _validate_schema_definition(child, depth=depth + 1)
     elif kind == "array":
         if "items" not in schema:
             raise ToolValidationError("array schemas require items")
-        _validate_schema_definition(schema["items"])
+        _validate_schema_definition(schema["items"], depth=depth + 1)
+
+
+def _assert_json_object_keys(value: Any, depth: int = 0) -> None:
+    if depth > 16:
+        raise ToolValidationError("JSON nesting exceeds 16 levels")
+    if isinstance(value, dict):
+        if any(not isinstance(key, str) for key in value):
+            raise ToolValidationError("JSON object keys must be strings")
+        for child in value.values():
+            _assert_json_object_keys(child, depth + 1)
+    elif isinstance(value, list):
+        for child in value:
+            _assert_json_object_keys(child, depth + 1)
 
 
 def _matches_type(value: Any, kind: str) -> bool:
@@ -131,7 +146,9 @@ def _matches_type(value: Any, kind: str) -> bool:
     return value is None
 
 
-def _validate_value(value: Any, schema: dict[str, Any], path: str = "arguments") -> None:
+def _validate_value(value: Any, schema: dict[str, Any], path: str = "arguments", depth: int = 0) -> None:
+    if depth > 16:
+        raise ToolValidationError(f"{path} exceeds the maximum nesting depth")
     kind = schema["type"]
     if not _matches_type(value, kind):
         raise ToolValidationError(f"{path} has the wrong type")
@@ -146,12 +163,12 @@ def _validate_value(value: Any, schema: dict[str, Any], path: str = "arguments")
         if extra:
             raise ToolValidationError(f"{path} contains undeclared properties")
         for key, item in value.items():
-            _validate_value(item, properties[key], f"{path}.{key}")
+            _validate_value(item, properties[key], f"{path}.{key}", depth + 1)
     elif kind == "array":
         if len(value) < schema.get("minItems", 0) or len(value) > schema.get("maxItems", 10_000):
             raise ToolValidationError(f"{path} has an invalid item count")
         for index, item in enumerate(value):
-            _validate_value(item, schema["items"], f"{path}[{index}]")
+            _validate_value(item, schema["items"], f"{path}[{index}]", depth + 1)
     elif kind == "string":
         if len(value) < schema.get("minLength", 0) or len(value) > schema.get("maxLength", 1_000_000):
             raise ToolValidationError(f"{path} has an invalid string length")
@@ -359,6 +376,7 @@ class ToolExecutor:
         encoded, raw = _canonical_json(arguments, max_bytes=self.max_argument_bytes, label="arguments")
         if not isinstance(arguments, dict):
             raise ToolValidationError("tool arguments must be a JSON object")
+        _assert_json_object_keys(arguments)
         _validate_value(json.loads(encoded), spec.schema())
         digest = hashlib.sha256(raw).hexdigest()
         if spec.requires_approval:
@@ -373,6 +391,7 @@ class ToolExecutor:
                 raise
             raise ToolExecutionError("tool handler failed; details suppressed") from None
         try:
+            _assert_json_object_keys(result)
             result_json, _ = _canonical_json(
                 result, max_bytes=self.max_result_bytes, label="tool result"
             )
