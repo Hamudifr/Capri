@@ -10,6 +10,9 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 
+import capri_core.ledger as ledger_module
+from unittest import mock
+
 from capri_core.__main__ import main as cli_main
 
 from capri_core import (
@@ -723,6 +726,186 @@ class DoctorTests(unittest.TestCase):
                 code = cli_main(["doctor", "--root", str(root)])
             self.assertEqual(code, 1)
             self.assertIn("[FAIL] Recovery CI coverage", output.getvalue())
+
+
+
+class LedgerPathSafetyTests(unittest.TestCase):
+    def test_final_symlink_is_rejected_without_changing_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "target.jsonl"
+            link = Path(directory) / "linked.jsonl"
+            HashChainLedger(target).append(passing("target-record"))
+            before = target.read_bytes()
+            link.symlink_to(target)
+
+            with self.assertRaises(LedgerIntegrityError):
+                HashChainLedger(link).append(passing("rejected-record"))
+            with self.assertRaises(LedgerIntegrityError):
+                HashChainLedger(link).verify()
+
+            self.assertEqual(target.read_bytes(), before)
+
+    def test_parent_symlink_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            real_parent = root / "real"
+            real_parent.mkdir()
+            parent_link = root / "linked-parent"
+            parent_link.symlink_to(real_parent, target_is_directory=True)
+
+            with self.assertRaises(LedgerIntegrityError):
+                HashChainLedger(parent_link / "runs.jsonl").append(passing("rejected-record"))
+            self.assertFalse((real_parent / "runs.jsonl").exists())
+
+    def test_non_regular_ledger_path_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ledger-directory"
+            path.mkdir()
+            with self.assertRaises(LedgerIntegrityError):
+                HashChainLedger(path).append(passing("rejected-record"))
+            self.assertTrue(path.is_dir())
+
+
+    def test_missing_file_scan_closes_parent_descriptor(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "missing.jsonl"
+            opened = []
+            real_open = os.open
+
+            def tracked_open(*args, **kwargs):
+                descriptor = real_open(*args, **kwargs)
+                opened.append(descriptor)
+                return descriptor
+
+            with mock.patch.object(ledger_module.os, "open", side_effect=tracked_open):
+                with self.assertRaises(LedgerIntegrityError):
+                    HashChainLedger(path).verify()
+
+            for descriptor in opened:
+                with self.assertRaises(OSError):
+                    os.fstat(descriptor)
+
+    def test_invalid_ledger_is_not_repermissioned_by_failed_append(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "runs.jsonl"
+            path.write_bytes(b"not-a-valid-ledger\\n")
+            path.chmod(0o644)
+
+            with self.assertRaises(LedgerIntegrityError):
+                HashChainLedger(path).append(passing("rejected-record"))
+
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o644)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX directory fsync is required")
+    def test_first_creation_fsyncs_file_then_parent_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "runs.jsonl"
+            real_fsync = os.fsync
+            observed = []
+
+            def record_fsync(descriptor):
+                mode = os.fstat(descriptor).st_mode
+                observed.append("directory" if stat.S_ISDIR(mode) else "file")
+                return real_fsync(descriptor)
+
+            with mock.patch.object(ledger_module.os, "fsync", side_effect=record_fsync):
+                HashChainLedger(path).append(passing("first"))
+
+            self.assertEqual(observed, ["file", "directory"])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX directory fsync is required")
+    def test_existing_append_does_not_fsync_parent_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "runs.jsonl"
+            ledger = HashChainLedger(path)
+            ledger.append(passing("first"))
+            real_fsync = os.fsync
+            observed = []
+
+            def record_fsync(descriptor):
+                mode = os.fstat(descriptor).st_mode
+                observed.append("directory" if stat.S_ISDIR(mode) else "file")
+                return real_fsync(descriptor)
+
+            with mock.patch.object(ledger_module.os, "fsync", side_effect=record_fsync):
+                ledger.append(passing("second", parent="first"))
+
+            self.assertEqual(observed, ["file"])
+
+    def _assert_failed_append_is_latched_and_closes_descriptors(self, helper, failure):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "runs.jsonl"
+            ledger = HashChainLedger(path)
+            opened = []
+            real_open = os.open
+
+            def tracked_open(*args, **kwargs):
+                descriptor = real_open(*args, **kwargs)
+                opened.append(descriptor)
+                return descriptor
+
+            with mock.patch.object(ledger_module.os, "open", side_effect=tracked_open):
+                with mock.patch.object(ledger_module, helper, side_effect=failure):
+                    with self.assertRaises(LedgerIntegrityError):
+                        ledger.append(passing("first"))
+
+            for descriptor in opened:
+                with self.assertRaises(OSError):
+                    os.fstat(descriptor)
+
+            before = path.read_bytes() if path.exists() else b""
+            with self.assertRaisesRegex(LedgerIntegrityError, "previous append failed"):
+                ledger.append(passing("second"))
+            with self.assertRaisesRegex(LedgerIntegrityError, "previous append failed"):
+                ledger.verify()
+            self.assertEqual(path.read_bytes() if path.exists() else b"", before)
+
+    def test_write_failure_closes_descriptors_and_latches_path(self):
+        def fail_after_partial_write(stream, data):
+            stream.write(data[:5])
+            raise OSError("injected write failure")
+
+        self._assert_failed_append_is_latched_and_closes_descriptors(
+            "_write_entry", fail_after_partial_write
+        )
+
+    def test_flush_failure_closes_descriptors_and_latches_path(self):
+        self._assert_failed_append_is_latched_and_closes_descriptors(
+            "_flush_entry", OSError("injected flush failure")
+        )
+
+    def test_file_fsync_failure_closes_descriptors_and_latches_path(self):
+        self._assert_failed_append_is_latched_and_closes_descriptors(
+            "_fsync_file", OSError("injected file fsync failure")
+        )
+
+    @unittest.skipUnless(os.name == "posix", "POSIX directory fsync is required")
+    def test_directory_fsync_failure_closes_descriptors_and_latches_path(self):
+        self._assert_failed_append_is_latched_and_closes_descriptors(
+            "_fsync_directory", OSError("injected directory fsync failure")
+        )
+
+
+    @unittest.skipUnless(os.name == "posix", "POSIX directory fsync is required")
+    def test_nested_new_parent_directories_are_synced_before_file_creation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "first" / "second" / "runs.jsonl"
+            real_fsync = os.fsync
+            observed = []
+
+            def record_fsync(descriptor):
+                mode = os.fstat(descriptor).st_mode
+                observed.append("directory" if stat.S_ISDIR(mode) else "file")
+                return real_fsync(descriptor)
+
+            with mock.patch.object(ledger_module.os, "fsync", side_effect=record_fsync):
+                HashChainLedger(path).append(passing("nested-first"))
+
+            self.assertEqual(
+                observed,
+                ["directory", "directory", "directory", "directory", "file", "directory"],
+            )
+            self.assertEqual(HashChainLedger(path).verify()["records"], 1)
 
 
 if __name__ == "__main__":
