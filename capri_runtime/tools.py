@@ -52,6 +52,10 @@ _NAME_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
+def _contains_surrogate(value: str) -> bool:
+    return any(0xD800 <= ord(character) <= 0xDFFF for character in value)
+
+
 def _canonical_json(value: Any, *, max_bytes: int, label: str) -> tuple[str, bytes]:
     try:
         encoded = json.dumps(
