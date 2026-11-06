@@ -583,6 +583,7 @@ class LedgerPathSafetyTests(unittest.TestCase):
                             original.append(passing("uncertain-directory-fsync"))
 
                     alias_path.hardlink_to(original_path)
+                    self.assertEqual(os.stat(original_path).st_ino, os.stat(alias_path).st_ino)
                     before = original_path.read_bytes()
                     self.assertEqual(alias_path.read_bytes(), before)
                     alias = HashChainLedger(alias_path)
