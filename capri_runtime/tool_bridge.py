@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import threading
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -114,6 +115,8 @@ class ToolExecutionBridge:
         self,
         requests: list[ToolCallRequest] | tuple[ToolCallRequest, ...],
         context: ExecutionContext,
+        *,
+        cancellation_event: threading.Event | None = None,
     ) -> tuple[ToolCallOutcome, ...]:
         """Execute a fully validated batch in order using host-supplied authority.
 
@@ -123,6 +126,8 @@ class ToolExecutionBridge:
         """
         if not isinstance(context, ExecutionContext):
             raise ToolBridgeValidationError("a trusted ExecutionContext is required")
+        if cancellation_event is not None and not callable(getattr(cancellation_event, "is_set", None)):
+            raise ToolBridgeValidationError("cancellation_event must expose is_set()")
         if not isinstance(requests, (list, tuple)):
             raise ToolBridgeValidationError("requests must be a list or tuple")
         if not requests or len(requests) > self.max_calls:
@@ -168,6 +173,15 @@ class ToolExecutionBridge:
 
         outcomes = []
         for call_id, name, arguments, digest, _ in prepared:
+            if cancellation_event is not None and cancellation_event.is_set():
+                outcomes.extend(
+                    ToolCallOutcome(
+                        pending_id, pending_name, "cancelled", error_code="cancelled",
+                        argument_digest=pending_digest,
+                    )
+                    for pending_id, pending_name, _, pending_digest, _ in prepared[len(outcomes):]
+                )
+                break
             try:
                 result = self.executor.execute(name, arguments, context)
             except ApprovalRequiredError:
