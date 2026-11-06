@@ -361,6 +361,28 @@ class SessionTurnCoordinator:
             snapshot = store.get(session_id)
             if snapshot.closed:
                 raise ToolOrchestrationError("session is closed")
+
+            # Validate persistence caps before model invocation or tool side effects.
+            # Assistant tool-call envelopes and final assistant text share max_output_chars;
+            # tool-result messages use max_tool_chars. The byte cap is conservative for
+            # the store's character limits because UTF-8 bytes are never fewer than chars.
+            required_assistant_chars = max(
+                orchestrator.max_output_chars,
+                orchestrator.max_tool_message_bytes,
+            )
+            if store.max_output_chars < required_assistant_chars:
+                raise ToolOrchestrationError(
+                    "session max_output_chars must cover assistant and tool-call message limits"
+                )
+            if store.max_tool_chars < orchestrator.max_tool_message_bytes:
+                raise ToolOrchestrationError(
+                    "session max_tool_chars must cover the orchestrator tool-message byte limit"
+                )
+            if isinstance(user_text, str) and len(user_text) > store.max_input_chars:
+                raise ToolOrchestrationError(
+                    "user_text exceeds the session store input limit"
+                )
+
             result = orchestrator.run(
                 session_id,
                 user_text,
