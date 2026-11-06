@@ -353,6 +353,8 @@ class SQLiteMemoryStore:
                 row = db.execute("SELECT 1 FROM memories WHERE memory_id=?", (memory_id,)).fetchone()
                 if row is None:
                     raise MemoryNotFoundError("memory record not found")
+                # A surviving correction must not prevent explicit deletion of its predecessor.
+                db.execute("UPDATE memories SET supersedes_id=NULL WHERE supersedes_id=?", (memory_id,))
                 db.execute("DELETE FROM memories WHERE memory_id=?", (memory_id,))
                 self._event(db, memory_id, "deleted", now)
                 db.execute("COMMIT")
