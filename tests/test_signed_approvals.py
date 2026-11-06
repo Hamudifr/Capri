@@ -130,28 +130,40 @@ class SignedApprovalTests(unittest.TestCase):
             active_key_id = "kms-key-version-7"
 
             def __init__(self):
-                self.__secret = b"remote-provider-secret" * 2
+                self.__keys = {
+                    "kms-key-version-7": b"remote-provider-secret" * 2,
+                    "kms-key-version-8": b"rotated-provider-secret" * 2,
+                }
                 self.signed = []
                 self.verified = []
 
             def sign(self, key_id, payload):
                 self.signed.append(key_id)
-                return hmac.new(self.__secret, payload, hashlib.sha256).digest()
+                return hmac.new(self.__keys[key_id], payload, hashlib.sha256).digest()
 
             def verify(self, key_id, payload, signature):
                 self.verified.append(key_id)
-                expected = hmac.new(self.__secret, payload, hashlib.sha256).digest()
+                key = self.__keys.get(key_id)
+                if key is None:
+                    return False
+                expected = hmac.new(key, payload, hashlib.sha256).digest()
                 return hmac.compare_digest(expected, signature)
 
         provider = RemoteMacProvider()
         authority = HmacApprovalAuthority(provider, clock=lambda: self.now)
-        grant = authority.issue(
+        old_grant = authority.issue(
             "alice", "delete_record", argument_digest(self.arguments), ttl_seconds=120
         )
-        self.assertEqual(grant.key_id, "kms-key-version-7")
-        self.assertEqual(provider.signed, ["kms-key-version-7"])
-        self.assertTrue(authority.verify(grant))
-        self.assertEqual(provider.verified, ["kms-key-version-7"])
+        provider.active_key_id = "kms-key-version-8"
+        new_grant = authority.issue(
+            "alice", "delete_record", argument_digest(self.arguments), ttl_seconds=120
+        )
+        self.assertEqual(old_grant.key_id, "kms-key-version-7")
+        self.assertEqual(new_grant.key_id, "kms-key-version-8")
+        self.assertEqual(provider.signed, ["kms-key-version-7", "kms-key-version-8"])
+        self.assertTrue(authority.verify(old_grant))
+        self.assertTrue(authority.verify(new_grant))
+        self.assertEqual(provider.verified, ["kms-key-version-7", "kms-key-version-8"])
         self.assertIsNone(authority._legacy_key)
 
     def test_mac_provider_failures_are_closed(self):
