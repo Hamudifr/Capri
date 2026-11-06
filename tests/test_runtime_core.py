@@ -557,5 +557,36 @@ class LedgerPathSafetyTests(unittest.TestCase):
             self.assertTrue(independent.verify()["valid"])
 
 
+    @unittest.skipUnless(os.name == "posix", "POSIX descriptor semantics are required")
+    def test_uncertain_inode_guard_cap_fails_closed_globally(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            uncertain = HashChainLedger(root / "uncertain.jsonl")
+            unrelated = HashChainLedger(root / "unrelated.jsonl")
+
+            # A zero-cap fixture exercises the same fail-closed branch as a full
+            # 128-descriptor guard table without opening 128 real descriptors.
+            with (
+                mock.patch.object(ledger_module, "_UNCERTAIN_ALL", False),
+                mock.patch.object(ledger_module, "_UNCERTAIN_PATHS", set()),
+                mock.patch.object(ledger_module, "_UNCERTAIN_INODES", set()),
+                mock.patch.object(ledger_module, "_UNCERTAIN_INODE_FDS", {}),
+                mock.patch.object(ledger_module, "_MAX_UNCERTAIN_INODE_GUARDS", 0),
+                mock.patch.object(
+                    ledger_module,
+                    "_fsync_file",
+                    side_effect=OSError("injected file fsync failure"),
+                ),
+            ):
+                with self.assertRaises(LedgerIntegrityError):
+                    uncertain.append(passing("guard-cap"))
+
+                self.assertTrue(ledger_module._UNCERTAIN_ALL)
+                with self.assertRaisesRegex(LedgerIntegrityError, "previous append failed"):
+                    unrelated.verify()
+                with self.assertRaisesRegex(LedgerIntegrityError, "previous append failed"):
+                    unrelated.append(passing("must-fail-closed"))
+
+
 if __name__ == "__main__":
     unittest.main()
