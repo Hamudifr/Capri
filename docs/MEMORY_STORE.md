@@ -5,9 +5,9 @@
 `capri_runtime.memory` provides a provider-neutral record model and a bounded local SQLite store for non-sensitive project knowledge. It is an internal building block, not a connected Notion client or a model orchestration layer.
 
 The current store supports:
-- create and retrieve records with source, confidence, scope, type, retention, timestamps, and expiry metadata;
+- create and retrieve records with source, confidence, scope, type, explicit non-sensitive classification, tags, retention, timestamps, and expiry metadata;
 - deterministic token-AND search with bounded offset pagination and exact provenance fields;
-- corrections as new records linked to the prior record, which is archived rather than silently overwritten;
+- corrections as new records linked to the prior record, which is archived rather than silently overwritten;\n- controlled tags from the project's six-tag vocabulary;
 - explicit archive and physical content deletion (with a minimal ID-only deletion event);
 - expiry sweeps and exclusion of expired records from active retrieval;
 - deterministic JSON export;
@@ -15,7 +15,7 @@ The current store supports:
 
 ## Trust and privacy rules
 
-- The API intentionally has no `sensitive=True` or secret-storage mode. It is intended only for non-sensitive project knowledge. This is a usage policy, not an automatic content classifier: callers must screen text before storing it; the store cannot reliably infer whether arbitrary content contains sensitive information.
+- Every record is marked `sensitivity='non_sensitive'`, and the SQLite schema constrains that field to the same value. This is a caller-declared classification, not an automatic content classifier: callers must screen text before storing it; the store cannot reliably infer whether arbitrary content contains sensitive information. There is no secret-storage mode. This is a usage policy, not an automatic content classifier: callers must screen text before storing it; the store cannot reliably infer whether arbitrary content contains sensitive information.
 - Retrieved text is untrusted data. It cannot alter system/user authority, authorize tools, or bypass the execution gate.
 - Do not deserialize memory content into execution contexts, approval grants, permissions, or executable code.
 - Provider adapters own their authentication and transport. No Notion credentials or provider SDK are embedded in this repository.
