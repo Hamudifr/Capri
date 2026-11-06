@@ -35,6 +35,7 @@ class MemoryProvider(Protocol):
     def archive(self, memory_id: str) -> "MemoryRecord": ...
     def delete(self, memory_id: str) -> None: ...
     def export_json(self) -> str: ...
+    def expire(self, *, now: datetime | None = None) -> tuple[str, ...]: ...
 
 @dataclass(frozen=True, slots=True)
 class MemoryRecord:
@@ -55,7 +56,6 @@ class MemoryRecord:
 _ALLOWED_TYPES = {"operating_directive", "architecture_decision", "project_fact", "security_boundary", "user_preference"}
 _ALLOWED_CONFIDENCE = {"user_directed", "verified", "inferred", "unverified"}
 _ALLOWED_RETENTION = {"keep", "expire_30d", "expire_90d", "archive_when_superseded"}
-_ALLOWED_STATUS = {"active", "review", "archived"}
 _MAX_TITLE = 200
 _MAX_CONTENT = 20_000
 _MAX_SOURCE = 2_048
@@ -185,11 +185,11 @@ class SQLiteMemoryStore:
         _validate_text(content, "content", _MAX_CONTENT)
         _validate_text(scope, "scope", _MAX_SCOPE)
         _validate_text(source, "source", _MAX_SOURCE)
-        if record_type not in _ALLOWED_TYPES:
+        if not isinstance(record_type, str) or record_type not in _ALLOWED_TYPES:
             raise MemoryValidationError("unsupported record_type")
-        if confidence not in _ALLOWED_CONFIDENCE:
+        if not isinstance(confidence, str) or confidence not in _ALLOWED_CONFIDENCE:
             raise MemoryValidationError("unsupported confidence")
-        if retention not in _ALLOWED_RETENTION:
+        if not isinstance(retention, str) or retention not in _ALLOWED_RETENTION:
             raise MemoryValidationError("unsupported retention")
         expiry = _validate_expiry(expires_at)
         if retention in {"expire_30d", "expire_90d"} and expiry is None:
@@ -200,12 +200,20 @@ class SQLiteMemoryStore:
         with self._lock:
             db = self._connect()
             try:
+                db.execute("BEGIN IMMEDIATE")
                 count = db.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
                 if count >= _MAX_RECORDS:
                     raise MemoryValidationError("memory record capacity reached")
                 db.execute("INSERT INTO memories VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                           (*asdict(record).values(),))
+                           tuple(asdict(record).values()))
                 self._event(db, record.memory_id, "created", now)
+                db.execute("COMMIT")
+            except Exception:
+                try:
+                    db.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+                raise
             finally:
                 db.close()
         return record
@@ -267,11 +275,11 @@ class SQLiteMemoryStore:
         _validate_text(values["content"], "content", _MAX_CONTENT)
         _validate_text(values["scope"], "scope", _MAX_SCOPE)
         _validate_text(values["source"], "source", _MAX_SOURCE)
-        if values["record_type"] not in _ALLOWED_TYPES:
+        if not isinstance(values["record_type"], str) or values["record_type"] not in _ALLOWED_TYPES:
             raise MemoryValidationError("unsupported record_type")
-        if values["confidence"] not in _ALLOWED_CONFIDENCE:
+        if not isinstance(values["confidence"], str) or values["confidence"] not in _ALLOWED_CONFIDENCE:
             raise MemoryValidationError("unsupported confidence")
-        if values["retention"] not in _ALLOWED_RETENTION:
+        if not isinstance(values["retention"], str) or values["retention"] not in _ALLOWED_RETENTION:
             raise MemoryValidationError("unsupported retention")
         expiry = _validate_expiry(values["expires_at"])
         if values["retention"] in {"expire_30d", "expire_90d"} and expiry is None:
@@ -312,31 +320,47 @@ class SQLiteMemoryStore:
         return self.get(corrected.memory_id)
 
     def archive(self, memory_id: str) -> MemoryRecord:
-        record = self.get(memory_id)
-        now = _iso(_now())
-        with self._lock:
-            db = self._connect()
-            try:
-                db.execute("UPDATE memories SET status='archived', updated_at=? WHERE memory_id=?",
-                           (now, memory_id))
-                self._event(db, memory_id, "archived", now)
-            finally:
-                db.close()
-        return self.get(record.memory_id)
-
-    def delete(self, memory_id: str) -> None:
-        self.get(memory_id)
+        _validate_text(memory_id, "memory_id", 64)
         now = _iso(_now())
         with self._lock:
             db = self._connect()
             try:
                 db.execute("BEGIN IMMEDIATE")
+                row = db.execute("SELECT 1 FROM memories WHERE memory_id=?", (memory_id,)).fetchone()
+                if row is None:
+                    raise MemoryNotFoundError("memory record not found")
+                db.execute("UPDATE memories SET status='archived', updated_at=? WHERE memory_id=?",
+                           (now, memory_id))
+                self._event(db, memory_id, "archived", now)
+                db.execute("COMMIT")
+            except Exception:
+                try:
+                    db.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+                raise
+            finally:
+                db.close()
+        return self.get(memory_id)
+
+    def delete(self, memory_id: str) -> None:
+        _validate_text(memory_id, "memory_id", 64)
+        now = _iso(_now())
+        with self._lock:
+            db = self._connect()
+            try:
+                db.execute("BEGIN IMMEDIATE")
+                row = db.execute("SELECT 1 FROM memories WHERE memory_id=?", (memory_id,)).fetchone()
+                if row is None:
+                    raise MemoryNotFoundError("memory record not found")
                 db.execute("DELETE FROM memories WHERE memory_id=?", (memory_id,))
                 self._event(db, memory_id, "deleted", now)
                 db.execute("COMMIT")
             except Exception:
-                try: db.execute("ROLLBACK")
-                except sqlite3.Error: pass
+                try:
+                    db.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
                 raise
             finally:
                 db.close()
@@ -348,7 +372,7 @@ class SQLiteMemoryStore:
             try:
                 db.execute("BEGIN IMMEDIATE")
                 rows = db.execute(
-                    "SELECT memory_id FROM memories WHERE status IN ('active','review') AND expires_at IS NOT NULL AND expires_at <= ?",
+                    "SELECT memory_id FROM memories WHERE status IN ('active','review') AND expires_at IS NOT NULL AND expires_at <= ? ORDER BY memory_id",
                     (instant,),
                 ).fetchall()
                 ids = tuple(row["memory_id"] for row in rows)
