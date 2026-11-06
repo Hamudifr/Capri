@@ -85,6 +85,23 @@ class HostAuthorityResolverTests(unittest.TestCase):
         with self.assertRaises(HostAuthorityError):
             bad_resolver.resolve("opaque-host-credential")
 
+    def test_unbounded_permission_and_approval_iterables_are_consumed_only_to_limit(self):
+        resolver = HostAuthorityResolver(
+            lambda credential: "alice",
+            lambda principal: __import__("itertools").repeat("records:read"),
+        )
+        with self.assertRaises(HostAuthorityError):
+            resolver.resolve("opaque")
+
+        grant = ApprovalGrant("grant-1", "alice", "delete_record", "a" * 64, "2099-01-01T00:00:00+00:00")
+        resolver = HostAuthorityResolver(
+            lambda credential: "alice",
+            lambda principal: ("records:delete",),
+            lambda principal: __import__("itertools").repeat(grant),
+        )
+        with self.assertRaises(HostAuthorityError):
+            resolver.resolve("opaque")
+
     def test_callback_construction_is_trusted_host_configuration(self):
         with self.assertRaises(HostAuthorityError):
             HostAuthorityResolver("authenticate", lambda principal: ())
