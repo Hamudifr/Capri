@@ -83,3 +83,12 @@ The database path must be in an existing directory owned by the current user and
 Both `SessionStore` and `SQLiteSessionStore` expose `commit_turn_messages(session_id, expected_version, turn_messages)`. It atomically appends one complete turn beginning with one user message and ending with an assistant message; intermediate assistant tool-call messages and tool-result messages are preserved in order. The session version advances once per user turn. Invalid role sequences, incomplete turns, oversized messages, stale versions, and closed sessions fail without committing.
 
 A host can persist a completed `ToolOrchestrator` result by loading the session snapshot, running the orchestrator with that snapshot as history, extracting the appended turn from `result.messages[len(session.messages):]`, then passing that tuple and the original `session.version` to `commit_turn_messages`. The host must serialize turns per session **before** calling the orchestrator: optimistic commit detects a stale result after generation, but it cannot undo tool side effects already performed by a concurrent turn. The SQLite implementation protects the final transcript commit across processes; it does not itself provide a pre-execution session lease.
+
+
+## Same-session turn coordination
+
+`SessionTurnCoordinator.run_and_commit(orchestrator, store, session_id, user_text, context)` provides a bounded-memory, fixed-stripe lock coordinator for one host process. It holds the session lock across snapshot retrieval, model/tool orchestration, and the atomic `commit_turn_messages` call. This prevents two requests routed through the same coordinator instance from executing tools concurrently against the same session. Hash collisions can serialize unrelated sessions but cannot weaken same-session exclusion.
+
+The coordinator also passes the store's message-count limit into the orchestrator. The orchestrator reserves room for the current tool-call messages, all corresponding tool results, and a final assistant message before executing a batch. This avoids performing side effects when the session cannot store the completed turn.
+
+**Multi-process limitation:** these locks are process-local. A deployment with multiple worker processes or hosts must route a session to one coordinator or add a distributed pre-execution lease with renewal and stale-owner fencing. SQLite optimistic version checks protect transcript integrity but cannot undo tool side effects performed before a losing commit. The coordinator is not a distributed lock service.
