@@ -247,17 +247,24 @@ class SQLiteSessionStoreTests(unittest.TestCase):
         after_expiry = datetime(2030, 1, 1, 0, 0, 1, tzinfo=timezone.utc)
         write_lock = sqlite3.connect(self.path, timeout=5, isolation_level=None)
         write_lock.execute("BEGIN IMMEDIATE")
-        started = threading.Event()
+        connection_opened = threading.Event()
         clock_called = threading.Event()
         lock_released = threading.Event()
         outcomes = []
+        original_connect = self.store._connect
+
+        def tracked_connect():
+            connection = original_connect()
+            connection_opened.set()
+            return connection
+
+        self.store._connect = tracked_connect
 
         def fake_now():
             clock_called.set()
             return after_expiry if lock_released.is_set() else before_expiry
 
         def renew():
-            started.set()
             try:
                 outcomes.append(self.store.renew_turn_lease(session.session_id, "worker", 3))
             except Exception as exc:
@@ -266,11 +273,12 @@ class SQLiteSessionStoreTests(unittest.TestCase):
         with patch.object(SQLiteSessionStore, "_lease_now", new=staticmethod(fake_now)):
             worker = threading.Thread(target=renew)
             worker.start()
-            self.assertTrue(started.wait(timeout=1))
-            self.assertFalse(clock_called.wait(timeout=0.1))
+            self.assertTrue(connection_opened.wait(timeout=1))
+            self.assertFalse(clock_called.is_set())
             lock_released.set()
             write_lock.execute("ROLLBACK")
             worker.join(timeout=3)
+        self.store._connect = original_connect
 
         write_lock.close()
         self.assertFalse(worker.is_alive())
