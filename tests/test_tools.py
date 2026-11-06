@@ -318,7 +318,7 @@ class ToolOrchestrationTests(unittest.TestCase):
             temp.cleanup()
 
     def test_memory_requires_explicit_memory_aware_adapter_before_tool_discovery(self):
-        store_temp = __import__("tempfile").TemporaryDirectory()
+        store_temp = tempfile.TemporaryDirectory()
         try:
             store = SQLiteMemoryStore(store_temp.name + "/memory.sqlite3")
             record = store.create(
