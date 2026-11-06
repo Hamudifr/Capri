@@ -399,6 +399,8 @@ class SessionTurnCoordinator:
         session_id: str,
         user_text: str,
         context: ExecutionContext,
+        *,
+        memory_context: UntrustedMemoryContext | None = None,
     ) -> CommittedOrchestration:
         """Run and persist one turn under local and available durable lease locks."""
         if not callable(getattr(orchestrator, "run", None)):
@@ -482,6 +484,7 @@ class SessionTurnCoordinator:
                     context,
                     max_total_messages=store.max_session_messages,
                     cancellation_event=lease_lost,
+                    memory_context=memory_context,
                 )
                 prefix_length = len(snapshot.messages)
                 if result.messages[:prefix_length] != snapshot.messages:
