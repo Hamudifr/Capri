@@ -526,6 +526,9 @@ class DoctorTests(unittest.TestCase):
         overrides = (
             "permissions: {contents: write},\n",
             '"permissions": {contents: write},\n',
+            "permissions:\n      {contents: write},\n",
+            '"permissions":\n      {contents: write},\n',
+            "'permissions':\n      {contents: write},\n',
         )
         for override in overrides:
             with self.subTest(override=override), tempfile.TemporaryDirectory() as directory:
