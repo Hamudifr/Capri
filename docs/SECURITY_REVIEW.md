@@ -6,7 +6,7 @@ This document records the current trust boundaries, verified controls, and unres
 
 ## Scope and assets
 
-The current runtime is a synchronous Python library with process-local sessions and a host-injected text adapter. It does not execute tools, persist transcripts, retrieve external documents, or authenticate users.
+The current runtime is a synchronous Python library with process-local sessions and a host-injected text adapter. A separate permissioned tool-execution gate is implemented in `capri_runtime.tools`; it accepts only explicitly registered host handlers after trusted permission/schema/approval checks. It is not wired to a model provider, is not a sandbox, does not persist transcripts, does not retrieve external documents, and does not authenticate users.
 
 Assets requiring protection as the runtime grows:
 - session transcripts and user-provided content;
@@ -33,6 +33,10 @@ Assets requiring protection as the runtime grows:
 - Immutable session/message snapshots and optimistic version checks.
 - A session closed while a model call is in progress cannot accept the late response.
 - Adapter exception details are suppressed from the public runtime exception.
+- Tool execution uses an explicit allowlist, immutable tool contracts, strict bounded JSON schema validation, and exact host permission checks.
+- Consequential tool specs require a one-use approval bound to principal, tool, canonical argument digest, and expiry.
+- Tool arguments/results are byte-bounded and checked for strict JSON/Unicode; handler exception details are suppressed.
+- Redacted audit-start persistence must succeed before a handler is invoked; a post-handler audit failure is surfaced as an uncertain outcome.
 - The runtime does not log transcript content or provider credentials.
 - CI declares `contents: read` and pins checkout/setup-python actions to immutable commit SHAs.
 
@@ -49,22 +53,22 @@ These controls reduce accidental resource abuse and concurrency defects; they do
 | Adapter timeout/cancellation | No runtime timeout | Define adapter cancellation contract and provider-specific timeout behavior |
 | Token/cost budget | Character limits only | Define provider-aware token, spend, and request budgets |
 | Rate limiting | Not implemented | Define per-user/tenant/IP quotas at host boundary |
-| Tool execution | Disabled | Define per-tool allowlists, authorization, schema validation, approval and audit policy |
+| Tool execution | Initial provider-neutral gate implemented; not wired to model provider and not sandboxed | Add durable approval replay prevention, durable audit sink, per-resource authorization inside handlers, timeouts/isolation, budgets, and end-to-end host integration |
 | Retrieval/prompt injection | No retrieval path | Treat retrieved material as untrusted data; test direct and indirect injection at every action boundary |
 | Observability | Minimal | Define redacted structured metadata, retention, alerting, and incident response |
 
-## Required abuse-case tests before agent capabilities
+## Required abuse-case tests before enabling real-world model-driven actions
 
 Use harmless fixtures and instrumented fake adapters/tools. Do not use real destructive actions or protected evaluation material.
 
 - Session ID guessing/reuse cannot cross user or tenant boundaries.
 - User-supplied or retrieved instructions cannot change tool authorization.
 - Untrusted content cannot trigger an unauthorized tool call.
-- Tool arguments are validated against strict schemas and caller permissions.
+- Tool arguments are validated against strict schemas and caller permissions. Covered in `tests/test_tools.py`; add integration tests when a real host/model adapter is connected.
 - Memory poisoning and cross-session transcript leakage are rejected.
 - Model output cannot reach HTML, SQL, shell, or filesystem sinks without destination-specific validation.
 - Repeated retries, recursive tool calls, and expensive outputs hit bounded budgets.
-- High-impact actions pause for action-specific approval and cannot self-approve.
+- High-impact actions pause for action-specific approval and cannot self-approve. The current gate tests exact argument binding, expiry, principal binding, and single-use behavior within one executor process.
 - Logs and errors do not disclose prompts, transcripts, credentials, or personal data.
 
 ## CI supply-chain posture
@@ -73,6 +77,15 @@ The quality workflow uses minimal `contents: read` permissions and immutable act
 
 ## Release position
 
-The runtime is not approved for public or multi-tenant deployment. Public or multi-tenant deployment requires host-level identity and authorization, tenant isolation, explicit retention/deletion behavior, operational budgets, provider integration, end-to-end/adversarial tests, observability, backup and rollback capability, and a documented Capri internal release review. External independent review is not a prerequisite for ordinary internal engineering; retain it only when a specific contract, regulation, customer commitment, or protected evaluation explicitly requires it. This document is Capri's internal review, not a security certification.
+The runtime is not approved for public or multi-tenant deployment. The tool executor is not a sandbox and its in-memory audit sink/process-local approval replay state are development foundations only. Public or multi-tenant deployment requires host-level identity and authorization, tenant isolation, explicit retention/deletion behavior, operational budgets, provider integration, durable audit and approval replay controls, handler isolation/timeouts, end-to-end/adversarial tests, observability, backup and rollback capability, and a documented Capri internal release review. External independent review is not a prerequisite for ordinary internal engineering; retain it only when a specific contract, regulation, customer commitment, or protected evaluation explicitly requires it. This document is Capri's internal review, not a security certification.
 
 No X5 instructions, rubrics, expected answers, hidden criteria, scoring keys, or evidence are part of this document or the implementation.
+
+
+## Tool-boundary internal self-review — 2026-11-06
+
+Capri reviewed the implemented tool gate and its negative tests before integration. Verified properties include explicit registration, strict argument schemas, exact host permissions, principal/tool/argument-digest/expiry-bound approvals, process-local single-use replay protection, bounded strict JSON, redacted audit events, audit-start fail-closed behavior, suppressed handler exceptions, and explicit uncertain-outcome behavior when completion auditing fails after handler invocation.
+
+Residual risks are material and intentionally visible: trusted host code can construct execution contexts and approval objects; the grant object is not a cryptographic signature; replay prevention is not durable across process restarts or multiple executors; the included audit sink is in-memory; handlers are not sandboxed and run with process privileges; and the gate is not connected to a model provider. Do not register untrusted handlers or expose consequential tools to model-driven calls until durable replay/audit controls, host identity/authorization, idempotency, budgets, and handler isolation are implemented.
+
+This is Capri's internal security review, not a security certification. External independent review is not a prerequisite for ordinary internal engineering or merging.
