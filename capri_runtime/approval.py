@@ -142,6 +142,12 @@ class SQLiteApprovalChallengeStore:
                     (challenge_id, operation_id, principal_id, tool_name, digest,
                      created.isoformat(), expiry.isoformat()),
                 )
+                connection.execute(
+                    """INSERT INTO audit_events
+                    (event_id,timestamp,principal_id,tool_name,argument_digest,status,error_code)
+                    VALUES (?,?,?,?,?,'approval_requested',NULL)""",
+                    (str(uuid4()), created.isoformat(), principal_id, tool_name, digest),
+                )
                 connection.execute("COMMIT")
                 return ApprovalChallenge(
                     challenge_id, operation_id, principal_id, tool_name, digest,
