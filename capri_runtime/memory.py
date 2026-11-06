@@ -77,19 +77,28 @@ class UntrustedMemoryContext:
         for record in self.records:
             if not isinstance(record, MemoryRecord):
                 raise MemoryValidationError("memory context contains an invalid record")
-            if record.memory_id in seen:
+            memory_id = _validate_text(record.memory_id, "memory_id", 64)
+            if memory_id in seen:
                 raise MemoryValidationError("memory context contains duplicate records")
-            seen.add(record.memory_id)
+            seen.add(memory_id)
             if record.status != "active" or record.sensitivity != "non_sensitive":
                 raise MemoryValidationError("memory context accepts only active non-sensitive records")
-            _validate_text(record.memory_id, "memory_id", 64)
             _validate_text(record.title, "title", _MAX_TITLE)
             _validate_text(record.content, "content", _MAX_CONTENT)
             _validate_text(record.scope, "scope", _MAX_SCOPE)
             _validate_text(record.source, "source", _MAX_SOURCE)
-            if record.record_type not in _ALLOWED_TYPES or record.confidence not in _ALLOWED_CONFIDENCE:
+            if (
+                not isinstance(record.record_type, str)
+                or record.record_type not in _ALLOWED_TYPES
+                or not isinstance(record.confidence, str)
+                or record.confidence not in _ALLOWED_CONFIDENCE
+                or not isinstance(record.retention, str)
+                or record.retention not in _ALLOWED_RETENTION
+            ):
                 raise MemoryValidationError("memory context record metadata is invalid")
             _validate_tags(record.tags)
+            _validate_expiry(record.created_at)
+            _validate_expiry(record.updated_at)
             expiry = _validate_expiry(record.expires_at)
             if expiry is not None and datetime.fromisoformat(expiry) <= now:
                 raise MemoryValidationError("memory context excludes expired records")
