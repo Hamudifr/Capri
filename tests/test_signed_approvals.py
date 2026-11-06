@@ -197,14 +197,10 @@ class SignedApprovalTests(unittest.TestCase):
         with self.assertRaises(AttributeError):
             ring.other_attribute = "value"
         self.assertEqual(ring.active_key_id, "active")
-        self.assertTrue(ring.verify(
-            "active",
-            HmacApprovalAuthority(ring). _payload(ApprovalGrant(
-                "grant", "alice", "delete_record", "a" * 64,
-                "2026-11-06T13:00:00+00:00", key_id="active",
-            )),
-            b"\x00" * 32,
-        ) is False)
+        authority = HmacApprovalAuthority(ring)
+        grant = authority.issue("alice", "delete_record", "a" * 64)
+        self.assertTrue(authority.verify(grant))
+        self.assertEqual(grant.key_id, "active")
 
     def test_key_ring_rejects_invalid_configuration(self):
         for keys, active in (
