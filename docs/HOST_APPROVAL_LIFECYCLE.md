@@ -135,3 +135,8 @@ The gateway invokes this only for bridge outcomes with status `approval_required
 The operation-ID resolver is the critical integration boundary. It must use host-authenticated session identity plus stable request identity and must not trust an operation ID supplied by the client/model. The current request call ID alone is not globally unique; a host should namespace it with a trusted session identifier and reject reuse with a different digest. A new intentional attempt should receive a new operation ID, while a retry of the same logical attempt must reuse its original ID.
 
 After a challenge is approved, the host's authority resolver must supply the persisted grant to the original principal's next execution context. The gateway does not inject grants or bypass the normal executor checks. The executor still verifies the signature and consumes the grant once. No approval integration is enabled by default, preserving existing gateway behavior.
+
+
+## Non-exportable MAC provider boundary — 2026-11-06
+
+The core now defines an ApprovalMacProvider protocol for host integrations with KMS/HSM-backed HMAC operations. It exposes only the active immutable key ID, sign(key_id, payload), and verify(key_id, payload, signature); raw key bytes are not part of the interface. The provider must operate on the exact requested key version, return a 32-byte HMAC-SHA256 tag from signing, return an actual boolean from verification, and fail closed on errors. No vendor adapter or cloud connection is included.
