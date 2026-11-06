@@ -522,6 +522,29 @@ class DoctorTests(unittest.TestCase):
                 self.assertEqual(code, 1, output.getvalue())
                 self.assertIn("[FAIL] CI permissions", output.getvalue())
 
+    def test_doctor_rejects_column_zero_flow_mapping_permission_continuations(self):
+        overrides = (
+            "permissions: {contents: write},\\n",
+            '"permissions": {contents: write},\\n',
+        )
+        for override in overrides:
+            with self.subTest(override=override), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self._make_repository(root)
+                workflow = root / ".github/workflows/quality.yml"
+                content = workflow.read_text(encoding="utf-8").replace(
+                    "  test:\\n    steps:\\n",
+                    "  test: {runs-on: ubuntu-latest,\\n"
+                    + override
+                    + '    steps: [{run: "echo hi"}]}\\n',
+                )
+                workflow.write_text(content, encoding="utf-8")
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    code = cli_main(["doctor", "--root", str(root)])
+                self.assertEqual(code, 1, output.getvalue())
+                self.assertIn("[FAIL] CI permissions", output.getvalue())
+
     def test_doctor_rejects_inline_job_mapping_permissions(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
