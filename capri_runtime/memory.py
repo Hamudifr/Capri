@@ -195,7 +195,10 @@ class SQLiteMemoryStore:
     def _record(row: sqlite3.Row) -> MemoryRecord:
         values = dict(row)
         try:
-            values["tags"] = _validate_tags(tuple(json.loads(values["tags"])))
+            decoded_tags = json.loads(values["tags"])
+            if not isinstance(decoded_tags, list):
+                raise ValueError("tags must be a JSON array")
+            values["tags"] = _validate_tags(decoded_tags)
         except (TypeError, ValueError):
             raise MemoryValidationError("stored memory tags are malformed") from None
         if values["sensitivity"] != "non_sensitive":
