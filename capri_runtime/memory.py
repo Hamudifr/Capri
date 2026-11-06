@@ -96,6 +96,8 @@ class UntrustedMemoryContext:
                 or record.retention not in _ALLOWED_RETENTION
             ):
                 raise MemoryValidationError("memory context record metadata is invalid")
+            if not isinstance(record.tags, tuple):
+                raise MemoryValidationError("memory context tags must be immutable")
             _validate_tags(record.tags)
             _validate_expiry(record.created_at)
             _validate_expiry(record.updated_at)

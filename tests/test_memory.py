@@ -2,6 +2,7 @@ import json
 import os
 import sqlite3
 import tempfile
+from dataclasses import replace
 import unittest
 from datetime import datetime, timedelta, timezone
 
@@ -134,6 +135,12 @@ class SQLiteMemoryStoreTests(unittest.TestCase):
         archived = self.store.archive(record.memory_id)
         with self.assertRaises(MemoryValidationError):
             UntrustedMemoryContext((archived,))
+
+    def test_untrusted_memory_context_rejects_mutable_nested_metadata(self):
+        record = self.create(tags=("security",))
+        mutable_record = replace(record, tags=["security"])
+        with self.assertRaises(MemoryValidationError):
+            UntrustedMemoryContext((mutable_record,))
 
     def test_untrusted_memory_context_rejects_expired_and_oversized_records(self):
         past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
