@@ -92,6 +92,12 @@ def _validate_schema_definition(schema: Any, *, root: bool = False, depth: int =
             value = schema[key]
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 raise ToolValidationError(f"{key} must be a number")
+    if kind != "string" and ({"minLength", "maxLength"} & set(schema)):
+        raise ToolValidationError("string length constraints require type string")
+    if kind != "array" and ({"minItems", "maxItems"} & set(schema)):
+        raise ToolValidationError("item count constraints require type array")
+    if kind not in {"integer", "number"} and ({"minimum", "maximum"} & set(schema)):
+        raise ToolValidationError("numeric bounds require a numeric type")
     if "minLength" in schema and "maxLength" in schema and schema["minLength"] > schema["maxLength"]:
         raise ToolValidationError("minLength cannot exceed maxLength")
     if "minItems" in schema and "maxItems" in schema and schema["minItems"] > schema["maxItems"]:
@@ -384,14 +390,16 @@ class ToolExecutor:
         if spec.requires_approval:
             self._consume_approval(context, spec, digest)
         self._audit(context.principal_id, spec.name, digest, "started")
+        handler_failed = False
         try:
             result = handler(json.loads(encoded))
         except Exception:
-            try:
-                self._audit(context.principal_id, spec.name, digest, "handler_failed", "handler_error")
-            except AuditError:
-                raise
-            raise ToolExecutionError("tool handler failed; details suppressed") from None
+            # Leave the except block before raising so exception details are not
+            # retained as an inspectable __context__ on the public error.
+            handler_failed = True
+        if handler_failed:
+            self._audit(context.principal_id, spec.name, digest, "handler_failed", "handler_error")
+            raise ToolExecutionError("tool handler failed; details suppressed")
         try:
             _assert_json_object_keys(result)
             result_json, _ = _canonical_json(
