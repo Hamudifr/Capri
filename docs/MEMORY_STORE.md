@@ -15,12 +15,12 @@ The current store supports:
 
 ## Trust and privacy rules
 
-- The API intentionally has no `sensitive=True` or secret-storage mode. It is for non-sensitive project knowledge only.
+- The API intentionally has no `sensitive=True` or secret-storage mode. It is intended only for non-sensitive project knowledge. This is a usage policy, not an automatic content classifier: callers must screen text before storing it; the store cannot reliably infer whether arbitrary content contains sensitive information.
 - Retrieved text is untrusted data. It cannot alter system/user authority, authorize tools, or bypass the execution gate.
 - Do not deserialize memory content into execution contexts, approval grants, permissions, or executable code.
 - Provider adapters own their authentication and transport. No Notion credentials or provider SDK are embedded in this repository.
 - The SQLite database is not encrypted. Store it only in a private host-controlled directory; do not place secrets or sensitive personal data in it.
-- Deletion removes the record content from the active database table. A minimal event containing only the memory ID, event type, and timestamp remains for auditability. This is not secure media sanitization of SQLite/WAL files or backups; hosts must manage backup expiry and storage lifecycle.
+- Deletion removes the record content from the active database table and severs surviving supersession references to that record. A minimal event containing only the memory ID, event type, and timestamp remains for auditability. This is not secure media sanitization of SQLite/WAL files or backups; hosts must manage backup expiry and storage lifecycle.
 - SQLite path checks reduce accidental symlink and permission exposure but are not a sandbox or a defense against a hostile process running as the same OS user.
 
 ## Current limitations
