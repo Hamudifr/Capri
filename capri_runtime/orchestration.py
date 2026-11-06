@@ -135,6 +135,7 @@ class ToolOrchestrator:
         context: ExecutionContext,
         *,
         max_total_messages: int | None = None,
+        cancellation_event: threading.Event | None = None,
     ) -> OrchestrationResult:
         """Complete one turn, executing at most max_tool_rounds tool batches.
 
@@ -142,6 +143,10 @@ class ToolOrchestrator:
         messages. The host decides how to persist it and must serialize concurrent
         turns for the same session before invoking this method.
         """
+        if cancellation_event is not None and not callable(getattr(cancellation_event, "is_set", None)):
+            raise ToolOrchestrationError("cancellation_event must expose is_set()")
+        if cancellation_event is not None and cancellation_event.is_set():
+            raise ToolOrchestrationError("orchestration cancelled before model invocation")
         if not _valid_text(session_id) or not session_id.strip() or len(session_id) > 256:
             raise ToolOrchestrationError("session_id must be bounded valid text")
         if not _valid_text(user_text) or not user_text.strip() or len(user_text) > 16_000:
@@ -181,12 +186,16 @@ class ToolOrchestrator:
             raise ToolOrchestrationError("tool definitions could not be prepared") from None
 
         for turn_index in range(self.max_tool_rounds + 1):
+            if cancellation_event is not None and cancellation_event.is_set():
+                raise ToolOrchestrationError("orchestration cancelled")
             try:
                 response = self.adapter.complete_with_tools(
                     session_id, tuple(working), definitions
                 )
             except Exception:
                 raise ToolOrchestrationError("model adapter failed") from None
+            if cancellation_event is not None and cancellation_event.is_set():
+                raise ToolOrchestrationError("orchestration cancelled after model invocation")
             if not isinstance(response, AssistantTurn):
                 raise ToolOrchestrationError("adapter must return an AssistantTurn")
             if not _valid_text(response.content) or len(response.content) > self.max_output_chars:
@@ -283,7 +292,8 @@ class ToolOrchestrator:
             else:
                 try:
                     batch_outcomes = self.bridge.execute_batch(
-                        list(response.tool_calls), context
+                        list(response.tool_calls), context,
+                        cancellation_event=cancellation_event,
                     )
                 except ToolBridgeValidationError:
                     raise ToolOrchestrationError("model proposed an invalid tool-call batch") from None
@@ -443,6 +453,7 @@ class SessionTurnCoordinator:
                     snapshot.messages,
                     context,
                     max_total_messages=store.max_session_messages,
+                    cancellation_event=lease_lost,
                 )
                 prefix_length = len(snapshot.messages)
                 if result.messages[:prefix_length] != snapshot.messages:
