@@ -301,7 +301,7 @@ class SQLiteMemoryStore:
                     if matched == len(terms):
                         exact = int(row["title"].casefold() == query.casefold())
                         ranked.append((exact, matched, row["updated_at"], self._record(row)))
-                ranked.sort(key=lambda item: (-item[0], -item[1], item[2], item[3].memory_id))
+                ranked.sort(key=lambda item: (-item[0], -item[1], -datetime.fromisoformat(item[2]).timestamp(), item[3].memory_id))
                 return tuple(item[3] for item in ranked[offset:offset + limit])
             finally:
                 db.close()
