@@ -16,8 +16,8 @@ A fresh metadata-only query of the Capri Evaluation Runs data source returned 39
 
 - Seven open Draft/unmerged PRs: #1, #4, #5, #6, #10, #12, #14.
 - PR #11 is closed as superseded by #12; PR #13 is closed as superseded by #14.
-- PR #6's current head is `595d9cb4cac9bc8e13f72aa727b5f29693414b84`; exact-head Actions run [42240709305](https://github.com/Hamudifr/Capri/actions/runs/42240709305) passed compileall, Capri Doctor, and 89 tests on each of Python 3.11, 3.12, and 3.13. All three logs were inspected; Doctor 6/6 and operational health 7/7.
-- `main` remains unchanged at `228669ed8b0c02db669cc082ac256e7491a26201`.
+- PR #6's current head is `ca245a18533f7e9084a5bbbf81df595fb73fae28`; exact-head Actions run [42241949677](https://github.com/Hamudifr/Capri/actions/runs/42241949677) passed compileall, Capri Doctor, and 92 tests on each of Python 3.11, 3.12, and 3.13. All three logs were inspected; Doctor 6/6 and operational health 7/7. The health-model contract now rejects blank IDs and unsupported status values; regression tests cover malformed values and unknown-state propagation.
+- CI trigger duplication was reduced on PR #1, #6, and #10 heads: commits `fed330e03a3e55ecc1f5307e684fbc842eddea29`, `75ebc6fb44c628620d036f3fdb111ab0a2ea422c`, and `27cc8ab7e25c84381db572285ba1bdd6d6d3a3a5` each now use one `pull_request` matrix for PR-head updates; exact runs `42241438580`, `42241341292`, and `42241452411` passed.
 - Release gate remains **NOT MET** pending independent security review, authorized non-X5 specification approval, assembled-stack integration/acceptance, independent non-X5 acceptance, and governance evidence. Do not merge or deploy from CI alone.
 
 ## Phase 0 — Preserve boundaries
