@@ -57,7 +57,31 @@ def _parse_time(value: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
+def _assert_json_value(value: Any, depth: int = 0) -> None:
+    if depth > 16:
+        raise TaskValidationError("JSON nesting exceeds 16 levels")
+    if value is None or isinstance(value, (bool, int, float)):
+        return
+    if isinstance(value, str):
+        if any(0xD800 <= ord(ch) <= 0xDFFF for ch in value):
+            raise TaskValidationError("JSON strings must contain Unicode scalar values")
+        return
+    if isinstance(value, list):
+        for child in value:
+            _assert_json_value(child, depth + 1)
+        return
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if not isinstance(key, str):
+                raise TaskValidationError("JSON object keys must be strings")
+            _assert_json_value(key, depth + 1)
+            _assert_json_value(child, depth + 1)
+        return
+    raise TaskValidationError("value contains a non-JSON type")
+
+
 def _json(value: Any, *, label: str, limit: int = 65_536) -> tuple[str, Any]:
+    _assert_json_value(value)
     try:
         encoded = json.dumps(
             value, ensure_ascii=False, allow_nan=False, sort_keys=True,
