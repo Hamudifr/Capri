@@ -10,6 +10,8 @@ class FakeNotionTransport:
     def __init__(self):
         self.pages = {}
         self.fail_archive = False
+        self.max_page_size = 2
+        self.repeat_cursor = False
 
     @staticmethod
     def _page(page_id, properties):
@@ -30,11 +32,14 @@ class FakeNotionTransport:
     def list_pages(self, *, cursor, page_size):
         ids = sorted(self.pages)
         offset = int(cursor or 0)
-        selected = ids[offset:offset + page_size]
+        selected = ids[offset:offset + min(page_size, self.max_page_size)]
         next_offset = offset + len(selected)
+        next_cursor = str(next_offset) if next_offset < len(ids) else None
+        if self.repeat_cursor and next_cursor is not None:
+            next_cursor = cursor or "0"
         return {
             "results": [self.pages[item] for item in selected],
-            "next_cursor": str(next_offset) if next_offset < len(ids) else None,
+            "next_cursor": next_cursor,
         }
 
     def update_page(self, page_id, properties):
@@ -85,6 +90,18 @@ class NotionMemoryAdapterTests(unittest.TestCase):
         self.assertEqual([r.memory_id for r in self.store.search("untrusted data")], [second.memory_id])
         with self.assertRaises(MemoryValidationError):
             self.store.search("untrusted", limit=101)
+
+    def test_export_json_is_deterministic(self):
+        self.create(title="Alpha")
+        self.create(title="Beta")
+        self.assertEqual(self.store.export_json(), self.store.export_json())
+
+    def test_repeated_pagination_cursor_fails_closed(self):
+        self.create()
+        self.create(title="Another record")
+        self.transport.repeat_cursor = True
+        with self.assertRaises(MemoryValidationError):
+            self.store.search("untrusted")
 
     def test_pagination_walks_multiple_pages(self):
         store = NotionMemoryAdapter(self.transport, max_records=3)
