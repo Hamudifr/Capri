@@ -447,7 +447,7 @@ class SessionTurnCoordinatorTests(unittest.TestCase):
                 return AssistantTurn(content="completed")
 
         adapter = BlockingAdapter()
-        store = SessionStore()
+        store = SessionStore(max_output_chars=131_072)
         session = store.create()
         calls, orchestrator, _ = self._build(adapter, store)
         coordinator = SessionTurnCoordinator()
@@ -492,7 +492,7 @@ class SessionTurnCoordinatorTests(unittest.TestCase):
                     tool_calls=(ToolCallRequest("one-call", "echo", {"value": "x"}),)
                 )
 
-        store = SessionStore(max_session_messages=3)
+        store = SessionStore(max_session_messages=3, max_output_chars=131_072)
         session = store.create()
         calls, orchestrator, _ = self._build(OneToolAdapter(), store)
         with self.assertRaises(ToolOrchestrationError):
@@ -508,7 +508,7 @@ class SessionTurnCoordinatorTests(unittest.TestCase):
             def complete_with_tools(self, *args):
                 raise AssertionError("closed session must not invoke adapter")
 
-        store = SessionStore()
+        store = SessionStore(max_output_chars=131_072)
         session = store.create()
         store.close(session.session_id)
         _, orchestrator, _ = self._build(NeverCall(), store)
@@ -523,6 +523,66 @@ class SessionTurnCoordinatorTests(unittest.TestCase):
             with self.subTest(value=value):
                 with self.assertRaises(ToolOrchestrationError):
                     SessionTurnCoordinator(value)
+
+    def test_store_output_limit_is_checked_before_model_or_tool_execution(self):
+        class NeverCall:
+            def __init__(self):
+                self.calls = 0
+            def complete_with_tools(self, *args):
+                self.calls += 1
+                return AssistantTurn(content="unexpected")
+        adapter = NeverCall()
+        store = SessionStore(max_output_chars=64_000)
+        session = store.create()
+        calls, orchestrator, _ = self._build(adapter, store)
+        with self.assertRaises(ToolOrchestrationError):
+            SessionTurnCoordinator().run_and_commit(
+                orchestrator, store, session.session_id, "go",
+                ExecutionContext("host-user", frozenset({"tools:echo"})),
+            )
+        self.assertEqual(adapter.calls, 0)
+        self.assertEqual(calls, [])
+        self.assertEqual(store.get(session.session_id).version, 0)
+
+    def test_store_tool_result_limit_is_checked_before_tool_side_effect(self):
+        class NeverCall:
+            def __init__(self):
+                self.calls = 0
+            def complete_with_tools(self, *args):
+                self.calls += 1
+                return AssistantTurn(content="unexpected")
+        adapter = NeverCall()
+        store = SessionStore(max_output_chars=131_072, max_tool_chars=1_000)
+        session = store.create()
+        calls, orchestrator, _ = self._build(adapter, store)
+        with self.assertRaises(ToolOrchestrationError):
+            SessionTurnCoordinator().run_and_commit(
+                orchestrator, store, session.session_id, "go",
+                ExecutionContext("host-user", frozenset({"tools:echo"})),
+            )
+        self.assertEqual(adapter.calls, 0)
+        self.assertEqual(calls, [])
+        self.assertEqual(store.get(session.session_id).version, 0)
+
+    def test_user_input_store_limit_is_checked_before_model_execution(self):
+        class NeverCall:
+            def __init__(self):
+                self.calls = 0
+            def complete_with_tools(self, *args):
+                self.calls += 1
+                return AssistantTurn(content="unexpected")
+        adapter = NeverCall()
+        store = SessionStore(max_input_chars=2, max_output_chars=131_072)
+        session = store.create()
+        calls, orchestrator, _ = self._build(adapter, store)
+        with self.assertRaises(ToolOrchestrationError):
+            SessionTurnCoordinator().run_and_commit(
+                orchestrator, store, session.session_id, "too long",
+                ExecutionContext("host-user", frozenset({"tools:echo"})),
+            )
+        self.assertEqual(adapter.calls, 0)
+        self.assertEqual(calls, [])
+        self.assertEqual(store.get(session.session_id).version, 0)
 
 
 if __name__ == "__main__":
