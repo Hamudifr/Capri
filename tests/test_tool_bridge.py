@@ -197,6 +197,14 @@ class ToolExecutionBridgeTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertNotIn("private audit detail", repr(outcome))
 
+    def test_non_string_json_keys_are_rejected_before_execution(self):
+        with self.assertRaises(ToolBridgeValidationError):
+            self.bridge.execute_batch(
+                [ToolCallRequest("bad-json", "search", {"query": "x", 7: "invalid"})],
+                self.context,
+            )
+        self.assertEqual(self.calls, [])
+
     def test_invalid_batch_shapes_and_limits_are_rejected(self):
         for requests in (None, (), [], [object()]):
             with self.subTest(requests=requests):
