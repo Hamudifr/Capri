@@ -4,7 +4,7 @@
 
 `capri_runtime.tasks` adds a provider-neutral durable task queue and a synchronous worker primitive. It stores a bounded ordered plan, claims work through SQLite leases, checkpoints each completed step, retries failed steps with bounded exponential backoff, supports cancellation between steps, and recovers abandoned work after a lease expires.
 
-It does not call a model provider, create plans from natural language, start a background daemon, schedule itself, or grant tool permissions. The host owns worker lifecycle, authenticated principal context, scheduling, and handler registration.
+It includes an explicit `TaskWorker` polling loop with graceful stop-event support and a concurrent lease-heartbeat thread while a handler runs. Constructing a worker starts no thread; the host must call `run_once()` or `run_forever(stop_event)` and owns process lifecycle, authenticated principal context, scheduling, and handler registration. It does not call a model provider, create plans from natural language, or grant tool permissions.
 
 ## Basic use
 
@@ -48,7 +48,7 @@ Claims and state transitions use `BEGIN IMMEDIATE`, so concurrent workers cannot
 
 Execution is **bounded and may be repeated; it is not exactly once**. A process can crash after claiming a step but before invoking its handler, or after a side effect but before persisting the result. Depending on the crash point and remaining attempt budget, a handler may run zero, one, or multiple times. After lease expiry, another worker may retry the same step. Each step therefore receives the stable idempotency key `<task_id>:<step_index>`; handlers that perform side effects must enforce that key at the side-effect boundary. Do not blindly retry a non-idempotent handler.
 
-Leases are bounded to 5–3600 seconds. The store exposes `renew_lease()` so a host-managed heartbeat can extend a live claim. Renewal must occur before expiry and fails closed after expiry or ownership change. The current `run_once()` helper does not start a heartbeat thread; hosts running long handlers must arrange renewal themselves. The engine cannot forcibly interrupt a running handler. If a handler outlives its lease without renewal, a second worker may reclaim it; stable idempotency is mandatory.
+Leases are bounded to 5–3600 seconds. The store exposes `renew_lease()` so a host-managed heartbeat can extend a live claim. Renewal must occur before expiry and fails closed after expiry or ownership change. The lower-level `TaskEngine.run_once()` helper does not start a heartbeat thread; hosts using it directly must arrange renewal themselves. `TaskWorker` handles heartbeats while its handler is running. Neither API can forcibly interrupt a running handler. If a handler outlives its lease without renewal, a second worker may reclaim it; stable idempotency is mandatory.
 
 ## Retry and cancellation
 
