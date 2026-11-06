@@ -167,6 +167,54 @@ class ApprovalLifecycleTests(unittest.TestCase):
         self.assertEqual({result.grant.grant_id for result in results}, {results[0].grant.grant_id})
         self.assertEqual(sum(result.status == "approved" for result in results), 4)
 
+    def test_concurrent_creation_returns_one_challenge(self):
+        stores = [SQLiteApprovalChallengeStore(SQLiteSecurityStore(self.path)) for _ in range(4)]
+        services = [
+            HostApprovalService(
+                store, self.signer,
+                lambda credential: "reviewer" if credential == "approver-token" else None,
+                lambda approver, item: approver == "reviewer",
+                clock=lambda: self.now,
+            )
+            for store in stores
+        ]
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            results = list(pool.map(
+                lambda service: service.create_challenge(
+                    self.context, self.outcome, "session-1:concurrent-call"
+                ),
+                services,
+            ))
+        self.assertEqual({item.challenge_id for item in results}, {results[0].challenge_id})
+
+    def test_concurrent_approve_and_reject_have_one_terminal_winner(self):
+        challenge = self.create()
+        stores = [SQLiteApprovalChallengeStore(SQLiteSecurityStore(self.path)) for _ in range(2)]
+        services = [
+            HostApprovalService(
+                store, self.signer,
+                lambda credential: "reviewer" if credential == "approver-token" else None,
+                lambda approver, item: approver == "reviewer",
+                clock=lambda: self.now,
+            )
+            for store in stores
+        ]
+        def decide(pair):
+            service, action = pair
+            try:
+                return action(service, "approver-token", challenge.challenge_id).status
+            except ToolValidationError:
+                return "lost_race"
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(
+                decide,
+                [(services[0], HostApprovalService.approve), (services[1], HostApprovalService.reject)],
+            ))
+        terminal = self.challenge_store.get(challenge.challenge_id, self.now)
+        self.assertIn(terminal.status, {"approved", "rejected"})
+        self.assertEqual(sum(value in {"approved", "rejected"} for value in results), 1)
+        self.assertEqual(sum(value == "lost_race" for value in results), 1)
+
     def test_audit_contains_decision_metadata_not_credentials_or_arguments(self):
         challenge = self.create()
         self.service.approve("approver-token", challenge.challenge_id)
