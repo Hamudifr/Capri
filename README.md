@@ -25,7 +25,8 @@ Capri is a research and execution-assistance project. This repository contains a
 - `docs/LEDGER_SCALING_DECISION.md` — proposed transactional storage migration, explicitly not implemented.
 - `capri_core/` — immutable evaluation records, fail-closed validation, and hash-chained append-only ledger.
 - `capri_runtime/` — in-memory session lifecycle, injected model-adapter boundary, permissioned tool execution gate, and bounded SQLite memory store.
-- `docs/TOOL_EXECUTION.md` — trust model, schema subset, approvals, audit behavior, and limitations for tool execution.\n- `docs/MEMORY_STORE.md` — durable memory contract, trust rules, privacy constraints, and limitations.
+- `docs/TOOL_EXECUTION.md` — trust model, schema subset, approvals, audit behavior, and limitations for tool execution.
+- `docs/MEMORY_STORE.md` — durable memory contract, trust rules, privacy constraints, and limitations.
 - `tests/` — deterministic structural, ledger, and runtime tests.
 - `.github/workflows/quality.yml` — non-X5 documentation and test checks.
 
