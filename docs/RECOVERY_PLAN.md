@@ -114,3 +114,15 @@ The current PR #6 branch has been reconciled with the latest PR #5 / recovery ba
 - The current PR #6 head remains Draft/open/unmerged. No merge, deployment, or release is authorized by this reconciliation.
 
 The release gate remains NOT MET pending independent review, explicit non-X5 specification approval, assembled-stack acceptance, independent non-X5 evaluation, and governance evidence.
+
+
+## Current ledger stack heads — 2026-11-06 20:24 UTC
+
+This section supersedes the older #10/#14/#15 head references in the earlier reconciliation snapshots above.
+
+- PR #4: `9bb4c021ccf7db24de6d4423816619a79ab6a459`, based on recovery foundation `fed330e03a3e55ecc1f5307e684fbc842eddea29`; run [42273444013](https://github.com/Hamudifr/Capri/actions/runs/42273444013) passed 63 tests per Python version.
+- PR #10: `3697f6440d0b56fc83c17bbb53234acaeb613a64`, based on current PR #4 head; run [42274529813](https://github.com/Hamudifr/Capri/actions/runs/42274529813) passed compileall and 75 tests per actual Python 3.11/3.12/3.13.
+- PR #14: `da25bff24a9c4fdcad997591caabfa193df35f21`, based on current PR #10 head; run [42274695527](https://github.com/Hamudifr/Capri/actions/runs/42274695527) passed compileall and 77 tests per actual Python version.
+- PR #15: `da2c3ec28412937c1993dcbe18132d73edeaa593`, based on current PR #14 head; 7 commits ahead / 0 behind; its PR diff remains only `tests/test_runtime_core.py`. Current tree `5322c19330c13181254f17927d10564d26befb5e` is identical to the tree tested by run [42274759020](https://github.com/Hamudifr/Capri/actions/runs/42274759020), which passed compileall and 80 tests per actual Python version.
+
+All nine job logs for runs 42274529813, 42274695527, and 42274759020 were inspected and confirmed the actual Python interpreter versions. These are automated tests, not independent security review or release acceptance. All PRs remain Draft/unmerged; `main` remains unchanged.
