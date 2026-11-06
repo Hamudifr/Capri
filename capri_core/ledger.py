@@ -20,6 +20,8 @@ _LOCK = RLock()
 _ZERO_HASH = "0" * 64
 _ENTRY_KEYS = {"previous_hash", "record", "hash"}
 _UNCERTAIN_PATHS: set[str] = set()
+_UNCERTAIN_INODES: set[tuple[int, int]] = set()
+_UNCERTAIN_ALL = False
 
 
 def _absolute_path(path: str | Path) -> Path:
@@ -36,10 +38,27 @@ def _path_key(path: str | Path) -> str:
     return os.fspath(_absolute_path(path))
 
 
-def _assert_not_uncertain(path: str | Path) -> None:
-    if _path_key(path) in _UNCERTAIN_PATHS:
+def _file_identity(descriptor: int) -> tuple[int, int]:
+    """Return the stable filesystem identity of an already-open ledger file."""
+    try:
+        info = os.fstat(descriptor)
+    except OSError as exc:
+        raise LedgerIntegrityError("ledger file identity could not be established") from exc
+    if not stat.S_ISREG(info.st_mode):
+        raise LedgerIntegrityError("ledger path is not an existing regular file")
+    return int(info.st_dev), int(info.st_ino)
+
+
+def _assert_not_uncertain(
+    path: str | Path, *, identity: tuple[int, int] | None = None
+) -> None:
+    if _UNCERTAIN_ALL or _path_key(path) in _UNCERTAIN_PATHS:
         raise LedgerIntegrityError(
             "a previous append failed after writing began; preserve the ledger and inspect a copy before further use"
+        )
+    if identity is not None and identity in _UNCERTAIN_INODES:
+        raise LedgerIntegrityError(
+            "a previous append failed after writing began to this file; preserve the ledger and inspect a copy before further use"
         )
 
 
@@ -296,6 +315,11 @@ class HashChainLedger:
                         return entries, seen_runs, previous, count
                     raise LedgerIntegrityError("ledger is not an existing regular file") from exc
 
+            # Check the opened inode even when the caller supplied a descriptor.
+            # Path-only checks are insufficient because hard links have distinct names.
+            identity = _file_identity(descriptor)
+            _assert_not_uncertain(self.path, identity=identity)
+
             with os.fdopen(os.dup(descriptor), "rb") as stream:
                 line_number = 0
                 while True:
@@ -387,6 +411,7 @@ class HashChainLedger:
             parent_fd: int | None = None
             descriptor: int | None = None
             stream: Any = None
+            file_identity: tuple[int, int] | None = None
             write_started = False
             try:
                 parent_fd = _open_parent_directory(self.path.parent, create=True)
@@ -403,6 +428,8 @@ class HashChainLedger:
                     existing_ids: set[str] = set()
                     previous = _ZERO_HASH
                 else:
+                    file_identity = _file_identity(descriptor)
+                    _assert_not_uncertain(self.path, identity=file_identity)
                     _, existing_ids, previous, _ = self._scan(descriptor=descriptor)
 
                 payload = record.to_dict()
@@ -439,6 +466,8 @@ class HashChainLedger:
                     descriptor, created = _open_ledger_file(
                         self.path, parent_fd, create=True, writable=True
                     )
+                    file_identity = _file_identity(descriptor)
+                    _assert_not_uncertain(self.path, identity=file_identity)
                     _, existing_ids, previous, _ = self._scan(descriptor=descriptor)
                     digest, encoded = build_entry(previous, existing_ids)
 
@@ -460,6 +489,13 @@ class HashChainLedger:
             except BaseException as exc:
                 if write_started:
                     _UNCERTAIN_PATHS.add(key)
+                    if file_identity is None:
+                        # We must never continue when a write may have reached a
+                        # file whose identity we failed to capture.
+                        global _UNCERTAIN_ALL
+                        _UNCERTAIN_ALL = True
+                    else:
+                        _UNCERTAIN_INODES.add(file_identity)
                 if isinstance(exc, OSError):
                     raise LedgerIntegrityError(
                         "ledger append failed after opening the file; preserve it and inspect a copy before retrying"
