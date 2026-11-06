@@ -7,7 +7,8 @@
 The current store supports:
 - create and retrieve records with source, confidence, scope, type, explicit non-sensitive classification, tags, retention, timestamps, and expiry metadata;
 - deterministic token-AND search with bounded offset pagination and exact provenance fields;
-- corrections as new records linked to the prior record, which is archived rather than silently overwritten;\n- controlled tags from the project's six-tag vocabulary;
+- corrections as new records linked to the prior record, which is archived rather than silently overwritten;
+- controlled tags from the project's six-tag vocabulary;
 - explicit archive and physical content deletion (with a minimal ID-only deletion event);
 - expiry sweeps and exclusion of expired records from active retrieval;
 - deterministic JSON export;
