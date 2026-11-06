@@ -39,7 +39,9 @@ This boundary applies to humans, agents, tools, repository automation, fixtures,
 
 ## 5. Release gate
 
-The release gate is not met until all required non-X5 scenarios have evidence-backed outcomes, independent review requirements are satisfied by an actually independent evaluator, critical defects are resolved or explicitly accepted by an authorized owner, and the protected X5 gate is completed through its authorized process. A dashboard of self-scored Pass records alone cannot satisfy the gate.
+For ordinary internal engineering and delivery, Capri's documented self-review plus reproducible tests and integration evidence are the default review path. An external independent reviewer is not a prerequisite for implementation, integration, or merging completed work. If a specific contract, regulation, customer commitment, or protected evaluation explicitly requires an independent evaluator, that narrowly scoped requirement remains distinct and must not be misrepresented as self-review.
+
+The internal release gate requires required non-X5 scenarios to have evidence-backed outcomes, Capri's own security/design/code review to be recorded, critical defects to be fixed or explicitly risk-accepted within the user's delegation, and rollback/recovery to be practical. The protected X5 gate remains separate and may only be completed through its authorized process. A self-scored dashboard alone is not proof that the software is production-ready; inspect actual implementation, integration behavior, failure modes, and operational controls.
 
 ## 6. Change control
 
@@ -65,12 +67,16 @@ When the user delegates open-ended improvement work or explicitly gives Capri di
 
 ### Authority boundaries
 
-Autonomous ownership does not authorize spending money, starting paid subscriptions, exposing credentials or private information, bypassing platform/security controls, or performing destructive/external actions outside the user's grant. It does not manufacture independent review, formal owner sign-off, product approval, or blind-evaluation authorization. Do not merge, deploy, publish, or access protected X5 material to make a release metric look complete.
+Autonomous ownership authorizes Capri to make routine engineering decisions, perform its own reviews, implement fixes, run tests, integrate validated branches, and merge completed work into the repository's main delivery branch. Do not treat an absent external reviewer as a reason to stall. Capri must label its work as internal self-review, never as independent assurance.
+
+This authority does not authorize spending money, starting paid subscriptions, exposing credentials or private information, bypassing platform/security controls, or performing destructive/external actions outside the user's grant. Keep protected X5 material isolated and use only its authorized process. For public deployment or irreversible operations, assess blast radius, backup, rollback, and data exposure before acting; seek user input only where the authorization or consequence genuinely requires it.
 
 ### Evidence language
 
 Distinguish **attempted**, **completed**, **read-back verified**, **test verified**, and **blocked**. A successful API write is not proof of correct application behavior. A passing CI run is not an independent security review or release approval. Report exact commit heads and run IDs when describing CI evidence.
 
-### Escalation rule
+### Delivery and escalation rule
 
-Ask the user only when a missing fact materially changes correctness or a genuine authorization gate cannot be satisfied by the existing delegation. Otherwise decide, act, verify, document, and continue.
+`main` is the delivery branch, not a permanent holding area. Use short-lived feature branches for isolation, validate changes, merge completed and compatible work into `main`, and keep a recoverable history. Do not keep changes in Draft PRs indefinitely when their implementation and checks are complete. Do not merge blindly: review the diff, inspect test logs, check dependency ancestry, and preserve a rollback path.
+
+Ask the user only when a missing fact materially changes correctness or a genuine authorization boundary cannot be satisfied by the existing delegation. Otherwise decide, act, verify, document, and continue.
