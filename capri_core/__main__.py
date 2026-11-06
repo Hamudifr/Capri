@@ -11,8 +11,33 @@ from .health import build_health_report
 
 
 def _workflow_permissions_are_read_only(workflow: str) -> bool:
-    """Accept only the explicit, single-scope contents: read permission block."""
+    """Accept only top-level contents: read; reject nested permission overrides."""
     lines = workflow.splitlines()
+    if any(
+        re.search(
+            r"(?:^[ \t]+(?:permissions|[\"']permissions[\"'])\s*:|"
+            r"[{,]\s*(?:permissions|[\"']permissions[\"'])\s*:|"
+            r"^[ \t]+\?\s*(?:permissions|[\"']permissions[\"'])\s*$|"
+            r"[{,]\s*\?\s*(?:permissions|[\"']permissions[\"'])\s*(?=:|$))",
+            line,
+        )
+        # GitHub Actions accepts YAML anchors/aliases, and YAML double-quoted
+        # keys can use escapes (for example, "\\u0070ermissions"). Without
+        # parsing YAML, fail closed on alias, anchor, tag, explicit, and escaped keys.
+        or re.search(r'^[ \t]*(?:\?\s*)?"(?:[^"\\]|\\.)*\\(?:[^"\\]|\\.)*"\s*(?::|$)', line)
+        or re.search(r'[{,]\s*(?:\?\s*)?"(?:[^"\\]|\\.)*\\(?:[^"\\]|\\.)*"\s*(?=:|,|})', line)
+        or re.search(r'^[ \t]*(?:\?\s*)?\*[^\s,:{}\[\]]+\s*(?::|$)', line)
+        or re.search(r'[{,]\s*(?:\?\s*)?\*[^\s,:{}\[\]]+\s*(?=:|,|})', line)
+        or re.search(r'^[ \t]*\?\s+', line)
+        or re.search(r'[{,]\s*\?\s+', line)
+        or re.search(r'^[ \t]*&[^\s,:{}\[\]]+\s+', line)
+        or re.search(r'[{,]\s*&[^\s,:{}\[\]]+\s+', line)
+        or re.search(r'^[ \t]*!(?:<[^>]+>|[^\s,:{}\[\]]+)\s+', line)
+        or re.search(r'[{,]\s*!(?:<[^>]+>|[^\s,:{}\[\]]+)\s+', line)
+        for line in lines
+        if not line.lstrip().startswith("#")
+    ):
+        return False
     matches = [
         index for index, line in enumerate(lines)
         if re.fullmatch(r"permissions:\s*(?:#.*)?", line)
