@@ -7,11 +7,13 @@ provide encryption or retention policy.
 from __future__ import annotations
 
 import json
+import math
 import os
 import sqlite3
 import stat
 import threading
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from .runtime import (
@@ -136,6 +138,13 @@ class SQLiteSessionStore(SessionStore):
                 )
                 connection.execute(
                     "CREATE INDEX IF NOT EXISTS sessions_updated_at ON sessions(updated_at)"
+                )
+                connection.execute(
+                    """CREATE TABLE IF NOT EXISTS session_turn_leases (
+                        session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
+                        owner_token TEXT NOT NULL,
+                        expires_at TEXT NOT NULL
+                    )"""
                 )
             finally:
                 connection.close()
@@ -286,11 +295,181 @@ class SQLiteSessionStore(SessionStore):
             finally:
                 connection.close()
 
+
+    @staticmethod
+    def _lease_parameters(owner_token: str, lease_seconds: float) -> tuple[str, float]:
+        if (
+            not isinstance(owner_token, str)
+            or not owner_token
+            or len(owner_token) > 128
+            or _contains_surrogate(owner_token)
+        ):
+            raise ValidationError("lease owner token must be bounded valid text")
+        if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, (int, float)):
+            raise ValidationError("lease_seconds must be between 3 and 3600 seconds")
+        try:
+            seconds = float(lease_seconds)
+        except (OverflowError, TypeError, ValueError):
+            raise ValidationError("lease_seconds must be between 3 and 3600 seconds") from None
+        if not math.isfinite(seconds) or not 3 <= seconds <= 3600:
+            raise ValidationError("lease_seconds must be between 3 and 3600 seconds")
+        return owner_token, seconds
+
+    @staticmethod
+    def _lease_now() -> datetime:
+        return datetime.now(timezone.utc)
+
+    def claim_turn_lease(
+        self,
+        session_id: str,
+        owner_token: str,
+        lease_seconds: float = 30.0,
+    ) -> str:
+        """Acquire a durable cross-process session-turn lease or fail if held."""
+        owner_token, lease_seconds = self._lease_parameters(owner_token, lease_seconds)
+        if not isinstance(session_id, str) or not session_id.strip():
+            raise ValidationError("session_id must be non-empty text")
+        now = self._lease_now()
+        expires_at = (now + timedelta(seconds=lease_seconds)).isoformat()
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                session = connection.execute(
+                    "SELECT closed FROM sessions WHERE session_id = ?",
+                    (session_id,),
+                ).fetchone()
+                if session is None:
+                    raise SessionNotFoundError("session does not exist")
+                if session[0] == 1:
+                    raise SessionClosedError("session is closed")
+                current = connection.execute(
+                    "SELECT owner_token, expires_at FROM session_turn_leases WHERE session_id = ?",
+                    (session_id,),
+                ).fetchone()
+                if current is not None:
+                    try:
+                        current_expiry = datetime.fromisoformat(current[1])
+                    except (TypeError, ValueError):
+                        raise ValidationError("persisted session lease is invalid") from None
+                    if current_expiry.tzinfo is None or current_expiry.utcoffset() is None:
+                        raise ValidationError("persisted session lease is invalid")
+                    if current_expiry > now and current[0] != owner_token:
+                        raise SessionConflictError("another worker holds the session turn lease")
+                    if current_expiry <= now and current[0] == owner_token:
+                        raise SessionConflictError("an expired lease token cannot be reused")
+                    connection.execute(
+                        """UPDATE session_turn_leases
+                        SET owner_token = ?, expires_at = ? WHERE session_id = ?""",
+                        (owner_token, expires_at, session_id),
+                    )
+                else:
+                    connection.execute(
+                        """INSERT INTO session_turn_leases (session_id, owner_token, expires_at)
+                        VALUES (?, ?, ?)""",
+                        (session_id, owner_token, expires_at),
+                    )
+                connection.execute("COMMIT")
+                return expires_at
+            except Exception:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+            finally:
+                connection.close()
+
+    def renew_turn_lease(
+        self,
+        session_id: str,
+        owner_token: str,
+        lease_seconds: float = 30.0,
+    ) -> str:
+        """Renew only a still-live lease owned by this exact worker token."""
+        owner_token, lease_seconds = self._lease_parameters(owner_token, lease_seconds)
+        if not isinstance(session_id, str) or not session_id.strip():
+            raise ValidationError("session_id must be non-empty text")
+        now = self._lease_now()
+        expires_at = (now + timedelta(seconds=lease_seconds)).isoformat()
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                current = connection.execute(
+                    "SELECT owner_token, expires_at FROM session_turn_leases WHERE session_id = ?",
+                    (session_id,),
+                ).fetchone()
+                if current is None or current[0] != owner_token:
+                    raise SessionConflictError("session turn lease is no longer owned by this worker")
+                try:
+                    current_expiry = datetime.fromisoformat(current[1])
+                except (TypeError, ValueError):
+                    raise ValidationError("persisted session lease is invalid") from None
+                if current_expiry.tzinfo is None or current_expiry.utcoffset() is None or current_expiry <= now:
+                    raise SessionConflictError("expired session turn lease cannot be renewed")
+                connection.execute(
+                    "UPDATE session_turn_leases SET expires_at = ? WHERE session_id = ? AND owner_token = ?",
+                    (expires_at, session_id, owner_token),
+                )
+                connection.execute("COMMIT")
+                return expires_at
+            except Exception:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+            finally:
+                connection.close()
+
+    def release_turn_lease(self, session_id: str, owner_token: str) -> bool:
+        """Release only the lease still owned by the supplied worker token."""
+        if (
+            not isinstance(session_id, str)
+            or not session_id.strip()
+            or not isinstance(owner_token, str)
+            or not owner_token
+            or len(owner_token) > 128
+            or _contains_surrogate(owner_token)
+        ):
+            raise ValidationError("session_id and lease owner token must be bounded valid text")
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                current = connection.execute(
+                    "SELECT owner_token, expires_at FROM session_turn_leases WHERE session_id = ?",
+                    (session_id,),
+                ).fetchone()
+                if current is None or current[0] != owner_token:
+                    connection.execute("COMMIT")
+                    return False
+                try:
+                    current_expiry = datetime.fromisoformat(current[1])
+                except (TypeError, ValueError):
+                    raise ValidationError("persisted session lease is invalid") from None
+                if current_expiry.tzinfo is None or current_expiry.utcoffset() is None:
+                    raise ValidationError("persisted session lease is invalid")
+                if current_expiry <= self._lease_now():
+                    connection.execute("COMMIT")
+                    return False
+                cursor = connection.execute(
+                    "DELETE FROM session_turn_leases WHERE session_id = ? AND owner_token = ?",
+                    (session_id, owner_token),
+                )
+                connection.execute("COMMIT")
+                return cursor.rowcount == 1
+            except Exception:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+            finally:
+                connection.close()
+
     def commit_turn_messages(
         self,
         session_id: str,
         expected_version: int,
         turn_messages: tuple[Message, ...],
+        *,
+        lease_owner: str | None = None,
     ) -> Session:
         validated = _validate_turn_messages(
             turn_messages,
@@ -317,6 +496,24 @@ class SQLiteSessionStore(SessionStore):
                     raise SessionClosedError("session is closed")
                 if current.version != expected_version:
                     raise SessionConflictError("session changed during model execution")
+                lease = connection.execute(
+                    "SELECT owner_token, expires_at FROM session_turn_leases WHERE session_id = ?",
+                    (session_id,),
+                ).fetchone()
+                now = self._lease_now()
+                if lease is not None:
+                    try:
+                        lease_expiry = datetime.fromisoformat(lease[1])
+                    except (TypeError, ValueError):
+                        raise ValidationError("persisted session lease is invalid") from None
+                    if lease_expiry.tzinfo is None or lease_expiry.utcoffset() is None:
+                        raise ValidationError("persisted session lease is invalid")
+                    if lease_expiry <= now:
+                        raise SessionConflictError("expired session turn lease must be reclaimed before commit")
+                    if not isinstance(lease_owner, str) or lease[0] != lease_owner:
+                        raise SessionConflictError("an active session turn lease fences this commit")
+                elif lease_owner is not None:
+                    raise SessionConflictError("session turn lease does not exist")
                 if len(current.messages) + len(validated) > self.max_session_messages:
                     raise SessionLimitError("session message limit reached")
                 updated_at = self._now()

@@ -6,9 +6,11 @@ Every proposed tool call passes through ToolExecutionBridge.
 from __future__ import annotations
 
 import json
+import math
 import threading
 from dataclasses import dataclass
 from typing import Protocol
+from uuid import uuid4
 
 from .runtime import Message, Session, SessionStore
 from .tool_bridge import (
@@ -325,18 +327,32 @@ class ToolOrchestrator:
 
 
 class SessionTurnCoordinator:
-    """Serialize complete model/tool/commit turns by session within one host process.
+    """Coordinate same-session turns locally and, for SQLite, across processes.
 
-    A fixed stripe set bounds lock memory. Hash collisions may serialize unrelated
-    sessions, but no two turns for the same session can execute concurrently through
-    this coordinator. Multi-process hosts still need a distributed pre-execution
-    lease; SQLite optimistic commits alone cannot undo already-run tool side effects.
+    A fixed stripe set bounds local lock memory. SQLite stores additionally receive
+    a renewable durable lease. This prevents a second coordinator from starting
+    while the lease is live and fences transcript commits by owner token. A lease
+    cannot forcibly stop a stale process or reverse an external side effect already
+    in progress; tool handlers still need idempotency and their own authorization.
     """
 
-    def __init__(self, lock_stripes: int = 64) -> None:
+    def __init__(
+        self,
+        lock_stripes: int = 64,
+        lease_seconds: float = 30.0,
+    ) -> None:
         if isinstance(lock_stripes, bool) or not isinstance(lock_stripes, int) or not 1 <= lock_stripes <= 4096:
             raise ToolOrchestrationError("lock_stripes must be an integer from 1 to 4096")
+        if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, (int, float)):
+            raise ToolOrchestrationError("lease_seconds must be between 3 and 3600 seconds")
+        try:
+            seconds = float(lease_seconds)
+        except (OverflowError, TypeError, ValueError):
+            raise ToolOrchestrationError("lease_seconds must be between 3 and 3600 seconds") from None
+        if not math.isfinite(seconds) or not 3 <= seconds <= 3600:
+            raise ToolOrchestrationError("lease_seconds must be between 3 and 3600 seconds")
         self._locks = tuple(threading.RLock() for _ in range(lock_stripes))
+        self.lease_seconds = seconds
 
     def run_and_commit(
         self,
@@ -346,57 +362,114 @@ class SessionTurnCoordinator:
         user_text: str,
         context: ExecutionContext,
     ) -> CommittedOrchestration:
-        """Run and persist one turn while holding the session's process-local lock."""
+        """Run and persist one turn under local and available durable lease locks."""
         if not callable(getattr(orchestrator, "run", None)):
             raise ToolOrchestrationError("orchestrator must implement run()")
         if not isinstance(store, SessionStore):
             raise ToolOrchestrationError("store must be a SessionStore")
         if not callable(getattr(store, "commit_turn_messages", None)):
             raise ToolOrchestrationError("store must support complete-turn commits")
-        if not isinstance(session_id, str) or not session_id.strip():
-            raise ToolOrchestrationError("session_id must be non-empty text")
+        if not isinstance(session_id, str) or not session_id.strip() or len(session_id) > 256:
+            raise ToolOrchestrationError("session_id must be bounded non-empty text")
+
+        lease_methods = (
+            "claim_turn_lease",
+            "renew_turn_lease",
+            "release_turn_lease",
+        )
+        available = tuple(callable(getattr(store, name, None)) for name in lease_methods)
+        if any(available) and not all(available):
+            raise ToolOrchestrationError("store exposes an incomplete durable lease contract")
+        durable_lease = all(available)
 
         lock = self._locks[hash(session_id) % len(self._locks)]
         with lock:
-            snapshot = store.get(session_id)
-            if snapshot.closed:
-                raise ToolOrchestrationError("session is closed")
+            owner_token = str(uuid4()) if durable_lease else None
+            stop_heartbeat = threading.Event() if durable_lease else None
+            lease_lost = threading.Event() if durable_lease else None
+            heartbeat_thread = None
 
-            # Validate persistence caps before model invocation or tool side effects.
-            # Assistant tool-call envelopes and final assistant text share max_output_chars;
-            # tool-result messages use max_tool_chars. The byte cap is conservative for
-            # the store's character limits because UTF-8 bytes are never fewer than chars.
-            required_assistant_chars = max(
-                orchestrator.max_output_chars,
-                orchestrator.max_tool_message_bytes,
-            )
-            if store.max_output_chars < required_assistant_chars:
-                raise ToolOrchestrationError(
-                    "session max_output_chars must cover assistant and tool-call message limits"
-                )
-            if store.max_tool_chars < orchestrator.max_tool_message_bytes:
-                raise ToolOrchestrationError(
-                    "session max_tool_chars must cover the orchestrator tool-message byte limit"
-                )
-            if isinstance(user_text, str) and len(user_text) > store.max_input_chars:
-                raise ToolOrchestrationError(
-                    "user_text exceeds the session store input limit"
-                )
+            if durable_lease:
+                try:
+                    store.claim_turn_lease(
+                        session_id, owner_token, self.lease_seconds
+                    )
+                except Exception:
+                    raise ToolOrchestrationError("session turn lease is unavailable") from None
 
-            result = orchestrator.run(
-                session_id,
-                user_text,
-                snapshot.messages,
-                context,
-                max_total_messages=store.max_session_messages,
-            )
-            prefix_length = len(snapshot.messages)
-            if result.messages[:prefix_length] != snapshot.messages:
-                raise ToolOrchestrationError("orchestrator returned a mismatched history prefix")
-            turn_messages = result.messages[prefix_length:]
-            committed = store.commit_turn_messages(
-                session_id,
-                snapshot.version,
-                turn_messages,
-            )
-            return CommittedOrchestration(session=committed, result=result)
+                def renew() -> None:
+                    while not stop_heartbeat.wait(self.lease_seconds / 3):
+                        try:
+                            store.renew_turn_lease(
+                                session_id, owner_token, self.lease_seconds
+                            )
+                        except Exception:
+                            lease_lost.set()
+                            return
+
+                heartbeat_thread = threading.Thread(
+                    target=renew,
+                    name="capri-session-lease-heartbeat",
+                    daemon=True,
+                )
+                heartbeat_thread.start()
+
+            try:
+                snapshot = store.get(session_id)
+                if snapshot.closed:
+                    raise ToolOrchestrationError("session is closed")
+
+                # Preflight persisted transcript limits before model invocation or tools.
+                required_assistant_chars = max(
+                    orchestrator.max_output_chars,
+                    orchestrator.max_tool_message_bytes,
+                )
+                if store.max_output_chars < required_assistant_chars:
+                    raise ToolOrchestrationError(
+                        "session max_output_chars must cover assistant and tool-call message limits"
+                    )
+                if store.max_tool_chars < orchestrator.max_tool_message_bytes:
+                    raise ToolOrchestrationError(
+                        "session max_tool_chars must cover the orchestrator tool-message byte limit"
+                    )
+                if isinstance(user_text, str) and len(user_text) > store.max_input_chars:
+                    raise ToolOrchestrationError(
+                        "user_text exceeds the session store input limit"
+                    )
+
+                result = orchestrator.run(
+                    session_id,
+                    user_text,
+                    snapshot.messages,
+                    context,
+                    max_total_messages=store.max_session_messages,
+                )
+                prefix_length = len(snapshot.messages)
+                if result.messages[:prefix_length] != snapshot.messages:
+                    raise ToolOrchestrationError("orchestrator returned a mismatched history prefix")
+                if durable_lease and lease_lost.is_set():
+                    raise ToolOrchestrationError("session turn lease was lost during orchestration")
+                turn_messages = result.messages[prefix_length:]
+                if durable_lease:
+                    committed = store.commit_turn_messages(
+                        session_id,
+                        snapshot.version,
+                        turn_messages,
+                        lease_owner=owner_token,
+                    )
+                else:
+                    committed = store.commit_turn_messages(
+                        session_id,
+                        snapshot.version,
+                        turn_messages,
+                    )
+                return CommittedOrchestration(session=committed, result=result)
+            finally:
+                if durable_lease:
+                    stop_heartbeat.set()
+                    heartbeat_thread.join(timeout=self.lease_seconds)
+                    try:
+                        store.release_turn_lease(session_id, owner_token)
+                    except Exception:
+                        # Lease expiry remains the recovery path if release storage fails.
+                        pass
