@@ -205,5 +205,17 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         self.assertIsNone(self.store.claim_next("worker", now=NOW + timedelta(seconds=3)))
 
 
+    def test_plan_rejects_non_string_keys_and_non_json_values(self):
+        invalid = [
+            [{"tool": "prepare", "input": {1: "value"}}],
+            [{"tool": "prepare", "input": {"nested": (1, 2)}}],
+            [{"tool": "prepare", "input": {"nested": [[[[[[[[[[[[[[[[[0]]]]]]]]]]]]]]]]]}}],
+        ]
+        for plan in invalid:
+            with self.subTest(plan=plan):
+                with self.assertRaises(TaskValidationError):
+                    self.store.create(plan, now=NOW)
+
+
 if __name__ == "__main__":
     unittest.main()
