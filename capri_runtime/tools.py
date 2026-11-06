@@ -345,6 +345,18 @@ class HmacApprovalAuthority:
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self.max_ttl_seconds = max_ttl_seconds
 
+    def _active_signing_key_id(self) -> str:
+        if self._mac_provider is None:
+            return self._active_key_id
+        try:
+            key_id = self._mac_provider.active_key_id
+        except Exception:
+            raise ToolValidationError("approval signing provider is unavailable") from None
+        if (not isinstance(key_id, str)
+                or not HmacApprovalKeyRing._KEY_ID_RE.fullmatch(key_id)):
+            raise ToolValidationError("approval signing provider returned an invalid key ID")
+        return key_id
+
     @staticmethod
     def _payload(grant: ApprovalGrant) -> bytes:
         return json.dumps(
@@ -382,14 +394,15 @@ class HmacApprovalAuthority:
         if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
             raise ToolValidationError("approval clock must return a timezone-aware datetime")
         expiry = (now.astimezone(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+        active_key_id = self._active_signing_key_id()
         unsigned = ApprovalGrant(
             str(uuid4()), principal_id, tool_name, argument_digest, expiry,
-            key_id=self._active_key_id,
+            key_id=active_key_id,
         )
         payload = self._payload(unsigned)
         try:
             if self._mac_provider is not None:
-                signature_bytes = self._mac_provider.sign(self._active_key_id, payload)
+                signature_bytes = self._mac_provider.sign(active_key_id, payload)
             else:
                 signature_bytes = hmac.new(self._legacy_key, payload, hashlib.sha256).digest()
             if not isinstance(signature_bytes, bytes) or len(signature_bytes) != 32:
