@@ -11,6 +11,7 @@ import re
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from itertools import islice
 from typing import Any, Callable, Mapping
 from uuid import uuid4
 
@@ -296,7 +297,7 @@ class HostAuthorityResolver:
         if isinstance(raw_permissions, (str, bytes, bytearray)):
             raise HostAuthorityError("host permission resolution returned an invalid grant set")
         try:
-            permissions = tuple(raw_permissions)
+            permissions = tuple(islice(iter(raw_permissions), 129))
         except Exception:
             raise HostAuthorityError("host permission resolution returned an invalid grant set") from None
         if (len(permissions) > 128
@@ -311,7 +312,7 @@ class HostAuthorityResolver:
                 raw_approvals = self._approvals_for(principal_id)
                 if isinstance(raw_approvals, (str, bytes, bytearray)):
                     raise ValueError("invalid approval collection")
-                approvals = tuple(raw_approvals)
+                approvals = tuple(islice(iter(raw_approvals), 33))
             except Exception:
                 raise HostAuthorityError("host approval resolution failed") from None
             if len(approvals) > 32 or any(
