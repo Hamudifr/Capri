@@ -524,8 +524,8 @@ class DoctorTests(unittest.TestCase):
 
     def test_doctor_rejects_column_zero_flow_mapping_permission_continuations(self):
         overrides = (
-            "permissions: {contents: write},\\n",
-            '"permissions": {contents: write},\\n',
+            "permissions: {contents: write},\n",
+            '"permissions": {contents: write},\n',
         )
         for override in overrides:
             with self.subTest(override=override), tempfile.TemporaryDirectory() as directory:
@@ -533,12 +533,12 @@ class DoctorTests(unittest.TestCase):
                 self._make_repository(root)
                 workflow = root / ".github/workflows/quality.yml"
                 content = workflow.read_text(encoding="utf-8").replace(
-                    "  test:\\n    steps:\\n      - uses: actions/checkout@"
+                    "  test:\n    steps:\n      - uses: actions/checkout@"
                     + "a" * 40
-                    + "\\n",
-                    "  test: {runs-on: ubuntu-latest,\\n"
+                    + "\n",
+                    "  test: {runs-on: ubuntu-latest,\n"
                     + override
-                    + '    steps: [{run: "echo hi"}]}\\n',
+                    + '    steps: [{run: "echo hi"}]}\n',
                 )
                 workflow.write_text(content, encoding="utf-8")
                 output = io.StringIO()
