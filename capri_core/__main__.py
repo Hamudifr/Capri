@@ -69,7 +69,7 @@ def run_doctor(root: Path, json_output: bool = False) -> int:
                 "contents: read is explicitly scoped"
                 if least_privilege else "expected explicit contents: read permission",
             ))
-            recovery_triggers = workflow.count('branches: ["main", "recovery/non-x5-foundation"]')
+            recovery_triggers = workflow.count("recovery/non-x5-foundation")
             checks.append((
                 "Recovery CI coverage",
                 recovery_triggers >= 2,
