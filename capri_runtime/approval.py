@@ -200,6 +200,8 @@ class SQLiteApprovalChallengeStore:
         grant_factory: Callable[[ApprovalChallenge], ApprovalGrant] | None = None,
     ) -> ApprovalChallenge:
         current = _utc(now, "decision clock")
+        if not isinstance(challenge_id, str) or not 0 < len(challenge_id) <= 64:
+            raise ToolValidationError("challenge_id is invalid")
         if decision not in {"approve", "reject"}:
             raise ToolValidationError("decision must be approve or reject")
         if decision == "approve" and not callable(grant_factory):
@@ -303,6 +305,7 @@ class HostApprovalService:
         clock: Callable[[], datetime] | None = None,
         challenge_ttl_seconds: int = 300,
         grant_ttl_seconds: int = 300,
+        allow_self_approval: bool = False,
     ) -> None:
         if not isinstance(store, SQLiteApprovalChallengeStore) or not isinstance(signer, HmacApprovalAuthority):
             raise ToolValidationError("trusted challenge store and HMAC signer are required")
@@ -311,10 +314,13 @@ class HostApprovalService:
         for label, value in (("challenge_ttl_seconds", challenge_ttl_seconds), ("grant_ttl_seconds", grant_ttl_seconds)):
             if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 3600:
                 raise ToolValidationError(f"{label} must be between 1 and 3600")
+        if not isinstance(allow_self_approval, bool):
+            raise ToolValidationError("allow_self_approval must be boolean")
         self._store, self._signer = store, signer
         self._authenticate, self._authorize = authenticate_approver, authorize_approver
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._challenge_ttl, self._grant_ttl = challenge_ttl_seconds, grant_ttl_seconds
+        self._allow_self_approval = allow_self_approval
 
     def create_challenge(
         self, context: ExecutionContext, outcome: ToolCallOutcome, operation_id: str,
@@ -342,6 +348,8 @@ class HostApprovalService:
         if (not isinstance(approver_id, str) or not approver_id.strip()
                 or len(approver_id) > 256 or any(0xD800 <= ord(c) <= 0xDFFF for c in approver_id)):
             raise HostAuthorityError("approval authentication failed")
+        if not self._allow_self_approval and approver_id == challenge.principal_id:
+            raise HostAuthorityError("self-approval is not permitted")
         try:
             allowed = self._authorize(approver_id, challenge)
         except Exception:
