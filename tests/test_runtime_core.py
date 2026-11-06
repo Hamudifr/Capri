@@ -533,7 +533,9 @@ class DoctorTests(unittest.TestCase):
                 self._make_repository(root)
                 workflow = root / ".github/workflows/quality.yml"
                 content = workflow.read_text(encoding="utf-8").replace(
-                    "  test:\\n    steps:\\n",
+                    "  test:\\n    steps:\\n      - uses: actions/checkout@"
+                    + "a" * 40
+                    + "\\n",
                     "  test: {runs-on: ubuntu-latest,\\n"
                     + override
                     + '    steps: [{run: "echo hi"}]}\\n',
