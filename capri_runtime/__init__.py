@@ -1,4 +1,4 @@
-"""Minimal provider-neutral non-X5 runtime foundation."""
+"""Provider-neutral non-X5 runtime and permissioned tool boundary."""
 
 from .runtime import (
     Message,
@@ -14,10 +14,35 @@ from .runtime import (
     SessionStore,
     ValidationError,
 )
+from .tools import (
+    ApprovalGrant,
+    ApprovalRequiredError,
+    AuditError,
+    AuditEvent,
+    AuditSink,
+    ExecutionContext,
+    InMemoryAuditSink,
+    PermissionDeniedError,
+    ToolBoundaryError,
+    ToolExecutionError,
+    ToolExecutor,
+    ToolNotFoundError,
+    ToolRegistry,
+    ToolSpec,
+    ToolValidationError,
+)
 
 __all__ = [
+    "ApprovalGrant",
+    "ApprovalRequiredError",
+    "AuditError",
+    "AuditEvent",
+    "AuditSink",
+    "ExecutionContext",
+    "InMemoryAuditSink",
     "Message",
     "ModelAdapter",
+    "PermissionDeniedError",
     "Runtime",
     "RuntimeErrorBase",
     "RuntimeExecutionError",
@@ -27,5 +52,12 @@ __all__ = [
     "SessionNotFoundError",
     "SessionLimitError",
     "SessionStore",
+    "ToolBoundaryError",
+    "ToolExecutionError",
+    "ToolExecutor",
+    "ToolNotFoundError",
+    "ToolRegistry",
+    "ToolSpec",
+    "ToolValidationError",
     "ValidationError",
 ]
