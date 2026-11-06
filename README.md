@@ -34,6 +34,15 @@ The repository has a reviewable foundation, a tested execution-ledger prototype,
 
 ## Run checks locally
 
+Run the read-only repository diagnostic before making changes:
+
+```bash
+python -m capri_core doctor
+```
+
+It checks required project files, Python version, pinned external CI actions, minimal workflow permissions, and recovery-branch CI triggers under the actual top-level `push` and `pull_request` events. Duplicate top-level `on:` blocks or duplicate direct event mappings fail closed, as do unsupported trigger forms. The check is deliberately narrow, not a general YAML parser. Its report also includes a dependency-aware operational health graph; use `--json` to consume it programmatically. It reads only those known project files and does not inspect transcripts, credentials, or arbitrary repository contents. Use `--root PATH` to check another working tree. Add `--json` for a versioned machine-readable report (`schema_version: 1`) with per-check status and aggregate counts.
+
+
 ```bash
 python -m compileall -q capri_core capri_runtime tests
 python -m unittest discover -s tests -v

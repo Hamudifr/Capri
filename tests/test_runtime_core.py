@@ -64,7 +64,7 @@ class CLITests(unittest.TestCase):
     def test_verify_cli_fails_on_corrupted_ledger(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "runs.jsonl"
-            path.write_text('{"bad":true}\\n', encoding="utf-8")
+            path.write_text('{"bad":true}\n', encoding="utf-8")
             output = io.StringIO()
             with redirect_stderr(output):
                 code = cli_main(["verify", str(path)])
@@ -200,7 +200,7 @@ class LedgerTests(unittest.TestCase):
             path = Path(directory) / "runs.jsonl"
             path.write_text(
                 '{"previous_hash":"' + ("0" * 64) + '","record":{},"hash":"' +
-                ("0" * 64) + '","hash":"' + ("0" * 64) + '"}\\n',
+                ("0" * 64) + '","hash":"' + ("0" * 64) + '"}\n',
                 encoding="utf-8",
             )
             with self.assertRaises(LedgerIntegrityError):
@@ -303,6 +303,405 @@ class LedgerTests(unittest.TestCase):
                 hashes = list(pool.map(lambda i: ledger.append(passing(f"thread-{i}")), range(24)))
             self.assertEqual(len(set(hashes)), 24)
             self.assertEqual(ledger.verify()["records"], 24)
+
+
+class DoctorTests(unittest.TestCase):
+    def _make_repository(self, root):
+        required = (
+            "README.md",
+            "capri_core/__main__.py",
+            "capri_core/ledger.py",
+            "capri_runtime/runtime.py",
+            "tests/test_runtime_core.py",
+            "tests/test_runtime.py",
+        )
+        for name in required:
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("# fixture\n", encoding="utf-8")
+        workflow = root / ".github/workflows/quality.yml"
+        workflow.parent.mkdir(parents=True, exist_ok=True)
+        workflow.write_text(
+            "on:\n"
+            "  push:\n"
+            '    branches: ["main", "recovery/non-x5-foundation"]\n'
+            "  pull_request:\n"
+            '    branches: ["main", "recovery/non-x5-foundation"]\n'
+            "permissions:\n"
+            "  contents: read\n"
+            "jobs:\n"
+            "  test:\n"
+            "    steps:\n"
+            "      - uses: actions/checkout@"
+            + "a" * 40
+            + "\n",
+            encoding="utf-8",
+        )
+
+    def test_doctor_passes_on_healthy_repository_fixture(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_repository(root)
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["doctor", "--root", str(root)])
+            self.assertEqual(code, 0, output.getvalue())
+            self.assertIn("Capri Doctor:", output.getvalue())
+            self.assertIn("Recovery CI coverage: push and pull_request", output.getvalue())
+
+    def test_doctor_json_report_has_stable_schema_and_exit_code(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_repository(root)
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["doctor", "--root", str(root), "--json"])
+            report = json.loads(output.getvalue())
+            self.assertEqual(code, 0)
+            self.assertEqual(report["schema_version"], 1)
+            self.assertEqual(report["tool"], "capri-doctor")
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(report["summary"], {"passed": 6, "failed": 0, "total": 6})
+            self.assertEqual(
+                [item["id"] for item in report["checks"]],
+                [
+                    "python_version",
+                    "repository_structure",
+                    "ci_workflow_readable",
+                    "ci_actions_pinned",
+                    "ci_permissions",
+                    "recovery_ci_coverage",
+                ],
+            )
+            self.assertTrue(all(item["status"] == "pass" for item in report["checks"]))
+
+    def test_doctor_json_report_is_machine_readable_on_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["doctor", "--root", directory, "--json"])
+            report = json.loads(output.getvalue())
+            self.assertEqual(code, 1)
+            self.assertEqual(report["status"], "fail")
+            self.assertGreater(report["summary"]["failed"], 0)
+            self.assertEqual(
+                report["summary"]["passed"] + report["summary"]["failed"],
+                report["summary"]["total"],
+            )
+
+    def test_doctor_fails_closed_on_missing_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["doctor", "--root", directory])
+            self.assertEqual(code, 1)
+            self.assertIn("[FAIL] Repository structure", output.getvalue())
+
+    def test_doctor_detects_unpinned_external_actions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_repository(root)
+            workflow = root / ".github/workflows/quality.yml"
+            workflow.write_text(
+                workflow.read_text(encoding="utf-8").replace("@" + "a" * 40, "@v6"),
+                encoding="utf-8",
+            )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["doctor", "--root", str(root)])
+            self.assertEqual(code, 1)
+            self.assertIn("[FAIL] CI actions pinned", output.getvalue())
+
+
+    def test_doctor_ignores_unrelated_branch_lists_in_job_matrix(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_repository(root)
+            workflow = root / ".github/workflows/quality.yml"
+            content = workflow.read_text(encoding="utf-8").replace(
+                'branches: ["main", "recovery/non-x5-foundation"]',
+                'branches: ["main"]',
+            )
+            content += (
+                "    strategy:\n"
+                "      matrix:\n"
+                "        include:\n"
+                '          - branches: ["main", "recovery/non-x5-foundation"]\n'
+                '          - branches: ["main", "recovery/non-x5-foundation"]\n'
+            )
+            workflow.write_text(content, encoding="utf-8")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["doctor", "--root", str(root)])
+            self.assertEqual(code, 1)
+            self.assertIn("[FAIL] Recovery CI coverage", output.getvalue())
+
+    def test_doctor_accepts_block_style_event_branch_lists(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_repository(root)
+            workflow = root / ".github/workflows/quality.yml"
+            content = workflow.read_text(encoding="utf-8").replace(
+                'branches: ["main", "recovery/non-x5-foundation"]',
+                'branches:\n'
+                '      - "main"\n'
+                '      - "recovery/non-x5-foundation"',
+            )
+            workflow.write_text(content, encoding="utf-8")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["doctor", "--root", str(root)])
+            self.assertEqual(code, 0, output.getvalue())
+            self.assertIn("[PASS] Recovery CI coverage", output.getvalue())
+
+
+    def test_doctor_ignores_nested_event_names_and_branch_lists(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_repository(root)
+            workflow = root / ".github/workflows/quality.yml"
+            content = workflow.read_text(encoding="utf-8")
+            start = content.index("on:\n")
+            end = content.index("permissions:\n", start)
+            nested = (
+                "on:\n"
+                "  workflow_dispatch:\n"
+                "    inputs:\n"
+                '      push:\n'
+                '        branches: ["main", "recovery/non-x5-foundation"]\n'
+                '      pull_request:\n'
+                '        branches: ["main", "recovery/non-x5-foundation"]\n'
+            )
+            workflow.write_text(content[:start] + nested + content[end:], encoding="utf-8")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["doctor", "--root", str(root)])
+            self.assertEqual(code, 1)
+            self.assertIn("[FAIL] Recovery CI coverage", output.getvalue())
+
+
+    def test_doctor_rejects_job_level_permissions_as_workflow_policy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_repository(root)
+            workflow = root / ".github/workflows/quality.yml"
+            content = workflow.read_text(encoding="utf-8")
+            content = content.replace("permissions:\n  contents: read\n", "")
+            content = content.replace(
+                "  test:\n    steps:\n",
+                "  test:\n    permissions:\n      contents: read\n    steps:\n",
+            )
+            workflow.write_text(content, encoding="utf-8")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["doctor", "--root", str(root)])
+            self.assertEqual(code, 1)
+            self.assertIn("[FAIL] CI permissions", output.getvalue())
+
+    def test_doctor_rejects_quoted_and_inline_job_level_permission_overrides(self):
+        overrides = (
+            "    permissions:\n      contents: write\n",
+            "    permissions: { contents: write }\n",
+            '    "permissions":\n      contents: write\n',
+            "    'permissions': { contents: write }\n",
+        )
+        for override in overrides:
+            with self.subTest(override=override), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self._make_repository(root)
+                workflow = root / ".github/workflows/quality.yml"
+                content = workflow.read_text(encoding="utf-8")
+                content = content.replace(
+                    "  test:\n    steps:\n",
+                    "  test:\n" + override + "    steps:\n",
+                )
+                workflow.write_text(content, encoding="utf-8")
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    code = cli_main(["doctor", "--root", str(root)])
+                self.assertEqual(code, 1, output.getvalue())
+                self.assertIn("[FAIL] CI permissions", output.getvalue())
+
+    def test_doctor_rejects_column_zero_flow_mapping_permission_continuations(self):
+        overrides = (
+            "permissions: {contents: write},\n",
+            '"permissions": {contents: write},\n',
+            "permissions:\n      {contents: write},\n",
+            '"permissions":\n      {contents: write},\n',
+            "'permissions':\n      {contents: write},\n",
+        )
+        for override in overrides:
+            with self.subTest(override=override), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self._make_repository(root)
+                workflow = root / ".github/workflows/quality.yml"
+                content = workflow.read_text(encoding="utf-8").replace(
+                    "  test:\n    steps:\n      - uses: actions/checkout@"
+                    + "a" * 40
+                    + "\n",
+                    "  test: {runs-on: ubuntu-latest,\n"
+                    + override
+                    + '    steps: [{run: "echo hi"}]}\n',
+                )
+                workflow.write_text(content, encoding="utf-8")
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    code = cli_main(["doctor", "--root", str(root)])
+                self.assertEqual(code, 1, output.getvalue())
+                self.assertIn("[FAIL] CI permissions", output.getvalue())
+
+    def test_doctor_rejects_inline_job_mapping_permissions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_repository(root)
+            workflow = root / ".github/workflows/quality.yml"
+            content = workflow.read_text(encoding="utf-8").replace(
+                "  test:\n    steps:\n",
+                '  test: {runs-on: ubuntu-latest, "permissions": {contents: write}, steps: [{run: "echo hi"}]}\n',
+            )
+            workflow.write_text(content, encoding="utf-8")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["doctor", "--root", str(root)])
+            self.assertEqual(code, 1, output.getvalue())
+            self.assertIn("[FAIL] CI permissions", output.getvalue())
+
+    def test_doctor_fails_closed_on_escaped_quoted_mapping_keys(self):
+        overrides = (
+            '    "\\u0070ermissions": {contents: write}\n',
+            '  test: {runs-on: ubuntu-latest, "\\u0070ermissions": {contents: write}, steps: [{run: "echo hi"}]}\n',
+        )
+        for override in overrides:
+            with self.subTest(override=override), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self._make_repository(root)
+                workflow = root / ".github/workflows/quality.yml"
+                content = workflow.read_text(encoding="utf-8")
+                if override.startswith("  test:"):
+                    content = content.replace("  test:\n    steps:\n", override)
+                else:
+                    content = content.replace("  test:\n    steps:\n", "  test:\n" + override + "    steps:\n")
+                workflow.write_text(content, encoding="utf-8")
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    code = cli_main(["doctor", "--root", str(root)])
+                self.assertEqual(code, 1, output.getvalue())
+                self.assertIn("[FAIL] CI permissions", output.getvalue())
+
+    def test_doctor_rejects_explicit_job_permission_keys(self):
+        overrides = (
+            '    ? "permissions"\n    : {contents: write}\n',
+            '  test: {? "permissions": {contents: write}, runs-on: ubuntu-latest, steps: [{run: "echo hi"}]}\n',
+            '    ? "\\u0070ermissions"\n    : {contents: write}\n',
+            '  test: {? "\\u0070ermissions": {contents: write}, runs-on: ubuntu-latest, steps: [{run: "echo hi"}]}\n',
+            '    name: &perm permissions\n    ? *perm\n    : {contents: write}\n',
+            '  test: {name: &perm permissions, ? *perm: {contents: write}, runs-on: ubuntu-latest, steps: [{run: "echo hi"}]}\n',
+            '    &perm permissions: {contents: write}\n',
+            '  test: {&perm permissions: {contents: write}, runs-on: ubuntu-latest}\n',
+            '    !!str permissions: {contents: write}\n',
+            '  test: {!!str permissions: {contents: write}, runs-on: ubuntu-latest}\n',
+            '    ? >-\n      permissions\n    : {contents: write}\n',
+        )
+        for override in overrides:
+            with self.subTest(override=override), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self._make_repository(root)
+                workflow = root / ".github/workflows/quality.yml"
+                content = workflow.read_text(encoding="utf-8")
+                if override.startswith("  test:"):
+                    content = content.replace("  test:\n    steps:\n", override)
+                else:
+                    content = content.replace("  test:\n    steps:\n", "  test:\n" + override + "    steps:\n")
+                workflow.write_text(content, encoding="utf-8")
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    code = cli_main(["doctor", "--root", str(root)])
+                self.assertEqual(code, 1, output.getvalue())
+                self.assertIn("[FAIL] CI permissions", output.getvalue())
+
+
+    def test_doctor_accepts_escaped_quotes_in_plain_run_command(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_repository(root)
+            workflow = root / ".github/workflows/quality.yml"
+            content = workflow.read_text(encoding="utf-8")
+            content += '      - run: echo "say \\"hello\\":world"\n'
+            workflow.write_text(content, encoding="utf-8")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["doctor", "--root", str(root)])
+            self.assertEqual(code, 0, output.getvalue())
+            self.assertIn("[PASS] CI permissions", output.getvalue())
+
+    def test_doctor_rejects_additional_workflow_write_permissions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_repository(root)
+            workflow = root / ".github/workflows/quality.yml"
+            content = workflow.read_text(encoding="utf-8").replace(
+                "  contents: read\n",
+                "  contents: read\n  issues: write\n",
+            )
+            workflow.write_text(content, encoding="utf-8")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["doctor", "--root", str(root)])
+            self.assertEqual(code, 1)
+            self.assertIn("[FAIL] CI permissions", output.getvalue())
+
+    def test_doctor_rejects_nested_branch_list_lookalikes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_repository(root)
+            workflow = root / ".github/workflows/quality.yml"
+            content = workflow.read_text(encoding="utf-8").replace(
+                'branches: ["main", "recovery/non-x5-foundation"]',
+                "branches:\n"
+                "      - include:\n"
+                "          - main\n"
+                "          - recovery/non-x5-foundation",
+            )
+            workflow.write_text(content, encoding="utf-8")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["doctor", "--root", str(root)])
+            self.assertEqual(code, 1)
+            self.assertIn("[FAIL] Recovery CI coverage", output.getvalue())
+
+
+    def test_doctor_rejects_duplicate_top_level_on_blocks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_repository(root)
+            workflow = root / ".github/workflows/quality.yml"
+            content = workflow.read_text(encoding="utf-8")
+            start = content.index("on:\n")
+            end = content.index("permissions:\n", start)
+            first = content[start:end]
+            workflow.write_text(content + first, encoding="utf-8")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["doctor", "--root", str(root)])
+            self.assertEqual(code, 1)
+            self.assertIn("[FAIL] Recovery CI coverage", output.getvalue())
+
+    def test_doctor_rejects_duplicate_push_event_mappings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_repository(root)
+            workflow = root / ".github/workflows/quality.yml"
+            content = workflow.read_text(encoding="utf-8")
+            duplicate = (
+                "  push:\n"
+                '    branches: ["main", "recovery/non-x5-foundation"]\n'
+            )
+            workflow.write_text(content.replace("  pull_request:\n", duplicate + "  pull_request:\n"), encoding="utf-8")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["doctor", "--root", str(root)])
+            self.assertEqual(code, 1)
+            self.assertIn("[FAIL] Recovery CI coverage", output.getvalue())
 
 
 if __name__ == "__main__":
