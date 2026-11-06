@@ -691,7 +691,7 @@ class TaskWorker:
         claim = engine.store.claim_next(engine.executor_id, engine.lease_seconds)
         if claim is None:
             return None
-        heartbeat_stop = Event()
+        heartbeat_stop = threading.Event()
 
         def heartbeat() -> None:
             while not heartbeat_stop.wait(self.heartbeat_interval_seconds):
@@ -701,7 +701,7 @@ class TaskWorker:
                     # Completion will fail closed if the lease was lost or expired.
                     return
 
-        thread = Thread(target=heartbeat, name="capri-task-lease-heartbeat", daemon=True)
+        thread = threading.Thread(target=heartbeat, name="capri-task-lease-heartbeat", daemon=True)
         thread.start()
         try:
             return engine.execute_claim(claim)
