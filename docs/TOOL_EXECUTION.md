@@ -47,3 +47,14 @@ Before exposing consequential handlers to an actual model, add host authenticati
 ## Durable store verification
 
 `SQLiteSecurityStore` is covered by `tests/test_security_store.py`: database permissions, integrity check, audit readback across instances, durable approval replay prevention, concurrent single-winner consumption, expiry, symlink rejection, and unsafe/missing parent directories. The SQLite store does not encrypt data; its database contains only redacted operational metadata and consumed grant identifiers. The host must keep the parent directory private and provide backups/retention controls.
+
+
+## Model-to-tool bridge
+
+`capri_runtime.tool_bridge.ToolExecutionBridge` accepts bounded batches of structured `ToolCallRequest` values and routes every call through the existing `ToolExecutor`. It validates the entire batch envelope (call IDs, duplicate IDs, object arguments, call count, and total bytes) before the first handler can run. Each call then receives the executor's existing schema, trusted permission, approval, audit, and result checks.
+
+The host supplies the `ExecutionContext`; the bridge never creates or modifies identity, permissions, or approvals from model data. `available_tools(context)` returns only schemas whose permission is already present in that trusted context. Consequential tools remain approval-gated. An `approval_required` outcome includes the canonical argument digest so trusted host approval UX can bind a later grant to the exact request; the bridge does not issue or approve grants.
+
+Outcomes are returned per call in request order. Audit failures are reported as `outcome_uncertain`, because the executor cannot always distinguish a failed pre-handler audit write from a failed completion write after a side effect. The bridge never retries an uncertain call. A `ToolExecutionError` becomes a generic handler-failed outcome; raw exception details are not returned.
+
+This is a provider-neutral execution bridge, not a model-provider adapter, conversation loop, approval UI, authenticated identity system, sandbox, or resource-level authorization layer. The host must authenticate the principal, build the context, enforce per-resource ownership in handlers, and decide how to present/resolve approval requests. Do not blindly retry uncertain side effects.
