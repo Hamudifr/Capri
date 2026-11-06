@@ -6,10 +6,11 @@ Every proposed tool call passes through ToolExecutionBridge.
 from __future__ import annotations
 
 import json
+import threading
 from dataclasses import dataclass
 from typing import Protocol
 
-from .runtime import Message
+from .runtime import Message, Session, SessionStore
 from .tool_bridge import (
     ToolBridgeValidationError,
     ToolCallOutcome,
@@ -40,6 +41,14 @@ class OrchestrationResult:
     messages: tuple[Message, ...]
     tool_outcomes: tuple[ToolCallOutcome, ...]
     tool_rounds: int
+
+
+@dataclass(frozen=True, slots=True)
+class CommittedOrchestration:
+    """The committed session snapshot and the orchestration result for that turn."""
+
+    session: Session
+    result: OrchestrationResult
 
 
 class ToolModelAdapter(Protocol):
@@ -122,6 +131,8 @@ class ToolOrchestrator:
         user_text: str,
         history: tuple[Message, ...],
         context: ExecutionContext,
+        *,
+        max_total_messages: int | None = None,
     ) -> OrchestrationResult:
         """Complete one turn, executing at most max_tool_rounds tool batches.
 
@@ -135,6 +146,12 @@ class ToolOrchestrator:
             raise ToolOrchestrationError("user_text must be bounded non-empty valid text")
         if not isinstance(context, ExecutionContext):
             raise ToolOrchestrationError("a trusted host ExecutionContext is required")
+        if max_total_messages is not None and (
+            isinstance(max_total_messages, bool)
+            or not isinstance(max_total_messages, int)
+            or max_total_messages < 2
+        ):
+            raise ToolOrchestrationError("max_total_messages must be at least two")
         if not isinstance(history, tuple) or len(history) + 1 > self.max_history_messages:
             raise ToolOrchestrationError("history plus the current user message exceeds the configured limit")
         for message in history:
@@ -151,6 +168,8 @@ class ToolOrchestrator:
         working.append(Message(role="user", content=user_text))
         if _history_size(working) > self.max_history_bytes:
             raise ToolOrchestrationError("conversation history exceeds the configured byte limit")
+        if max_total_messages is not None and len(working) + 1 > max_total_messages:
+            raise ToolOrchestrationError("session message capacity is exhausted")
         outcomes: list[ToolCallOutcome] = []
         seen_call_ids: set[str] = set()
         tool_rounds = 0
@@ -195,6 +214,12 @@ class ToolOrchestrator:
                 raise ToolOrchestrationError("adapter exceeded the maximum tool-call batch size")
             if len(working) + 1 + len(response.tool_calls) > self.max_history_messages:
                 raise ToolOrchestrationError("conversation history limit reached")
+            if max_total_messages is not None and (
+                len(working) + 1 + len(response.tool_calls) + 1 > max_total_messages
+            ):
+                raise ToolOrchestrationError(
+                    "session message capacity cannot accommodate tool results and a final response"
+                )
 
             duplicate_prior_id = False
             duplicate_batch_id = False
@@ -296,3 +321,60 @@ class ToolOrchestrator:
             tool_rounds += 1
 
         raise ToolOrchestrationError("orchestration ended without a final response")
+
+
+
+class SessionTurnCoordinator:
+    """Serialize complete model/tool/commit turns by session within one host process.
+
+    A fixed stripe set bounds lock memory. Hash collisions may serialize unrelated
+    sessions, but no two turns for the same session can execute concurrently through
+    this coordinator. Multi-process hosts still need a distributed pre-execution
+    lease; SQLite optimistic commits alone cannot undo already-run tool side effects.
+    """
+
+    def __init__(self, lock_stripes: int = 64) -> None:
+        if isinstance(lock_stripes, bool) or not isinstance(lock_stripes, int) or not 1 <= lock_stripes <= 4096:
+            raise ToolOrchestrationError("lock_stripes must be an integer from 1 to 4096")
+        self._locks = tuple(threading.RLock() for _ in range(lock_stripes))
+
+    def run_and_commit(
+        self,
+        orchestrator: ToolOrchestrator,
+        store: SessionStore,
+        session_id: str,
+        user_text: str,
+        context: ExecutionContext,
+    ) -> CommittedOrchestration:
+        """Run and persist one turn while holding the session's process-local lock."""
+        if not callable(getattr(orchestrator, "run", None)):
+            raise ToolOrchestrationError("orchestrator must implement run()")
+        if not isinstance(store, SessionStore):
+            raise ToolOrchestrationError("store must be a SessionStore")
+        if not callable(getattr(store, "commit_turn_messages", None)):
+            raise ToolOrchestrationError("store must support complete-turn commits")
+        if not isinstance(session_id, str) or not session_id.strip():
+            raise ToolOrchestrationError("session_id must be non-empty text")
+
+        lock = self._locks[hash(session_id) % len(self._locks)]
+        with lock:
+            snapshot = store.get(session_id)
+            if snapshot.closed:
+                raise ToolOrchestrationError("session is closed")
+            result = orchestrator.run(
+                session_id,
+                user_text,
+                snapshot.messages,
+                context,
+                max_total_messages=store.max_session_messages,
+            )
+            prefix_length = len(snapshot.messages)
+            if result.messages[:prefix_length] != snapshot.messages:
+                raise ToolOrchestrationError("orchestrator returned a mismatched history prefix")
+            turn_messages = result.messages[prefix_length:]
+            committed = store.commit_turn_messages(
+                session_id,
+                snapshot.version,
+                turn_messages,
+            )
+            return CommittedOrchestration(session=committed, result=result)
