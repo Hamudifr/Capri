@@ -76,3 +76,10 @@ The adapter is injected by trusted host code and is responsible for translating 
 The database path must be in an existing directory owned by the current user and private (0700 or stricter on POSIX). The database file is regular, non-symlink, single-link, and forced to mode 0600; directory and file properties are rechecked on every connection. SQLite uses WAL and full synchronous commits.
 
 **Data handling:** transcript messages are stored as plaintext JSON. This is not encryption at rest. The host must protect the device, parent directory, WAL files, backups, and retention lifecycle. Do not store credentials, secrets, or sensitive personal data unless a separate encryption and data-governance layer is provided.
+
+
+## Persisting tool-enabled turns
+
+Both `SessionStore` and `SQLiteSessionStore` expose `commit_turn_messages(session_id, expected_version, turn_messages)`. It atomically appends one complete turn beginning with one user message and ending with an assistant message; intermediate assistant tool-call messages and tool-result messages are preserved in order. The session version advances once per user turn. Invalid role sequences, incomplete turns, oversized messages, stale versions, and closed sessions fail without committing.
+
+A host can persist a completed `ToolOrchestrator` result by loading the session snapshot, running the orchestrator with that snapshot as history, extracting the appended turn from `result.messages[len(session.messages):]`, then passing that tuple and the original `session.version` to `commit_turn_messages`. The host must serialize turns per session **before** calling the orchestrator: optimistic commit detects a stale result after generation, but it cannot undo tool side effects already performed by a concurrent turn. The SQLite implementation protects the final transcript commit across processes; it does not itself provide a pre-execution session lease.
