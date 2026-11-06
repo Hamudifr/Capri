@@ -6,12 +6,16 @@ It does not store tool arguments, results, prompts, credentials, or transcripts.
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 import stat
 import threading
 from datetime import datetime
 
 from .tools import ApprovalGrant, ApprovalStore, AuditEvent, AuditSink, ToolValidationError
+
+_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+_NAME_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 
 
 class SQLiteSecurityStore(AuditSink, ApprovalStore):
@@ -127,6 +131,21 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
     def write(self, event: AuditEvent) -> None:
         if not isinstance(event, AuditEvent):
             raise ToolValidationError("audit sink accepts AuditEvent records only")
+        text_fields = (
+            (event.event_id, 64), (event.timestamp, 64), (event.principal_id, 256),
+            (event.tool_name, 64), (event.status, 64),
+        )
+        if any(not isinstance(value, str) or not value or len(value) > limit
+               or any(0xD800 <= ord(ch) <= 0xDFFF for ch in value)
+               for value, limit in text_fields):
+            raise ToolValidationError("audit event contains invalid or oversized metadata")
+        if not isinstance(event.argument_digest, str) or not _DIGEST_RE.fullmatch(event.argument_digest):
+            raise ToolValidationError("audit event argument digest must be SHA-256 hex")
+        if event.error_code is not None and (
+            not isinstance(event.error_code, str) or len(event.error_code) > 128
+            or any(0xD800 <= ord(ch) <= 0xDFFF for ch in event.error_code)
+        ):
+            raise ToolValidationError("audit event error code is invalid")
         with self._lock:
             connection = self._connect()
             try:
@@ -149,6 +168,13 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
 
     def consume(self, grant: ApprovalGrant, now: datetime) -> bool:
         if not isinstance(grant, ApprovalGrant):
+            return False
+        if (not isinstance(grant.grant_id, str) or not grant.grant_id or len(grant.grant_id) > 128
+                or not isinstance(grant.principal_id, str) or not grant.principal_id or len(grant.principal_id) > 256
+                or not isinstance(grant.tool_name, str) or not _NAME_RE.fullmatch(grant.tool_name)
+                or not isinstance(grant.argument_digest, str) or not _DIGEST_RE.fullmatch(grant.argument_digest)
+                or not isinstance(grant.expires_at, str) or len(grant.expires_at) > 64
+                or any(0xD800 <= ord(ch) <= 0xDFFF for value in (grant.grant_id, grant.principal_id, grant.tool_name, grant.argument_digest, grant.expires_at) for ch in value)):
             return False
         if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
             raise ToolValidationError("approval consumption requires a timezone-aware time")
