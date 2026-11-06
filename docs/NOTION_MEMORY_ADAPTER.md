@@ -28,7 +28,7 @@ The REST transport pins `Notion-Version: 2026-03-11`, uses `POST /data_sources/{
 - Corrections create a replacement with Status=Review and a Supersedes link, archive the old record, then activate the replacement.
 - Notion has no multi-page transaction. If correction stops part-way, the replacement remains Review and `MemorySyncError.new_memory_id` identifies it for reconciliation. Hosts must serialize cross-process writes.
 - Archive changes the Status property.
-- Delete moves the page to Notion trash (`in_trash=true`); it is not permanent deletion or secure media erasure.
+- Delete moves the page to Notion trash (`in_trash=true`); it is not permanent deletion or secure media erasure. The REST API's trash operation is reversible.
 - Expiry archives due records; the host must schedule `expire()`.
 - Date-only expiry values are interpreted as end-of-day UTC. Datetime values must include a timezone.
 - Export includes all statuses and is deterministic.
