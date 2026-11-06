@@ -120,3 +120,18 @@ The following host-side library components now implement the core lifecycle:
 The service is a trusted host API, not a model-facing endpoint. The application must keep it and the signer private, authenticate users with a real identity provider, implement its own approval UI and policy, and pass the resulting grant only through the host's normal authority-resolution path. The existing executor still performs signature verification and durable one-use consumption before a handler runs.
 
 The store currently uses the existing SQLiteSecurityStore's internal connection and lock hooks so it shares its filesystem protections and transaction database. Keep these classes in the same trusted package boundary; do not hand the store, signer, or service object to model-generated code or untrusted clients. SQLite database contents are not encrypted at rest.
+
+
+## Gateway integration (PR #51)
+
+`HostToolGateway` can now optionally integrate the approval service. Enable it only when all three trusted host dependencies are configured:
+
+- `approval_service`: the host-owned `HostApprovalService`;
+- `operation_id_resolver(credential, execution_context, request)`: derives a stable operation ID from authenticated host session state and the specific request;
+- `on_approval_challenge(challenge)`: delivers the durable challenge to the host's authenticated approval UX/notification path.
+
+The gateway invokes this only for bridge outcomes with status `approval_required`. It returns the original `ToolCallOutcome` to the model unchanged; challenge objects are sent only to the host callback. The model does not receive the challenge ID or signer. If notification fails after challenge persistence, the gateway reports a host error; retrying the same operation ID recovers the existing challenge, so the notification callback should be idempotent by challenge ID.
+
+The operation-ID resolver is the critical integration boundary. It must use host-authenticated session identity plus stable request identity and must not trust an operation ID supplied by the client/model. The current request call ID alone is not globally unique; a host should namespace it with a trusted session identifier and reject reuse with a different digest. A new intentional attempt should receive a new operation ID, while a retry of the same logical attempt must reuse its original ID.
+
+After a challenge is approved, the host's authority resolver must supply the persisted grant to the original principal's next execution context. The gateway does not inject grants or bypass the normal executor checks. The executor still verifies the signature and consumes the grant once. No approval integration is enabled by default, preserving existing gateway behavior.
