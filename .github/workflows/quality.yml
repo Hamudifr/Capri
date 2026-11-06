@@ -1,10 +1,11 @@
 name: Non-X5 quality checks
 
 on:
+  # PR #10 is validated by pull_request; avoid duplicate push + PR matrices.
   push:
-    branches: ["main", "recovery/non-x5-foundation", "security/ledger-path-hardening"]
+    branches: ["main", "recovery/non-x5-foundation"]
   pull_request:
-    # Include the inode-hardening branch as a base so its stacked regression PR receives CI.
+    # Include the inode-hardening branch as a base so stacked PR #15 receives CI.
     branches: ["main", "recovery/non-x5-foundation", "security/ledger-private-permissions-v2", "security/ledger-path-hardening", "fix/ledger-inode-uncertainty-rebased-2026-11-06"]
   workflow_dispatch:
 
