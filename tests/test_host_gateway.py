@@ -164,10 +164,12 @@ class HostGatewayApprovalIntegrationTests(unittest.TestCase):
             self.assertEqual(len(issued), 1)
 
     def test_approval_integration_requires_all_host_callbacks(self):
+        authority = HostAuthorityResolver(lambda credential: "alice", lambda principal: ())
+        bridge = ToolExecutionBridge(ToolExecutor(ToolRegistry(), InMemoryAuditSink()))
         with self.assertRaises(HostAuthorityError):
             HostToolGateway(
-                self.gateway._authority,
-                self.gateway._bridge,
+                authority,
+                bridge,
                 operation_id_resolver=lambda *args: "op-1",
             )
 
