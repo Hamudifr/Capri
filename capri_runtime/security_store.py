@@ -10,7 +10,6 @@ import sqlite3
 import stat
 import threading
 from datetime import datetime
-from typing import Any
 
 from .tools import ApprovalGrant, ApprovalStore, AuditEvent, AuditSink, ToolValidationError
 
@@ -47,6 +46,8 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
                 raise ToolValidationError("database path must be a regular non-symlink file")
             if os.name == "posix" and existing.st_uid != os.geteuid():
                 raise ToolValidationError("database file must be owned by the current user")
+            if os.name == "posix" and existing.st_nlink != 1:
+                raise ToolValidationError("database file must not have hard-link aliases")
 
         flags = os.O_RDWR | os.O_CREAT
         if hasattr(os, "O_NOFOLLOW"):
@@ -62,6 +63,8 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
             if os.name == "posix":
                 if opened.st_uid != os.geteuid():
                     raise ToolValidationError("database file must be owned by the current user")
+                if opened.st_nlink != 1:
+                    raise ToolValidationError("database file must not have hard-link aliases")
                 os.fchmod(descriptor, 0o600)
         finally:
             os.close(descriptor)
@@ -71,12 +74,21 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
+        parent = os.path.dirname(self.path)
+        if os.path.realpath(parent) != parent:
+            raise ToolValidationError("database parent path changed to traverse a symlink")
+        parent_stat = os.stat(parent, follow_symlinks=False)
+        if not stat.S_ISDIR(parent_stat.st_mode):
+            raise ToolValidationError("database parent changed to a non-directory")
+        if os.name == "posix":
+            if parent_stat.st_uid != os.geteuid() or stat.S_IMODE(parent_stat.st_mode) & 0o077:
+                raise ToolValidationError("database parent ownership or privacy changed")
         current = os.lstat(self.path)
         if not stat.S_ISREG(current.st_mode):
             raise ToolValidationError("database file changed to a non-regular path")
         if os.name == "posix":
-            if current.st_uid != os.geteuid() or stat.S_IMODE(current.st_mode) & 0o077:
-                raise ToolValidationError("database ownership or permissions changed")
+            if current.st_uid != os.geteuid() or stat.S_IMODE(current.st_mode) != 0o600 or current.st_nlink != 1:
+                raise ToolValidationError("database ownership, link count, or permissions changed")
         connection = sqlite3.connect(self.path, timeout=5.0, isolation_level=None)
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA trusted_schema=OFF")
