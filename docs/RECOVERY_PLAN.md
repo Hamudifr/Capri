@@ -39,11 +39,11 @@ Next engineering priorities, in order: (1) permissioned tool registry/execution 
 
 ### Delivery status
 
-The integrated recovery branch is a tested internal prototype, not a public or multi-tenant production deployment. Capri's internal self-review is the default engineering review. Before any public deployment, separately verify identity/authorization, tenant isolation, secrets handling, retention/deletion, provider budgets, monitoring, backups, rollback, and data exposure. No X5 access or evaluation is authorized by ordinary engineering work.
+The integrated recovery branch is a tested internal prototype, not a public or multi-tenant production deployment. Capri's internal self-review is the default engineering review. The production release gate not met until identity/authorization, tenant isolation, secrets handling, retention/deletion, provider budgets, monitoring, backups, rollback, and data exposure are verified. No X5 access or evaluation is authorized by ordinary engineering work.
 
 ## Phase 0 — Preserve boundaries
 
-- [x] Confirm the current five-skill Notion registry; do not add or modify skills without a separate governance decision.
+- [x] Inspect the current five-skill Notion registry; owner authorizes new or improved skills when a concrete capability gap and validation path justify them.
 - [x] Establish protected blind-evaluation restrictions.
 - [x] Create an isolated recovery branch.
 - [ ] Maintain a minimal contamination log without protected content.
@@ -60,8 +60,8 @@ The integrated recovery branch is a tested internal prototype, not a public or m
 - [ ] Obtain a fresh, authorized, metadata-only export of non-protected records.
 - [ ] Reconcile run count versus unique scenario count and retest lineage.
 - [ ] Validate evidence-stage completeness without opening protected material.
-- [ ] Identify eligible records for a genuinely independent reviewer.
-- [ ] Record reviewer role and review artifacts; never self-label as independent.
+- [ ] Perform Capri's own review of non-protected evaluation metadata, evidence completeness, and retest lineage.
+- [ ] Use an independent evaluator only if a specific evaluation protocol or external requirement explicitly requires one; never label self-review as independent.
 
 Known historical snapshot (2026-11-05, metadata-only, protected scenario excluded): 36 database records, all marked Pass, Self evaluator, Self-Scored stage; 16 records were marked as retests. This is 36 records, not 36 proven unique scenarios. No independent reviews were recorded. Evidence content could not be safely audited because protected-evaluation indicators appeared in retrieved material; inspection was stopped. The 2026-11-06 snapshot above supersedes these historical counts. Re-query and re-verify before relying on either snapshot.
 
