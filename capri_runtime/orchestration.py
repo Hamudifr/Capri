@@ -369,8 +369,8 @@ class SessionTurnCoordinator:
             raise ToolOrchestrationError("store must be a SessionStore")
         if not callable(getattr(store, "commit_turn_messages", None)):
             raise ToolOrchestrationError("store must support complete-turn commits")
-        if not isinstance(session_id, str) or not session_id.strip():
-            raise ToolOrchestrationError("session_id must be non-empty text")
+        if not isinstance(session_id, str) or not session_id.strip() or len(session_id) > 256:
+            raise ToolOrchestrationError("session_id must be bounded non-empty text")
 
         lease_methods = (
             "claim_turn_lease",

@@ -200,6 +200,44 @@ class SQLiteSessionStoreTests(unittest.TestCase):
         self.assertEqual(committed.version, 1)
 
 
+    def test_expired_lease_cannot_release_or_commit_without_reclaim(self):
+        session = self.store.create()
+        self.store.claim_turn_lease(session.session_id, "stale-owner", 3)
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute(
+                "UPDATE session_turn_leases SET expires_at = ? WHERE session_id = ?",
+                ("2000-01-01T00:00:00+00:00", session.session_id),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        self.assertFalse(self.store.release_turn_lease(session.session_id, "stale-owner"))
+        turn = (
+            Message(role="user", content="go"),
+            Message(role="assistant", content="done"),
+        )
+        with self.assertRaises(SessionConflictError):
+            self.store.commit_turn_messages(session.session_id, 0, turn)
+
+        self.store.claim_turn_lease(session.session_id, "new-owner", 3)
+        self.assertFalse(self.store.release_turn_lease(session.session_id, "stale-owner"))
+        committed = self.store.commit_turn_messages(
+            session.session_id, 0, turn, lease_owner="new-owner"
+        )
+        self.assertEqual(committed.version, 1)
+
+    def test_lease_session_ids_are_bounded_and_valid_text(self):
+        for invalid in ("x" * 257, "bad\ud800"):
+            with self.subTest(session_id=repr(invalid)):
+                with self.assertRaises(ValidationError):
+                    self.store.claim_turn_lease(invalid, "owner", 3)
+                with self.assertRaises(ValidationError):
+                    self.store.renew_turn_lease(invalid, "owner", 3)
+                with self.assertRaises(ValidationError):
+                    self.store.release_turn_lease(invalid, "owner")
+
     def test_coordinator_renews_durable_lease_during_long_model_call(self):
         entered = threading.Event()
         release = threading.Event()
