@@ -181,5 +181,29 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             os.chmod(self.temp.name, 0o700)
 
 
+    def test_success_after_retry_clears_previous_error_code(self):
+        attempts = {"count": 0}
+        def sometimes_fails(_data, _key):
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                raise RuntimeError("private failure")
+            return {"ok": True}
+        engine = TaskEngine(self.store, {"prepare": sometimes_fails}, "worker")
+        self.store.create([{"tool": "prepare", "input": {}, "max_attempts": 2}], now=NOW)
+        first = engine.run_once(now=NOW)
+        self.assertEqual(first.state, "retry_wait")
+        second = engine.run_once(now=NOW + timedelta(seconds=5))
+        self.assertEqual(second.state, "succeeded")
+        self.assertIsNone(second.error_code)
+
+    def test_cancellation_during_failed_step_does_not_schedule_retry(self):
+        self.store.create([{"tool": "prepare", "input": {}, "max_attempts": 5}], now=NOW)
+        claim = self.store.claim_next("worker", now=NOW)
+        self.store.request_cancel(claim.task_id, now=NOW + timedelta(seconds=1))
+        result = self.store.fail_step(claim, now=NOW + timedelta(seconds=2))
+        self.assertEqual(result.state, "cancelled")
+        self.assertIsNone(self.store.claim_next("worker", now=NOW + timedelta(seconds=3)))
+
+
 if __name__ == "__main__":
     unittest.main()
