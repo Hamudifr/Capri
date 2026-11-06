@@ -119,6 +119,8 @@ class ToolExecutionTests(unittest.TestCase):
             ToolSpec("bad", "tools:bad", {"type": "object", "properties": {}, "patternProperties": {}})
         with self.assertRaises(ToolValidationError):
             ToolSpec("bad", "tools:bad", {"type": "object", "properties": {"x": {"type": "array"}}})
+        with self.assertRaises(ToolValidationError):
+            ToolSpec("bad", "tools:bad", {"type": "integer", "minimum": 0, "minLength": 1})
 
     def test_mutating_original_schema_does_not_change_registered_contract(self):
         schema = {"type": "object", "properties": {"x": {"type": "string"}}, "required": ["x"]}
@@ -184,6 +186,7 @@ class ToolExecutionTests(unittest.TestCase):
         with self.assertRaises(ToolExecutionError) as raised:
             executor.execute("broken", {"query": "ok"}, ExecutionContext("u", frozenset({"tools:broken"})))
         self.assertNotIn("secret detail", str(raised.exception))
+        self.assertIsNone(raised.exception.__context__)
         self.assertEqual([event.status for event in audit.events()], ["started", "handler_failed"])
 
     def test_oversized_or_non_json_handler_results_are_rejected(self):
