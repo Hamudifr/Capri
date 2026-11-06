@@ -509,6 +509,77 @@ class LedgerPathSafetyTests(unittest.TestCase):
             self.assertEqual(HashChainLedger(path).verify()["records"], 1)
 
 
+    def _assert_hard_link_alias_is_latched_after_failure(self, helper, failure):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original_path = root / "runs.jsonl"
+            alias_path = root / "alias.jsonl"
+            original = HashChainLedger(original_path)
+
+            with (
+                mock.patch.object(ledger_module, "_UNCERTAIN_ALL", False),
+                mock.patch.object(ledger_module, "_UNCERTAIN_PATHS", set()),
+                mock.patch.object(ledger_module, "_UNCERTAIN_INODES", set()),
+                mock.patch.object(ledger_module, "_UNCERTAIN_INODE_FDS", {}),
+            ):
+                try:
+                    with mock.patch.object(ledger_module, helper, side_effect=failure):
+                        with self.assertRaises(LedgerIntegrityError):
+                            original.append(passing(f"uncertain-{helper}"))
+
+                    self.assertTrue(original_path.exists())
+                    alias_path.hardlink_to(original_path)
+                    self.assertEqual(os.stat(original_path).st_ino, os.stat(alias_path).st_ino)
+                    before = original_path.read_bytes()
+                    self.assertEqual(alias_path.read_bytes(), before)
+                    alias = HashChainLedger(alias_path)
+
+                    for operation in (
+                        alias.verify,
+                        alias.records,
+                        lambda: alias.append(passing("blocked-alias")),
+                        original.verify,
+                        original.records,
+                        lambda: original.append(passing("blocked-original")),
+                    ):
+                        with self.assertRaisesRegex(LedgerIntegrityError, "previous append failed"):
+                            operation()
+
+                    descriptor = os.open(alias_path, os.O_RDONLY)
+                    try:
+                        with self.assertRaisesRegex(LedgerIntegrityError, "previous append failed"):
+                            alias._scan(descriptor=descriptor)
+                    finally:
+                        os.close(descriptor)
+
+                    self.assertEqual(original_path.read_bytes(), before)
+                    self.assertEqual(alias_path.read_bytes(), before)
+
+                    independent = HashChainLedger(root / "independent.jsonl")
+                    independent.append(passing("independent"))
+                    self.assertTrue(independent.verify()["valid"])
+                finally:
+                    # The inode latch intentionally retains a guard descriptor.
+                    # This fixture owns the isolated registry and closes it at teardown.
+                    for guard_fd in list(ledger_module._UNCERTAIN_INODE_FDS.values()):
+                        os.close(guard_fd)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX hard links are required")
+    def test_partial_write_failure_latches_hard_link_alias(self):
+        def fail_after_partial_write(stream, data):
+            stream.write(data[:5])
+            raise OSError("injected partial write failure")
+
+        self._assert_hard_link_alias_is_latched_after_failure(
+            "_write_entry", fail_after_partial_write
+        )
+
+    @unittest.skipUnless(os.name == "posix", "POSIX hard links are required")
+    def test_flush_failure_latches_hard_link_alias(self):
+        self._assert_hard_link_alias_is_latched_after_failure(
+            "_flush_entry", OSError("injected flush failure")
+        )
+
     @unittest.skipUnless(os.name == "posix", "POSIX hard links are required")
     def test_z_hard_link_alias_is_latched_after_uncertain_append(self):
         with tempfile.TemporaryDirectory() as directory:
