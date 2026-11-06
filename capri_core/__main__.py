@@ -21,6 +21,10 @@ def _workflow_permissions_are_read_only(workflow: str) -> bool:
             r"[{,]\s*\?\s*(?:permissions|[\"']permissions[\"'])\s*(?=:|$))",
             line,
         )
+        # Flow-mapping entries may continue at column zero. Reject a bare or
+        # quoted permissions key there; otherwise a job-level override can
+        # evade the indentation- and delimiter-aware checks above.
+        or re.search(r"""^(?:permissions|["']permissions["'])\s*:\s*[^#\s]""", line)
         # GitHub Actions accepts YAML anchors/aliases, and YAML double-quoted
         # keys can use escapes (for example, "\\u0070ermissions"). Without
         # parsing YAML, fail closed on alias, anchor, tag, explicit, and escaped keys.
