@@ -100,3 +100,8 @@ The session stores expose `commit_turn_messages` for atomically persisting a com
 
 Session stores apply a separate `max_tool_chars` limit to persisted tool-result messages (default 131,072 characters), distinct from assistant-output limits.
 
+
+
+## OpenAI Responses API adapter
+
+`capri_runtime.openai_responses.OpenAIResponsesAdapter` implements the provider-neutral `ToolModelAdapter` interface using an injected OpenAI SDK-compatible client. It maps only host-authorized Capri tool definitions, reconstructs bounded conversation/tool-call history, preserves reasoning items required for stateless Responses API tool-call continuation, disables server-side response storage by default, and returns untrusted calls to the existing permissioned bridge. The adapter does not import the OpenAI SDK, hold credentials, or execute tools itself; the host installs/configures the SDK client and supplies it. See [official function-calling documentation](https://developers.openai.com/api/docs/guides/function-calling) and [Responses API reference](https://developers.openai.com/api/reference/resources/responses/methods/create).
