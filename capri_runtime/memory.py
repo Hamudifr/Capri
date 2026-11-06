@@ -55,6 +55,52 @@ class MemoryRecord:
     status: str = "active"
     supersedes_id: str | None = None
 
+
+@dataclass(frozen=True, slots=True)
+class UntrustedMemoryContext:
+    """Bounded, data-only memory records passed separately from chat history.
+
+    This envelope preserves provenance and prevents memory from being confused
+    with host policy or tool authority. It does not itself prevent model prompt
+    injection; the provider adapter must place these records in an untrusted-data
+    channel and must never promote their contents to system/developer instructions.
+    """
+
+    records: tuple[MemoryRecord, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.records, tuple) or len(self.records) > 20:
+            raise MemoryValidationError("memory context must be a tuple of at most 20 records")
+        seen: set[str] = set()
+        total_bytes = 0
+        now = _now()
+        for record in self.records:
+            if not isinstance(record, MemoryRecord):
+                raise MemoryValidationError("memory context contains an invalid record")
+            if record.memory_id in seen:
+                raise MemoryValidationError("memory context contains duplicate records")
+            seen.add(record.memory_id)
+            if record.status != "active" or record.sensitivity != "non_sensitive":
+                raise MemoryValidationError("memory context accepts only active non-sensitive records")
+            _validate_text(record.memory_id, "memory_id", 64)
+            _validate_text(record.title, "title", _MAX_TITLE)
+            _validate_text(record.content, "content", _MAX_CONTENT)
+            _validate_text(record.scope, "scope", _MAX_SCOPE)
+            _validate_text(record.source, "source", _MAX_SOURCE)
+            if record.record_type not in _ALLOWED_TYPES or record.confidence not in _ALLOWED_CONFIDENCE:
+                raise MemoryValidationError("memory context record metadata is invalid")
+            _validate_tags(record.tags)
+            expiry = _validate_expiry(record.expires_at)
+            if expiry is not None and datetime.fromisoformat(expiry) <= now:
+                raise MemoryValidationError("memory context excludes expired records")
+            total_bytes += sum(
+                len(value.encode("utf-8"))
+                for value in (record.memory_id, record.title, record.content, record.scope, record.source)
+            ) + 128
+            if total_bytes > 100_000:
+                raise MemoryValidationError("memory context exceeds the aggregate byte limit")
+
+
 _ALLOWED_TYPES = {"operating_directive", "architecture_decision", "project_fact", "security_boundary", "user_preference"}
 _ALLOWED_CONFIDENCE = {"user_directed", "verified", "inferred", "unverified"}
 _ALLOWED_RETENTION = {"keep", "expire_30d", "expire_90d", "archive_when_superseded"}
