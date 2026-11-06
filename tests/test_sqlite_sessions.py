@@ -139,6 +139,20 @@ class SQLiteSessionStoreTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             self.store.get(session.session_id)
 
+    def test_corrupt_version_or_role_sequence_fails_closed(self):
+        session = self.store.create()
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute(
+                "UPDATE sessions SET version = 1 WHERE session_id = ?",
+                (session.session_id,),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        with self.assertRaises(ValidationError):
+            self.store.get(session.session_id)
+
     def test_database_file_is_private_on_posix(self):
         if os.name == "posix":
             self.assertEqual(stat.S_IMODE(os.stat(self.path).st_mode), 0o600)
