@@ -137,8 +137,7 @@ class SQLiteSessionStore(SessionStore):
             finally:
                 connection.close()
 
-    @staticmethod
-    def _decode(row: tuple) -> Session:
+    def _decode(self, row: tuple) -> Session:
         try:
             session_id, created_at, updated_at, version, closed, encoded = row
             raw = json.loads(encoded)
@@ -170,8 +169,15 @@ class SQLiteSessionStore(SessionStore):
                 or not isinstance(version, int)
                 or version < 0
                 or closed not in (0, 1)
+                or len(messages) != version * 2
+                or len(messages) > self.max_session_messages
             ):
                 raise ValueError("invalid session metadata")
+            for index, message in enumerate(messages):
+                expected_role = "user" if index % 2 == 0 else "assistant"
+                limit = self.max_input_chars if expected_role == "user" else self.max_output_chars
+                if message.role != expected_role or not message.content.strip() or len(message.content) > limit:
+                    raise ValueError("invalid transcript sequence or message size")
             return Session(
                 session_id=session_id,
                 created_at=created_at,
