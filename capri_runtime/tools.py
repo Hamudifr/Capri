@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from itertools import islice
 from typing import Any, Callable, Mapping
+from types import MappingProxyType
 from uuid import uuid4
 
 
@@ -241,6 +242,38 @@ class ApprovalGrant:
     argument_digest: str
     expires_at: str
     signature: str | None = None
+    key_id: str | None = None
+
+
+class HmacApprovalKeyRing:
+    """Immutable host-configured HMAC key set with one active signing key.
+
+    Keep keys in a secret manager and construct this object at trusted host startup.
+    Retain old verification keys only for the maximum lifetime of grants they signed.
+    """
+
+    _KEY_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+
+    def __init__(self, keys: Mapping[str, bytes], *, active_key_id: str) -> None:
+        if not isinstance(keys, Mapping) or not 1 <= len(keys) <= 32:
+            raise ToolValidationError("approval key ring must contain 1 to 32 keys")
+        if (not isinstance(active_key_id, str)
+                or not self._KEY_ID_RE.fullmatch(active_key_id)
+                or active_key_id not in keys):
+            raise ToolValidationError("active approval key ID must identify a configured key")
+        copied: dict[str, bytes] = {}
+        for key_id, key in keys.items():
+            if not isinstance(key_id, str) or not self._KEY_ID_RE.fullmatch(key_id):
+                raise ToolValidationError("approval key ID is invalid")
+            if not isinstance(key, bytes) or len(key) < 32:
+                raise ToolValidationError("each approval key must contain at least 32 bytes")
+            copied[key_id] = bytes(key)
+        self._keys = MappingProxyType(copied)
+        self.active_key_id = active_key_id
+
+    def key_for(self, key_id: str) -> bytes | None:
+        """Return only the specifically requested key; never try other keys."""
+        return self._keys.get(key_id)
 
 
 class HmacApprovalAuthority:
@@ -252,18 +285,36 @@ class HmacApprovalAuthority:
 
     def __init__(
         self,
-        key: bytes,
+        key: bytes | HmacApprovalKeyRing,
         *,
         clock: Callable[[], datetime] | None = None,
         max_ttl_seconds: int = 3600,
     ) -> None:
-        if not isinstance(key, bytes) or len(key) < 32:
-            raise ToolValidationError("approval signing key must contain at least 32 bytes")
+        if isinstance(key, bytes):
+            if len(key) < 32:
+                raise ToolValidationError("approval signing key must contain at least 32 bytes")
+            self._key_ring = None
+            self._legacy_key = bytes(key)
+            self._active_key_id = "default"
+        elif isinstance(key, HmacApprovalKeyRing):
+            self._key_ring = key
+            self._legacy_key = None
+            self._active_key_id = key.active_key_id
+        else:
+            raise ToolValidationError("approval key must be bytes or a trusted HmacApprovalKeyRing")
         if isinstance(max_ttl_seconds, bool) or not isinstance(max_ttl_seconds, int) or not 1 <= max_ttl_seconds <= 86_400:
             raise ToolValidationError("max_ttl_seconds must be between 1 and 86400")
-        self._key = bytes(key)
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self.max_ttl_seconds = max_ttl_seconds
+
+    def _key_for(self, key_id: str | None) -> bytes | None:
+        if key_id is None:
+            # Compatibility for grants issued before key IDs existed. Key rings
+            # deliberately reject these rather than guessing which key to try.
+            return self._legacy_key
+        if self._key_ring is None:
+            return self._legacy_key if key_id == self._active_key_id else None
+        return self._key_ring.key_for(key_id)
 
     @staticmethod
     def _payload(grant: ApprovalGrant) -> bytes:
@@ -274,6 +325,7 @@ class HmacApprovalAuthority:
                 "tool_name": grant.tool_name,
                 "argument_digest": grant.argument_digest,
                 "expires_at": grant.expires_at,
+                **({"key_id": grant.key_id} if grant.key_id is not None else {}),
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -301,11 +353,18 @@ class HmacApprovalAuthority:
         if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
             raise ToolValidationError("approval clock must return a timezone-aware datetime")
         expiry = (now.astimezone(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
-        unsigned = ApprovalGrant(str(uuid4()), principal_id, tool_name, argument_digest, expiry)
-        signature = hmac.new(self._key, self._payload(unsigned), hashlib.sha256).hexdigest()
+        unsigned = ApprovalGrant(
+            str(uuid4()), principal_id, tool_name, argument_digest, expiry,
+            key_id=self._active_key_id,
+        )
+        signing_key = self._key_for(self._active_key_id)
+        if signing_key is None:
+            raise ToolValidationError("active approval signing key is unavailable")
+        signature = hmac.new(signing_key, self._payload(unsigned), hashlib.sha256).hexdigest()
         return ApprovalGrant(
             unsigned.grant_id, unsigned.principal_id, unsigned.tool_name,
             unsigned.argument_digest, unsigned.expires_at, signature,
+            unsigned.key_id,
         )
 
     def verify(self, grant: ApprovalGrant) -> bool:
@@ -313,8 +372,11 @@ class HmacApprovalAuthority:
                 or not isinstance(grant.signature, str)
                 or not _DIGEST_RE.fullmatch(grant.signature)):
             return False
+        signing_key = self._key_for(grant.key_id)
+        if signing_key is None:
+            return False
         try:
-            expected = hmac.new(self._key, self._payload(grant), hashlib.sha256).hexdigest()
+            expected = hmac.new(signing_key, self._payload(grant), hashlib.sha256).hexdigest()
         except (TypeError, ValueError, UnicodeEncodeError):
             return False
         return hmac.compare_digest(expected, grant.signature)

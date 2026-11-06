@@ -9,7 +9,7 @@ Design contract for the next implementation increment. This document does not cl
 Capri already has:
 
 - `ToolCallOutcome(status="approval_required", argument_digest=...)` from the tool bridge.
-- `HmacApprovalAuthority` for short-lived, signed grants bound to principal, tool, exact canonical argument digest, and expiry.
+- `HmacApprovalAuthority` for short-lived, signed grants bound to principal, tool, exact canonical argument digest, expiry, and explicit signing-key ID. `HmacApprovalKeyRing` supports bounded host-managed key rotation.
 - `ToolExecutor` strict signed-grant verification.
 - `SQLiteSecurityStore` for durable, cross-process one-use grant consumption and redacted audit events.
 - `HostAuthorityResolver` and `HostToolGateway` for host-owned authentication and permission resolution.
