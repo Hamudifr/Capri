@@ -498,6 +498,114 @@ class DoctorTests(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertIn("[FAIL] CI permissions", output.getvalue())
 
+    def test_doctor_rejects_quoted_and_inline_job_level_permission_overrides(self):
+        overrides = (
+            "    permissions:\n      contents: write\n",
+            "    permissions: { contents: write }\n",
+            '    "permissions":\n      contents: write\n',
+            "    'permissions': { contents: write }\n",
+        )
+        for override in overrides:
+            with self.subTest(override=override), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self._make_repository(root)
+                workflow = root / ".github/workflows/quality.yml"
+                content = workflow.read_text(encoding="utf-8")
+                content = content.replace(
+                    "  test:\n    steps:\n",
+                    "  test:\n" + override + "    steps:\n",
+                )
+                workflow.write_text(content, encoding="utf-8")
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    code = cli_main(["doctor", "--root", str(root)])
+                self.assertEqual(code, 1, output.getvalue())
+                self.assertIn("[FAIL] CI permissions", output.getvalue())
+
+    def test_doctor_rejects_inline_job_mapping_permissions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_repository(root)
+            workflow = root / ".github/workflows/quality.yml"
+            content = workflow.read_text(encoding="utf-8").replace(
+                "  test:\n    steps:\n",
+                '  test: {runs-on: ubuntu-latest, "permissions": {contents: write}, steps: [{run: "echo hi"}]}\n',
+            )
+            workflow.write_text(content, encoding="utf-8")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["doctor", "--root", str(root)])
+            self.assertEqual(code, 1, output.getvalue())
+            self.assertIn("[FAIL] CI permissions", output.getvalue())
+
+    def test_doctor_fails_closed_on_escaped_quoted_mapping_keys(self):
+        overrides = (
+            '    "\\u0070ermissions": {contents: write}\n',
+            '  test: {runs-on: ubuntu-latest, "\\u0070ermissions": {contents: write}, steps: [{run: "echo hi"}]}\n',
+        )
+        for override in overrides:
+            with self.subTest(override=override), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self._make_repository(root)
+                workflow = root / ".github/workflows/quality.yml"
+                content = workflow.read_text(encoding="utf-8")
+                if override.startswith("  test:"):
+                    content = content.replace("  test:\n    steps:\n", override)
+                else:
+                    content = content.replace("  test:\n    steps:\n", "  test:\n" + override + "    steps:\n")
+                workflow.write_text(content, encoding="utf-8")
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    code = cli_main(["doctor", "--root", str(root)])
+                self.assertEqual(code, 1, output.getvalue())
+                self.assertIn("[FAIL] CI permissions", output.getvalue())
+
+    def test_doctor_rejects_explicit_job_permission_keys(self):
+        overrides = (
+            '    ? "permissions"\n    : {contents: write}\n',
+            '  test: {? "permissions": {contents: write}, runs-on: ubuntu-latest, steps: [{run: "echo hi"}]}\n',
+            '    ? "\\u0070ermissions"\n    : {contents: write}\n',
+            '  test: {? "\\u0070ermissions": {contents: write}, runs-on: ubuntu-latest, steps: [{run: "echo hi"}]}\n',
+            '    name: &perm permissions\n    ? *perm\n    : {contents: write}\n',
+            '  test: {name: &perm permissions, ? *perm: {contents: write}, runs-on: ubuntu-latest, steps: [{run: "echo hi"}]}\n',
+            '    &perm permissions: {contents: write}\n',
+            '  test: {&perm permissions: {contents: write}, runs-on: ubuntu-latest}\n',
+            '    !!str permissions: {contents: write}\n',
+            '  test: {!!str permissions: {contents: write}, runs-on: ubuntu-latest}\n',
+            '    ? >-\n      permissions\n    : {contents: write}\n',
+        )
+        for override in overrides:
+            with self.subTest(override=override), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self._make_repository(root)
+                workflow = root / ".github/workflows/quality.yml"
+                content = workflow.read_text(encoding="utf-8")
+                if override.startswith("  test:"):
+                    content = content.replace("  test:\n    steps:\n", override)
+                else:
+                    content = content.replace("  test:\n    steps:\n", "  test:\n" + override + "    steps:\n")
+                workflow.write_text(content, encoding="utf-8")
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    code = cli_main(["doctor", "--root", str(root)])
+                self.assertEqual(code, 1, output.getvalue())
+                self.assertIn("[FAIL] CI permissions", output.getvalue())
+
+
+    def test_doctor_accepts_escaped_quotes_in_plain_run_command(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_repository(root)
+            workflow = root / ".github/workflows/quality.yml"
+            content = workflow.read_text(encoding="utf-8")
+            content += '      - run: echo "say \\"hello\\":world"\n'
+            workflow.write_text(content, encoding="utf-8")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["doctor", "--root", str(root)])
+            self.assertEqual(code, 0, output.getvalue())
+            self.assertIn("[PASS] CI permissions", output.getvalue())
+
     def test_doctor_rejects_additional_workflow_write_permissions(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
