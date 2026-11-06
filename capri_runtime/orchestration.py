@@ -48,7 +48,6 @@ class ToolModelAdapter(Protocol):
     def complete_with_tools(
         self,
         session_id: str,
-        user_text: str,
         history: tuple[Message, ...],
         tools: tuple[ToolDefinition, ...],
     ) -> AssistantTurn:
@@ -121,8 +120,8 @@ class ToolOrchestrator:
             raise ToolOrchestrationError("user_text must be bounded non-empty valid text")
         if not isinstance(context, ExecutionContext):
             raise ToolOrchestrationError("a trusted host ExecutionContext is required")
-        if not isinstance(history, tuple) or len(history) > self.max_history_messages:
-            raise ToolOrchestrationError("history must be a bounded tuple of messages")
+        if not isinstance(history, tuple) or len(history) + 1 > self.max_history_messages:
+            raise ToolOrchestrationError("history plus the current user message exceeds the configured limit")
         for message in history:
             if (
                 not isinstance(message, Message)
@@ -134,6 +133,7 @@ class ToolOrchestrator:
             ):
                 raise ToolOrchestrationError("history contains an invalid message")
         working = list(history)
+        working.append(Message(role="user", content=user_text))
         outcomes: list[ToolCallOutcome] = []
         seen_call_ids: set[str] = set()
         tool_rounds = 0
@@ -145,7 +145,7 @@ class ToolOrchestrator:
         for turn_index in range(self.max_tool_rounds + 1):
             try:
                 response = self.adapter.complete_with_tools(
-                    session_id, user_text, tuple(working), definitions
+                    session_id, tuple(working), definitions
                 )
             except Exception:
                 raise ToolOrchestrationError("model adapter failed") from None
