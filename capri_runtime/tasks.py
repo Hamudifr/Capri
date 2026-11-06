@@ -446,6 +446,49 @@ class SQLiteTaskStore:
             finally:
                 connection.close()
 
+    def renew_lease(self, claim: TaskClaim, lease_seconds: int = 60,
+                    now: datetime | None = None) -> TaskClaim:
+        """Extend a live claim before expiry; expired or superseded owners fail closed."""
+        if not isinstance(claim, TaskClaim):
+            raise TaskValidationError("claim must be a TaskClaim")
+        if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int) or not 5 <= lease_seconds <= 3600:
+            raise TaskValidationError("lease_seconds must be between 5 and 3600")
+        current = now or _now()
+        stamp = _iso(current)
+        lease_until = _iso(current + timedelta(seconds=lease_seconds))
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    "SELECT state,lease_owner,lease_until,current_step FROM tasks WHERE task_id=?",
+                    (claim.task_id,),
+                ).fetchone()
+                if not row:
+                    raise TaskNotFoundError("task does not exist")
+                state, owner, existing_until, index = row
+                if state != "running" or owner != claim.executor_id or index != claim.step_index:
+                    raise TaskConflictError("task lease is no longer owned by this executor")
+                if _parse_time(existing_until) <= _parse_time(stamp):
+                    raise TaskConflictError("an expired task lease cannot be renewed")
+                connection.execute(
+                    "UPDATE tasks SET lease_until=?,updated_at=? WHERE task_id=?",
+                    (lease_until, stamp, claim.task_id),
+                )
+                connection.execute("COMMIT")
+                return TaskClaim(
+                    claim.task_id, claim.executor_id, claim.step_index, claim.attempt,
+                    claim.idempotency_key, claim.tool, claim.input, lease_until,
+                )
+            except Exception:
+                try:
+                    connection.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+                raise
+            finally:
+                connection.close()
+
     def finish_step(self, claim: TaskClaim, result: Any,
                     now: datetime | None = None) -> TaskRecord:
         result_json, decoded = _json(result, label="step result")
