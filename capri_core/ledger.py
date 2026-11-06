@@ -404,6 +404,7 @@ class HashChainLedger:
         return entries, seen_runs, previous, count
 
     def append(self, record: EvaluationRecord) -> str:
+        global _UNCERTAIN_ALL
         validate_record(record)
         with _LOCK:
             key = _path_key(self.path)
@@ -492,7 +493,6 @@ class HashChainLedger:
                     if file_identity is None:
                         # We must never continue when a write may have reached a
                         # file whose identity we failed to capture.
-                        global _UNCERTAIN_ALL
                         _UNCERTAIN_ALL = True
                     else:
                         _UNCERTAIN_INODES.add(file_identity)
