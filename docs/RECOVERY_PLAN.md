@@ -1,32 +1,45 @@
 # Capri recovery plan
 
-## Current reconciliation — 2026-11-06
+## Current reconciliation — 2026-11-06 19:35 UTC
 
-This dated section supersedes older status snapshots below where they conflict. Historical records remain intact for audit purposes.
+This block is the current source of truth for implementation and delivery. Older snapshots below are retained as history and must not be read as current state.
+
+### Owner directive and operating policy
+
+The owner delegates routine engineering direction to Capri: choose priorities, tools, architecture, sequencing, implementation, testing, integration, and documentation without asking for routine decisions. Capri performs its own design, security, code, integration, and operational reviews; fixes findings; runs reproducible checks; inspects logs; and records evidence. External independent review is not a prerequisite for ordinary implementation, integration, or merging completed work. Internal work must be labeled honestly as Capri self-review, never independent assurance.
+
+`main` is the delivery branch, not a permanent holding area. Use feature branches for isolation, validate changes and dependency ancestry, preserve rollback, then merge completed work into `main`. Do not leave finished work in Draft PRs indefinitely. No paid spend or subscriptions, credential/private-data exposure, security-control bypass, or destructive/external action outside the user's grant. Preserve the protected X5 boundary and its authorized process.
 
 ### Skill registry
 
-The live Notion enabled-skills registry returned **five enabled Capri skills** on 2026-11-06: Identity and Session Continuity; Agency and Self-Direction; Adversarial Research and Verification; Execution Memory and Process Ledger; and Engineering and Security Release Operations. This is a Notion registry observation. It must not be conflated with any separate agent-role architecture or treated as authorization to add more skills. Keep the existing set stable while independent evaluation remains incomplete.
+The live Notion enabled-skills registry returned five enabled Capri skills on 2026-11-06. The owner has now explicitly authorized Capri to add or improve skills when a concrete capability gap justifies them. Do not add skills cosmetically; each new skill must have a clear purpose, scope, validation method, and safe operating boundaries. The current five-skill count is a historical registry observation, not a prohibition on future improvements.
 
 ### Evaluation evidence
 
-The latest metadata-only query of the Capri Evaluation Runs data source returned 39 records across 22 distinct Scenario IDs: 37 Pass, 2 Not Run, 0 Fail, 0 Retest Needed; 37 Self / Self-Scored; 0 Independent and 0 Independently Reviewed; 2 evaluator types untyped. Five-field evidence completeness is 26/39. M4 and X5 remain Not Run. The protected X5 page and criteria were not opened. Self-scored Pass labels are provisional and do not satisfy independent evaluation.
+The latest metadata-only Notion query returned 39 records across 22 distinct Scenario IDs: 37 Pass, 2 Not Run, 0 Fail, 0 Retest Needed; 37 Self / Self-Scored; 0 Independent and 0 Independently Reviewed; 2 evaluator types untyped. Five-field evidence completeness is 26/39. M4 and X5 remain Not Run. The protected X5 page and criteria were not opened. Self-scored Pass labels remain provisional; this evaluation-data limitation does not block ordinary engineering delivery.
 
-### Repository and release state
+### Integrated repository state
 
-- **Eight open Draft/unmerged PRs:** #1, #4, #5, #6, #10, #12, #14, #15.
-- PR #11 is closed as superseded by #12; PR #13 is closed as superseded by #14.
-- PR #6 current head: `803be03306ad44de7d24cbd59de8a89ca8e0f15a`; exact-head run [42242311834](https://github.com/Hamudifr/Capri/actions/runs/42242311834) passed compileall, Capri Doctor 6/6, operational health 7/7, and 92 tests on each actual Python 3.11/3.12/3.13 job (276 executions). All three logs inspected.
-- Ledger stack #4 → #10 → #14 → #15 is now ancestry-reconciled:
-  - PR #10 head `b97aff61c79dbbf53ab2f65ba499290281c30919`; run [42270848931](https://github.com/Hamudifr/Capri/actions/runs/42270848931) passed 75 tests per actual Python version.
-  - PR #14 head `35fcc988d9a5babeae2636d1b198c280200194be`; 10 commits ahead / 0 behind its PR #10 base; run [42271093562](https://github.com/Hamudifr/Capri/actions/runs/42271093562) passed 77 tests per actual Python version.
-  - PR #15 head `5265ce5be3c0ca2d6ff8c5ee78441b58aaa5fb0a`; 4 commits ahead / 0 behind its PR #14 base; only `tests/test_runtime_core.py` changes in its PR diff; run [42271543329](https://github.com/Hamudifr/Capri/actions/runs/42271543329) passed 80 tests per actual Python version.
-  - All three ledger runs passed compileall; all nine logs were inspected and confirmed the actual interpreter versions. The workflow explicitly sets `python-version: ${{ matrix.python-version }}`.
-- The earlier PR #10 run [42241452411](https://github.com/Hamudifr/Capri/actions/runs/42241452411) is superseded for multi-interpreter claims because its setup-python step omitted the matrix input. The omission has been corrected and the current heads revalidated.
-- PR #15 covers hard-link aliases after partial-write, flush, file-fsync, and first-create directory-fsync failures; blocked alias operations preserve bytes and leave an unrelated ledger usable.
-- The independent ledger security-review packet is prepared in Notion: [review handoff](https://app.notion.com/p/410ac6905d2681ef8551f668cd52e252?pvs=204). It is not an independent review. PR #14 and #15 have zero submitted reviews.
-- `main` remains unchanged at `228669ed8b0c02db669cc082ac256e7491a26201`. All PRs remain Draft/unmerged.
-- Release gate remains **NOT MET** pending independent security review, authorized non-X5 specification approval, assembled-stack integration/acceptance, independent non-X5 acceptance, and governance evidence. Do not merge or deploy from CI alone.
+- Current recovery branch head: `602ba5d370982495486092019197f3577974c355`.
+- The assembled branch contains the original recovery foundation plus the integrated Doctor/operational-health stack, private ledger permissions, path/symlink protections, crash-durability handling, hard-link/inode uncertainty latching, and store-level input/output/history limits.
+- The Doctor/health stack (#5/#6) was merged through PR #6. PR #5 was closed as superseded.
+- Ledger permissions (#4) were merged. The ledger path/durability changes from #10, inode identity guard from #14, and additional failure-stage regression tests from #15 were integrated into the same recovery branch; those PRs were closed as superseded after integration.
+- Runtime store-level message bounds from #12 were integrated; #12 was closed as superseded.
+- Current integrated CI: push run [42280421240](https://github.com/Hamudifr/Capri/actions/runs/42280421240) and PR run [42280430210](https://github.com/Hamudifr/Capri/actions/runs/42280430210). Both passed compileall, Capri Doctor 6/6, operational health 7/7, and 114 tests on each actual Python 3.11, 3.12, and 3.13 interpreter. All six job logs were inspected.
+- PR #1 is the integration PR from recovery to `main`; it is currently open and Draft, with clean mergeability and the same 114-test exact-head CI. It is the next delivery action.
+- `main` remains at `228669ed8b0c02db669cc082ac256e7491a26201` until the integration PR is merged. It is currently unprotected. GitHub's rulesets endpoint returned HTTP 403 because rulesets require a paid plan or a public repository; do not upgrade or publish merely to obtain them.
+
+### Current implementation limits and next priorities
+
+Implemented: typed evaluation metadata, fail-closed validation, hash-chained append-only ledger, hardened filesystem access and crash handling, read-only Doctor diagnostics, dependency-aware operational health, and a provider-neutral in-memory session runtime with direct-store resource bounds.
+
+Not implemented: concrete model/provider adapter, permissioned tool execution, durable memory/transcript persistence, authenticated identity and tenant isolation, task planning/queueing, long-running task recovery, provider-aware budgets/rate limits, comprehensive observability, and deployment packaging.
+
+Next engineering priorities, in order: (1) permissioned tool registry/execution with strict schemas, least privilege, per-action authorization, bounded recursion/cost, audit records, and untrusted-content isolation; (2) durable, user-controllable memory with retention/export/deletion semantics; (3) task planning, execution state, retries, idempotency, and recovery; (4) end-to-end and adversarial integration tests; (5) observability and deployment packaging. Build these as small independently tested capabilities. Do not claim full autonomy or AGI before the capabilities exist and are verified.
+
+### Delivery status
+
+The integrated recovery branch is a tested internal prototype, not a public or multi-tenant production deployment. Capri's internal self-review is the default engineering review. Before any public deployment, separately verify identity/authorization, tenant isolation, secrets handling, retention/deletion, provider budgets, monitoring, backups, rollback, and data exposure. No X5 access or evaluation is authorized by ordinary engineering work.
 
 ## Phase 0 — Preserve boundaries
 
@@ -77,17 +90,21 @@ Known historical snapshot (2026-11-05, metadata-only, protected scenario exclude
 
 The implemented runtime slice is intentionally process-local and memory-only. It is not production-ready and does not include a concrete model provider, tool execution, durable storage, authentication, tenant isolation, or deployment. The ledger remains a separate single-writer metadata component.
 
-## Phase 4 — Independent verification and release
+## Phase 4 — Internal verification and controlled release
 
-- [ ] Commission an independent evaluator who did not author the implementation or self-score the runs.
-- [ ] Review non-protected evidence and defects.
-- [ ] Confirm the non-protected release gate.
+- [x] Perform Capri's own design, code, security, integration, and operational self-review for the current integrated foundation.
+- [x] Run the assembled repository suite on Python 3.11, 3.12, and 3.13; inspect every job log and record the exact commit/run evidence.
+- [ ] Implement and test permissioned tool execution, durable memory, identity/tenant isolation, task recovery, budgets, and observability.
+- [ ] Complete adversarial and end-to-end tests for the implemented agent capabilities.
+- [ ] Verify backups, recovery, rollback, deployment configuration, and data-retention/deletion behavior before public or multi-tenant deployment.
 - [ ] Run the protected blind evaluation only through its authorized designated environment and procedure.
 - [ ] Record the outcome exactly as reported by that process; do not infer it.
 
+External independent review is not a prerequisite for routine internal implementation or merging. If a specific contract, regulation, customer commitment, or protected evaluation explicitly requires an independent evaluator, record that narrow requirement separately; never label Capri's self-review as independent.
+
 ## Exit criteria
 
-Recovery is complete only when the actual runtime is implemented against an authorized specification, tests pass in CI, evidence is reconciled, independent review is documented, release gates are satisfied, and the protected blind evaluation is completed through its authorized process. Until then, overall status remains **in progress / release gate not met**.
+Internal engineering recovery is complete when the current code and docs are integrated into main, reproducible tests pass, critical risks are documented, and the implemented capabilities meet their stated boundaries. Production deployment is a separate gate requiring identity, authorization, privacy/retention, budgets, monitoring, backup, rollback, and adversarial validation. The protected blind evaluation remains separate and may only be run through its authorized process.
 
 
 ## Exact-head refresh — 2026-11-06 19:42 UTC
