@@ -11,7 +11,7 @@ This is an internal capability foundation. It does not connect a model provider,
 1. The host resolves the authenticated principal and constructs an immutable `ExecutionContext`.
 2. The host registers explicit `ToolSpec` objects with injected Python handlers in a `ToolRegistry`.
 3. The executor resolves the exact tool name. Unknown tools fail closed.
-4. The executor checks the exact permission string in the trusted host context.
+4. The executor checks the exact permission string in the trusted host context. If the `ToolSpec` defines a trusted `resource_authorizer`, it receives a fresh validated argument object and the trusted `ExecutionContext`; only an exact boolean `True` authorizes the resource. Exceptions and non-boolean results fail closed and are recorded as redacted permission-denied audit events. Resource authorization runs before approval consumption.
 5. Arguments are canonicalized as strict UTF-8 JSON, bounded by bytes, and validated against the tool's deliberately limited schema.
 6. Consequential tools require an `ApprovalGrant` matching the principal, tool name, and SHA-256 digest of the exact canonical arguments. Grants must be timezone-aware and unexpired, and are consumed once per executor instance.
 7. A redacted `started` audit event must persist before the handler is invoked. If this write fails, the handler is not called.
@@ -29,7 +29,7 @@ Supported schema keywords are `type`, `properties`, `required`, `additionalPrope
 - An approval grant is scoped to one principal, one tool, one exact argument digest, and an expiry.
 - With the default in-memory store, grants are one-use within one executor instance unless the same store is shared. Inject `SQLiteSecurityStore` as both `audit_sink` and `approval_store` to persist consumed grant IDs across executor instances and processes.
 - The grant dataclass is not a cryptographic signature. Only trusted host code may construct grants after authenticating the user's approval. Do not deserialize arbitrary model/user JSON directly into an `ExecutionContext` or `ApprovalGrant`.
-- A permission check is not a substitute for per-resource authorization. A handler must still enforce ownership, tenant scope, and domain invariants before performing its action.
+- Coarse permission checks are not a substitute for per-resource authorization. Use the optional host-supplied `ToolSpec.resource_authorizer` for reusable ownership/tenant checks, and retain handler-level checks for resource state and domain invariants immediately before side effects. Never trust a model-supplied owner or tenant field as authority.
 - The executor is not a sandbox. Handlers execute with the Python process's privileges. Register only trusted, reviewed host functions.
 
 ## Audit and failure behavior
