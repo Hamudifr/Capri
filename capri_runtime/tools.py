@@ -517,11 +517,19 @@ class ToolExecutor:
         max_result_bytes: int = 65_536,
         clock: Callable[[], datetime] | None = None,
         approval_store: ApprovalStore | None = None,
+        approval_verifier: Callable[[ApprovalGrant], bool] | None = None,
+        require_signed_approvals: bool = False,
     ) -> None:
         if not isinstance(registry, ToolRegistry) or not callable(getattr(audit_sink, "write", None)):
             raise ToolValidationError("registry and audit sink are required")
         if approval_store is not None and not callable(getattr(approval_store, "consume", None)):
             raise ToolValidationError("approval_store must implement consume()")
+        if approval_verifier is not None and not callable(approval_verifier):
+            raise ToolValidationError("approval_verifier must be callable")
+        if not isinstance(require_signed_approvals, bool):
+            raise ToolValidationError("require_signed_approvals must be boolean")
+        if require_signed_approvals and approval_verifier is None:
+            raise ToolValidationError("signed approvals require a trusted approval verifier")
         for name, value in (("max_argument_bytes", max_argument_bytes), ("max_result_bytes", max_result_bytes)):
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ToolValidationError(f"{name} must be a positive integer")
@@ -531,6 +539,8 @@ class ToolExecutor:
         self.max_result_bytes = max_result_bytes
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self.approval_store = approval_store if approval_store is not None else InMemoryApprovalStore()
+        self.approval_verifier = approval_verifier
+        self.require_signed_approvals = require_signed_approvals
 
     def _now(self) -> datetime:
         value = self._clock()
@@ -566,8 +576,16 @@ class ToolExecutor:
             and grant.principal_id == context.principal_id
             and grant.tool_name == spec.name
             and grant.argument_digest == digest
+            and (not self.require_signed_approvals or isinstance(grant.signature, str))
         ]
         for grant in matching:
+            if self.approval_verifier is not None:
+                try:
+                    verified = self.approval_verifier(grant) is True
+                except Exception:
+                    verified = False
+                if not verified:
+                    continue
             try:
                 if self.approval_store.consume(grant, now):
                     return
