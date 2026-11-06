@@ -32,7 +32,7 @@ Capri is a research and execution-assistance project. This repository contains a
 
 ## Current status
 
-Current `main` is `9a07be24f4c0f835e22e596d51789b8a85652c7e`. This change adds a bounded SQLite memory core with provenance, confidence, scope, sensitivity classification, tags, retention, expiry, and supersession metadata.
+Current `main` is `733dfc2bc5eb2fd260184a172171b54fdc6452dd`. This change adds a bounded SQLite memory core with provenance, confidence, scope, sensitivity classification, tags, retention, expiry, and supersession metadata.
 
 - Recovery foundation merged in PR #1: `d42bfbb2f59a31c713b03f09d074da77b8fb6250`.
 - Permissioned tool boundary merged in PR #17: `35ddc8408a2389dff8594283d40d37b66905c0dc`.
