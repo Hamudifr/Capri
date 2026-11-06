@@ -32,12 +32,12 @@ Capri is a research and execution-assistance project. This repository contains a
 
 ## Current status
 
-Current `main` is `733dfc2bc5eb2fd260184a172171b54fdc6452dd`. This change adds a bounded SQLite memory core with provenance, confidence, scope, sensitivity classification, tags, retention, expiry, and supersession metadata.
+Current `main` is `6c01190033c7ade9bb40414a0d86f5444fca0b46`. It contains the integrated recovery foundation, permissioned tool boundary, durable SQLite task execution and lease renewal, durable audit/approval storage, and bounded local project memory.
 
 - Recovery foundation merged in PR #1: `d42bfbb2f59a31c713b03f09d074da77b8fb6250`.
 - Permissioned tool boundary merged in PR #17: `35ddc8408a2389dff8594283d40d37b66905c0dc`.
-- Durable SQLite audit/approval store merged in PR #18: `ed530c8f3fbcea993a2577b87b2b9ab98bb16921`.
-- Post-merge CI [42286526969](https://github.com/Hamudifr/Capri/actions/runs/42286526969) passed compileall, Capri Doctor 6/6, operational health 7/7, and 141 tests on each actual Python 3.11, 3.12, and 3.13 interpreter; all three job logs inspected.
+- Durable SQLite audit/approval store merged in PR #18: `ed530c8f3fbcea993a2577b87b2b9ab98bb16921`.\n- Durable project memory core merged in PR #24: `6c01190033c7ade9bb40414a0d86f5444fca0b46`.
+- Post-merge CI [42286526969](https://github.com/Hamudifr/Capri/actions/runs/42286526969) passed compileall, Capri Doctor 6/6, operational health 7/7, and 141 tests on each actual Python 3.11, 3.12, and 3.13 interpreter; all three job logs inspected.\n- Memory-core post-merge CI [42288996102](https://github.com/Hamudifr/Capri/actions/runs/42288996102) passed compileall, Capri Doctor, and 182 tests on each Python 3.11, 3.12, and 3.13 interpreter; all three job logs inspected.
 
 Implemented: hardened append-only hash-chain ledger; read-only Doctor diagnostics; dependency-aware operational health; provider-neutral in-memory sessions with optimistic concurrency and direct-store resource limits; explicit tool registry; bounded strict schemas; host permission checks; one-use action-bound approvals; bounded JSON/Unicode; redacted audit events; and a private SQLite store for durable audit metadata and cross-executor/process approval replay prevention.
 
