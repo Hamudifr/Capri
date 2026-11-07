@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "capri-agent-runtime"
+version = "0.1.0"
+description = "Provider-neutral Capri runtime, permissioned tool execution, and durable memory primitives"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.setuptools.packages.find]
+include = ["capri_core", "capri_runtime"]
