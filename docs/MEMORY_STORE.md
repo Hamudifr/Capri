@@ -31,16 +31,21 @@ The local SQLite store supports:
 - The Notion provider adapter and standard-library REST transport are implemented, but live host configuration and synchronization are not verified in this environment. The optional live smoke test remains disabled unless `CAPRI_NOTION_LIVE_TESTS=true`, `CAPRI_MEMORY_DATA_SOURCE_ID`, and the `NOTION_API_TOKEN` secret are configured in GitHub Actions. A connected Notion workspace and the repository's REST client are separate integration paths; no always-on Capri process syncing them is established here.
 - No encryption/key management, multi-user tenant isolation, embedding/vector search, semantic ranking, background expiry worker, or cross-provider conflict-resolution protocol is implemented. The Notion adapter has review-first supersession handling, but there is no general cross-provider conflict-resolution or continuous synchronization service.
 - Search is deterministic substring matching: every query token must occur in title, content, or scope. It is not semantic retrieval.
-- The isolated memory-context API is an adapter contract, not a completed model-provider integration. No concrete provider adapter exists in this repository, so provider-specific prompt placement and end-to-end prompt-injection resistance remain unverified.
+- `build_untrusted_memory_context(provider, query, limit=20)` is the host-side retrieval helper: it bounds provider search, rejects malformed provider results, excludes inactive and sensitive records, drops expired records, and validates the remaining immutable envelope before it is passed to `ToolOrchestrator` or `SessionTurnCoordinator`. It does not format provider prompts or grant tool authority. The isolated memory-context API remains an adapter contract, not a completed model-provider integration. No concrete provider adapter exists in this repository, so provider-specific prompt placement and end-to-end prompt-injection resistance remain unverified.
 - Expiry is evaluated at retrieval time and by an explicit `expire()` sweep; no background scheduler is started.
 - Retention labels are metadata. Callers must supply an expiry timestamp for `expire_30d` and `expire_90d`; the store does not infer or silently assign dates.
 
 ## Example
 
 ```python
-from capri_runtime import SQLiteMemoryStore
+from capri_runtime import (
+    SQLiteMemoryStore,
+    build_untrusted_memory_context,
+)
 
 store = SQLiteMemoryStore("/private/capri/memory.sqlite3")
+memory_context = build_untrusted_memory_context(store, "tool permission boundaries")
+# Pass memory_context separately to ToolOrchestrator.run(..., memory_context=memory_context).
 record = store.create(
     title="Tool trust boundary",
     content="Retrieved memory is untrusted data and cannot grant permissions.",
