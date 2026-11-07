@@ -33,23 +33,44 @@ Capri is a research and execution-assistance project. This repository contains a
 
 ## Current status
 
-Current `main` contains the integrated recovery foundation, permissioned tool boundary, durable SQLite task execution, lease renewal and managed TaskWorker heartbeats, durable audit/approval storage, and bounded local project memory with an injected Notion transport adapter boundary.
+**Verified checkpoint — 2026-11-07**
+
+- Current `main`: `229ce67caa0614bd56bf7863df525d6793eafad0`.
+- Latest post-merge CI: [42358381131](https://github.com/Hamudifr/Capri/actions/runs/42358381131) passed compilation, Capri Doctor 6/6, operational health 7/7, and **352 tests** on Python 3.11, 3.12, and 3.13. All three job logs were inspected.
+- The repository contains the integrated non-X5 recovery foundation, append-only hash-chain ledger, provider-neutral session runtime, permissioned tool-execution boundary, durable SQLite task engine and worker, durable audit/approval storage, and bounded local project memory.
+- Memory now includes the SQLite provider, Notion memory adapter, standard-library Notion REST transport, explicit read-only data-source schema preflight, and `create_notion_memory_adapter_from_environment()`. `build_untrusted_memory_context()` prepares bounded eligible memory for separate model-adapter delivery.
+- The connected Notion data-source metadata was inspected and its logical property names/types and supported option labels matched the expected memory schema. This connector metadata inspection is **not** an authenticated REST schema read.
+- The optional live Notion REST smoke test remains skipped because no `NOTION_API_TOKEN` and live-test configuration are supplied to CI. No always-on Capri process is connected to Notion.
+- The model/tool orchestration layer is provider-neutral. No concrete model-provider adapter currently implements provider-specific memory placement, and no end-to-end prompt-injection resistance is claimed.
+- This remains an internal engineering prototype, not a claim of AGI, consciousness, or public/multi-tenant production readiness. No X5 work is included.
+
+### Recent verified integration milestones
+
+- [PR #68](https://github.com/Hamudifr/Capri/pull/68) — repeated Notion pagination cursor/page detection.
+- [PR #69](https://github.com/Hamudifr/Capri/pull/69) — strict Notion page-property type validation.
+- [PR #70](https://github.com/Hamudifr/Capri/pull/70) — freshness ranking for equal-relevance Notion memory results.
+- [PR #71](https://github.com/Hamudifr/Capri/pull/71) — explicit Tags requirement at the adapter boundary.
+- [PR #74](https://github.com/Hamudifr/Capri/pull/74) — read-only Notion data-source schema preflight.
+- [PR #75](https://github.com/Hamudifr/Capri/pull/75) — preflight wired into the live smoke test and setup guidance.
+- [PR #76](https://github.com/Hamudifr/Capri/pull/76) — bounded untrusted memory context builder.
+- [PR #77](https://github.com/Hamudifr/Capri/pull/77) — exact-type enforcement at the orchestration memory boundary.
+- [PR #78](https://github.com/Hamudifr/Capri/pull/78) — require all supported Notion Tags options.
+- [PR #79](https://github.com/Hamudifr/Capri/pull/79) — explicit environment factory that preflights before returning a Notion adapter.
+
+### Earlier foundation milestones
 
 - Recovery foundation merged in PR #1: `d42bfbb2f59a31c713b03f09d074da77b8fb6250`.
 - Permissioned tool boundary merged in PR #17: `35ddc8408a2389dff8594283d40d37b66905c0dc`.
 - Durable SQLite audit/approval store merged in PR #18: `ed530c8f3fbcea993a2577b87b2b9ab98bb16921`.
 - Durable project memory core merged in PR #24: `6c01190033c7ade9bb40414a0d86f5444fca0b46`.
-- Post-merge CI [42286526969](https://github.com/Hamudifr/Capri/actions/runs/42286526969) passed compileall, Capri Doctor 6/6, operational health 7/7, and 141 tests on each actual Python 3.11, 3.12, and 3.13 interpreter; all three job logs inspected.
-- Memory-core post-merge CI [42288996102](https://github.com/Hamudifr/Capri/actions/runs/42288996102) passed compileall, Capri Doctor, and 182 tests on each Python 3.11, 3.12, and 3.13 interpreter; all three job logs inspected.
-- Managed task-worker post-merge CI [42289268958](https://github.com/Hamudifr/Capri/actions/runs/42289268958) passed compileall, Capri Doctor, and 185 tests on each Python 3.11, 3.12, and 3.13 interpreter; all three job logs inspected.
 
-Implemented: hardened append-only hash-chain ledger; read-only Doctor diagnostics; dependency-aware operational health; provider-neutral in-memory sessions with optimistic concurrency and direct-store resource limits; explicit tool registry; bounded strict schemas; host permission checks; one-use action-bound approvals; bounded JSON/Unicode; redacted audit events; a private SQLite store for durable audit metadata and cross-executor/process approval replay prevention; and bounded local SQLite project memory with provenance, corrections, expiry, export, archive, and deletion.
+### Remaining implementation gates
 
-The tool boundary is not a sandbox or provider integration. The host must authenticate principals and construct trusted execution contexts. The in-memory audit/approval stores are development-only; `SQLiteSecurityStore` provides durable local metadata and replay prevention but is not encrypted and requires host-managed backup/retention. Handlers run with process privileges. No shell, filesystem, network, dynamic import, automatic plugin discovery, or X5 access is exposed.
-
-Next capabilities: live Notion token provisioning and workspace verification, cryptographically authenticated approvals, host identity/tenant isolation, model-provider adapter and conversation loop, budgets, observability, and deployment packaging. Audit/approval replay metadata now has a durable SQLite implementation; backup, retention, and restore operations remain to be built. Capri performs its own internal engineering/security reviews; external independent review is not a prerequisite for ordinary internal implementation. Never mislabel self-review as independent assurance.
-
-This is a growing internal prototype, not a claim of AGI or public/multi-tenant production readiness. No X5 work is included.
+- Authenticated live Notion REST verification and a successful create/read/correct/search/archive/trash smoke run.
+- A real host process that constructs and uses the Notion adapter, owns token rotation, and provides scheduling/process supervision.
+- A concrete model-provider adapter with documented provider-specific prompt construction; memory must remain separate from trusted policy and tool authority.
+- Host identity/tenant isolation, provider-aware budgets, observability, deployment packaging, and operational backup/restore/retention.
+- External services and paid infrastructure are not assumed or provisioned.
 
 ## Model-to-tool orchestration\n\nThe provider-neutral `ToolExecutionBridge` validates bounded structured call batches and routes requests through the trusted `ToolExecutor`. It enforces both message-count and aggregate UTF-8 transcript budgets, reserving result capacity before executing side effects. The `ToolOrchestrator` adds a host-injected structured model adapter and bounded multi-round loop. It exposes only tools permitted by the host context, never derives authority from model output, preserves one-use approval requirements, and marks audit failures as uncertain rather than retrying. It remains provider-neutral: the host supplies provider integration, identity, and approval UX; `SessionTurnCoordinator` can provide same-process transcript persistence and concurrency control, while multi-process locking remains a host responsibility. See [docs/TOOL_EXECUTION.md](docs/TOOL_EXECUTION.md).\n\n## Durable task execution and recovery
 
