@@ -239,6 +239,7 @@ class NotionMemoryAdapterTests(unittest.TestCase):
         assert_rejected(lambda page: page.__setitem__("created_time", TextSubclass(page["created_time"])))
         assert_rejected(lambda page: page.__setitem__("last_edited_time", TextSubclass(page["last_edited_time"])))
         assert_rejected(lambda page: page["properties"].__setitem__("Supersedes", TextSubclass(str(uuid4()))))
+        assert_rejected(lambda page: page["properties"].__setitem__("Expires", TextSubclass("2026-11-07T00:00:00+00:00")))
 
     def test_rejects_missing_or_non_boolean_sensitive_classification(self):
         record = self.create()
