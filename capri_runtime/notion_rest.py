@@ -6,13 +6,41 @@ from typing import Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
-from .memory import MemoryErrorBase, MemoryNotFoundError, MemoryValidationError
-from .notion_memory import NotionMemoryTransport
+from .memory import MemoryErrorBase, MemoryNotFoundError, MemoryValidationError, _ALLOWED_TAGS
+from .notion_memory import (
+    NotionMemoryTransport,
+    _ALLOWED_SCOPES,
+    _CONFIDENCE_TO_LABEL,
+    _RETENTION_TO_LABEL,
+    _STATUS_TO_LABEL,
+    _TYPE_TO_LABEL,
+)
 
 NOTION_API_VERSION = "2026-03-11"
 NOTION_API_BASE = "https://api.notion.com/v1"
 _MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 _MAX_RICH_TEXT_CHUNK = 2_000
+_EXPECTED_PROPERTY_TYPES = {
+    "Name": {"title"},
+    "Content": {"rich_text"},
+    "Type": {"select"},
+    "Scope": {"select"},
+    "Sensitive": {"checkbox"},
+    "Source": {"url"},
+    "Confidence": {"select"},
+    "Retention": {"select"},
+    "Tags": {"multi_select"},
+    "Status": {"status", "select"},
+    "Expires": {"date"},
+    "Supersedes": {"rich_text"},
+}
+_REQUIRED_SELECT_OPTIONS = {
+    "Type": set(_TYPE_TO_LABEL.values()),
+    "Scope": set(_ALLOWED_SCOPES),
+    "Confidence": set(_CONFIDENCE_TO_LABEL.values()),
+    "Retention": set(_RETENTION_TO_LABEL.values()),
+    "Status": set(_STATUS_TO_LABEL.values()),
+}
 
 class _NoRedirectHandler(HTTPRedirectHandler):
     """Refuse redirects so bearer credentials are never forwarded to another origin."""
@@ -54,6 +82,44 @@ class NotionRESTTransport:
 
     def __repr__(self) -> str:
         return f"NotionRESTTransport(data_source_id={self.data_source_id!r}, api_version={NOTION_API_VERSION!r})"
+
+    def validate_data_source_schema(self) -> dict[str, str]:
+        """Read-only preflight: verify the configured data source matches Capri's memory schema."""
+        data = self._request("GET", f"/data_sources/{quote(self.data_source_id, safe='')}")
+        if data.get("id") != self.data_source_id:
+            raise NotionTransportError("Notion returned a different data source")
+        properties = data.get("properties")
+        if not isinstance(properties, Mapping):
+            raise NotionTransportError("Notion data source schema is missing")
+
+        actual_types: dict[str, str] = {}
+        for name, expected_types in _EXPECTED_PROPERTY_TYPES.items():
+            prop = properties.get(name)
+            if (
+                not isinstance(prop, Mapping)
+                or type(prop.get("type")) is not str
+                or prop["type"] not in expected_types
+            ):
+                raise NotionTransportError(f"Notion data source property {name} has an unexpected type")
+            actual_type = prop["type"]
+            actual_types[name] = actual_type
+
+            required_options = _REQUIRED_SELECT_OPTIONS.get(name)
+            if required_options is None:
+                continue
+            config = prop.get(actual_type)
+            options = config.get("options") if isinstance(config, Mapping) else None
+            if type(options) is not list:
+                raise NotionTransportError(f"Notion data source property {name} has no option list")
+            option_names = set()
+            for option in options:
+                if not isinstance(option, Mapping) or type(option.get("name")) is not str:
+                    raise NotionTransportError(f"Notion data source property {name} has malformed options")
+                option_names.add(option["name"])
+            if not required_options.issubset(option_names):
+                raise NotionTransportError(f"Notion data source property {name} is missing required options")
+
+        return actual_types
 
     @staticmethod
     def _rich_text(value: str) -> list[dict[str, object]]:
