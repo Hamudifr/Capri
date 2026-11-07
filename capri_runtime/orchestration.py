@@ -175,8 +175,8 @@ class ToolOrchestrator:
         if not isinstance(context, ExecutionContext):
             raise ToolOrchestrationError("a trusted host ExecutionContext is required")
         if memory_context is not None:
-            if not isinstance(memory_context, UntrustedMemoryContext):
-                raise ToolOrchestrationError("memory_context must be an UntrustedMemoryContext")
+            if type(memory_context) is not UntrustedMemoryContext:
+                raise ToolOrchestrationError("memory_context must be an exact UntrustedMemoryContext")
             if not callable(getattr(self.adapter, "complete_with_tools_and_memory", None)):
                 raise ToolOrchestrationError(
                     "adapter must implement complete_with_tools_and_memory when memory is supplied"
