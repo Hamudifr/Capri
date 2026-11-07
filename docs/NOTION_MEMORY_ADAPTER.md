@@ -4,7 +4,7 @@
 
 `NotionMemoryAdapter` implements the durable `MemoryProvider` contract. It can use an injected `NotionMemoryTransport` or the concrete standard-library `NotionRESTTransport`. No Notion SDK is required.
 
-The Capri Durable Memory data source ID is `435a6e29-3b57-4637-908b-a07761e0df0f`. Its schema includes Name, Content, Type, Scope, Sensitive, Source, Confidence, Retention, Tags, Status, Expires, and Supersedes. Notion page IDs and non-null Supersedes lineage IDs are validated as UUIDs at the provider-neutral adapter boundary.
+The Capri Durable Memory data source ID is `435a6e29-3b57-4637-908b-a07761e0df0f`. Its schema includes Name, Content, Type, Scope, Sensitive, Source, Confidence, Retention, Tags, Status, Expires, and Supersedes. Notion page IDs and non-null Supersedes lineage IDs are validated as UUIDs at the provider-neutral adapter boundary. Transport-provided textual fields and tags must be plain built-in strings; string subclasses are rejected so custom transports cannot bypass primitive validation. Expires accepts only a plain ISO string, an exact `date` value, or null.
 
 ## Standalone REST setup
 
