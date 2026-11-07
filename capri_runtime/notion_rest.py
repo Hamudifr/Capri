@@ -255,6 +255,7 @@ class NotionRESTTransport:
             "Scope": ("Capri System", "GitHub Repository", "Notion Workspace", "Tool Integration"),
             "Confidence": ("User-Directed", "Verified", "Inferred", "Unverified"),
             "Retention": ("Keep until deleted", "Expire after 30 days", "Expire after 90 days", "Archive when superseded"),
+            "Tags": ("autonomy", "delivery", "security", "memory", "architecture", "tooling"),
             "Status": ("Active", "Review", "Archived"),
         }
 
