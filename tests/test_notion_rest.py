@@ -342,6 +342,32 @@ class NotionRESTTransportTests(unittest.TestCase):
         self.assertEqual(encoded["Tags"], {"multi_select": [{"name": "memory"}, {"name": "security"}]})
         self.assertEqual(encoded["Source"], {"url": "https://example.com/source"})
 
+    def test_outbound_encoder_enforces_memory_text_bounds(self):
+        invalid = (
+            {"Name": ""},
+            {"Name": "x" * 201},
+            {"Content": ""},
+            {"Content": "x" * 20_001},
+            {"Supersedes": "x" * 65},
+            {"Source": "https://example.com/" + "x" * 2048},
+            {"Name": "invalid\ud800text"},
+        )
+        for properties in invalid:
+            with self.subTest(field=next(iter(properties))):
+                with self.assertRaises(MemoryValidationError):
+                    NotionRESTTransport._encode_properties(properties)
+
+    def test_outbound_encoder_accepts_empty_supersedes_and_boundary_lengths(self):
+        encoded = NotionRESTTransport._encode_properties({
+            "Name": "x" * 200,
+            "Content": "x" * 20_000,
+            "Supersedes": None,
+            "Source": "https://example.com/" + "x" * 2028,
+        })
+        self.assertEqual(encoded["Supersedes"], {"rich_text": []})
+        self.assertEqual(len(encoded["Name"]["title"]), 1)
+        self.assertEqual(len(encoded["Content"]["rich_text"]), 10)
+
     def test_outbound_encoder_rejects_string_and_container_subclasses(self):
         class TextSubclass(str):
             pass
