@@ -379,20 +379,48 @@ class NotionMemoryAdapter:
             values.update(changes)
             new = self._create(**values, status="review", supersedes_id=old.memory_id)
             try:
-                self._transport.update_page(old.memory_id, {"Status": "Archived"})
-                self._transport.update_page(new.memory_id, {"Status": "Active"})
+                archived = self._record_from_page(
+                    self._transport.update_page(old.memory_id, {"Status": "Archived"})
+                )
+                if archived.memory_id != old.memory_id or archived.status != "archived":
+                    raise MemoryValidationError("Notion did not confirm the old record was archived")
+
+                activated = self._record_from_page(
+                    self._transport.update_page(new.memory_id, {"Status": "Active"})
+                )
+                if (
+                    activated.memory_id != new.memory_id
+                    or activated.status != "active"
+                    or activated.supersedes_id != old.memory_id
+                ):
+                    raise MemoryValidationError("Notion did not confirm the replacement was activated")
+
+                # Read both pages back: a syntactically valid PATCH response is
+                # not sufficient evidence that the two-page lifecycle completed.
+                persisted_old = self.get(old.memory_id)
+                persisted_new = self.get(new.memory_id)
+                if persisted_old.status != "archived":
+                    raise MemoryValidationError("Notion old record did not persist as archived")
+                if (
+                    persisted_new.status != "active"
+                    or persisted_new.supersedes_id != old.memory_id
+                ):
+                    raise MemoryValidationError("Notion replacement did not persist as active")
             except Exception as exc:
                 raise MemorySyncError(
                     f"Notion correction is partially complete; reconcile replacement {new.memory_id}",
                     new.memory_id,
                 ) from exc
-            return self.get(new.memory_id)
+            return persisted_new
 
     def archive(self, memory_id: str) -> MemoryRecord:
         _validate_memory_id(memory_id)
-        return self._record_from_page(
+        archived = self._record_from_page(
             self._transport.update_page(memory_id, {"Status": "Archived"})
         )
+        if archived.memory_id != memory_id or archived.status != "archived":
+            raise MemoryValidationError("Notion did not confirm the record was archived")
+        return archived
 
     def delete(self, memory_id: str) -> None:
         """Move the Notion page to trash; this is not secure or permanent erasure."""

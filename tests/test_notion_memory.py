@@ -218,6 +218,46 @@ class NotionMemoryAdapterTests(unittest.TestCase):
         self.assertEqual(new.status, "active")
         self.assertEqual(self.store.get(old.memory_id).status, "archived")
 
+    def test_correction_rejects_silent_archive_and_activation_noops(self):
+        class NoArchiveTransport(FakeNotionTransport):
+            def update_page(inner, page_id, properties):
+                if properties.get("Status") == "Archived":
+                    return inner.get_page(page_id)
+                return super(NoArchiveTransport, inner).update_page(page_id, properties)
+
+        class NoActivateTransport(FakeNotionTransport):
+            def update_page(inner, page_id, properties):
+                if properties.get("Status") == "Active":
+                    return inner.get_page(page_id)
+                return super(NoActivateTransport, inner).update_page(page_id, properties)
+
+        for transport, expected_old_status in (
+            (NoArchiveTransport(), "active"),
+            (NoActivateTransport(), "archived"),
+        ):
+            with self.subTest(transport=type(transport).__name__):
+                store = NotionMemoryAdapter(transport)
+                old = self.create(store=store)
+                with self.assertRaises(MemorySyncError) as caught:
+                    store.correct(old.memory_id, content="Replacement.")
+                replacement = store.get(caught.exception.new_memory_id)
+                self.assertEqual(replacement.status, "review")
+                self.assertEqual(store.get(old.memory_id).status, expected_old_status)
+
+    def test_archive_rejects_silent_noop(self):
+        class NoArchiveTransport(FakeNotionTransport):
+            def update_page(inner, page_id, properties):
+                if properties.get("Status") == "Archived":
+                    return inner.get_page(page_id)
+                return super(NoArchiveTransport, inner).update_page(page_id, properties)
+
+        transport = NoArchiveTransport()
+        store = NotionMemoryAdapter(transport)
+        record = self.create(store=store)
+        with self.assertRaisesRegex(MemoryValidationError, "did not confirm"):
+            store.archive(record.memory_id)
+        self.assertEqual(store.get(record.memory_id).status, "active")
+
     def test_correction_failure_leaves_replacement_in_review(self):
         old = self.create()
         self.transport.fail_archive = True
