@@ -33,20 +33,26 @@ class NotionRateLimitError(NotionTransportError):
 class NotionRESTTransport:
     """Standard-library Notion REST client; token is injected and held in memory only."""
     def __init__(self, api_token: str, data_source_id: str, *, timeout: float = 10.0, opener: Callable[..., object] | None = None) -> None:
-        if not isinstance(api_token, str) or not api_token.strip() or len(api_token) > 4096:
+        if type(api_token) is not str or not api_token.strip() or len(api_token) > 4096:
             raise MemoryValidationError("Notion API token is missing or invalid")
+        if type(data_source_id) is not str:
+            raise MemoryValidationError("Notion data source ID must be a plain UUID string")
         try:
             self.data_source_id = str(uuid.UUID(data_source_id))
         except (ValueError, TypeError, AttributeError):
             raise MemoryValidationError("Notion data source ID must be a UUID") from None
-        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 1 <= timeout <= 30:
+        if type(timeout) not in (int, float) or not 1 <= timeout <= 30:
             raise MemoryValidationError("timeout must be between 1 and 30 seconds")
+        if opener is not None and not callable(opener):
+            raise MemoryValidationError("opener must be callable")
         self._token = api_token
         self._timeout = float(timeout)
-        self._opener = opener or build_opener(_NoRedirectHandler()).open
+        self._opener = opener if opener is not None else build_opener(_NoRedirectHandler()).open
 
     @classmethod
     def from_environment(cls, *, token_env: str = "NOTION_API_TOKEN", data_source_env: str = "CAPRI_MEMORY_DATA_SOURCE_ID", timeout: float = 10.0, opener: Callable[..., object] | None = None) -> "NotionRESTTransport":
+        if type(token_env) is not str or not token_env or type(data_source_env) is not str or not data_source_env:
+            raise MemoryValidationError("Notion environment variable names must be plain non-empty strings")
         token, source = os.environ.get(token_env), os.environ.get(data_source_env)
         if not token: raise MemoryValidationError(f"{token_env} is not configured")
         if not source: raise MemoryValidationError(f"{data_source_env} is not configured")
@@ -61,29 +67,33 @@ class NotionRESTTransport:
 
     @classmethod
     def _encode_properties(cls, properties: Mapping[str, object]) -> dict[str, object]:
+        if not isinstance(properties, Mapping):
+            raise MemoryValidationError("Notion properties must be a mapping")
         out = {}
         for name, value in properties.items():
+            if type(name) is not str:
+                raise MemoryValidationError("Notion property names must be plain strings")
             if name in {"Name","Content","Supersedes"}:
                 if value is None and name == "Supersedes": value = ""
-                if not isinstance(value,str): raise MemoryValidationError(f"{name} must be text")
+                if type(value) is not str: raise MemoryValidationError(f"{name} must be plain text")
                 out[name] = {"title" if name=="Name" else "rich_text": cls._rich_text(value)}
             elif name in {"Type","Scope","Confidence","Retention"}:
-                if not isinstance(value,str): raise MemoryValidationError(f"{name} must be text")
+                if type(value) is not str: raise MemoryValidationError(f"{name} must be plain text")
                 out[name] = {"select":{"name":value}}
             elif name == "Status":
-                if not isinstance(value,str): raise MemoryValidationError("Status must be text")
+                if type(value) is not str: raise MemoryValidationError("Status must be plain text")
                 out[name] = {"status":{"name":value}}
             elif name == "Sensitive":
-                if not isinstance(value,bool): raise MemoryValidationError("Sensitive must be boolean")
+                if type(value) is not bool: raise MemoryValidationError("Sensitive must be a plain boolean")
                 out[name] = {"checkbox":value}
             elif name == "Source":
-                if value is not None and not isinstance(value,str): raise MemoryValidationError("Source must be URL text")
+                if value is not None and type(value) is not str: raise MemoryValidationError("Source must be plain URL text")
                 out[name] = {"url":value}
             elif name == "Tags":
-                if not isinstance(value,(list,tuple)) or any(not isinstance(x,str) for x in value): raise MemoryValidationError("Tags must be strings")
+                if type(value) not in (list,tuple) or any(type(x) is not str for x in value): raise MemoryValidationError("Tags must be a list or tuple of plain strings")
                 out[name] = {"multi_select":[{"name":x} for x in value]}
             elif name == "Expires":
-                if value is not None and not isinstance(value,str): raise MemoryValidationError("Expires must be an ISO timestamp")
+                if value is not None and type(value) is not str: raise MemoryValidationError("Expires must be a plain ISO timestamp")
                 out[name] = {"date":None if value is None else {"start":value}}
             else:
                 raise MemoryValidationError(f"unsupported Notion property: {name}")
