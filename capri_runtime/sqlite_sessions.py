@@ -156,6 +156,20 @@ class SQLiteSessionStore(SessionStore):
                 connection.execute(
                     "CREATE INDEX IF NOT EXISTS session_owners_principal_id ON session_owners(principal_id)"
                 )
+                connection.execute(
+                    """CREATE TRIGGER IF NOT EXISTS session_owners_immutable_update
+                    BEFORE UPDATE ON session_owners
+                    BEGIN
+                        SELECT RAISE(ABORT, 'session owner is immutable');
+                    END"""
+                )
+                connection.execute(
+                    """CREATE TRIGGER IF NOT EXISTS session_owners_immutable_delete
+                    BEFORE DELETE ON session_owners
+                    BEGIN
+                        SELECT RAISE(ABORT, 'session owner is immutable');
+                    END"""
+                )
             finally:
                 connection.close()
 
