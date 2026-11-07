@@ -81,6 +81,26 @@ class NotionRESTTransportTests(unittest.TestCase):
         self.assertFalse(body["in_trash"])
         self.assertEqual(result["next_cursor"],"opaque+/cursor==")
 
+    def test_query_requires_consistent_explicit_pagination_state(self):
+        malformed = (
+            {"results": [page()], "next_cursor": None},
+            {"results": [page()], "has_more": None, "next_cursor": None},
+            {"results": [page()], "has_more": 0, "next_cursor": None},
+            {"results": [page()], "has_more": 1, "next_cursor": "cursor"},
+            {"results": [page()], "has_more": "false", "next_cursor": None},
+            {"results": [page()], "has_more": False, "next_cursor": "unexpected"},
+            {"results": [page()], "has_more": True, "next_cursor": None},
+            {"results": [page()], "has_more": True, "next_cursor": ""},
+        )
+        for payload in malformed:
+            with self.subTest(payload=payload):
+                t, _ = self.make(payload)
+                with self.assertRaises(NotionTransportError):
+                    t.list_pages(cursor=None, page_size=10)
+
+        t, _ = self.make({"results": [page()], "has_more": False, "next_cursor": None})
+        self.assertIsNone(t.list_pages(cursor=None, page_size=10)["next_cursor"])
+
     def test_query_rejects_missing_cursor_and_malformed_page_items(self):
         t,_=self.make({"results":[page()],"has_more":True,"next_cursor":None})
         with self.assertRaises(NotionTransportError):
