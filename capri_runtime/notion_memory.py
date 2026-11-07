@@ -276,6 +276,8 @@ class NotionMemoryAdapter:
 
     def _list_all(self) -> tuple[MemoryRecord, ...]:
         records: list[MemoryRecord] = []
+        seen_memory_ids: set[str] = set()
+        seen_cursors: set[str] = set()
         cursor: str | None = None
         page_requests = 0
         while True:
@@ -284,17 +286,27 @@ class NotionMemoryAdapter:
                 raise MemoryValidationError("Notion memory pagination capacity reached")
             page_requests += 1
             response = self._transport.list_pages(cursor=cursor, page_size=page_size)
-            if not isinstance(response, Mapping) or not isinstance(response.get("results"), Sequence):
+            if not isinstance(response, Mapping) or type(response.get("results")) is not list:
                 raise MemoryValidationError("Notion list response is malformed")
+            if "next_cursor" not in response:
+                raise MemoryValidationError("Notion list response omitted its cursor field")
             batch = response["results"]
             if len(batch) > page_size:
                 raise MemoryValidationError("Notion transport exceeded the requested page size")
-            records.extend(self._record_from_page(page) for page in batch)
-            next_cursor = response.get("next_cursor")
+            for page in batch:
+                record = self._record_from_page(page)
+                if record.memory_id in seen_memory_ids:
+                    raise MemoryValidationError("Notion pagination returned a duplicate page")
+                seen_memory_ids.add(record.memory_id)
+                records.append(record)
+            next_cursor = response["next_cursor"]
             if next_cursor is None:
                 return tuple(records)
-            if not isinstance(next_cursor, str):
+            if type(next_cursor) is not str or not next_cursor:
                 raise MemoryValidationError("Notion pagination cursor is malformed")
+            if next_cursor in seen_cursors:
+                raise MemoryValidationError("Notion pagination cursor repeated")
+            seen_cursors.add(next_cursor)
             # Cursors are opaque API tokens: never parse, normalize, or persist them.
             cursor = next_cursor
 
