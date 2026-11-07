@@ -1,7 +1,12 @@
 import io, json, os, unittest
 from urllib.error import HTTPError
 from capri_runtime.memory import MemoryNotFoundError, MemoryValidationError
-from capri_runtime.notion_rest import NOTION_API_VERSION, NotionRateLimitError, NotionRESTTransport, NotionTransportError, _NoRedirectHandler
+from capri_runtime.notion_memory import NotionMemoryAdapter
+from capri_runtime.notion_rest import (
+    NOTION_API_VERSION, NotionRateLimitError, NotionRESTTransport,
+    NotionTransportError, _NoRedirectHandler,
+    create_notion_memory_adapter_from_environment,
+)
 
 PAGE_ID="b55c9c91-384d-452b-81db-d1ef79372b75"
 DATA_SOURCE_ID="435a6e29-3b57-4637-908b-a07761e0df0f"
@@ -296,5 +301,45 @@ class NotionRESTTransportTests(unittest.TestCase):
             self.assertNotIn("hidden-token",repr(t))
         finally:
             os.environ.clear(); os.environ.update(old)
+
+    def test_memory_adapter_environment_factory_preflights_schema_before_return(self):
+        old = dict(os.environ)
+        try:
+            os.environ["CAPRI_FACTORY_NOTION_TOKEN"] = "hidden-token"
+            os.environ["CAPRI_FACTORY_NOTION_SOURCE"] = DATA_SOURCE_ID
+            opener = FakeOpener(FakeResponse(data_source_schema()))
+            adapter = create_notion_memory_adapter_from_environment(
+                token_env="CAPRI_FACTORY_NOTION_TOKEN",
+                data_source_env="CAPRI_FACTORY_NOTION_SOURCE",
+                opener=opener,
+            )
+            self.assertIsInstance(adapter, NotionMemoryAdapter)
+            self.assertEqual(len(opener.requests), 1)
+            request, _ = opener.requests[0]
+            self.assertEqual(request.get_method(), "GET")
+            self.assertIn(f"/data_sources/{DATA_SOURCE_ID}", request.full_url)
+        finally:
+            os.environ.clear()
+            os.environ.update(old)
+
+    def test_memory_adapter_environment_factory_fails_closed_on_schema_drift(self):
+        old = dict(os.environ)
+        try:
+            os.environ["CAPRI_FACTORY_NOTION_TOKEN"] = "hidden-token"
+            os.environ["CAPRI_FACTORY_NOTION_SOURCE"] = DATA_SOURCE_ID
+            schema = data_source_schema()
+            schema["properties"].pop("Sensitive")
+            opener = FakeOpener(FakeResponse(schema))
+            with self.assertRaises(NotionTransportError):
+                create_notion_memory_adapter_from_environment(
+                    token_env="CAPRI_FACTORY_NOTION_TOKEN",
+                    data_source_env="CAPRI_FACTORY_NOTION_SOURCE",
+                    opener=opener,
+                )
+            self.assertEqual(len(opener.requests), 1)
+        finally:
+            os.environ.clear()
+            os.environ.update(old)
+
 
 if __name__=="__main__": unittest.main()
