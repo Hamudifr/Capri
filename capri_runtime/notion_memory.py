@@ -58,6 +58,12 @@ _ALLOWED_SCOPES = {"Capri System", "GitHub Repository", "Notion Workspace", "Too
 _MAX_RECORDS = 10_000
 
 
+def _validate_transport_text(value: object, field: str, maximum: int) -> str:
+    if type(value) is not str:
+        raise MemoryValidationError(f"{field} must be a plain string")
+    return _validate_text(value, field, maximum)
+
+
 class MemorySyncError(MemoryErrorBase):
     """A multi-page Notion correction stopped in a recoverable partial state."""
 
@@ -110,7 +116,7 @@ class NotionMemoryAdapter:
 
     @staticmethod
     def _timestamp(value: object, field: str) -> str:
-        _validate_text(value, field, 64)
+        _validate_transport_text(value, field, 64)
         try:
             parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
@@ -146,7 +152,7 @@ class NotionMemoryAdapter:
         if not isinstance(page, Mapping):
             raise MemoryValidationError("Notion transport returned a non-object page")
         page_id = page.get("id")
-        _validate_text(page_id, "Notion page id", 64)
+        _validate_transport_text(page_id, "Notion page id", 64)
         try:
             UUID(page_id)
         except (ValueError, TypeError, AttributeError):
@@ -154,15 +160,13 @@ class NotionMemoryAdapter:
         props = page.get("properties")
         if not isinstance(props, Mapping):
             raise MemoryValidationError("Notion page properties are missing")
-        title = _validate_text(props.get("Name"), "title", 200)
-        content = _validate_text(props.get("Content"), "content", 20_000)
-        type_label = props.get("Type")
-        if not isinstance(type_label, str):
-            raise MemoryValidationError("Notion Type property is unsupported")
+        title = _validate_transport_text(props.get("Name"), "title", 200)
+        content = _validate_transport_text(props.get("Content"), "content", 20_000)
+        type_label = _validate_transport_text(props.get("Type"), "Notion Type property", 100)
         record_type = _LABEL_TO_TYPE.get(type_label)
         if record_type not in _ALLOWED_TYPES:
             raise MemoryValidationError("Notion Type property is unsupported")
-        scope = _validate_text(props.get("Scope"), "scope", 100)
+        scope = _validate_transport_text(props.get("Scope"), "scope", 100)
         if scope not in _ALLOWED_SCOPES:
             raise MemoryValidationError("Notion Scope property is unsupported")
         # The transport contract requires an explicit boolean classification.
@@ -171,22 +175,20 @@ class NotionMemoryAdapter:
         sensitive = props.get("Sensitive")
         if type(sensitive) is not bool or sensitive:
             raise MemoryValidationError("sensitive or unclassified Notion memory is not permitted")
-        source = cls._source(props.get("Source"))
-        confidence_label = props.get("Confidence")
-        if not isinstance(confidence_label, str):
-            raise MemoryValidationError("Notion Confidence property is unsupported")
+        source = cls._source(_validate_transport_text(props.get("Source"), "source", 2_048))
+        confidence_label = _validate_transport_text(props.get("Confidence"), "Notion Confidence property", 100)
         confidence = _LABEL_TO_CONFIDENCE.get(confidence_label)
         if confidence not in _ALLOWED_CONFIDENCE:
             raise MemoryValidationError("Notion Confidence property is unsupported")
-        retention_label = props.get("Retention")
-        if not isinstance(retention_label, str):
-            raise MemoryValidationError("Notion Retention property is unsupported")
+        retention_label = _validate_transport_text(props.get("Retention"), "Notion Retention property", 100)
         retention = _LABEL_TO_RETENTION.get(retention_label)
         if retention not in _ALLOWED_RETENTION:
             raise MemoryValidationError("Notion Retention property is unsupported")
         tags_value = props.get("Tags")
         if type(tags_value) not in (list, tuple):
             raise MemoryValidationError("Notion Tags property is missing or malformed")
+        if any(type(tag) is not str for tag in tags_value):
+            raise MemoryValidationError("Notion Tags must contain plain strings")
         tags = _validate_tags(tags_value)
         status_label = props.get("Status")
         if type(status_label) is not str:
@@ -201,7 +203,7 @@ class NotionMemoryAdapter:
         updated_at = cls._timestamp(page.get("last_edited_time"), "last_edited_time")
         supersedes_id = props.get("Supersedes")
         if supersedes_id is not None:
-            _validate_text(supersedes_id, "Supersedes", 64)
+            _validate_transport_text(supersedes_id, "Supersedes", 64)
             try:
                 UUID(supersedes_id)
             except (ValueError, TypeError, AttributeError):
