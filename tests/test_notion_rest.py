@@ -331,6 +331,44 @@ class NotionRESTTransportTests(unittest.TestCase):
                 with self.assertRaises(MemoryValidationError):
                     NotionRESTTransport(*args, **kwargs)
 
+    def test_read_and_pagination_inputs_require_exact_primitives(self):
+        class TextSubclass(str):
+            pass
+        class IntSubclass(int):
+            pass
+
+        t, op = self.make()
+        invalid_calls = (
+            lambda: t.get_page(TextSubclass(PAGE_ID)),
+            lambda: t.update_page(TextSubclass(PAGE_ID), {"Status": "Active"}),
+            lambda: t.delete_page(TextSubclass(PAGE_ID)),
+            lambda: t.get_page("not-a-uuid"),
+            lambda: t.update_page("not-a-uuid", {"Status": "Active"}),
+            lambda: t.delete_page("not-a-uuid"),
+            lambda: t.list_pages(cursor=TextSubclass("opaque"), page_size=10),
+            lambda: t.list_pages(cursor="", page_size=10),
+            lambda: t.list_pages(cursor=None, page_size=IntSubclass(10)),
+            lambda: t.list_pages(cursor=None, page_size=True),
+        )
+        for call in invalid_calls:
+            with self.subTest(call=call):
+                with self.assertRaises(MemoryValidationError):
+                    call()
+        self.assertEqual(op.requests, [])
+
+    def test_response_normalizer_rejects_container_subclasses(self):
+        class DictSubclass(dict):
+            pass
+        class ListSubclass(list):
+            pass
+
+        with self.assertRaises(NotionTransportError):
+            NotionRESTTransport._normalize_page(DictSubclass(page()))
+        with self.assertRaises(NotionTransportError):
+            NotionRESTTransport._plain(ListSubclass([{"plain_text": "text"}]))
+        with self.assertRaises(NotionTransportError):
+            NotionRESTTransport._plain([DictSubclass({"plain_text": "text"})])
+
     def test_response_size_and_configuration_are_bounded(self):
         t,op=self.make()
         class Big(FakeResponse):

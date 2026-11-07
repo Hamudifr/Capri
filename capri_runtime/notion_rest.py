@@ -1,6 +1,6 @@
 """Concrete Notion REST transport for the injected memory adapter."""
 from __future__ import annotations
-import json, os, re, uuid
+import json, os, uuid
 from collections.abc import Mapping
 from typing import Callable
 from urllib.error import HTTPError, URLError
@@ -29,6 +29,15 @@ class NotionRateLimitError(NotionTransportError):
     def __init__(self, retry_after: float | None) -> None:
         super().__init__("Notion rate limit reached")
         self.retry_after = retry_after
+
+def _validated_page_id(value: object) -> str:
+    if type(value) is not str:
+        raise MemoryValidationError("Notion page ID must be a plain UUID string")
+    try:
+        return str(uuid.UUID(value))
+    except (ValueError, TypeError, AttributeError):
+        raise MemoryValidationError("Notion page ID must be a UUID") from None
+
 
 class NotionRESTTransport:
     """Standard-library Notion REST client; token is injected and held in memory only."""
@@ -101,18 +110,18 @@ class NotionRESTTransport:
 
     @staticmethod
     def _plain(items: object) -> str:
-        if not isinstance(items, list):
+        if type(items) is not list:
             raise NotionTransportError("Notion rich-text property is missing or malformed")
         parts = []
         for item in items:
-            if not isinstance(item, Mapping):
+            if type(item) is not dict:
                 raise NotionTransportError("Notion rich-text contains a malformed item")
             plain_text = item.get("plain_text")
             if type(plain_text) is str:
                 parts.append(plain_text)
                 continue
             text_value = item.get("text")
-            if isinstance(text_value, Mapping) and type(text_value.get("content")) is str:
+            if type(text_value) is dict and type(text_value.get("content")) is str:
                 parts.append(text_value["content"])
                 continue
             raise NotionTransportError("Notion rich-text item has no readable text")
@@ -120,20 +129,22 @@ class NotionRESTTransport:
 
     @classmethod
     def _normalize_page(cls, raw: Mapping[str,object]) -> dict[str,object]:
+        if type(raw) is not dict:
+            raise NotionTransportError("Notion page response must be a plain JSON object")
         in_trash = raw.get("in_trash")
         if type(in_trash) is not bool:
             raise NotionTransportError("Notion page response has no valid trash state")
         if in_trash:
             raise MemoryNotFoundError("Notion page is in trash")
         props = raw.get("properties")
-        if not isinstance(props, Mapping):
+        if type(props) is not dict:
             raise NotionTransportError("Notion page response has no properties")
 
         def p(name, expected_type):
             value = props.get(name)
             expected = (expected_type,) if isinstance(expected_type, str) else expected_type
             if (
-                not isinstance(value, Mapping)
+                type(value) is not dict
                 or type(value.get("type")) is not str
                 or value["type"] not in expected
             ):
@@ -142,30 +153,30 @@ class NotionRESTTransport:
 
         def option(name, kind):
             value = p(name, kind).get(kind)
-            if not isinstance(value, Mapping) or type(value.get("name")) is not str:
+            if type(value) is not dict or type(value.get("name")) is not str:
                 raise NotionTransportError(f"Notion page property {name} has a malformed option")
             return value["name"]
 
         expiry_value = p("Expires", "date").get("date")
         if expiry_value is None:
             expires_at = None
-        elif isinstance(expiry_value, Mapping) and type(expiry_value.get("start")) is str:
+        elif type(expiry_value) is dict and type(expiry_value.get("start")) is str:
             expires_at = expiry_value["start"]
         else:
             raise NotionTransportError("Notion Expires property is malformed")
 
         tags = p("Tags", "multi_select").get("multi_select")
-        if not isinstance(tags, list):
+        if type(tags) is not list:
             raise NotionTransportError("Notion Tags property is missing or malformed")
         normalized_tags = []
         for item in tags:
-            if not isinstance(item, Mapping) or type(item.get("name")) is not str:
+            if type(item) is not dict or type(item.get("name")) is not str:
                 raise NotionTransportError("Notion Tags contains a malformed option")
             normalized_tags.append(item["name"])
 
         status_property = props.get("Status")
         if (
-            not isinstance(status_property, Mapping)
+            type(status_property) is not dict
             or type(status_property.get("type")) is not str
             or status_property["type"] not in {"status", "select"}
         ):
@@ -194,7 +205,7 @@ class NotionRESTTransport:
     def _error_code(body: bytes) -> str | None:
         try: data=json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError,json.JSONDecodeError): return None
-        return data.get("code") if isinstance(data,Mapping) and isinstance(data.get("code"),str) else None
+        return data.get("code") if type(data) is dict and type(data.get("code")) is str else None
 
     def _request(self, method: str, path: str, payload: Mapping[str,object] | None=None) -> Mapping[str,object]:
         if not path.startswith("/") or ".." in path.split("/"): raise MemoryValidationError("invalid Notion API path")
@@ -230,7 +241,7 @@ class NotionRESTTransport:
         except (TimeoutError,OSError): raise NotionTransportError("Notion API transport failed") from None
         try: data=json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError,json.JSONDecodeError): raise NotionTransportError("Notion API returned malformed JSON") from None
-        if not isinstance(data,Mapping): raise NotionTransportError("Notion API returned non-object response")
+        if type(data) is not dict: raise NotionTransportError("Notion API returned non-object response")
         return data
 
     def validate_data_source_schema(self) -> None:
@@ -243,7 +254,7 @@ class NotionRESTTransport:
         if raw.get("object") != "data_source" or raw.get("id") != self.data_source_id:
             raise NotionTransportError("Notion data source identity does not match configuration")
         properties = raw.get("properties")
-        if not isinstance(properties, Mapping):
+        if type(properties) is not dict:
             raise NotionTransportError("Notion data source schema is missing properties")
 
         expected_types = {
@@ -272,7 +283,7 @@ class NotionRESTTransport:
         for name, allowed_types in expected_types.items():
             descriptor = properties.get(name)
             if (
-                not isinstance(descriptor, Mapping)
+                type(descriptor) is not dict
                 or type(descriptor.get("type")) is not str
                 or descriptor["type"] not in allowed_types
             ):
@@ -282,12 +293,12 @@ class NotionRESTTransport:
             descriptor = properties[name]
             property_type = descriptor["type"]
             config = descriptor.get(property_type)
-            if not isinstance(config, Mapping) or type(config.get("options")) is not list:
+            if type(config) is not dict or type(config.get("options")) is not list:
                 raise NotionTransportError(f"Notion data source property {name} has malformed options")
             option_names = {
                 option.get("name")
                 for option in config["options"]
-                if isinstance(option, Mapping) and type(option.get("name")) is str
+                if type(option) is dict and type(option.get("name")) is str
             }
             if not set(required_names).issubset(option_names):
                 raise NotionTransportError(f"Notion data source property {name} is missing required options")
@@ -297,18 +308,18 @@ class NotionRESTTransport:
         return self._normalize_page(raw)
 
     def get_page(self, page_id: str) -> Mapping[str,object]:
-        if not isinstance(page_id,str) or not re.fullmatch(r"[0-9a-fA-F-]{32,36}",page_id): raise MemoryValidationError("Notion page ID is invalid")
+        page_id = _validated_page_id(page_id)
         return self._normalize_page(self._request("GET",f"/pages/{quote(page_id,safe='')}"))
 
     def list_pages(self, *, cursor: str | None, page_size: int) -> Mapping[str,object]:
-        if isinstance(page_size,bool) or not isinstance(page_size,int) or not 1<=page_size<=100: raise MemoryValidationError("page_size must be between 1 and 100")
+        if type(page_size) is not int or not 1<=page_size<=100: raise MemoryValidationError("page_size must be between 1 and 100")
         payload={"page_size":page_size,"in_trash":False}
         if cursor is not None:
-            if not isinstance(cursor,str): raise MemoryValidationError("Notion cursor must be an opaque string")
+            if type(cursor) is not str or not cursor: raise MemoryValidationError("Notion cursor must be a non-empty plain opaque string")
             payload["start_cursor"]=cursor
         raw=self._request("POST",f"/data_sources/{self.data_source_id}/query",payload)
         results=raw.get("results")
-        if not isinstance(results,list) or any(not isinstance(x,Mapping) for x in results):
+        if type(results) is not list or any(type(x) is not dict for x in results):
             raise NotionTransportError("Notion query returned malformed results")
         has_more = raw.get("has_more")
         if type(has_more) is not bool:
@@ -324,12 +335,12 @@ class NotionRESTTransport:
         return {"results":[self._normalize_page(x) for x in results],"next_cursor":next_cursor}
 
     def update_page(self, page_id: str, properties: Mapping[str,object]) -> Mapping[str,object]:
-        if not isinstance(page_id,str) or not re.fullmatch(r"[0-9a-fA-F-]{32,36}",page_id): raise MemoryValidationError("Notion page ID is invalid")
+        page_id = _validated_page_id(page_id)
         raw=self._request("PATCH",f"/pages/{quote(page_id,safe='')}",{"properties":self._encode_properties(properties)})
         return self._normalize_page(raw)
 
     def delete_page(self, page_id: str) -> None:
-        if not isinstance(page_id,str) or not re.fullmatch(r"[0-9a-fA-F-]{32,36}",page_id): raise MemoryValidationError("Notion page ID is invalid")
+        page_id = _validated_page_id(page_id)
         self._request("PATCH",f"/pages/{quote(page_id,safe='')}",{"in_trash":True})
 
 
