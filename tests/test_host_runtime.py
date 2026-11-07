@@ -10,6 +10,8 @@ from capri_runtime import (
     SessionClosedError,
     SessionNotFoundError,
     SQLiteSessionStore,
+    SQLiteTaskStore,
+    TaskNotFoundError,
     ToolExecutionBridge,
     ToolExecutor,
     ToolOrchestrator,
@@ -43,6 +45,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
             os.path.join(self.temp.name, "sessions.sqlite3"),
             max_output_chars=131_072,
         )
+        self.task_store = SQLiteTaskStore(os.path.join(self.temp.name, "tasks.sqlite3"))
         self.adapter = RecordingAdapter()
         bridge = ToolExecutionBridge(
             ToolExecutor(ToolRegistry(), InMemoryAuditSink())
@@ -64,6 +67,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
             self.authority,
             self.store,
             self.orchestrator,
+            task_store=self.task_store,
             **kwargs,
         )
 
@@ -86,6 +90,22 @@ class CapriHostRuntimeTests(unittest.TestCase):
         )
         with self.assertRaises(SessionNotFoundError):
             host.get_session("bob-token", session.session_id)
+
+    def test_task_creation_read_and_cancel_are_bound_to_authenticated_principal(self):
+        host = self.make_host()
+        task = host.create_task(
+            "alice-token",
+            [{"tool": "collect", "input": {"scope": "private"}}],
+            idempotency_key="request-1",
+        )
+        self.assertEqual(host.get_task("alice-token", task.task_id), task)
+        with self.assertRaises(TaskNotFoundError):
+            host.get_task("bob-token", task.task_id)
+        with self.assertRaises(TaskNotFoundError):
+            host.cancel_task("bob-token", task.task_id)
+        cancelled = host.cancel_task("alice-token", task.task_id)
+        self.assertEqual(cancelled.state, "cancelled")
+        self.assertEqual(host.get_task("alice-token", task.task_id), cancelled)
 
     def test_unauthorized_session_is_rejected_before_memory_retrieval(self):
         memory_calls = []
