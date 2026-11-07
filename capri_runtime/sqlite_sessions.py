@@ -11,6 +11,7 @@ import math
 import os
 import sqlite3
 import stat
+import tempfile
 import threading
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -748,5 +749,135 @@ class SQLiteSessionStore(SessionStore):
                 if connection.in_transaction:
                     connection.execute("ROLLBACK")
                 raise
+            finally:
+                connection.close()
+
+    def backup_to(self, destination_path: str) -> str:
+        """Create a consistent private snapshot without overwriting an existing file.
+
+        SQLite's online backup API captures committed WAL content. The destination
+        directory must already exist and be private; live database sidecars are
+        never copied directly.
+        """
+        if not isinstance(destination_path, str) or not destination_path.strip():
+            raise ValidationError("backup destination must be a non-empty path")
+        absolute = os.path.abspath(destination_path)
+        if absolute == self.path:
+            raise ValidationError("backup destination must differ from the live database")
+        parent = os.path.dirname(absolute)
+        if not os.path.isdir(parent) or os.path.realpath(parent) != parent:
+            raise ValidationError("backup parent must be an existing non-symlink directory")
+        parent_stat = os.stat(parent, follow_symlinks=False)
+        if not stat.S_ISDIR(parent_stat.st_mode):
+            raise ValidationError("backup parent must be a directory")
+        if os.name == "posix" and (
+            parent_stat.st_uid != os.geteuid()
+            or stat.S_IMODE(parent_stat.st_mode) & 0o077
+        ):
+            raise ValidationError("backup parent must be owned by the current user and private")
+        if os.path.lexists(absolute):
+            raise ValidationError("backup destination already exists")
+
+        descriptor, temporary_path = tempfile.mkstemp(
+            prefix=".capri-session-backup-", suffix=".sqlite3", dir=parent
+        )
+        os.close(descriptor)
+        source = None
+        destination = None
+        published = False
+        try:
+            with self._lock:
+                source = self._connect()
+                destination = sqlite3.connect(
+                    temporary_path, timeout=5.0, isolation_level=None
+                )
+                destination.execute("PRAGMA foreign_keys=ON")
+                destination.execute("PRAGMA trusted_schema=OFF")
+                destination.execute("PRAGMA synchronous=FULL")
+                source.backup(destination)
+                check = destination.execute("PRAGMA integrity_check").fetchone()
+                foreign_key_errors = destination.execute("PRAGMA foreign_key_check").fetchall()
+                if not check or check[0] != "ok" or foreign_key_errors:
+                    raise ValidationError("SQLite session backup integrity check failed")
+                rows = destination.execute(
+                    """SELECT session_id, created_at, updated_at, version, closed, messages_json
+                    FROM sessions ORDER BY created_at, session_id"""
+                ).fetchall()
+                for row in rows:
+                    self._decode(row)
+                owners = destination.execute(
+                    "SELECT session_id, principal_id FROM session_owners"
+                ).fetchall()
+                for session_id, principal_id in owners:
+                    self._validate_principal_id(principal_id)
+                    if not isinstance(session_id, str) or not session_id:
+                        raise ValidationError("SQLite session backup contains invalid ownership data")
+                destination.close()
+                destination = None
+                source.close()
+                source = None
+
+            flags = os.O_RDONLY
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+            backup_fd = os.open(temporary_path, flags)
+            try:
+                info = os.fstat(backup_fd)
+                if not stat.S_ISREG(info.st_mode):
+                    raise ValidationError("temporary session backup is not a regular file")
+                if os.name == "posix":
+                    if info.st_uid != os.geteuid() or info.st_nlink != 1:
+                        raise ValidationError("temporary session backup ownership or link count is invalid")
+                    os.fchmod(backup_fd, 0o600)
+                os.fsync(backup_fd)
+            finally:
+                os.close(backup_fd)
+
+            # link() publishes without replacing a destination created in a race.
+            os.link(temporary_path, absolute, follow_symlinks=False)
+            published = True
+            os.unlink(temporary_path)
+            if os.name == "posix":
+                directory_fd = os.open(parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+            return absolute
+        except Exception:
+            if destination is not None:
+                destination.close()
+            if source is not None:
+                source.close()
+            for candidate in (
+                temporary_path, temporary_path + "-journal",
+                temporary_path + "-wal", temporary_path + "-shm",
+            ):
+                try:
+                    os.unlink(candidate)
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    pass
+            if published:
+                # Preserve a complete backup if only the final directory fsync failed.
+                raise ValidationError(
+                    "session backup was published but directory durability could not be confirmed"
+                ) from None
+            raise
+
+    def integrity_check(self) -> str:
+        with self._lock:
+            connection = self._connect()
+            try:
+                row = connection.execute("PRAGMA integrity_check").fetchone()
+                foreign_key_errors = connection.execute("PRAGMA foreign_key_check").fetchall()
+                if not row:
+                    return "no result"
+                if row[0] != "ok":
+                    return str(row[0])
+                if foreign_key_errors:
+                    return "foreign key check failed"
+                return "ok"
             finally:
                 connection.close()
