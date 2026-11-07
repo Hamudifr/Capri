@@ -229,7 +229,9 @@ class NotionMemoryAdapterTests(unittest.TestCase):
                 inner.calls += 1
                 if inner.calls == 1:
                     return {"results": [page], "next_cursor": "next"}
-                return {"results": [page], "next_cursor": None}
+                uppercase_page = dict(page)
+                uppercase_page["id"] = page["id"].upper()
+                return {"results": [uppercase_page], "next_cursor": None}
 
         with self.assertRaisesRegex(MemoryValidationError, "duplicate page"):
             NotionMemoryAdapter(DuplicatePageTransport()).search("untrusted")
