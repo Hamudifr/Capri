@@ -418,10 +418,30 @@ class NotionRESTTransportTests(unittest.TestCase):
                     NotionRESTTransport._encode_properties(properties)
 
     def test_outbound_encoder_rejects_non_http_source_urls(self):
-        for value in ("javascript:alert(1)", "file:///etc/passwd", "/relative/path", "https://"):
+        for value in (None, "javascript:alert(1)", "file:///etc/passwd", "/relative/path", "https://"):
             with self.subTest(value=value):
                 with self.assertRaises(MemoryValidationError):
                     NotionRESTTransport._encode_properties({"Source": value})
+
+    def test_create_rejects_null_required_source_before_network(self):
+        properties = {
+            "Name": "Title",
+            "Content": "Body",
+            "Type": "Project Fact",
+            "Scope": "GitHub Repository",
+            "Sensitive": False,
+            "Source": None,
+            "Confidence": "Verified",
+            "Retention": "Keep until deleted",
+            "Tags": ["memory"],
+            "Status": "Active",
+            "Expires": None,
+            "Supersedes": None,
+        }
+        transport, opener = self.make()
+        with self.assertRaises(MemoryValidationError):
+            transport.create_page(properties)
+        self.assertEqual(opener.requests, [])
 
     def test_outbound_encoder_accepts_only_supported_memory_labels_and_tags(self):
         properties = {
