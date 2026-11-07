@@ -86,6 +86,62 @@ class NotionMemoryAdapterTests(unittest.TestCase):
         self.assertEqual(page["properties"]["Supersedes"], None)
         self.assertEqual(page["properties"]["Tags"], ["memory", "security"])
 
+    def test_write_and_query_inputs_require_exact_primitives(self):
+        class TextSubclass(str):
+            pass
+        class ListSubclass(list):
+            pass
+        class TupleSubclass(tuple):
+            pass
+        class IntSubclass(int):
+            pass
+
+        invalid_creates = (
+            {"title": TextSubclass("Title")},
+            {"content": TextSubclass("Body")},
+            {"record_type": TextSubclass("security_boundary")},
+            {"scope": TextSubclass("GitHub Repository")},
+            {"source": TextSubclass("https://example.com")},
+            {"confidence": TextSubclass("verified")},
+            {"retention": TextSubclass("keep")},
+            {"tags": ListSubclass(["memory"])},
+            {"tags": TupleSubclass(("memory",))},
+            {"tags": ("memory", TextSubclass("security"))},
+        )
+        for overrides in invalid_creates:
+            with self.subTest(overrides=overrides):
+                with self.assertRaises(MemoryValidationError):
+                    self.create(**overrides)
+        self.assertEqual(self.transport.pages, {})
+
+        with self.assertRaises(MemoryValidationError):
+            self.store.search(TextSubclass("memory"))
+        with self.assertRaises(MemoryValidationError):
+            self.store.search("memory", limit=IntSubclass(5))
+        with self.assertRaises(MemoryValidationError):
+            self.store.search("memory", offset=IntSubclass(0))
+        with self.assertRaises(MemoryValidationError):
+            NotionMemoryAdapter(self.transport, max_records=IntSubclass(10))
+
+    def test_record_ids_require_plain_uuid_strings_before_transport_calls(self):
+        class TextSubclass(str):
+            pass
+
+        for operation in ("get", "archive", "delete"):
+            with self.subTest(operation=operation):
+                with self.assertRaises(MemoryValidationError):
+                    getattr(self.store, operation)(TextSubclass(str(uuid4())))
+                with self.assertRaises(MemoryValidationError):
+                    getattr(self.store, operation)("not-a-uuid")
+        self.assertEqual(self.transport.pages, {})
+
+    def test_expiry_now_requires_plain_datetime(self):
+        class DateTimeSubclass(datetime):
+            pass
+
+        with self.assertRaises(MemoryValidationError):
+            self.store.expire(now=DateTimeSubclass.now(timezone.utc))
+
     def test_search_is_bounded_and_excludes_archived(self):
         first = self.create(title="Alpha")
         second = self.create(title="Beta")
