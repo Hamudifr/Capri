@@ -116,6 +116,13 @@ class NotionRESTTransport:
             return value.get("name") if isinstance(value,Mapping) and isinstance(value.get("name"),str) else None
         expiry=p("Expires").get("date")
         tags=p("Tags").get("multi_select")
+        if not isinstance(tags, list):
+            raise NotionTransportError("Notion Tags property is missing or malformed")
+        normalized_tags = []
+        for item in tags:
+            if not isinstance(item, Mapping) or type(item.get("name")) is not str:
+                raise NotionTransportError("Notion Tags contains a malformed option")
+            normalized_tags.append(item["name"])
         # Missing lifecycle state must remain unclassified for the adapter to reject.
         status=option("Status","status") or option("Status","select")
         return {
@@ -128,7 +135,7 @@ class NotionRESTTransport:
                 # Preserve absence; do not silently classify a missing checkbox as non-sensitive.
                 "Sensitive":p("Sensitive").get("checkbox"),"Source":p("Source").get("url"),
                 "Confidence":option("Confidence","select"),"Retention":option("Retention","select"),
-                "Tags":[x.get("name") for x in tags if isinstance(x,Mapping) and isinstance(x.get("name"),str)] if isinstance(tags,list) else [],
+                "Tags":normalized_tags,
                 "Status":status,"Expires":expiry.get("start") if isinstance(expiry,Mapping) else None,
                 "Supersedes":cls._plain(p("Supersedes").get("rich_text")) or None,
             }
