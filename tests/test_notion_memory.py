@@ -197,6 +197,13 @@ class NotionMemoryAdapterTests(unittest.TestCase):
         with self.assertRaises(MemoryValidationError):
             self.store.get(record.memory_id)
 
+    def test_rejects_missing_tags_instead_of_defaulting_empty(self):
+        record = self.create()
+        properties = self.transport.pages[record.memory_id]["properties"]
+        properties.pop("Tags")
+        with self.assertRaises(MemoryValidationError):
+            self.store.get(record.memory_id)
+
     def test_rejects_missing_or_non_boolean_sensitive_classification(self):
         record = self.create()
         properties = self.transport.pages[record.memory_id]["properties"]
