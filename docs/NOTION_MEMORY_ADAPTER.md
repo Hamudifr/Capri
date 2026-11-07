@@ -24,7 +24,7 @@ The REST transport pins `Notion-Version: 2026-03-11`, uses `POST /data_sources/{
 ## Lifecycle and consistency
 
 - Create validates values and writes the exact data-source properties. Sensitive pages are rejected on read.
-- Search uses deterministic token-AND substring matching over active/review pages and bounded cursor pagination.
+- Search uses deterministic token-AND substring matching over active/review pages and bounded cursor pagination. When exact-title and term-match relevance tie, the most recently edited record ranks first, matching the local SQLite memory provider.
 - Corrections create a replacement with Status=Review and a Supersedes link, archive the old record, then activate the replacement.
 - Notion has no multi-page transaction. If correction stops part-way, the replacement remains Review and `MemorySyncError.new_memory_id` identifies it for reconciliation. Hosts must serialize cross-process writes.
 - Archive changes the Status property.

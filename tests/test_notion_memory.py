@@ -94,6 +94,14 @@ class NotionMemoryAdapterTests(unittest.TestCase):
         with self.assertRaises(MemoryValidationError):
             self.store.search("untrusted", limit=101)
 
+    def test_search_prefers_newer_records_when_relevance_is_equal(self):
+        older = self.create(title="Shared Project", content="same stable facts")
+        newer = self.create(title="Shared Project", content="same stable facts")
+        self.transport.pages[older.memory_id]["last_edited_time"] = "2026-01-01T00:00:00+00:00"
+        self.transport.pages[newer.memory_id]["last_edited_time"] = "2026-11-06T00:00:00+00:00"
+        results = self.store.search("Shared Project", limit=2)
+        self.assertEqual([item.memory_id for item in results], [newer.memory_id, older.memory_id])
+
     def test_export_json_is_deterministic(self):
         self.create(title="Alpha")
         self.create(title="Beta")
