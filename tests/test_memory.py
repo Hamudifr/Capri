@@ -141,7 +141,7 @@ class SQLiteMemoryStoreTests(unittest.TestCase):
     def test_builder_returns_only_active_non_sensitive_non_expired_records(self):
         active = self.create(title="Shared memory", content="active record")
         archived = self.create(title="Shared memory", content="archived record")
-        self.store.archive(archived.memory_id)
+        archived = self.store.archive(archived.memory_id)
         expired = self.create(
             title="Shared memory", content="expired record",
             expires_at=(datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
