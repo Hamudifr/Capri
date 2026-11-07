@@ -175,6 +175,45 @@ def _validate_expiry(value: str | None) -> str | None:
         raise MemoryValidationError("expires_at must include a timezone")
     return parsed.astimezone(timezone.utc).isoformat()
 
+
+def build_untrusted_memory_context(
+    provider: MemoryProvider,
+    query: str,
+    *,
+    limit: int = 20,
+) -> UntrustedMemoryContext:
+    """Retrieve bounded eligible records for separate model-adapter delivery.
+
+    Only exact MemoryRecord values returned in the provider's tuple result are
+    considered. Inactive or sensitive records are excluded; expired records are
+    excluded after strict timestamp validation. Remaining records are validated
+    by UntrustedMemoryContext before being returned.
+    """
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 20:
+        raise MemoryValidationError("memory context limit must be between 1 and 20")
+    search = getattr(provider, "search", None)
+    if not callable(search):
+        raise MemoryValidationError("memory provider must implement search()")
+    records = search(query, limit=limit)
+    if type(records) is not tuple or len(records) > limit:
+        raise MemoryValidationError("memory provider returned an invalid search result")
+
+    now = datetime.now(timezone.utc)
+    eligible: list[MemoryRecord] = []
+    for record in records:
+        if type(record) is not MemoryRecord:
+            raise MemoryValidationError("memory provider returned an invalid record")
+        if type(record.status) is not str or type(record.sensitivity) is not str:
+            raise MemoryValidationError("memory provider returned invalid trust metadata")
+        if record.status != "active" or record.sensitivity != "non_sensitive":
+            continue
+        expiry = _validate_expiry(record.expires_at)
+        if expiry is not None and datetime.fromisoformat(expiry) <= now:
+            continue
+        eligible.append(record)
+    return UntrustedMemoryContext(tuple(eligible))
+
+
 class SQLiteMemoryStore:
     """Private SQLite store for non-sensitive project memory.
 
