@@ -885,6 +885,7 @@ class TaskEngine:
     def execute_claim(self, claim: TaskClaim, now: datetime | None = None) -> TaskRecord:
         if not isinstance(claim, TaskClaim) or claim.executor_id != self.executor_id:
             raise TaskConflictError("claim does not belong to this task engine")
+        self.store.validate_claim(claim)
         if claim.principal_id is None:
             handler = self.handlers.get(claim.tool)
             if handler is None:
