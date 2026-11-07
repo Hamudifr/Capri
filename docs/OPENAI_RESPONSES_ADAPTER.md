@@ -36,7 +36,7 @@ This does not make a network request. API calls can incur separate API charges; 
 - `store=false` is sent; Capri resends its own bounded transcript and does not depend on provider-side conversation state.
 - No automatic retries: a timeout or network error is reported generically rather than replaying a request with uncertain provider-side completion.
 - Provider output is parsed strictly. Duplicate JSON keys, malformed arguments, duplicate call IDs, unknown output item types, incomplete responses, and malformed stored tool-call history are rejected.
-- Prior Capri tool-call transcript envelopes are reconstructed as Responses API `function_call` and `function_call_output` items.
+- Prior Capri tool-call transcript envelopes are reconstructed as Responses API `function_call` and `function_call_output` items. When a response includes reasoning/continuation items alongside tool calls, the complete provider output sequence is retained in the private Capri session transcript and replayed with tool outputs, as required by the Responses API. This state is bounded by the existing transcript limits; protect the local SQLite database and backups.
 - Retrieved memory is serialized separately from trusted host instructions and sent as a separate user input item. The fixed adapter policy says memory is untrusted reference data. This is a prompt-construction safeguard, not provider-enforced isolation or proof that prompt injection is impossible.
 - The provider receives only the tool definitions already filtered by the trusted host context. The returned calls still pass through Capri's permission checks, approval handling, audit persistence, and executor.
 
