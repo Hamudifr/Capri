@@ -1,7 +1,6 @@
 import io, json, os, unittest
 from urllib.error import HTTPError
 from capri_runtime.memory import MemoryNotFoundError, MemoryValidationError
-from capri_runtime.notion_memory import NotionMemoryAdapter
 from capri_runtime.notion_rest import NOTION_API_VERSION, NotionRateLimitError, NotionRESTTransport, NotionTransportError, _NoRedirectHandler
 
 PAGE_ID="b55c9c91-384d-452b-81db-d1ef79372b75"
@@ -76,22 +75,14 @@ class NotionRESTTransportTests(unittest.TestCase):
         t, _ = self.make(raw)
         self.assertEqual(t.get_page(PAGE_ID)["properties"]["Status"], "Active")
 
-    def test_missing_sensitive_and_status_properties_remain_unclassified(self):
-        raw = page()
-        raw["properties"]["Sensitive"] = {}
-        t, _ = self.make(raw)
-        normalized = t.get_page(PAGE_ID)
-        self.assertIsNone(normalized["properties"]["Sensitive"])
-        with self.assertRaises(MemoryValidationError):
-            NotionMemoryAdapter(t).get(PAGE_ID)
-
-        raw = page()
-        raw["properties"]["Status"] = {}
-        t, _ = self.make(raw)
-        normalized = t.get_page(PAGE_ID)
-        self.assertIsNone(normalized["properties"]["Status"])
-        with self.assertRaises(MemoryValidationError):
-            NotionMemoryAdapter(t).get(PAGE_ID)
+    def test_missing_sensitive_and_status_properties_are_rejected(self):
+        for property_name in ("Sensitive", "Status"):
+            with self.subTest(property_name=property_name):
+                raw = page()
+                raw["properties"][property_name] = {}
+                t, _ = self.make(raw)
+                with self.assertRaises(NotionTransportError):
+                    t.get_page(PAGE_ID)
 
     def test_create_uses_data_source_parent_and_chunks_rich_text(self):
         t,op=self.make()
