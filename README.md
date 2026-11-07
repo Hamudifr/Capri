@@ -35,9 +35,9 @@ Capri is a research and execution-assistance project. This repository contains a
 
 ## Current status
 
-**Verified checkpoint — 2026-11-07 (after PR #113 merge)**
+**Verified code checkpoint — 2026-11-07 (PR #113 code baseline)**
 
-- Current `main`: `252e7eed7543aa5fc91ea3eb57a54b408b384e84`.
+- Latest verified code-changing mainline commit at this checkpoint: PR #113 merge `252e7eed7543aa5fc91ea3eb57a54b408b384e84`. Later checkpoint-only documentation commits do not change this code baseline; re-read GitHub for the current branch tip.
 - Latest verified exact-head CI: PR #113 run [42379590963](https://github.com/Hamudifr/Capri/actions/runs/42379590963) passed compilation, Capri Doctor 6/6, operational health 7/7, and **390 tests** on Python 3.11, 3.12, and 3.13. All three job logs were inspected. This run tested the PR head before merge; post-merge push CI is not verified here. The optional live Notion REST smoke test was skipped.
 - The repository contains the integrated non-X5 recovery foundation, append-only hash-chain ledger, provider-neutral session runtime, permissioned tool-execution boundary, durable SQLite task engine and worker, durable audit/approval storage, and bounded local project memory.
 - Memory includes the SQLite provider, Notion memory adapter, standard-library Notion REST transport, explicit read-only data-source schema preflight, and `create_notion_memory_adapter_from_environment()`. `build_untrusted_memory_context()` prepares bounded eligible memory for separate model-adapter delivery.

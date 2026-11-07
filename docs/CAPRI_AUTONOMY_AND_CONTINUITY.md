@@ -89,7 +89,7 @@ Before integrating or merging code, inspect the exact diff, dependency ancestry,
 
 Live GitHub and the README were rechecked after PR #113 merged on 2026-11-07:
 - Repository: `Hamudifr/Capri`, private, default branch `main`.
-- Current main commit: `252e7eed7543aa5fc91ea3eb57a54b408b384e84`.
+- Latest verified code-changing mainline commit at this checkpoint: PR #113 merge `252e7eed7543aa5fc91ea3eb57a54b408b384e84`. Subsequent checkpoint-only documentation commits do not change this code baseline; re-read live GitHub for the current branch tip.
 - Latest verified exact-head CI is PR #113 run `42379590963`: compilation, Capri Doctor 6/6, operational health 7/7, and 390 tests passed on Python 3.11, 3.12, and 3.13. All three job logs were inspected. This was PR-head CI before merge; post-merge push CI is not verified in this checkpoint. The optional live Notion REST smoke test was skipped.
 - The README describes the project as an internal engineering prototype, not an AGI, consciousness, or public/multi-tenant production system.
 - Remaining gaps include authenticated live Notion REST smoke verification, a supervised host process, concrete model-provider adapter, host identity/tenant isolation, observability, deployment packaging, and operational backup/restore/retention.
