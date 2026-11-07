@@ -786,9 +786,12 @@ class SQLiteTaskStore:
 class TaskEngine:
     """Run one claimed task step per call; hosts own scheduling and worker lifecycle.
 
-    Handlers receive (input_dict, stable_idempotency_key). They must be trusted
-    host code and must make side effects idempotent with that key. Model-proposed
-    calls must still be routed through ToolExecutor and host authorization.
+    Legacy unowned tasks use handlers(input_dict, stable_idempotency_key).
+    Principal-owned tasks require principal_handlers(
+    input_dict, stable_idempotency_key, principal_id) and never fall back to the
+    legacy map. Both handler classes must be trusted host code, enforce current
+    resource authorization, and make side effects idempotent with the key.
+    Model-proposed tool calls must still pass through ToolExecutor and host policy.
     """
 
     def __init__(
