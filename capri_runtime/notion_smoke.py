@@ -78,11 +78,12 @@ def main() -> int:
         return 0
     try:
         transport = NotionRESTTransport.from_environment()
+        transport.validate_data_source_schema()
         run_smoke(NotionMemoryAdapter(transport))
     except Exception:
         print("FAIL: Notion REST smoke test failed; check sanitized transport errors and workspace sharing")
         return 1
-    print("PASS: Notion REST create/read/correct/search/archive/trash round trip")
+    print("PASS: Notion schema preflight and REST create/read/correct/search/archive/trash round trip")
     return 0
 
 

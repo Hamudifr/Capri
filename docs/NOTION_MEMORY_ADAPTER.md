@@ -14,7 +14,9 @@ Set `NOTION_API_TOKEN` and `CAPRI_MEMORY_DATA_SOURCE_ID` in the host's secret/co
 from capri_runtime import NotionMemoryAdapter
 from capri_runtime.notion_rest import NotionRESTTransport
 
-memory = NotionMemoryAdapter(NotionRESTTransport.from_environment())
+transport = NotionRESTTransport.from_environment()
+transport.validate_data_source_schema()
+memory = NotionMemoryAdapter(transport)
 ```
 
 The token is held in memory only. It is not written to disk, included in logs, or exposed in the transport representation. Do not place it in source control, command-line arguments, or a committed `.env` file.
