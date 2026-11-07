@@ -283,7 +283,7 @@ class NotionMemoryAdapter:
         if retention in {"expire_30d", "expire_90d"} and expires_at is None:
             raise MemoryValidationError("expiring retention requires expires_at")
         if supersedes_id is not None:
-            _validate_memory_id(supersedes_id, "supersedes_id")
+            supersedes_id = _validate_memory_id(supersedes_id, "supersedes_id")
         properties = self._properties(
             title=title, content=content, record_type=record_type, scope=scope,
             source=source, confidence=confidence, retention=retention, tags=tags,
