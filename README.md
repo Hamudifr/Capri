@@ -35,19 +35,25 @@ Capri is a research and execution-assistance project. This repository contains a
 
 ## Current status
 
-**Verified checkpoint — 2026-11-07**
+**Verified checkpoint — 2026-11-07 13:55 UTC**
 
-- Current `main`: `229ce67caa0614bd56bf7863df525d6793eafad0`.
-- Latest post-merge CI: [42358381131](https://github.com/Hamudifr/Capri/actions/runs/42358381131) passed compilation, Capri Doctor 6/6, operational health 7/7, and **352 tests** on Python 3.11, 3.12, and 3.13. All three job logs were inspected.
+- Current `main`: `41348ece66177f7cca3027936e9bc44d82bfa529`.
+- Latest verified exact-head CI: PR #109 run [42379098826](https://github.com/Hamudifr/Capri/actions/runs/42379098826) passed compilation, Capri Doctor 6/6, operational health 7/7, and **388 tests** on Python 3.11, 3.12, and 3.13. All three job logs were inspected. This run tested the PR head before merge; post-merge push CI is not verified here.
 - The repository contains the integrated non-X5 recovery foundation, append-only hash-chain ledger, provider-neutral session runtime, permissioned tool-execution boundary, durable SQLite task engine and worker, durable audit/approval storage, and bounded local project memory.
-- Memory now includes the SQLite provider, Notion memory adapter, standard-library Notion REST transport, explicit read-only data-source schema preflight, and `create_notion_memory_adapter_from_environment()`. `build_untrusted_memory_context()` prepares bounded eligible memory for separate model-adapter delivery.
-- The connected Notion data-source metadata was inspected and its logical property names/types and supported option labels matched the expected memory schema. This connector metadata inspection is **not** an authenticated REST schema read.
-- The optional live Notion REST smoke test remains skipped because no `NOTION_API_TOKEN` and live-test configuration are supplied to CI. No always-on Capri process is connected to Notion.
+- Memory includes the SQLite provider, Notion memory adapter, standard-library Notion REST transport, explicit read-only data-source schema preflight, and `create_notion_memory_adapter_from_environment()`. `build_untrusted_memory_context()` prepares bounded eligible memory for separate model-adapter delivery.
+- The connected Notion data-source metadata was inspected read-only: required logical properties and supported option labels are present. The connector normalizes text fields as `text`; this is **not** an authenticated raw REST schema preflight.
+- The optional live Notion REST smoke test remains skipped. Authenticated REST create/read/correct/search/archive/trash behavior is not yet verified, and no always-on Capri process is connected to Notion.
 - The model/tool orchestration layer is provider-neutral. No concrete model-provider adapter currently implements provider-specific memory placement, and no end-to-end prompt-injection resistance is claimed.
 - This remains an internal engineering prototype, not a claim of AGI, consciousness, or public/multi-tenant production readiness. No X5 work is included.
 
 ### Recent verified integration milestones
 
+- [PR #101](https://github.com/Hamudifr/Capri/pull/101) — require non-null Source URLs for direct Notion REST writes.
+- [PR #102](https://github.com/Hamudifr/Capri/pull/102) — preserve numeric Retry-After on normal HTTP 429 responses without automatic retries.
+- [PR #103](https://github.com/Hamudifr/Capri/pull/103) — reject credential-bearing and malformed Source URLs at both adapter boundaries.
+- [PR #104](https://github.com/Hamudifr/Capri/pull/104) — consolidate owner-directed autonomy, self-review, safety, and continuity doctrine.
+- [PR #105](https://github.com/Hamudifr/Capri/pull/105) — detect case-variant duplicate Notion page UUIDs.
+- [PR #109](https://github.com/Hamudifr/Capri/pull/109) — enforce exact HTTPS Notion API final origin, including port and userinfo checks.
 - [PR #68](https://github.com/Hamudifr/Capri/pull/68) — repeated Notion pagination cursor/page detection.
 - [PR #69](https://github.com/Hamudifr/Capri/pull/69) — strict Notion page-property type validation.
 - [PR #70](https://github.com/Hamudifr/Capri/pull/70) — freshness ranking for equal-relevance Notion memory results.
