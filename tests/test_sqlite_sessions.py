@@ -129,7 +129,7 @@ class SQLiteSessionStoreTests(unittest.TestCase):
             self.store.get_for_principal(session.session_id, "principal-bob")
 
     def test_principal_id_validation_is_bounded(self):
-        for principal_id in ("", "  ", "x" * 257, "bad\\ud800"):
+        for principal_id in ("", "  ", "x" * 257, "bad" + chr(0xD800)):
             with self.subTest(principal_id=principal_id):
                 with self.assertRaises(ValidationError):
                     self.store.create_for_principal(principal_id)
