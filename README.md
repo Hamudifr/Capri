@@ -35,10 +35,10 @@ Capri is a research and execution-assistance project. This repository contains a
 
 ## Current status
 
-**Verified checkpoint — 2026-11-07 13:55 UTC**
+**Verified checkpoint — 2026-11-07 14:02 UTC**
 
-- Current `main`: `41348ece66177f7cca3027936e9bc44d82bfa529`.
-- Latest verified exact-head CI: PR #109 run [42379098826](https://github.com/Hamudifr/Capri/actions/runs/42379098826) passed compilation, Capri Doctor 6/6, operational health 7/7, and **388 tests** on Python 3.11, 3.12, and 3.13. All three job logs were inspected. This run tested the PR head before merge; post-merge push CI is not verified here.
+- Current `main`: `252e7eed7543aa5fc91ea3eb57a54b408b384e84`.
+- Latest fully inspected exact-head CI: PR #111 run [42379464168](https://github.com/Hamudifr/Capri/actions/runs/42379464168) passed compilation, Capri Doctor 6/6, operational health 7/7, and **389 tests** on Python 3.11, 3.12, and 3.13. All three job logs were inspected. This run predates PR #113. PR #113's description reports its Python 3.11/3.12/3.13 matrix passed, but its exact run/logs have not been inspected in this checkpoint. Post-merge push CI is not verified here.
 - The repository contains the integrated non-X5 recovery foundation, append-only hash-chain ledger, provider-neutral session runtime, permissioned tool-execution boundary, durable SQLite task engine and worker, durable audit/approval storage, and bounded local project memory.
 - Memory includes the SQLite provider, Notion memory adapter, standard-library Notion REST transport, explicit read-only data-source schema preflight, and `create_notion_memory_adapter_from_environment()`. `build_untrusted_memory_context()` prepares bounded eligible memory for separate model-adapter delivery.
 - The connected Notion data-source metadata was inspected read-only: required logical properties and supported option labels are present. The connector normalizes text fields as `text`; this is **not** an authenticated raw REST schema preflight.
@@ -54,6 +54,9 @@ Capri is a research and execution-assistance project. This repository contains a
 - [PR #104](https://github.com/Hamudifr/Capri/pull/104) — consolidate owner-directed autonomy, self-review, safety, and continuity doctrine.
 - [PR #105](https://github.com/Hamudifr/Capri/pull/105) — detect case-variant duplicate Notion page UUIDs.
 - [PR #109](https://github.com/Hamudifr/Capri/pull/109) — enforce exact HTTPS Notion API final origin, including port and userinfo checks.
+- [PR #110](https://github.com/Hamudifr/Capri/pull/110) — refresh the verified mainline and continuity anchors.
+- [PR #111](https://github.com/Hamudifr/Capri/pull/111) — clean up temporary Notion smoke pages after create-verification failures.
+- [PR #113](https://github.com/Hamudifr/Capri/pull/113) — require expiry timestamps for expiring untrusted-memory retention policies.
 - [PR #68](https://github.com/Hamudifr/Capri/pull/68) — repeated Notion pagination cursor/page detection.
 - [PR #69](https://github.com/Hamudifr/Capri/pull/69) — strict Notion page-property type validation.
 - [PR #70](https://github.com/Hamudifr/Capri/pull/70) — freshness ranking for equal-relevance Notion memory results.
