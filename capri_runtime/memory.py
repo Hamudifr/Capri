@@ -634,6 +634,15 @@ class SQLiteMemoryStore:
             _validate_text(record.content, "content", _MAX_CONTENT)
             _validate_text(record.scope, "scope", _MAX_SCOPE)
             _validate_text(record.source, "source", _MAX_SOURCE)
+            _validate_text(record.created_at, "created_at", 64)
+            _validate_text(record.updated_at, "updated_at", 64)
+            try:
+                datetime.fromisoformat(record.created_at)
+                datetime.fromisoformat(record.updated_at)
+            except ValueError:
+                raise MemoryValidationError("backup contains invalid memory timestamps") from None
+            if record.supersedes_id is not None:
+                _validate_text(record.supersedes_id, "supersedes_id", 64)
             if record.record_type not in _ALLOWED_TYPES:
                 raise MemoryValidationError("backup contains an unsupported record type")
             if record.confidence not in _ALLOWED_CONFIDENCE:
@@ -655,6 +664,10 @@ class SQLiteMemoryStore:
             if row["event_type"] not in allowed_events:
                 raise MemoryValidationError("backup contains an unsupported memory event")
             _validate_text(row["occurred_at"], "event timestamp", 64)
+            try:
+                datetime.fromisoformat(row["occurred_at"])
+            except ValueError:
+                raise MemoryValidationError("backup contains an invalid memory event timestamp") from None
 
     def backup_to(self, destination_path: str) -> str:
         """Create a private, consistent memory snapshot without overwriting."""
