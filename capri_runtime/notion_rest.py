@@ -14,6 +14,14 @@ NOTION_API_VERSION = "2026-03-11"
 NOTION_API_BASE = "https://api.notion.com/v1"
 _MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 _MAX_RICH_TEXT_CHUNK = 2_000
+_SELECT_OPTIONS = {
+    "Type": frozenset({"Operating Directive", "Architecture Decision", "Project Fact", "Security Boundary", "User Preference"}),
+    "Scope": frozenset({"Capri System", "GitHub Repository", "Notion Workspace", "Tool Integration"}),
+    "Confidence": frozenset({"User-Directed", "Verified", "Inferred", "Unverified"}),
+    "Retention": frozenset({"Keep until deleted", "Expire after 30 days", "Expire after 90 days", "Archive when superseded"}),
+}
+_STATUS_OPTIONS = frozenset({"Active", "Review", "Archived"})
+_TAG_OPTIONS = frozenset({"autonomy", "delivery", "security", "memory", "architecture", "tooling"})
 
 class _NoRedirectHandler(HTTPRedirectHandler):
     """Refuse redirects so bearer credentials are never forwarded to another origin."""
@@ -88,19 +96,32 @@ class NotionRESTTransport:
                 if type(value) is not str: raise MemoryValidationError(f"{name} must be plain text")
                 out[name] = {"title" if name=="Name" else "rich_text": cls._rich_text(value)}
             elif name in {"Type","Scope","Confidence","Retention"}:
-                if type(value) is not str: raise MemoryValidationError(f"{name} must be plain text")
+                if type(value) is not str or value not in _SELECT_OPTIONS[name]:
+                    raise MemoryValidationError(f"{name} contains an unsupported option")
                 out[name] = {"select":{"name":value}}
             elif name == "Status":
-                if type(value) is not str: raise MemoryValidationError("Status must be plain text")
+                if type(value) is not str or value not in _STATUS_OPTIONS:
+                    raise MemoryValidationError("Status contains an unsupported option")
                 out[name] = {"status":{"name":value}}
             elif name == "Sensitive":
                 if type(value) is not bool: raise MemoryValidationError("Sensitive must be a plain boolean")
                 out[name] = {"checkbox":value}
             elif name == "Source":
-                if value is not None and type(value) is not str: raise MemoryValidationError("Source must be plain URL text")
+                if value is not None:
+                    if type(value) is not str:
+                        raise MemoryValidationError("Source must be plain URL text")
+                    parsed = urlsplit(value)
+                    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                        raise MemoryValidationError("Source must be an absolute HTTP(S) URL")
                 out[name] = {"url":value}
             elif name == "Tags":
-                if type(value) not in (list,tuple) or any(type(x) is not str for x in value): raise MemoryValidationError("Tags must be a list or tuple of plain strings")
+                if (
+                    type(value) not in (list, tuple)
+                    or len(value) > 20
+                    or any(type(tag) is not str or tag not in _TAG_OPTIONS for tag in value)
+                    or len(set(value)) != len(value)
+                ):
+                    raise MemoryValidationError("Tags must contain unique supported plain strings")
                 out[name] = {"multi_select":[{"name":x} for x in value]}
             elif name == "Expires":
                 if value is not None:
