@@ -17,16 +17,22 @@ def run_smoke(adapter: NotionMemoryAdapter) -> None:
     token = uuid4().hex
     created_ids: list[str] = []
     try:
-        original = adapter.create(
-            title=f"Capri Notion REST smoke {token[:12]}",
-            content=f"Temporary non-sensitive integration smoke record {token}",
-            record_type="project_fact",
-            scope="GitHub Repository",
-            source="https://github.com/Hamudifr/Capri",
-            confidence="verified",
-            retention="keep",
-            tags=("tooling",),
-        )
+        try:
+            original = adapter.create(
+                title=f"Capri Notion REST smoke {token[:12]}",
+                content=f"Temporary non-sensitive integration smoke record {token}",
+                record_type="project_fact",
+                scope="GitHub Repository",
+                source="https://github.com/Hamudifr/Capri",
+                confidence="verified",
+                retention="keep",
+                tags=("tooling",),
+            )
+        except MemorySyncError as exc:
+            # The provider may have created a page before response verification failed.
+            # Preserve its ID so the finally block can trash the orphaned test page.
+            created_ids.append(exc.new_memory_id)
+            raise
         created_ids.append(original.memory_id)
         if adapter.get(original.memory_id).content != f"Temporary non-sensitive integration smoke record {token}":
             raise RuntimeError("Notion create/read round trip did not preserve content")
