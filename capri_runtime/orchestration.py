@@ -34,6 +34,7 @@ class AssistantTurn:
 
     content: str = ""
     tool_calls: tuple[ToolCallRequest, ...] = ()
+    provider_state: tuple[dict[str, object], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -252,6 +253,44 @@ class ToolOrchestrator:
                 raise ToolOrchestrationError("adapter content is invalid or oversized")
             if not isinstance(response.tool_calls, tuple):
                 raise ToolOrchestrationError("adapter tool_calls must be a tuple")
+            if type(response.provider_state) is not tuple or len(response.provider_state) > 256:
+                raise ToolOrchestrationError("adapter provider_state must be a bounded tuple")
+            if response.provider_state:
+                if not response.tool_calls:
+                    raise ToolOrchestrationError("provider_state is only valid with tool calls")
+                if any(
+                    type(item) is not dict
+                    or item.get("type") not in {"reasoning", "message", "function_call"}
+                    for item in response.provider_state
+                ):
+                    raise ToolOrchestrationError("adapter provider_state contains an unsupported item")
+                raw_calls = [
+                    item for item in response.provider_state
+                    if item.get("type") == "function_call"
+                ]
+                if len(raw_calls) != len(response.tool_calls):
+                    raise ToolOrchestrationError("provider_state does not match the tool-call batch")
+                try:
+                    state_json = json.dumps(
+                        response.provider_state, ensure_ascii=False, allow_nan=False,
+                        sort_keys=True, separators=(",", ":"),
+                    )
+                    state_bytes = state_json.encode("utf-8", errors="strict")
+                except (TypeError, ValueError, UnicodeEncodeError, RecursionError):
+                    raise ToolOrchestrationError("provider_state is not valid bounded JSON") from None
+                if len(state_bytes) > self.max_tool_message_bytes:
+                    raise ToolOrchestrationError("provider_state exceeds the configured byte limit")
+                for raw_call, call in zip(raw_calls, response.tool_calls):
+                    try:
+                        raw_arguments = json.loads(raw_call.get("arguments", ""))
+                    except (TypeError, ValueError, json.JSONDecodeError, RecursionError):
+                        raise ToolOrchestrationError("provider_state contains invalid function arguments") from None
+                    if (
+                        raw_call.get("call_id") != call.call_id
+                        or raw_call.get("name") != call.name
+                        or raw_arguments != call.arguments
+                    ):
+                        raise ToolOrchestrationError("provider_state does not match the tool-call data")
 
             if not response.tool_calls:
                 if not response.content.strip():
@@ -306,6 +345,8 @@ class ToolOrchestrator:
                     for call in response.tool_calls
                 ],
             }
+            if response.provider_state:
+                call_payload["provider_state"] = list(response.provider_state)
             try:
                 encoded_calls = json.dumps(
                     call_payload, ensure_ascii=False, allow_nan=False,

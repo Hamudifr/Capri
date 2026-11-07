@@ -57,6 +57,7 @@ from .orchestration import (
     ToolOrchestrator,
 )
 from .host import HostToolGateway
+from .openai_responses import OpenAIResponsesAdapter, OpenAIResponsesAdapterError
 from .approval import ApprovalChallenge, HostApprovalService, SQLiteApprovalChallengeStore
 from .sqlite_sessions import SQLiteSessionStore
 from .security_store import SQLiteSecurityStore
@@ -84,6 +85,8 @@ __all__ = [
     "ToolModelAdapter",
     "MemoryAwareToolModelAdapter",
     "ToolOrchestrationError",
+    "OpenAIResponsesAdapter",
+    "OpenAIResponsesAdapterError",
     "ToolOrchestrator",
     "ApprovalChallenge",
     "ApprovalGrant",

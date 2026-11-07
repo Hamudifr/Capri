@@ -2,7 +2,7 @@
 
 ## Status
 
-The repository currently defines a provider-neutral MemoryAwareToolModelAdapter protocol and a serializer, but no concrete model-provider adapter. This document specifies the required integration boundary; it does not claim a provider integration or live model test exists.
+The repository now includes OpenAIResponsesAdapter, a concrete standard-library implementation of the MemoryAwareToolModelAdapter protocol, plus offline fake-response tests. It is not yet connected to a running host, and no live provider request has been made. This document specifies the integration boundary and distinguishes adapter implementation from live provider verification.
 
 ## Input separation
 
@@ -57,4 +57,4 @@ A concrete provider adapter should include tests for:
 - ToolOrchestrator — passes memory separately and keeps host tool execution behind the bridge.
 - tests/test_memory_orchestration_boundary.py — hostile-memory tests for structural separation and host authorization.
 
-No concrete provider adapter or live provider integration is currently present.
+OpenAIResponsesAdapter now implements the protocol using the official Responses API. Its offline tests exercise request construction, function-call parsing, prior tool-transcript reconstruction, memory separation, malformed provider outputs, and credential/error redaction. No live provider integration or prompt-injection resistance claim is made. See [OPENAI_RESPONSES_ADAPTER.md](OPENAI_RESPONSES_ADAPTER.md).
