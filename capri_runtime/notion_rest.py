@@ -214,7 +214,9 @@ class NotionRESTTransport:
         has_more = raw.get("has_more")
         if type(has_more) is not bool:
             raise NotionTransportError("Notion query omitted its pagination state")
-        next_cursor = raw.get("next_cursor")
+        if "next_cursor" not in raw:
+            raise NotionTransportError("Notion query omitted its cursor field")
+        next_cursor = raw["next_cursor"]
         if has_more:
             if type(next_cursor) is not str or not next_cursor:
                 raise NotionTransportError("Notion query omitted its continuation cursor")
