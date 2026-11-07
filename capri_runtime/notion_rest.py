@@ -101,7 +101,11 @@ class NotionRESTTransport:
 
     @classmethod
     def _normalize_page(cls, raw: Mapping[str,object]) -> dict[str,object]:
-        if raw.get("in_trash") is True: raise MemoryNotFoundError("Notion page is in trash")
+        in_trash = raw.get("in_trash")
+        if type(in_trash) is not bool:
+            raise NotionTransportError("Notion page response has no valid trash state")
+        if in_trash:
+            raise MemoryNotFoundError("Notion page is in trash")
         props=raw.get("properties")
         if not isinstance(props,Mapping): raise NotionTransportError("Notion page response has no properties")
         def p(name):
