@@ -7,7 +7,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 from .memory import MemoryErrorBase, MemoryNotFoundError, MemoryValidationError
-from .notion_memory import NotionMemoryTransport
+from .notion_memory import NotionMemoryAdapter, NotionMemoryTransport
 
 NOTION_API_VERSION = "2026-03-11"
 NOTION_API_BASE = "https://api.notion.com/v1"
@@ -321,3 +321,26 @@ class NotionRESTTransport:
     def delete_page(self, page_id: str) -> None:
         if not isinstance(page_id,str) or not re.fullmatch(r"[0-9a-fA-F-]{32,36}",page_id): raise MemoryValidationError("Notion page ID is invalid")
         self._request("PATCH",f"/pages/{quote(page_id,safe='')}",{"in_trash":True})
+
+
+def create_notion_memory_adapter_from_environment(
+    *,
+    token_env: str = "NOTION_API_TOKEN",
+    data_source_env: str = "CAPRI_MEMORY_DATA_SOURCE_ID",
+    timeout: float = 10.0,
+    opener: Callable[..., object] | None = None,
+) -> NotionMemoryAdapter:
+    """Build a Notion memory adapter only after a successful read-only schema check.
+
+    This explicit factory performs network I/O to validate the configured data
+    source before returning an adapter. Plain NotionRESTTransport construction
+    remains network-free; hosts opt into preflight by calling this factory.
+    """
+    transport = NotionRESTTransport.from_environment(
+        token_env=token_env,
+        data_source_env=data_source_env,
+        timeout=timeout,
+        opener=opener,
+    )
+    transport.validate_data_source_schema()
+    return NotionMemoryAdapter(transport)
