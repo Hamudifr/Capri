@@ -22,6 +22,8 @@ Owner rows have no public reassignment or deletion API. A privileged host with d
 
 The host supplies:
 
+The SQLite session store's `max_output_chars` must be at least the greater of the orchestrator's `max_output_chars` and `max_tool_message_bytes`; `max_tool_chars` must cover `max_tool_message_bytes`. CapriHostRuntime validates these limits at construction and fails early if they are incompatible.
+
 1. A trusted `HostAuthorityResolver` whose authentication callback maps opaque credentials to stable principal IDs and whose permission callback returns current least-privilege grants.
 2. A private `SQLiteSessionStore`.
 3. A configured `ToolOrchestrator`, including the model adapter and `ToolExecutionBridge`.
@@ -46,7 +48,7 @@ authority = HostAuthorityResolver(
     authenticate=authenticate_opaque_credential,
     permissions_for=load_current_permissions,
 )
-sessions = SQLiteSessionStore("/private/capri/sessions.sqlite3")
+sessions = SQLiteSessionStore("/private/capri/sessions.sqlite3", max_output_chars=131072)
 adapter = OpenAIResponsesAdapter.from_environment()
 bridge = ToolExecutionBridge(ToolExecutor(ToolRegistry(), audit_sink))
 orchestrator = ToolOrchestrator(adapter, bridge)
