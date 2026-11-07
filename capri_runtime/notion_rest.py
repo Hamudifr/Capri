@@ -359,7 +359,10 @@ class NotionRESTTransport:
 
     def get_page(self, page_id: str) -> Mapping[str,object]:
         page_id = _validated_page_id(page_id)
-        return self._normalize_page(self._request("GET",f"/pages/{quote(page_id,safe='')}"))
+        raw = self._request("GET", f"/pages/{quote(page_id, safe='')}")
+        if raw.get("id") != page_id:
+            raise NotionTransportError("Notion page response identity does not match the requested page")
+        return self._normalize_page(raw)
 
     def list_pages(self, *, cursor: str | None, page_size: int) -> Mapping[str,object]:
         if type(page_size) is not int or not 1<=page_size<=100: raise MemoryValidationError("page_size must be between 1 and 100")
@@ -386,7 +389,16 @@ class NotionRESTTransport:
 
     def update_page(self, page_id: str, properties: Mapping[str,object]) -> Mapping[str,object]:
         page_id = _validated_page_id(page_id)
-        raw=self._request("PATCH",f"/pages/{quote(page_id,safe='')}",{"properties":self._encode_properties(properties)})
+        encoded = self._encode_properties(properties)
+        if not encoded:
+            raise MemoryValidationError("Notion page updates must include at least one property")
+        raw = self._request(
+            "PATCH",
+            f"/pages/{quote(page_id, safe='')}",
+            {"properties": encoded},
+        )
+        if raw.get("id") != page_id:
+            raise NotionTransportError("Notion update response identity does not match the requested page")
         return self._normalize_page(raw)
 
     def delete_page(self, page_id: str) -> None:
