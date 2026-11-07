@@ -179,9 +179,9 @@ class NotionMemoryAdapter:
         retention = _LABEL_TO_RETENTION.get(retention_label)
         if retention not in _ALLOWED_RETENTION:
             raise MemoryValidationError("Notion Retention property is unsupported")
-        tags_value = props.get("Tags", [])
-        if not isinstance(tags_value, (list, tuple)):
-            raise MemoryValidationError("Notion Tags property must be a list")
+        tags_value = props.get("Tags")
+        if type(tags_value) not in (list, tuple):
+            raise MemoryValidationError("Notion Tags property is missing or malformed")
         tags = _validate_tags(tags_value)
         status_label = props.get("Status")
         if type(status_label) is not str:
