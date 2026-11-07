@@ -147,7 +147,11 @@ class SQLiteMemoryStoreTests(unittest.TestCase):
             expires_at=(datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
             retention="expire_30d",
         )
-        context = build_untrusted_memory_context(self.store, "Shared memory")
+        class Provider:
+            def search(self, query, *, limit=20, offset=0):
+                return (active, archived, expired)
+
+        context = build_untrusted_memory_context(Provider(), "Shared memory")
         self.assertEqual(context.records, (active,))
         self.assertNotIn(archived, context.records)
         self.assertNotIn(expired, context.records)
