@@ -45,6 +45,72 @@ class SQLiteSessionStoreTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def test_principal_owned_sessions_persist_and_are_hidden_from_other_principals(self):
+        session = self.store.create_for_principal("principal-alice")
+        self.assertEqual(
+            self.store.get_for_principal(session.session_id, "principal-alice"),
+            session,
+        )
+        with self.assertRaises(SessionNotFoundError):
+            self.store.get_for_principal(session.session_id, "principal-bob")
+        reopened = SQLiteSessionStore(self.path)
+        self.assertEqual(
+            reopened.get_for_principal(session.session_id, "principal-alice"),
+            session,
+        )
+        with self.assertRaises(SessionNotFoundError):
+            reopened.get_for_principal(session.session_id, "principal-bob")
+
+    def test_legacy_unowned_sessions_cannot_be_claimed_by_principal_lookup(self):
+        session = self.store.create()
+        with self.assertRaises(SessionNotFoundError):
+            self.store.get_for_principal(session.session_id, "principal-alice")
+
+    def test_principal_ownership_guards_commits_and_close(self):
+        session = self.store.create_for_principal("principal-alice")
+        turn = (
+            Message(role="user", content="hello"),
+            Message(role="assistant", content="hello back"),
+        )
+        with self.assertRaises(SessionNotFoundError):
+            self.store.commit_turn_messages_for_principal(
+                session.session_id, "principal-bob", 0, turn
+            )
+        self.assertEqual(self.store.get(session.session_id).version, 0)
+        updated = self.store.commit_turn_messages_for_principal(
+            session.session_id, "principal-alice", 0, turn
+        )
+        self.assertEqual(updated.version, 1)
+        with self.assertRaises(SessionNotFoundError):
+            self.store.close_for_principal(session.session_id, "principal-bob")
+        closed = self.store.close_for_principal(session.session_id, "principal-alice")
+        self.assertTrue(closed.closed)
+        with self.assertRaises(SessionNotFoundError):
+            self.store.get_for_principal(session.session_id, "principal-bob")
+
+    def test_principal_ownership_guards_durable_turn_leases(self):
+        session = self.store.create_for_principal("principal-alice")
+        with self.assertRaises(SessionNotFoundError):
+            self.store.claim_turn_lease_for_principal(
+                session.session_id, "principal-bob", "worker-bob", 3
+            )
+        self.store.claim_turn_lease_for_principal(
+            session.session_id, "principal-alice", "worker-alice", 3
+        )
+        with self.assertRaises(SessionNotFoundError):
+            self.store.renew_turn_lease_for_principal(
+                session.session_id, "principal-bob", "worker-alice", 3
+            )
+        self.assertTrue(self.store.release_turn_lease_for_principal(
+            session.session_id, "principal-alice", "worker-alice"
+        ))
+
+    def test_principal_id_validation_is_bounded(self):
+        for principal_id in ("", "  ", "x" * 257, "bad\\ud800"):
+            with self.subTest(principal_id=principal_id):
+                with self.assertRaises(ValidationError):
+                    self.store.create_for_principal(principal_id)
+
     def test_session_and_transcript_survive_store_reopen(self):
         session = self.store.create()
         updated = self.store.commit_turn(
