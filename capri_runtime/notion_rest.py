@@ -1,6 +1,6 @@
 """Concrete Notion REST transport for the injected memory adapter."""
 from __future__ import annotations
-import json, os, re, uuid
+import json, os, uuid
 from collections.abc import Mapping
 from typing import Callable
 from urllib.error import HTTPError, URLError
@@ -205,7 +205,7 @@ class NotionRESTTransport:
     def _error_code(body: bytes) -> str | None:
         try: data=json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError,json.JSONDecodeError): return None
-        return data.get("code") if isinstance(data,Mapping) and isinstance(data.get("code"),str) else None
+        return data.get("code") if type(data) is dict and type(data.get("code")) is str else None
 
     def _request(self, method: str, path: str, payload: Mapping[str,object] | None=None) -> Mapping[str,object]:
         if not path.startswith("/") or ".." in path.split("/"): raise MemoryValidationError("invalid Notion API path")
