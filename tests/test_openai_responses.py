@@ -138,8 +138,13 @@ class OpenAIResponsesAdapterTests(unittest.TestCase):
         }))
         adapter = self.make_adapter(opener, instructions="Answer concisely.")
         memory = memory_fixture()
+        tool = ToolDefinition(
+            "project_search",
+            '{"type":"object","properties":{},"required":[],"additionalProperties":false}',
+            False,
+        )
         adapter.complete_with_tools_and_memory(
-            "session-3", (Message("user", "Continue"),), (), memory
+            "session-3", (Message("user", "Continue"),), (tool,), memory
         )
         body = json.loads(opener.request.data.decode("utf-8"))
         self.assertNotIn(memory.records[0].content, body["instructions"])
