@@ -11,7 +11,9 @@ from capri_runtime import (
     SessionNotFoundError,
     SQLiteSessionStore,
     SQLiteTaskStore,
+    TaskEngine,
     TaskNotFoundError,
+    TaskWorker,
     ToolExecutionBridge,
     ToolExecutor,
     ToolOrchestrator,
@@ -92,7 +94,13 @@ class CapriHostRuntimeTests(unittest.TestCase):
             host.get_session("bob-token", session.session_id)
 
     def test_task_creation_read_and_cancel_are_bound_to_authenticated_principal(self):
-        host = self.make_host()
+        worker = TaskWorker(TaskEngine(
+            self.task_store,
+            {},
+            "worker",
+            principal_handlers={"collect": lambda data, key, principal: {"ok": True}},
+        ))
+        host = self.make_host(task_worker=worker)
         task = host.create_task(
             "alice-token",
             [{"tool": "collect", "input": {"scope": "private"}}],
@@ -106,6 +114,17 @@ class CapriHostRuntimeTests(unittest.TestCase):
         cancelled = host.cancel_task("alice-token", task.task_id)
         self.assertEqual(cancelled.state, "cancelled")
         self.assertEqual(host.get_task("alice-token", task.task_id), cancelled)
+        with self.assertRaises(HostRuntimeError):
+            host.create_task(
+                "alice-token", [{"tool": "not-registered", "input": {}}]
+            )
+
+    def test_principal_task_creation_requires_a_configured_worker_registry(self):
+        host = self.make_host()
+        with self.assertRaises(HostRuntimeError):
+            host.create_task(
+                "alice-token", [{"tool": "collect", "input": {}}]
+            )
 
     def test_unauthorized_session_is_rejected_before_memory_retrieval(self):
         memory_calls = []
