@@ -87,12 +87,12 @@ Before integrating or merging code, inspect the exact diff, dependency ancestry,
 
 ## 9. Current verified repository anchor
 
-Live GitHub and the README were rechecked after PR #113 merged on 2026-11-07:
+Live GitHub and the README were rechecked after PR #117 merged on 2026-11-07:
 - Repository: `Hamudifr/Capri`, private, default branch `main`.
-- Latest verified code-changing mainline commit at this checkpoint: PR #113 merge `252e7eed7543aa5fc91ea3eb57a54b408b384e84`. Subsequent checkpoint-only documentation commits do not change this code baseline; re-read live GitHub for the current branch tip.
-- Latest verified exact-head CI is PR #113 run `42379590963`: compilation, Capri Doctor 6/6, operational health 7/7, and 390 tests passed on Python 3.11, 3.12, and 3.13. All three job logs were inspected. This was PR-head CI before merge; post-merge push CI is not verified in this checkpoint. The optional live Notion REST smoke test was skipped.
+- Latest verified code-changing mainline commit at this checkpoint: PR #117 merge `4d38c85a28120b917601602ba664cb772246a419`. Re-read live GitHub for the current branch tip before future changes.
+- PR #117 exact-head CI run `42380772978` and post-merge push CI run `42380871240` both passed compilation, Capri Doctor 6/6, operational health 7/7, and 405 tests on Python 3.11, 3.12, and 3.13. All six job logs were inspected. The optional live Notion REST smoke test was skipped.
 - The README describes the project as an internal engineering prototype, not an AGI, consciousness, or public/multi-tenant production system.
-- Remaining gaps include authenticated live Notion REST smoke verification, a supervised host process, concrete model-provider adapter, host identity/tenant isolation, observability, deployment packaging, and operational backup/restore/retention.
+- `OpenAIResponsesAdapter` is now integrated, but no live provider request or paid API usage has occurred. Remaining gaps include authenticated live Notion REST verification, a supervised host process, authenticated session ownership/tenant isolation, provider-aware spend controls, observability, deployment packaging, and operational backup/restore/retention.
 
 This is a read-back-verified mainline anchor, not a claim that every open or superseded feature branch is merged. Re-read live GitHub state before making release or integration decisions.
 
