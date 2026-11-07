@@ -113,6 +113,19 @@ class NotionMemoryAdapterTests(unittest.TestCase):
             "mutated during archive",
         )
 
+    def test_get_rejects_transport_response_for_different_memory_id(self):
+        class MisroutedGetTransport(FakeNotionTransport):
+            def get_page(inner, page_id):
+                page = super(MisroutedGetTransport, inner).get_page(page_id)
+                page["id"] = str(uuid4())
+                return page
+
+        transport = MisroutedGetTransport()
+        store = NotionMemoryAdapter(transport)
+        record = self.create(store=store)
+        with self.assertRaises(MemoryValidationError):
+            store.get(record.memory_id)
+
     def test_create_and_read_round_trip_maps_schema(self):
         record = self.create()
         self.assertEqual(self.store.get(record.memory_id), record)

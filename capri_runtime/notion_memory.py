@@ -312,7 +312,10 @@ class NotionMemoryAdapter:
 
     def get(self, memory_id: str) -> MemoryRecord:
         _validate_memory_id(memory_id)
-        return self._record_from_page(self._transport.get_page(memory_id))
+        record = self._record_from_page(self._transport.get_page(memory_id))
+        if UUID(record.memory_id) != UUID(memory_id):
+            raise MemoryValidationError("Notion get response identity does not match the requested memory")
+        return record
 
     def _list_all(self) -> tuple[MemoryRecord, ...]:
         records: list[MemoryRecord] = []
