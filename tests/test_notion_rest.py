@@ -25,12 +25,12 @@ class FakeOpener:
 
 def page():
     return {"id":PAGE_ID,"created_time":"2026-11-06T20:00:00Z","last_edited_time":"2026-11-06T20:10:00Z","in_trash":False,"properties":{
-        "Name":{"title":[{"plain_text":"Title"}]},"Content":{"rich_text":[{"plain_text":"Body"}]},
-        "Type":{"select":{"name":"Project Fact"}},"Scope":{"select":{"name":"GitHub Repository"}},
-        "Sensitive":{"checkbox":False},"Source":{"url":"https://github.com/Hamudifr/Capri"},
-        "Confidence":{"select":{"name":"Verified"}},"Retention":{"select":{"name":"Keep until deleted"}},
-        "Tags":{"multi_select":[{"name":"memory"}]},"Status":{"status":{"name":"Active"}},
-        "Expires":{"date":None},"Supersedes":{"rich_text":[]}
+        "Name":{"type":"title","title":[{"plain_text":"Title"}]},"Content":{"type":"rich_text","rich_text":[{"plain_text":"Body"}]},
+        "Type":{"type":"select","select":{"name":"Project Fact"}},"Scope":{"type":"select","select":{"name":"GitHub Repository"}},
+        "Sensitive":{"type":"checkbox","checkbox":False},"Source":{"type":"url","url":"https://github.com/Hamudifr/Capri"},
+        "Confidence":{"type":"select","select":{"name":"Verified"}},"Retention":{"type":"select","select":{"name":"Keep until deleted"}},
+        "Tags":{"type":"multi_select","multi_select":[{"name":"memory"}]},"Status":{"type":"status","status":{"name":"Active"}},
+        "Expires":{"type":"date","date":None},"Supersedes":{"type":"rich_text","rich_text":[]}
     }}
 
 class NotionRESTTransportTests(unittest.TestCase):
