@@ -637,10 +637,15 @@ class SQLiteMemoryStore:
             _validate_text(record.created_at, "created_at", 64)
             _validate_text(record.updated_at, "updated_at", 64)
             try:
-                datetime.fromisoformat(record.created_at)
-                datetime.fromisoformat(record.updated_at)
+                created_at = datetime.fromisoformat(record.created_at)
+                updated_at = datetime.fromisoformat(record.updated_at)
             except ValueError:
                 raise MemoryValidationError("backup contains invalid memory timestamps") from None
+            if (
+                created_at.tzinfo is None or created_at.utcoffset() is None
+                or updated_at.tzinfo is None or updated_at.utcoffset() is None
+            ):
+                raise MemoryValidationError("backup timestamps must be timezone-aware")
             if record.supersedes_id is not None:
                 _validate_text(record.supersedes_id, "supersedes_id", 64)
             if record.record_type not in _ALLOWED_TYPES:
@@ -665,9 +670,11 @@ class SQLiteMemoryStore:
                 raise MemoryValidationError("backup contains an unsupported memory event")
             _validate_text(row["occurred_at"], "event timestamp", 64)
             try:
-                datetime.fromisoformat(row["occurred_at"])
+                occurred_at = datetime.fromisoformat(row["occurred_at"])
             except ValueError:
                 raise MemoryValidationError("backup contains an invalid memory event timestamp") from None
+            if occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
+                raise MemoryValidationError("backup event timestamps must be timezone-aware")
 
     def backup_to(self, destination_path: str) -> str:
         """Create a private, consistent memory snapshot without overwriting."""
