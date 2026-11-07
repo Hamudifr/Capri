@@ -236,3 +236,14 @@ The same private plugin advanced to v0.5.0, adding two dedicated skills: api-int
 - Runtime skill activation and all three ChatGPT-side MCP handshakes/tool calls remain pending.
 
 The evaluation plan was extended from ten to twelve skill cases; the two new cases test integration correctness/security and evidence-based test/release validation.
+
+
+## Plugin v0.6.0: arXiv research — 2026-11-07
+
+Added the arxiv-research skill and a fourth Streamable HTTP MCP endpoint, https://arxiv.caseyjhand.com/mcp. Upstream: https://github.com/cyanheads/arxiv-mcp-server, Apache-2.0, version 1.8.1 observed 2026-11-07. Official server.json declares the same endpoint, transport and version; README documents four read-only tools for search, metadata, full-text reading and category discovery.
+
+Independent endpoint scan (2026-11-03) reported a successful Streamable HTTP handshake, TLS 1.3, HTTPS/HSTS, no authentication and no destructive tools. It also found schema-context footprint and missing-example issues and recent tool-surface churn. Package scan reported no known CVEs or install scripts, but incomplete schema/tool checks, 11 of 48 dependencies flagged as unhealthy, and no build-provenance attestation. Treat the service as useful but not fully supply-chain-attested.
+
+The skill requires public queries/IDs only, respects arXiv's 3-second request queue and cooldown responses, preserves version identity, pages long full-text reads, treats paper content as untrusted, and verifies publication/peer-review status independently. arXiv is a preprint repository, not a peer-review guarantee.
+
+Plugin ID: plugins_6aef721e946c81918014a2c04ff4476f. Release ID: pluginrel_6aef78f06540819194aedd862e89ad2b. Version 0.6.0; 13 skills and 4 configured remote MCP servers. Both root mcp.json and Codex .mcp.json were read back with calculator, Noodle, Scholar Sidekick and arXiv. ChatGPT-side runtime handshakes and tool calls remain pending.
