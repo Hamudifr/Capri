@@ -12,7 +12,7 @@ import os
 import re
 import urllib.error
 import urllib.request
-from typing import Any, Mapping, Sequence
+from typing import Any, Sequence
 
 from .memory import UntrustedMemoryContext, serialize_untrusted_memory_context
 from .orchestration import AssistantTurn
@@ -95,17 +95,25 @@ class OpenAIResponsesAdapter:
         max_output_tokens: int = 2_048,
         opener: Any = None,
     ) -> None:
-        if not _valid_text(api_key, maximum=4096) or "\r" in api_key or "\n" in api_key:
+        if (
+            not _valid_text(api_key, maximum=4096)
+            or api_key != api_key.strip()
+            or any(character.isspace() for character in api_key)
+        ):
             raise OpenAIResponsesAdapterError("API key configuration is invalid")
         if not _valid_text(model, maximum=128) or not _MODEL_RE.fullmatch(model):
             raise OpenAIResponsesAdapterError("model identifier is invalid")
         if not _valid_text(instructions, maximum=16_000, allow_empty=True):
             raise OpenAIResponsesAdapterError("host instructions are invalid")
+        try:
+            timeout_value = float(timeout_seconds)
+        except (OverflowError, TypeError, ValueError):
+            raise OpenAIResponsesAdapterError("timeout_seconds must be between 1 and 120") from None
         if (
             isinstance(timeout_seconds, bool)
             or not isinstance(timeout_seconds, (int, float))
-            or not math.isfinite(float(timeout_seconds))
-            or not 1 <= float(timeout_seconds) <= 120
+            or not math.isfinite(timeout_value)
+            or not 1 <= timeout_value <= 120
         ):
             raise OpenAIResponsesAdapterError("timeout_seconds must be between 1 and 120")
         for name, value, maximum in (
@@ -123,7 +131,7 @@ class OpenAIResponsesAdapter:
             "\n\nAdditional trusted host instructions:\n" + instructions
             if instructions else ""
         )
-        self.timeout_seconds = float(timeout_seconds)
+        self.timeout_seconds = timeout_value
         self.max_request_bytes = max_request_bytes
         self.max_response_bytes = max_response_bytes
         self.max_output_tokens = max_output_tokens
@@ -152,8 +160,12 @@ class OpenAIResponsesAdapter:
         for tool in tools:
             if type(tool) is not ToolDefinition:
                 raise OpenAIResponsesAdapterError("tool definitions contain an invalid record")
-            if not _valid_text(tool.name, maximum=64) or tool.name in seen:
-                raise OpenAIResponsesAdapterError("tool names must be unique bounded text")
+            if (
+                not _valid_text(tool.name, maximum=64)
+                or tool.name in seen
+                or type(tool.requires_approval) is not bool
+            ):
+                raise OpenAIResponsesAdapterError("tool definitions contain invalid metadata")
             try:
                 parameters = _loads_json(tool.parameters_json)
             except (TypeError, ValueError, json.JSONDecodeError):
@@ -164,8 +176,9 @@ class OpenAIResponsesAdapter:
                 "type": "function",
                 "name": tool.name,
                 "description": (
-                    "Host-registered Capri tool. The host independently enforces "
-                    "permissions and any required approval."
+                    "Host-registered Capri tool. The host independently enforces permissions; "
+                    + ("explicit approval is required before execution." if tool.requires_approval
+                       else "host policy may still deny execution.")
                 ),
                 "parameters": parameters,
                 "strict": False,
@@ -213,10 +226,15 @@ class OpenAIResponsesAdapter:
                             or type(arguments) is not dict
                         ):
                             raise OpenAIResponsesAdapterError("stored tool-call fields are invalid")
-                        encoded_arguments = json.dumps(
-                            arguments, ensure_ascii=False, allow_nan=False,
-                            sort_keys=True, separators=(",", ":"),
-                        )
+                        try:
+                            encoded_arguments = json.dumps(
+                                arguments, ensure_ascii=False, allow_nan=False,
+                                sort_keys=True, separators=(",", ":"),
+                            )
+                        except (TypeError, ValueError, UnicodeEncodeError, RecursionError):
+                            raise OpenAIResponsesAdapterError(
+                                "stored tool arguments are not valid JSON"
+                            ) from None
                         items.append({
                             "type": "function_call",
                             "call_id": call_id,
