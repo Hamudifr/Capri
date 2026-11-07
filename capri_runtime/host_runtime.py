@@ -13,7 +13,7 @@ from .orchestration import (
     SessionTurnCoordinator,
     ToolOrchestrator,
 )
-from .runtime import Session, SessionStore
+from .runtime import Message, Session, SessionClosedError, SessionStore
 from .sqlite_sessions import SQLiteSessionStore
 from .tasks import TaskWorker
 from .tools import ExecutionContext, HostAuthorityResolver
@@ -56,7 +56,7 @@ class PrincipalBoundSessionStore(SessionStore):
         self,
         session_id: str,
         expected_version: int,
-        turn_messages: tuple,
+        turn_messages: tuple[Message, ...],
         *,
         lease_owner: str | None = None,
     ) -> Session:
@@ -162,6 +162,20 @@ class CapriHostRuntime:
     ) -> CommittedOrchestration:
         """Run and durably commit one turn after authenticating session ownership."""
         context = self._context(credential)
+        if (
+            not isinstance(user_text, str)
+            or not user_text.strip()
+            or len(user_text) > self._session_store.max_input_chars
+            or any(0xD800 <= ord(character) <= 0xDFFF for character in user_text)
+        ):
+            raise HostRuntimeError("user_text is invalid or exceeds the host input limit")
+        # Authenticate ownership before memory retrieval or model invocation. A
+        # caller cannot use a foreign session ID to trigger scoped memory work.
+        snapshot = self._session_store.get_for_principal(
+            session_id, context.principal_id
+        )
+        if snapshot.closed:
+            raise SessionClosedError("session is closed")
         memory_context = None
         if self._memory_context_resolver is not None:
             try:
