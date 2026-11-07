@@ -35,10 +35,10 @@ Capri is a research and execution-assistance project. This repository contains a
 
 ## Current status
 
-**Verified checkpoint — 2026-11-07 13:55 UTC**
+**Verified checkpoint — 2026-11-07 (after PR #113 merge)**
 
-- Current `main`: `41348ece66177f7cca3027936e9bc44d82bfa529`.
-- Latest verified exact-head CI: PR #109 run [42379098826](https://github.com/Hamudifr/Capri/actions/runs/42379098826) passed compilation, Capri Doctor 6/6, operational health 7/7, and **388 tests** on Python 3.11, 3.12, and 3.13. All three job logs were inspected. This run tested the PR head before merge; post-merge push CI is not verified here.
+- Current `main`: `252e7eed7543aa5fc91ea3eb57a54b408b384e84`.
+- Latest verified exact-head CI: PR #113 run [42379590963](https://github.com/Hamudifr/Capri/actions/runs/42379590963) passed compilation, Capri Doctor 6/6, operational health 7/7, and **390 tests** on Python 3.11, 3.12, and 3.13. All three job logs were inspected. This run tested the PR head before merge; post-merge push CI is not verified here. The optional live Notion REST smoke test was skipped.
 - The repository contains the integrated non-X5 recovery foundation, append-only hash-chain ledger, provider-neutral session runtime, permissioned tool-execution boundary, durable SQLite task engine and worker, durable audit/approval storage, and bounded local project memory.
 - Memory includes the SQLite provider, Notion memory adapter, standard-library Notion REST transport, explicit read-only data-source schema preflight, and `create_notion_memory_adapter_from_environment()`. `build_untrusted_memory_context()` prepares bounded eligible memory for separate model-adapter delivery.
 - The connected Notion data-source metadata was inspected read-only: required logical properties and supported option labels are present. The connector normalizes text fields as `text`; this is **not** an authenticated raw REST schema preflight.
@@ -64,6 +64,7 @@ Capri is a research and execution-assistance project. This repository contains a
 - [PR #77](https://github.com/Hamudifr/Capri/pull/77) — exact-type enforcement at the orchestration memory boundary.
 - [PR #78](https://github.com/Hamudifr/Capri/pull/78) — require all supported Notion Tags options.
 - [PR #79](https://github.com/Hamudifr/Capri/pull/79) — explicit environment factory that preflights before returning a Notion adapter.
+- [PR #113](https://github.com/Hamudifr/Capri/pull/113) — enforce required expiry timestamps for `expire_30d` / `expire_90d` records at the immutable untrusted-memory context boundary; exact-head CI passed 390 tests across Python 3.11/3.12/3.13.
 
 ### Earlier foundation milestones
 
