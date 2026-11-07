@@ -1,7 +1,7 @@
 # Capri capability expansion: alternative implementation routes
 
 **Research date:** 2026-11-07  
-**Status:** Research and one remote-tool integration completed; other routes are candidates, not installed.
+**Status:** Research completed; two remote-tool integrations are saved in the private plugin. ChatGPT-side MCP handshakes remain pending.
 
 ## Executive finding
 
@@ -17,13 +17,13 @@ The best route depends on the user's host. Remote MCP servers can be used from C
 
 ## Implemented: remote mathematical computation
 
-Updated the existing private **Capri Engineering Lab** plugin to v0.2.0.
+Updated the existing private **Capri Engineering Lab** plugin to v0.3.0.
 
 - Plugin ID: `plugins_6aef721e946c81918014a2c04ff4476f`
-- Release ID: `pluginrel_6aef75bc617c8191b42ab494be51926b`
-- Added `mcp.json` with Streamable HTTP server `calculator` at `https://calculator.caseyjhand.com/mcp`.
-- Added `calculator-computation` skill with privacy boundaries and result-validation procedure.
-- Preserved the existing seven domain skills and private audience.
+- Release ID: `pluginrel_6aef763b9f1c81919d84ad5952a3c9d1`
+- Added Streamable HTTP servers `calculator` and `noodle` in `mcp.json`.
+- Added `calculator-computation` and `biomedical-literature-discovery` skills with privacy boundaries and validation procedures.
+- Preserved the original seven domain skills and private audience.
 
 ### Verification
 
@@ -57,15 +57,17 @@ Use only when the endpoint is verified, HTTPS, no-auth or has an acceptable auth
 - Purpose: expression evaluation, simplification, differentiation
 - Decision: integrated in Capri Engineering Lab v0.2.0; host-side handshake pending.
 
-### Candidate: biomedical literature graph — investigate, do not yet connect
+### Candidate: biomedical literature graph — integrated, host handshake pending
 
-- Project/service: Helena Bioinformatics Noodle
+- Project: https://github.com/helena-bioinformatics/noodle-mcp
 - Endpoint: https://api.helena.bio/noodle/v1/mcp
-- Public description: read-only biomedical literature search, publication inspection, bounded citation/semantic graph traversal; no authentication; Streamable HTTP.
-- Documentation: https://noodle.helena.bio/mcp
-- The endpoint returned HTTP 405 to a GET-style page fetch; this is not an MCP handshake test and neither proves nor disproves MCP availability.
-- Privacy restriction stated by provider: public, non-sensitive questions and identifiers only; never send patient records or private case data.
-- Decision: potentially useful for biomedical literature only; verify repository provenance, data handling and MCP handshake before adoption.
+- Transport: Streamable HTTP; official MCP Server Card version 0.2.1 declares `authentication.required=false`.
+- Official MCP Registry identity: `io.github.helena-bioinformatics/noodle`, active latest version 0.2.1.
+- License: Apache-2.0.
+- Scope: read-only public PubMed-derived corpus search, PMID/DOI/PMCID publication lookup, bounded citation and semantic graph exploration, corpus freshness/coverage metadata.
+- Added to Capri Engineering Lab v0.3.0 with a dedicated task-first skill.
+- Privacy restriction: public, non-sensitive queries and identifiers only; never send patient records or private case data. Graph edges are discovery signals, not causality or clinical evidence. Do not call the unrelated `support_helena` action unless the user explicitly asks.
+- Verification: source README, official Server Card, registry record and privacy policy inspected. The endpoint returned HTTP 405 to a GET-style page fetch; this is not an MCP handshake test. ChatGPT-side initialize/list-tools and tool invocation remain pending.
 
 ### Candidate: hosted academic bibliography search — do not connect yet
 
@@ -177,10 +179,10 @@ Measure baseline vs skill-only vs skill+tool. Keep a tool only if it improves qu
 
 ## Recommended next steps
 
-1. Keep the current remote calculator as the first real tool integration, pending a ChatGPT-side tool handshake.
+1. Refresh/install Capri Engineering Lab v0.3.0 and verify both remote MCP handshakes and one harmless tool call per server.
 2. Build a separate local desktop/Codex toolkit later: Polymath MCP + scoped Git/Fetch + DuckDB/SQLite, with read-only defaults.
 3. Curate NVIDIA and high-quality research/security skills through a provenance-and-license review; do not bulk-import unknown skills.
-4. Find a reliable, no-login, hosted academic MCP endpoint for broad computer science/engineering research. The current candidates are either local-only, too new, or failed endpoint verification.
+4. Find a reliable, no-login, hosted general CS/engineering academic MCP endpoint beyond the biomedical corpus; current candidates are either local-only, too new, or failed endpoint verification.
 5. Create and run the capability benchmark before declaring any skill or integration validated.
 
 ## Non-goals
