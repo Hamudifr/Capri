@@ -32,7 +32,7 @@ def data_source_schema():
         "Source": ("url", None),
         "Confidence": ("select", ["User-Directed", "Verified", "Inferred", "Unverified"]),
         "Retention": ("select", ["Keep until deleted", "Expire after 30 days", "Expire after 90 days", "Archive when superseded"]),
-        "Tags": ("multi_select", []),
+        "Tags": ("multi_select", ["autonomy", "delivery", "security", "memory", "architecture", "tooling"]),
         "Status": ("status", ["Active", "Review", "Archived"]),
         "Expires": ("date", None),
         "Supersedes": ("rich_text", None),
@@ -81,6 +81,9 @@ class NotionRESTTransportTests(unittest.TestCase):
         raw = data_source_schema()
         raw["properties"]["Status"]["status"]["options"] = [{"name": "Active"}, {"name": "Archived"}]
         cases.append(("missing lifecycle option", raw))
+        raw = data_source_schema()
+        raw["properties"]["Tags"]["multi_select"]["options"].pop()
+        cases.append(("missing supported tag option", raw))
         raw = data_source_schema()
         raw["properties"]["Type"]["select"]["options"] = "not-a-list"
         cases.append(("malformed options", raw))
