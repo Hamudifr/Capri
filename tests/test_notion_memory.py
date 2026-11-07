@@ -360,6 +360,15 @@ class NotionMemoryAdapterTests(unittest.TestCase):
         with self.assertRaises(MemoryValidationError):
             self.store.get(record.memory_id)
 
+    def test_rejects_missing_expiry_and_supersession_properties(self):
+        for property_name in ("Expires", "Supersedes"):
+            with self.subTest(property_name=property_name):
+                record = self.create()
+                properties = self.transport.pages[record.memory_id]["properties"]
+                properties.pop(property_name)
+                with self.assertRaises(MemoryValidationError):
+                    self.store.get(record.memory_id)
+
     def test_rejects_non_uuid_page_and_supersession_ids(self):
         record = self.create()
         page = self.transport.pages[record.memory_id]
