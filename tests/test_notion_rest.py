@@ -385,6 +385,14 @@ class NotionRESTTransportTests(unittest.TestCase):
                     {"Expires": {"date": {"start": value}}},
                 )
 
+    def test_outbound_encoder_rejects_sensitive_classification(self):
+        with self.assertRaises(MemoryValidationError):
+            NotionRESTTransport._encode_properties({"Sensitive": True})
+        self.assertEqual(
+            NotionRESTTransport._encode_properties({"Sensitive": False}),
+            {"Sensitive": {"checkbox": False}},
+        )
+
     def test_outbound_encoder_rejects_unsupported_select_and_status_labels(self):
         invalid = (
             {"Type": "Unapproved Type"},
