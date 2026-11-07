@@ -7,7 +7,7 @@ from typing import Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
-from .memory import MemoryErrorBase, MemoryNotFoundError, MemoryValidationError
+from .memory import MemoryErrorBase, MemoryNotFoundError, MemoryValidationError, _validate_text
 from .notion_memory import NotionMemoryAdapter, NotionMemoryTransport
 
 NOTION_API_VERSION = "2026-03-11"
@@ -92,8 +92,17 @@ class NotionRESTTransport:
             if type(name) is not str:
                 raise MemoryValidationError("Notion property names must be plain strings")
             if name in {"Name","Content","Supersedes"}:
-                if value is None and name == "Supersedes": value = ""
-                if type(value) is not str: raise MemoryValidationError(f"{name} must be plain text")
+                if value is None and name == "Supersedes":
+                    value = ""
+                if type(value) is not str:
+                    raise MemoryValidationError(f"{name} must be plain text")
+                maximum = {"Name": 200, "Content": 20_000, "Supersedes": 64}[name]
+                _validate_text(value, name, maximum, empty=(name == "Supersedes"))
+                if name == "Supersedes" and value:
+                    try:
+                        uuid.UUID(value)
+                    except (ValueError, TypeError, AttributeError):
+                        raise MemoryValidationError("Supersedes must be a UUID or null") from None
                 out[name] = {"title" if name=="Name" else "rich_text": cls._rich_text(value)}
             elif name in {"Type","Scope","Confidence","Retention"}:
                 if type(value) is not str or value not in _SELECT_OPTIONS[name]:
@@ -110,6 +119,7 @@ class NotionRESTTransport:
                 if value is not None:
                     if type(value) is not str:
                         raise MemoryValidationError("Source must be plain URL text")
+                    _validate_text(value, "Source", 2_048)
                     parsed = urlsplit(value)
                     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
                         raise MemoryValidationError("Source must be an absolute HTTP(S) URL")
@@ -127,6 +137,7 @@ class NotionRESTTransport:
                 if value is not None:
                     if type(value) is not str:
                         raise MemoryValidationError("Expires must be a plain timezone-aware ISO timestamp")
+                    _validate_text(value, "Expires", 64)
                     try:
                         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
                     except ValueError:
