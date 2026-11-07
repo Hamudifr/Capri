@@ -47,6 +47,35 @@ class NotionRESTTransportTests(unittest.TestCase):
         self.assertIn("Bearer test-secret",req.get_header("Authorization"))
         self.assertEqual(timeout,10.0)
 
+    def test_page_properties_require_expected_notion_types(self):
+        wrong_types = {
+            "Name": "rich_text", "Content": "title", "Type": "status",
+            "Scope": "url", "Sensitive": "select", "Source": "checkbox",
+            "Confidence": "status", "Retention": "rich_text",
+            "Tags": "rich_text", "Status": "checkbox",
+            "Expires": "rich_text", "Supersedes": "title",
+        }
+        for property_name, wrong_type in wrong_types.items():
+            with self.subTest(property_name=property_name, wrong_type=wrong_type):
+                raw = page()
+                raw["properties"][property_name]["type"] = wrong_type
+                t, _ = self.make(raw)
+                with self.assertRaises(NotionTransportError):
+                    t.get_page(PAGE_ID)
+
+    def test_malformed_expiry_value_is_rejected(self):
+        raw = page()
+        raw["properties"]["Expires"]["date"] = "not-a-date-object"
+        t, _ = self.make(raw)
+        with self.assertRaises(NotionTransportError):
+            t.get_page(PAGE_ID)
+
+    def test_legacy_select_status_type_remains_supported(self):
+        raw = page()
+        raw["properties"]["Status"] = {"type": "select", "select": {"name": "Active"}}
+        t, _ = self.make(raw)
+        self.assertEqual(t.get_page(PAGE_ID)["properties"]["Status"], "Active")
+
     def test_missing_sensitive_and_status_properties_remain_unclassified(self):
         raw = page()
         raw["properties"]["Sensitive"] = {}
@@ -167,7 +196,7 @@ class NotionRESTTransportTests(unittest.TestCase):
                 if value == "missing":
                     raw["properties"]["Tags"] = {}
                 else:
-                    raw["properties"]["Tags"] = {"multi_select": value}
+                    raw["properties"]["Tags"] = {"type": "multi_select", "multi_select": value}
                 t, _ = self.make(raw)
                 with self.assertRaises(NotionTransportError):
                     t.get_page(PAGE_ID)
