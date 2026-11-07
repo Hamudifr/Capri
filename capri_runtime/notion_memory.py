@@ -163,12 +163,7 @@ class NotionMemoryAdapter:
     def _record_from_page(cls, page: Mapping[str, object]) -> MemoryRecord:
         if not isinstance(page, Mapping):
             raise MemoryValidationError("Notion transport returned a non-object page")
-        page_id = page.get("id")
-        _validate_transport_text(page_id, "Notion page id", 64)
-        try:
-            UUID(page_id)
-        except (ValueError, TypeError, AttributeError):
-            raise MemoryValidationError("Notion page id must be a UUID") from None
+        page_id = _validate_memory_id(page.get("id"), "Notion page id")
         props = page.get("properties")
         if not isinstance(props, Mapping):
             raise MemoryValidationError("Notion page properties are missing")
@@ -215,11 +210,7 @@ class NotionMemoryAdapter:
         updated_at = cls._timestamp(page.get("last_edited_time"), "last_edited_time")
         supersedes_id = props.get("Supersedes")
         if supersedes_id is not None:
-            _validate_transport_text(supersedes_id, "Supersedes", 64)
-            try:
-                UUID(supersedes_id)
-            except (ValueError, TypeError, AttributeError):
-                raise MemoryValidationError("Notion Supersedes id must be a UUID") from None
+            supersedes_id = _validate_memory_id(supersedes_id, "Supersedes")
         return MemoryRecord(
             page_id, title, content, record_type, scope, "non_sensitive", source,
             confidence, retention, tags, created_at, updated_at, expires_at,
