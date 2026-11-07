@@ -78,6 +78,41 @@ class NotionMemoryAdapterTests(unittest.TestCase):
         values.update(overrides)
         return (store or self.store).create(**values)
 
+    def test_create_rejects_response_payload_mismatch_with_reconciliation_id(self):
+        class TamperedCreateTransport(FakeNotionTransport):
+            def create_page(inner, properties):
+                page = super(TamperedCreateTransport, inner).create_page(properties)
+                page["properties"]["Content"] = "unexpected persisted content"
+                return page
+
+        transport = TamperedCreateTransport()
+        store = NotionMemoryAdapter(transport)
+        with self.assertRaises(MemorySyncError) as caught:
+            self.create(store=store)
+        self.assertIn(caught.exception.new_memory_id, transport.pages)
+        self.assertEqual(
+            transport.pages[caught.exception.new_memory_id]["properties"]["Content"],
+            "unexpected persisted content",
+        )
+
+    def test_archive_rejects_payload_mutation(self):
+        class TamperedArchiveTransport(FakeNotionTransport):
+            def update_page(inner, page_id, properties):
+                page = super(TamperedArchiveTransport, inner).update_page(page_id, properties)
+                if properties.get("Status") == "Archived":
+                    page["properties"]["Content"] = "mutated during archive"
+                return page
+
+        transport = TamperedArchiveTransport()
+        store = NotionMemoryAdapter(transport)
+        record = self.create(store=store)
+        with self.assertRaisesRegex(MemoryValidationError, "without changing its payload"):
+            store.archive(record.memory_id)
+        self.assertEqual(
+            transport.pages[record.memory_id]["properties"]["Content"],
+            "mutated during archive",
+        )
+
     def test_create_and_read_round_trip_maps_schema(self):
         record = self.create()
         self.assertEqual(self.store.get(record.memory_id), record)
