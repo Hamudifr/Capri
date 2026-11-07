@@ -119,6 +119,26 @@ class NotionRESTTransportTests(unittest.TestCase):
         t, _ = self.make(raw)
         t.validate_data_source_schema()
 
+    def test_get_rejects_response_for_different_page_id(self):
+        raw = page()
+        raw["id"] = DATA_SOURCE_ID
+        transport, _ = self.make(raw)
+        with self.assertRaises(NotionTransportError):
+            transport.get_page(PAGE_ID)
+
+    def test_update_rejects_empty_payload_before_network(self):
+        transport, opener = self.make()
+        with self.assertRaises(MemoryValidationError):
+            transport.update_page(PAGE_ID, {})
+        self.assertEqual(opener.requests, [])
+
+    def test_update_rejects_response_for_different_page_id(self):
+        raw = page()
+        raw["id"] = DATA_SOURCE_ID
+        transport, _ = self.make(raw)
+        with self.assertRaises(NotionTransportError):
+            transport.update_page(PAGE_ID, {"Status": "Archived"})
+
     def test_get_maps_properties_and_auth_version_headers(self):
         t,op=self.make(); result=t.get_page(PAGE_ID); req,timeout=op.requests[0]
         self.assertEqual(result["properties"]["Name"],"Title")
