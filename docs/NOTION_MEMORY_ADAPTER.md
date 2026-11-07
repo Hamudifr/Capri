@@ -19,7 +19,7 @@ memory = NotionMemoryAdapter(NotionRESTTransport.from_environment())
 
 The token is held in memory only. It is not written to disk, included in logs, or exposed in the transport representation. Do not place it in source control, command-line arguments, or a committed `.env` file.
 
-The REST transport pins `Notion-Version: 2026-03-11`, uses `POST /data_sources/{data_source_id}/query`, `POST /pages`, `GET /pages/{id}`, and `PATCH /pages/{id}`. It passes opaque cursors through unchanged, bounds response size, refuses HTTP redirects by default before credentials can be forwarded, and rejects any unexpected final origin. Page normalization requires an explicit boolean `in_trash` state and rejects missing or malformed values; trashed pages map to not-found. It maps 404 to not-found and exposes 429 `Retry-After` without retrying mutations automatically.
+The REST transport pins `Notion-Version: 2026-03-11`, uses `POST /data_sources/{data_source_id}/query`, `POST /pages`, `GET /pages/{id}`, and `PATCH /pages/{id}`. It passes opaque cursors through unchanged, bounds response size, refuses HTTP redirects by default before credentials can be forwarded, and rejects any unexpected final origin. Page normalization requires an explicit boolean `in_trash` state and rejects missing or malformed values; trashed pages map to not-found. The Tags multi-select must be present as a list, and every option must contain a string name; malformed options are rejected instead of silently discarded. It maps 404 to not-found and exposes 429 `Retry-After` without retrying mutations automatically.
 
 ## Lifecycle and consistency
 
