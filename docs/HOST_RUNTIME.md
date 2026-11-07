@@ -18,7 +18,7 @@ It is not an HTTP server, daemon, deployment package, authentication provider, o
 
 Owner rows have no public reassignment or deletion API and SQLite triggers reject direct owner updates/deletes. A privileged host with direct database access can still bypass application boundaries; protect the SQLite file and its directory. SQLite transcripts are plaintext, not encrypted at rest.
 
-`SQLiteSessionStore.backup_to()` creates a consistent private snapshot that includes ownership records and triggers. The backup is also plaintext; see [SQLITE_SESSION_BACKUP.md](SQLITE_SESSION_BACKUP.md). Task-store and memory-store backup methods are still outstanding.
+`SQLiteSessionStore.backup_to()` creates a consistent private snapshot that includes ownership records and triggers. The backup is also plaintext; see [SQLITE_SESSION_BACKUP.md](SQLITE_SESSION_BACKUP.md). Task, memory, security, and session stores now expose private consistent backup methods; the backups remain plaintext and no scheduler, retention policy, or automated restore workflow is provided. See [SQLITE_STORE_BACKUP.md](SQLITE_STORE_BACKUP.md).
 
 ## Composition
 
