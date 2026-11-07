@@ -89,6 +89,7 @@ class NotionRESTTransportTests(unittest.TestCase):
             {"results": [page()], "has_more": 1, "next_cursor": "cursor"},
             {"results": [page()], "has_more": "false", "next_cursor": None},
             {"results": [page()], "has_more": False, "next_cursor": "unexpected"},
+            {"results": [page()], "has_more": False},
             {"results": [page()], "has_more": True, "next_cursor": None},
             {"results": [page()], "has_more": True, "next_cursor": ""},
         )
