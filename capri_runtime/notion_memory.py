@@ -13,6 +13,7 @@ from dataclasses import asdict
 from datetime import date, datetime, time, timezone
 from typing import Protocol
 from urllib.parse import urlsplit
+from uuid import UUID
 
 from .memory import (
     MemoryErrorBase,
@@ -146,6 +147,10 @@ class NotionMemoryAdapter:
             raise MemoryValidationError("Notion transport returned a non-object page")
         page_id = page.get("id")
         _validate_text(page_id, "Notion page id", 64)
+        try:
+            UUID(page_id)
+        except (ValueError, TypeError, AttributeError):
+            raise MemoryValidationError("Notion page id must be a UUID") from None
         props = page.get("properties")
         if not isinstance(props, Mapping):
             raise MemoryValidationError("Notion page properties are missing")
@@ -197,6 +202,10 @@ class NotionMemoryAdapter:
         supersedes_id = props.get("Supersedes")
         if supersedes_id is not None:
             _validate_text(supersedes_id, "Supersedes", 64)
+            try:
+                UUID(supersedes_id)
+            except (ValueError, TypeError, AttributeError):
+                raise MemoryValidationError("Notion Supersedes id must be a UUID") from None
         return MemoryRecord(
             page_id, title, content, record_type, scope, "non_sensitive", source,
             confidence, retention, tags, created_at, updated_at, expires_at,
