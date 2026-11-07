@@ -4,7 +4,7 @@
 
 `capri_runtime.tasks` adds a provider-neutral durable task queue and a synchronous worker primitive. It stores a bounded ordered plan, claims work through SQLite leases, checkpoints each completed step, retries failed steps with bounded exponential backoff, supports cancellation between steps, and recovers abandoned work after a lease expires.
 
-It includes an explicit `TaskWorker` polling loop with graceful stop-event support and a concurrent lease-heartbeat thread while a handler runs. Constructing a worker starts no thread; the host must call `run_once()` or `run_forever(stop_event)` and owns process lifecycle, authenticated principal context, scheduling, and handler registration. The stop event is checked between tasks and does not forcibly interrupt an active handler; process supervisors must account for the current handler's completion time. It does not call a model provider, create plans from natural language, or grant tool permissions.
+It includes an explicit `TaskWorker` polling loop with graceful stop-event support and a concurrent lease-heartbeat thread while a handler runs. Constructing a worker starts no thread; the host must call `run_once()` or `run_forever(stop_event)` and owns process lifecycle, authenticated principal context, scheduling, and handler registration. Principal-owned tasks carry the owner ID from the immutable task-owner table into the claim; they execute only through a separately configured `principal_handlers` allowlist. Legacy unowned tasks continue to use the original two-argument `handlers` mapping. The stop event is checked between tasks and does not forcibly interrupt an active handler; process supervisors must account for the current handler's completion time. It does not call a model provider, create plans from natural language, or grant tool permissions.
 
 ## Basic use
 
@@ -32,6 +32,12 @@ engine.run_once()
 ```
 
 The parent directory must already exist and be private (0700 or stricter on POSIX). The database is created with private permissions, rejects symlink/hard-link aliases, rechecks path safety on each connection, and uses SQLite WAL with full synchronous commits.
+
+## Principal-scoped task ownership
+
+`create_for_principal(principal_id, plan, idempotency_key=...)` atomically creates the task and an immutable owner row in the same SQLite transaction. `get_for_principal()`, `request_cancel_for_principal()`, and `events_for_principal()` hide foreign and legacy-unowned tasks as `TaskNotFoundError`. Existing tasks created with `create()` remain unowned and are not silently assigned to a principal. Principal-scoped idempotency keys are stored as one-way principal-namespaced digests, so different principals can reuse the same client key without colliding or revealing one another's task.
+
+The worker claim includes the owner ID from the trusted database row. A principal-owned claim never falls back to a generic legacy handler: it requires a matching trusted `principal_handlers` callback with signature `(input_dict, stable_idempotency_key, principal_id)`. That callback must enforce current resource-level authorization for every external resource it touches. The principal ID is provenance from the local ownership record, not a replacement for a live authentication provider or resource ACL check. Legacy unowned tasks continue to use `handlers` with signature `(input_dict, stable_idempotency_key)`.
 
 ## State machine
 
@@ -63,8 +69,9 @@ Cancellation is cooperative. Queued/retry-wait tasks cancel immediately. A runni
 - Handler names must exist in the host's injected allowlist. This module never imports code dynamically or runs shell/network/filesystem commands.
 - Injected handlers are trusted host code and run with the process's privileges; this module is not a sandbox.
 - Model-proposed actions must still pass through `ToolExecutor`, host authentication/authorization, and any required user approval. Do not register a raw unrestricted handler merely because a task plan names it.
+- Immutable task ownership protects task lookup and cancellation through the scoped APIs, but it does not by itself establish resource-level authorization or complete tenant isolation. Principal handlers must perform resource ACL checks.
 - The store protects local file paths and permissions, but does not provide remote multi-tenant isolation, encrypted storage, backup/restore automation, retention/compaction, or authenticated event signatures.
 
 ## Validation
 
-`tests/test_tasks.py` covers persistent state, idempotent creation, plan validation, concurrent claims, lease recovery, stale-worker rejection, bounded retries, step checkpointing, handler failure suppression, missing handlers, cancellation, event persistence, symlink rejection, and directory privacy. The repository quality workflow runs the full suite on Python 3.11, 3.12, and 3.13.
+`tests/test_tasks.py` covers persistent state, idempotent creation, principal-scoped task isolation, immutable owner rows, principal-aware worker dispatch, backup/restore of ownership, plan validation, concurrent claims, lease recovery, stale-worker rejection, bounded retries, step checkpointing, handler failure suppression, cancellation, event persistence, symlink rejection, and directory privacy. The repository quality workflow runs the full suite on Python 3.11, 3.12, and 3.13.
