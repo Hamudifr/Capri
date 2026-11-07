@@ -39,7 +39,10 @@ class CapriHostRuntimeTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         if os.name == "posix":
             os.chmod(self.temp.name, 0o700)
-        self.store = SQLiteSessionStore(os.path.join(self.temp.name, "sessions.sqlite3"))
+        self.store = SQLiteSessionStore(
+            os.path.join(self.temp.name, "sessions.sqlite3"),
+            max_output_chars=131_072,
+        )
         self.adapter = RecordingAdapter()
         bridge = ToolExecutionBridge(
             ToolExecutor(ToolRegistry(), InMemoryAuditSink())
