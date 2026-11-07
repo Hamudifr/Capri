@@ -130,6 +130,60 @@ class OpenAIResponsesAdapterTests(unittest.TestCase):
         self.assertEqual(body["tools"][0]["strict"], False)
         self.assertEqual(body["tool_choice"], "auto")
 
+    def test_reasoning_and_raw_output_items_are_preserved_for_tool_continuation(self):
+        output = [
+            {
+                "type": "reasoning",
+                "id": "rs_123",
+                "encrypted_content": "opaque-provider-state",
+                "summary": [],
+            },
+            {
+                "type": "function_call",
+                "call_id": "call_reasoning",
+                "name": "project_search",
+                "arguments": '{ "query" : "runtime" }',
+                "status": "completed",
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "I am searching."}],
+            },
+        ]
+        opener = FakeOpener(response_payload(*output))
+        adapter = self.make_adapter(opener)
+        tool = ToolDefinition(
+            "project_search",
+            '{"type":"object","properties":{"query":{"type":"string"}},'
+            '"required":["query"],"additionalProperties":false}',
+            False,
+        )
+        result = adapter.complete_with_tools(
+            "session-reasoning", (Message("user", "Search"),), (tool,)
+        )
+        self.assertEqual(result.provider_state, tuple(output))
+        self.assertEqual(result.content, "I am searching.")
+
+        envelope = json.dumps({
+            "content": result.content,
+            "tool_calls": [{
+                "id": result.tool_calls[0].call_id,
+                "name": result.tool_calls[0].name,
+                "arguments": result.tool_calls[0].arguments,
+            }],
+            "provider_state": list(result.provider_state),
+        })
+        tool_output = json.dumps({"call_id": "call_reasoning", "status": "success"})
+        items = OpenAIResponsesAdapter._history_to_input((
+            Message("user", "Search"),
+            Message("assistant", envelope),
+            Message("tool", tool_output),
+        ))
+        self.assertEqual(items[1:4], output)
+        self.assertEqual(items[4]["type"], "function_call_output")
+        self.assertEqual(items[4]["call_id"], "call_reasoning")
+
     def test_memory_is_a_separate_untrusted_input_not_host_instructions(self):
         opener = FakeOpener(response_payload({
             "type": "message",
