@@ -87,12 +87,12 @@ Before integrating or merging code, inspect the exact diff, dependency ancestry,
 
 ## 9. Current verified repository anchor
 
-Live GitHub and the README were rechecked after PR #119 merged on 2026-11-07:
+Live GitHub and the README were rechecked after PR #120 merged on 2026-11-07:
 - Repository: `Hamudifr/Capri`, private, default branch `main`.
-- Latest verified code-changing mainline commit at this checkpoint: PR #119 merge `fceae5173a46252d547a87274b016422ea9f26fb`. Re-read live GitHub for the current branch tip before future changes.
-- PR #119 exact-head CI run `42381733985` and post-merge push CI run `42381811001` both passed compilation, Capri Doctor 6/6, operational health 7/7, and 421 tests on Python 3.11, 3.12, and 3.13. All six job logs were inspected. The optional live Notion REST smoke test was skipped.
+- Latest verified code-changing mainline commit at this checkpoint: PR #120 merge `0965e539609b7fc94bcf000d0ba6f2fca8bc7f59`. Re-read live GitHub for the current branch tip before future changes.
+- PR #120 exact-head CI run `42382331774` and post-merge push CI run `42382405035` both passed compilation, Capri Doctor 6/6, operational health 7/7, and 425 tests on Python 3.11, 3.12, and 3.13. All six Python job logs were inspected. The optional live Notion REST smoke test was skipped.
 - The README describes the project as an internal engineering prototype, not an AGI, consciousness, or public/multi-tenant production system.
-- `OpenAIResponsesAdapter` and request-scoped `CapriHostRuntime` are integrated. SQLite session ownership is bound to the authenticated principal and immutable at the database layer; `SQLiteSessionStore.backup_to()` creates private consistent snapshots. No live provider request or paid API usage has occurred. Remaining gaps include authentication-provider integration, memory ACL tests, live Notion REST verification, a supervised host process, per-principal hard spend controls, task/memory-store backups, encryption/retention, observability, and deployment packaging.
+- `OpenAIResponsesAdapter` and request-scoped `CapriHostRuntime` are integrated. SQLite session ownership is bound to the authenticated principal and immutable at the database layer. All four local SQLite stores now expose private consistent backup methods. No live provider request or paid API usage has occurred. Remaining gaps include authentication-provider integration, memory ACL tests, live Notion REST verification, a supervised host process, per-principal hard spend controls, encrypted/scheduled backups, retention/restore drills, observability, and deployment packaging.
 
 This is a read-back-verified mainline anchor, not a claim that every open or superseded feature branch is merged. Re-read live GitHub state before making release or integration decisions.
 
