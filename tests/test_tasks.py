@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import stat
 import tempfile
 import time
@@ -118,7 +119,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         legacy = self.store.create(PLAN, now=NOW)
         connection = self.store._connect()
         try:
-            with self.assertRaises(Exception):
+            with self.assertRaises(sqlite3.IntegrityError):
                 connection.execute(
                     "UPDATE task_owners SET principal_id='bob' WHERE task_id=?",
                     (owned.task_id,),
