@@ -75,7 +75,7 @@ class UntrustedMemoryContext:
         total_bytes = 0
         now = _now()
         for record in self.records:
-            if not isinstance(record, MemoryRecord):
+            if type(record) is not MemoryRecord:
                 raise MemoryValidationError("memory context contains an invalid record")
             memory_id = _validate_text(record.memory_id, "memory_id", 64)
             if memory_id in seen:
@@ -96,8 +96,8 @@ class UntrustedMemoryContext:
                 or record.retention not in _ALLOWED_RETENTION
             ):
                 raise MemoryValidationError("memory context record metadata is invalid")
-            if not isinstance(record.tags, tuple):
-                raise MemoryValidationError("memory context tags must be immutable")
+            if type(record.tags) is not tuple:
+                raise MemoryValidationError("memory context tags must be an immutable tuple")
             _validate_tags(record.tags)
             _validate_expiry(record.created_at)
             _validate_expiry(record.updated_at)
