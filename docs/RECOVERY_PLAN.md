@@ -1,16 +1,16 @@
 # Capri recovery plan
 
-## Live reconciliation — 2026-11-07 14:30 UTC (authoritative)
+## Live reconciliation — 2026-11-07 14:38 UTC (authoritative)
 
 This section is the current repository snapshot. Older reconciliation blocks below are retained as historical records and must not be treated as current state.
 
 ### Current repository state
 
 - Private repository: `Hamudifr/Capri`.
-- Latest verified code-changing mainline commit: PR #119 merge `fceae5173a46252d547a87274b016422ea9f26fb`.
+- Latest verified code-changing mainline commit: PR #120 merge `0965e539609b7fc94bcf000d0ba6f2fca8bc7f59`.
 - Open pull requests: 0.
-- Main includes the non-X5 recovery foundation, permissioned tool boundary, durable audit/approval storage, SQLite sessions, principal-owned session runtime, private session backups, SQLite/Notion memory providers, durable task engine/worker, Notion REST transport hardening, expiring-memory invariants, and the OpenAI Responses API adapter.
-- PR #119 exact-head CI run [42381733985](https://github.com/Hamudifr/Capri/actions/runs/42381733985) and post-merge push CI run [42381811001](https://github.com/Hamudifr/Capri/actions/runs/42381811001) both passed compilation, Capri Doctor 6/6, operational health 7/7, and 421 tests on Python 3.11, 3.12, and 3.13. All six Python job logs were inspected.
+- Main includes the non-X5 recovery foundation, permissioned tool boundary, durable audit/approval storage, principal-owned SQLite sessions, the OpenAI Responses API adapter, request-scoped host composition, durable task engine/worker, SQLite/Notion memory providers, Notion REST transport hardening, expiring-memory invariants, and private consistent backups for all four local SQLite stores.
+- PR #120 exact-head CI run [42382331774](https://github.com/Hamudifr/Capri/actions/runs/42382331774) and post-merge push CI run [42382405035](https://github.com/Hamudifr/Capri/actions/runs/42382405035) both passed compilation, Capri Doctor 6/6, operational health 7/7, and 425 tests on Python 3.11, 3.12, and 3.13. All six Python job logs were inspected.
 - Optional live Notion REST smoke was skipped. No live OpenAI API request, API key creation, paid API usage, deployment, public release, or protected X5 access occurred.
 
 ### Model and host runtime
@@ -19,8 +19,8 @@ This section is the current repository snapshot. Older reconciliation blocks bel
 - Full provider output continuation items, including reasoning items returned alongside function calls, are retained in the bounded private session transcript and replayed with tool outputs.
 - Retrieved memory is sent separately from trusted host instructions. Offline tests cover request/response parsing, tool transcript replay, memory separation, continuation-state persistence, malformed responses, duplicate IDs, bounds, and credential/error suppression.
 - `CapriHostRuntime` composes a trusted HostAuthorityResolver, principal-owned SQLite sessions, ToolOrchestrator, optional principal-scoped memory resolver, and optional host-managed TaskWorker. It is request-scoped, not an HTTP server or daemon.
-- SQLite session owner rows are created atomically, cannot be reassigned/deleted through the database triggers, and are checked before memory retrieval/model invocation. Cross-principal and legacy unowned sessions are hidden as not found.
-- `SQLiteSessionStore.backup_to()` creates a private consistent SQLite snapshot with integrity, foreign-key, transcript, and owner validation. Session backups are plaintext. Task-store and memory-store backups remain outstanding.
+- SQLite session owner rows are created atomically, cannot be reassigned/deleted through database triggers, and are checked before memory retrieval/model invocation. Cross-principal and legacy unowned sessions are hidden as not found.
+- Session, security, task, and memory SQLite stores all expose private consistent backup methods with integrity and store-specific validation. Backups are plaintext and must be protected.
 - No live provider call was made. `OPENAI_API_KEY` and `CAPRI_OPENAI_MODEL` require deliberate host provisioning; API usage may incur charges separate from ChatGPT subscriptions. No hard currency spend cap is implemented.
 
 ### Remaining work, ordered
@@ -30,7 +30,7 @@ This section is the current repository snapshot. Older reconciliation blocks bel
 3. Add per-principal request/token budgets and hard spend controls before any paid provider is enabled.
 4. Add end-to-end adversarial tests for hostile memory, retrieved documents, forged tool calls, approval replay, and tool-result prompt injection.
 5. Add redacted structured observability, live-dependency health probes, alerting hooks, and incident/recovery runbooks.
-6. Add consistent private backups for task and memory stores, encrypted backup storage, retention/compaction, and tested restore drills.
+6. Add encrypted backup storage, scheduled/off-site copies, retention/compaction, and tested restore drills. Backup methods exist, but no backup policy or disaster-recovery exercise is implemented.
 7. Add deployment packaging and process supervision; keep deployment internal/private until controls are verified.
 8. Verify live Notion REST only when least-privilege credentials and repository Actions secrets/variables are deliberately configured. Verify live OpenAI only if the owner deliberately provisions an API key and accepts API charges. Never request or commit credentials in chat/Git.
 
