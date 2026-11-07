@@ -83,7 +83,7 @@ def main() -> int:
     except Exception:
         print("FAIL: Notion REST smoke test failed; check sanitized transport errors and workspace sharing")
         return 1
-    print("PASS: Notion REST create/read/correct/search/archive/trash round trip")
+    print("PASS: Notion schema preflight and REST create/read/correct/search/archive/trash round trip")
     return 0
 
 
