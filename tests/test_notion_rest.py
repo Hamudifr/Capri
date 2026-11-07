@@ -283,6 +283,54 @@ class NotionRESTTransportTests(unittest.TestCase):
         t, _ = self.make(raw)
         self.assertEqual(t.get_page(PAGE_ID)["properties"]["Content"], "fallback text")
 
+    def test_outbound_encoder_rejects_string_and_container_subclasses(self):
+        class TextSubclass(str):
+            pass
+        class ListSubclass(list):
+            pass
+        class TupleSubclass(tuple):
+            pass
+
+        invalid = (
+            {"Name": TextSubclass("Title")},
+            {"Content": TextSubclass("Body")},
+            {"Type": TextSubclass("Project Fact")},
+            {"Scope": TextSubclass("GitHub Repository")},
+            {"Confidence": TextSubclass("Verified")},
+            {"Retention": TextSubclass("Keep until deleted")},
+            {"Status": TextSubclass("Active")},
+            {"Source": TextSubclass("https://example.com")},
+            {"Expires": TextSubclass("2026-12-01T00:00:00+00:00")},
+            {"Tags": ListSubclass(["memory"])},
+            {"Tags": TupleSubclass(("memory",))},
+            {"Tags": ["memory", TextSubclass("memory")]},
+            {TextSubclass("Name"): "Title"},
+        )
+        for properties in invalid:
+            with self.subTest(properties=properties):
+                with self.assertRaises(MemoryValidationError):
+                    NotionRESTTransport._encode_properties(properties)
+
+        self.assertEqual(
+            NotionRESTTransport._encode_properties({"Tags": ("memory",)})["Tags"],
+            {"multi_select": [{"name": "memory"}]},
+        )
+
+    def test_constructor_rejects_subclassed_configuration_primitives(self):
+        class TextSubclass(str):
+            pass
+        class FloatSubclass(float):
+            pass
+
+        for args, kwargs in (
+            ((TextSubclass("token"), DATA_SOURCE_ID), {}),
+            (("token", TextSubclass(DATA_SOURCE_ID)), {}),
+            (("token", DATA_SOURCE_ID), {"timeout": FloatSubclass(10.0)}),
+        ):
+            with self.subTest(args=args, kwargs=kwargs):
+                with self.assertRaises(MemoryValidationError):
+                    NotionRESTTransport(*args, **kwargs)
+
     def test_response_size_and_configuration_are_bounded(self):
         t,op=self.make()
         class Big(FakeResponse):
