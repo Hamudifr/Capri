@@ -271,7 +271,14 @@ class NotionRESTTransport:
             if not 200<=status<300:
                 code=self._error_code(raw) or "unknown"
                 if status==404 or code=="object_not_found": raise MemoryNotFoundError("Notion resource not found")
-                if status==429: raise NotionRateLimitError(None)
+                if status==429:
+                    response_headers = getattr(result, "headers", None)
+                    raw_retry_after = response_headers.get("Retry-After") if response_headers is not None else None
+                    try:
+                        retry_after = float(raw_retry_after) if raw_retry_after is not None else None
+                    except (TypeError, ValueError):
+                        retry_after = None
+                    raise NotionRateLimitError(retry_after)
                 raise NotionTransportError(f"Notion API request failed (HTTP {status}, code {code})")
         except HTTPError as exc:
             code=self._error_code(exc.read(4096)) or "unknown"

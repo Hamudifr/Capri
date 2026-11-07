@@ -12,8 +12,8 @@ PAGE_ID="b55c9c91-384d-452b-81db-d1ef79372b75"
 DATA_SOURCE_ID="435a6e29-3b57-4637-908b-a07761e0df0f"
 
 class FakeResponse:
-    def __init__(self,payload,status=200,url="https://api.notion.com/v1/pages"):
-        self.status=status; self.body=json.dumps(payload).encode(); self.url=url
+    def __init__(self,payload,status=200,url="https://api.notion.com/v1/pages",headers=None):
+        self.status=status; self.body=json.dumps(payload).encode(); self.url=url; self.headers=headers or {}
     def __enter__(self): return self
     def __exit__(self,*args): return False
     def read(self,size=-1): return self.body if size<0 else self.body[:size]
@@ -303,6 +303,13 @@ class NotionRESTTransportTests(unittest.TestCase):
         t,_=self.make(error=err)
         with self.assertRaises(NotionRateLimitError) as caught: t.get_page(PAGE_ID)
         self.assertEqual(caught.exception.retry_after,3.0)
+
+        response = FakeResponse({"code":"rate_limited"}, status=429, headers={"Retry-After":"4.5"})
+        opener = FakeOpener(response)
+        transport = NotionRESTTransport("test-secret", DATA_SOURCE_ID, opener=opener)
+        with self.assertRaises(NotionRateLimitError) as caught: transport.get_page(PAGE_ID)
+        self.assertEqual(caught.exception.retry_after,4.5)
+        self.assertEqual(len(opener.requests),1)
 
     def test_auth_errors_redact_response_and_token(self):
         err=HTTPError("https://api.notion.com/v1/pages",401,"Unauthorized",{},io.BytesIO(b'{"message":"private detail","code":"unauthorized"}'))
