@@ -77,7 +77,8 @@ class UntrustedMemoryContext:
         for record in self.records:
             if type(record) is not MemoryRecord:
                 raise MemoryValidationError("memory context contains an invalid record")
-            if type(record.memory_id) is not str:\n                raise MemoryValidationError("memory_id must be a plain string")\n            memory_id = _validate_text(record.memory_id, "memory_id", 64)
+            if type(record.memory_id) is not str:
+                raise MemoryValidationError("memory_id must be a plain string")\n            memory_id = _validate_text(record.memory_id, "memory_id", 64)
             if memory_id in seen:
                 raise MemoryValidationError("memory context contains duplicate records")
             seen.add(memory_id)
