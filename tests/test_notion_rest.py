@@ -283,6 +283,20 @@ class NotionRESTTransportTests(unittest.TestCase):
         t, _ = self.make(raw)
         self.assertEqual(t.get_page(PAGE_ID)["properties"]["Content"], "fallback text")
 
+    def test_outbound_encoder_rejects_malformed_or_timezone_naive_expiry(self):
+        for value in ("not-a-date", "2026-12-01", "2026-12-01T12:00:00"):
+            with self.subTest(value=value):
+                with self.assertRaises(MemoryValidationError):
+                    NotionRESTTransport._encode_properties({"Expires": value})
+
+    def test_outbound_encoder_accepts_timezone_aware_expiry(self):
+        for value in ("2026-12-01T12:00:00+00:00", "2026-12-01T12:00:00Z"):
+            with self.subTest(value=value):
+                self.assertEqual(
+                    NotionRESTTransport._encode_properties({"Expires": value}),
+                    {"Expires": {"date": {"start": value}}},
+                )
+
     def test_outbound_encoder_rejects_string_and_container_subclasses(self):
         class TextSubclass(str):
             pass
