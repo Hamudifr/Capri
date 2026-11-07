@@ -117,8 +117,9 @@ class NotionRESTTransport:
                     raise MemoryValidationError("Status contains an unsupported option")
                 out[name] = {"status":{"name":value}}
             elif name == "Sensitive":
-                if type(value) is not bool: raise MemoryValidationError("Sensitive must be a plain boolean")
-                out[name] = {"checkbox":value}
+                if type(value) is not bool or value is not False:
+                    raise MemoryValidationError("Sensitive must be exactly false; sensitive memory is not supported")
+                out[name] = {"checkbox":False}
             elif name == "Source":
                 if value is not None:
                     if type(value) is not str:
