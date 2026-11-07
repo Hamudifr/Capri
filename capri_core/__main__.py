@@ -309,7 +309,7 @@ def run_doctor(root: Path, json_output: bool = False) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="python -m capri_core",
+        prog="capri",
         description="Read-only tools for the Capri non-X5 execution ledger.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
