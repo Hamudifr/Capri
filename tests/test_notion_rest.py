@@ -27,6 +27,17 @@ class FakeOpener:
         if self.error: raise self.error
         return self.response
 
+class SequenceOpener:
+    def __init__(self, *responses):
+        self.responses = list(responses)
+        self.requests = []
+    def __call__(self, request, timeout):
+        self.requests.append((request, timeout))
+        if not self.responses:
+            raise AssertionError("unexpected extra request")
+        return self.responses.pop(0)
+
+
 def data_source_schema():
     expected = {
         "Name": ("title", None),
@@ -204,8 +215,41 @@ class NotionRESTTransportTests(unittest.TestCase):
     def test_update_status_and_trash_use_patch(self):
         t,op=self.make(); t.update_page(PAGE_ID,{"Status":"Archived"})
         self.assertEqual(json.loads(op.requests[0][0].data)["properties"]["Status"]["status"]["name"],"Archived")
-        t2,op2=self.make(); t2.delete_page(PAGE_ID)
-        self.assertEqual(json.loads(op2.requests[0][0].data),{"in_trash":True})
+
+    def test_delete_requires_confirmed_trash_response_and_readback(self):
+        trashed = {"object": "page", "id": PAGE_ID, "in_trash": True}
+        opener = SequenceOpener(FakeResponse(trashed), FakeResponse(trashed))
+        transport = NotionRESTTransport("test-secret", DATA_SOURCE_ID, opener=opener)
+        transport.delete_page(PAGE_ID)
+        self.assertEqual(len(opener.requests), 2)
+        self.assertEqual(opener.requests[0][0].get_method(), "PATCH")
+        self.assertEqual(json.loads(opener.requests[0][0].data), {"in_trash": True})
+        self.assertEqual(opener.requests[1][0].get_method(), "GET")
+        self.assertIn(f"/pages/{PAGE_ID}", opener.requests[1][0].full_url)
+
+    def test_delete_rejects_unconfirmed_or_wrong_identity_response(self):
+        invalid_responses = (
+            {"object": "page", "id": PAGE_ID, "in_trash": False},
+            {"object": "page", "id": PAGE_ID, "in_trash": 1},
+            {"object": "page", "id": DATA_SOURCE_ID, "in_trash": True},
+            {"object": "database", "id": PAGE_ID, "in_trash": True},
+            {"id": PAGE_ID, "in_trash": True},
+        )
+        for payload in invalid_responses:
+            with self.subTest(payload=payload):
+                opener = SequenceOpener(FakeResponse(payload))
+                transport = NotionRESTTransport("test-secret", DATA_SOURCE_ID, opener=opener)
+                with self.assertRaises(NotionTransportError):
+                    transport.delete_page(PAGE_ID)
+                self.assertEqual(len(opener.requests), 1)
+
+    def test_delete_rejects_page_still_retrievable_after_trash(self):
+        trashed = {"object": "page", "id": PAGE_ID, "in_trash": True}
+        opener = SequenceOpener(FakeResponse(trashed), FakeResponse(page()))
+        transport = NotionRESTTransport("test-secret", DATA_SOURCE_ID, opener=opener)
+        with self.assertRaises(NotionTransportError):
+            transport.delete_page(PAGE_ID)
+        self.assertEqual(len(opener.requests), 2)
 
     def test_404_is_not_found_and_429_exposes_retry_after(self):
         err=HTTPError("https://api.notion.com/v1/pages",404,"Not found",{},io.BytesIO(b'{"code":"object_not_found"}'))
