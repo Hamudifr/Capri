@@ -12,6 +12,7 @@ from capri_runtime.tasks import (
     TaskConflictError,
     TaskEngine,
     TaskIdempotencyConflict,
+    TaskNotFoundError,
     TaskValidationError,
     TaskWorker,
 )
@@ -55,6 +56,15 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         self.assertEqual(restored.integrity_check(), "ok")
         self.assertEqual(restored.get(task.task_id), finished)
         self.assertEqual(restored.events(task.task_id), self.store.events(task.task_id))
+        owned = self.store.create_for_principal("backup-owner", PLAN, now=NOW)
+        owned_backup_path = os.path.join(self.temp.name, "owned-task-backup.sqlite3")
+        self.store.backup_to(owned_backup_path)
+        restored_owned = SQLiteTaskStore(owned_backup_path)
+        self.assertEqual(
+            restored_owned.get_for_principal(owned.task_id, "backup-owner"), owned
+        )
+        with self.assertRaises(TaskNotFoundError):
+            restored_owned.get_for_principal(owned.task_id, "other-owner")
 
     def test_backup_refuses_existing_symlink_and_public_directory(self):
         existing = os.path.join(self.temp.name, "existing.sqlite3")
@@ -83,6 +93,79 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         self.store.create(PLAN, "request-1", NOW)
         with self.assertRaises(TaskIdempotencyConflict):
             self.store.create([{"tool": "other", "input": {}}], "request-1", NOW)
+
+    def test_principal_task_ownership_and_namespaced_idempotency(self):
+        alice = self.store.create_for_principal("alice", PLAN, "same-key", NOW)
+        alice_again = self.store.create_for_principal("alice", PLAN, "same-key", NOW)
+        bob = self.store.create_for_principal("bob", PLAN, "same-key", NOW)
+        self.assertEqual(alice.task_id, alice_again.task_id)
+        self.assertNotEqual(alice.task_id, bob.task_id)
+        self.assertEqual(self.store.get_for_principal(alice.task_id, "alice"), alice)
+        self.assertEqual(self.store.events_for_principal(alice.task_id, "alice")[0]["state"], "queued")
+        with self.assertRaises(TaskNotFoundError):
+            self.store.get_for_principal(alice.task_id, "bob")
+        with self.assertRaises(TaskNotFoundError):
+            self.store.request_cancel_for_principal(alice.task_id, "bob")
+        with self.assertRaises(TaskNotFoundError):
+            self.store.events_for_principal(alice.task_id, "bob")
+        with self.assertRaises(TaskIdempotencyConflict):
+            self.store.create_for_principal(
+                "alice", [{"tool": "different", "input": {}}], "same-key", NOW
+            )
+
+    def test_task_owner_rows_are_immutable_and_legacy_tasks_stay_unowned(self):
+        owned = self.store.create_for_principal("alice", PLAN, now=NOW)
+        legacy = self.store.create(PLAN, now=NOW)
+        connection = self.store._connect()
+        try:
+            with self.assertRaises(Exception):
+                connection.execute(
+                    "UPDATE task_owners SET principal_id='bob' WHERE task_id=?",
+                    (owned.task_id,),
+                )
+            with self.assertRaises(Exception):
+                connection.execute(
+                    "DELETE FROM task_owners WHERE task_id=?",
+                    (owned.task_id,),
+                )
+        finally:
+            connection.close()
+        with self.assertRaises(TaskNotFoundError):
+            self.store.get_for_principal(legacy.task_id, "alice")
+        self.assertEqual(self.store.get(legacy.task_id), legacy)
+
+    def test_principal_claims_require_principal_aware_handlers(self):
+        calls = []
+        self.store.create_for_principal(
+            "alice", [{"tool": "prepare", "input": {}, "max_attempts": 1}], now=NOW
+        )
+        generic = TaskEngine(
+            self.store,
+            {"prepare": lambda data, key: calls.append("generic") or {"ok": True}},
+            "worker",
+        )
+        failed = generic.run_once(now=NOW)
+        self.assertEqual(failed.state, "failed")
+        self.assertEqual(failed.error_code, "principal_handler_required")
+        self.assertEqual(calls, [])
+
+        self.store.create_for_principal(
+            "bob", [{"tool": "prepare", "input": {}, "max_attempts": 1}], now=NOW
+        )
+        scoped = TaskEngine(
+            self.store,
+            {},
+            "scoped-worker",
+            principal_handlers={
+                "prepare": lambda data, key, principal: (
+                    calls.append(principal) or {"principal": principal}
+                )
+            },
+        )
+        succeeded = scoped.run_once(now=NOW)
+        self.assertEqual(succeeded.state, "succeeded")
+        self.assertEqual(calls, ["bob"])
+        self.assertEqual(succeeded.result, ({"principal": "bob"},))
 
     def test_plan_validation_is_strict_and_bounded(self):
         invalid = (
