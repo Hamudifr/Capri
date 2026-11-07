@@ -168,7 +168,7 @@ class OpenAIResponsesAdapter:
                 raise OpenAIResponsesAdapterError("tool definitions contain invalid metadata")
             try:
                 parameters = _loads_json(tool.parameters_json)
-            except (TypeError, ValueError, json.JSONDecodeError):
+            except (TypeError, ValueError, json.JSONDecodeError, RecursionError):
                 raise OpenAIResponsesAdapterError("tool schema is invalid JSON") from None
             if type(parameters) is not dict:
                 raise OpenAIResponsesAdapterError("tool schema must be a JSON object")
@@ -417,7 +417,7 @@ class OpenAIResponsesAdapter:
             raise OpenAIResponsesAdapterError("provider response exceeds the configured byte limit")
         try:
             payload = _loads_json(raw.decode("utf-8", errors="strict"))
-        except (UnicodeDecodeError, TypeError, ValueError, json.JSONDecodeError):
+        except (UnicodeDecodeError, TypeError, ValueError, json.JSONDecodeError, RecursionError):
             raise OpenAIResponsesAdapterError("provider response is not valid JSON") from None
         return self._parse_response(payload)
 
