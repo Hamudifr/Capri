@@ -1,7 +1,5 @@
 # Capri recovery plan
 
-# Capri recovery plan
-
 ## Live reconciliation — 2026-11-07 14:10 UTC (authoritative)
 
 This section is the current repository snapshot. Older reconciliation blocks below are retained as historical records and must not be treated as current state.
@@ -9,7 +7,7 @@ This section is the current repository snapshot. Older reconciliation blocks bel
 ### Current repository state
 
 - Private repository: `Hamudifr/Capri`.
-- Current `main`: `2e5749c8a2cd3110a7ef9a909ba87866542ea5f4`.
+- Latest verified code-changing mainline commit at this checkpoint: PR #113 merge `252e7eed7543aa5fc91ea3eb57a54b408b384e84`. Later checkpoint-only documentation commits do not change this code baseline; re-read GitHub for the current branch tip.
 - Open pull requests: 0.
 - Main contains the integrated non-X5 foundation, permissioned tool boundary, durable local audit/approval storage, SQLite sessions, SQLite/Notion memory providers, durable task engine and worker, Notion REST transport hardening, and the latest expiring-memory invariant.
 - Latest exact-head CI inspected in this session: PR #113 run [42379590963](https://github.com/Hamudifr/Capri/actions/runs/42379590963). Python 3.11, 3.12, and 3.13 each passed compileall, Capri Doctor 6/6, operational health 7/7, and 390 tests. The optional live Notion REST smoke job was skipped. This run tested the PR head before merge; main's subsequent commit `2e5749c...` is documentation-only. Post-merge push CI was not independently queried.
