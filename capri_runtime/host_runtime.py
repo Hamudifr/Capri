@@ -15,7 +15,7 @@ from .orchestration import (
 )
 from .runtime import Message, Session, SessionClosedError, SessionStore
 from .sqlite_sessions import SQLiteSessionStore
-from .tasks import SQLiteTaskStore, TaskWorker
+from .tasks import SQLiteTaskStore, TaskRecord, TaskWorker
 from .tools import ExecutionContext, HostAuthorityResolver
 
 
@@ -180,23 +180,35 @@ class CapriHostRuntime:
 
     def create_task(
         self, credential: Any, plan: Any, idempotency_key: str | None = None
-    ):
-        """Create a durable task owned by the authenticated principal."""
+    ) -> TaskRecord:
+        """Create a durable task owned by the authenticated principal.
+
+        Task creation requires a configured worker registry so plans cannot
+        enqueue handler names that are not currently approved for principal work.
+        """
         context = self._context(credential)
         if self._task_store is None:
             raise HostRuntimeError("no task store is configured")
+        if self._task_worker is None:
+            raise HostRuntimeError("principal task creation requires a configured task worker")
+        allowed = self._task_worker.engine.principal_handlers
+        if isinstance(plan, list):
+            for step in plan:
+                if isinstance(step, dict) and isinstance(step.get("tool"), str):
+                    if step["tool"] not in allowed:
+                        raise HostRuntimeError("task plan references an unavailable principal handler")
         return self._task_store.create_for_principal(
             context.principal_id, plan, idempotency_key=idempotency_key
         )
 
-    def get_task(self, credential: Any, task_id: str):
+    def get_task(self, credential: Any, task_id: str) -> TaskRecord:
         """Read only a task owned by the authenticated principal."""
         context = self._context(credential)
         if self._task_store is None:
             raise HostRuntimeError("no task store is configured")
         return self._task_store.get_for_principal(task_id, context.principal_id)
 
-    def cancel_task(self, credential: Any, task_id: str):
+    def cancel_task(self, credential: Any, task_id: str) -> TaskRecord:
         """Cancel only a task owned by the authenticated principal."""
         context = self._context(credential)
         if self._task_store is None:
