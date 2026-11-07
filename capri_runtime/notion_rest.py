@@ -91,12 +91,21 @@ class NotionRESTTransport:
 
     @staticmethod
     def _plain(items: object) -> str:
-        if not isinstance(items,list): return ""
-        parts=[]
+        if not isinstance(items, list):
+            raise NotionTransportError("Notion rich-text property is missing or malformed")
+        parts = []
         for item in items:
-            if not isinstance(item,Mapping): continue
-            if isinstance(item.get("plain_text"),str): parts.append(item["plain_text"])
-            elif isinstance(item.get("text"),Mapping) and isinstance(item["text"].get("content"),str): parts.append(item["text"]["content"])
+            if not isinstance(item, Mapping):
+                raise NotionTransportError("Notion rich-text contains a malformed item")
+            plain_text = item.get("plain_text")
+            if type(plain_text) is str:
+                parts.append(plain_text)
+                continue
+            text_value = item.get("text")
+            if isinstance(text_value, Mapping) and type(text_value.get("content")) is str:
+                parts.append(text_value["content"])
+                continue
+            raise NotionTransportError("Notion rich-text item has no readable text")
         return "".join(parts)
 
     @classmethod
