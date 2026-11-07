@@ -16,7 +16,9 @@ It is not an HTTP server, daemon, deployment package, authentication provider, o
 - The host runtime wraps the SQLite store in a `PrincipalBoundSessionStore` for the entire coordinated turn, including durable lease claims, heartbeat renewals, reads, and commits.
 - Existing sessions created through the legacy unscoped `create()` API remain unowned. They are not automatically assigned to any principal and cannot be accessed through `CapriHostRuntime`.
 
-Owner rows have no public reassignment or deletion API. A privileged host with direct database access can still bypass this application boundary; protect the SQLite file and its directory. SQLite transcripts are plaintext, not encrypted at rest.
+Owner rows have no public reassignment or deletion API and SQLite triggers reject direct owner updates/deletes. A privileged host with direct database access can still bypass application boundaries; protect the SQLite file and its directory. SQLite transcripts are plaintext, not encrypted at rest.
+
+`SQLiteSessionStore.backup_to()` creates a consistent private snapshot that includes ownership records and triggers. The backup is also plaintext; see [SQLITE_SESSION_BACKUP.md](SQLITE_SESSION_BACKUP.md). Task-store and memory-store backup methods are still outstanding.
 
 ## Composition
 
@@ -75,4 +77,4 @@ The host-runtime tests cover:
 - Ownership-scoped durable lease and commit paths.
 - Closed-session behavior, invalid inputs, and redacted memory resolver errors.
 
-These tests establish an application-level session ownership boundary, not complete tenant isolation. Before external multi-user deployment, add authentication integration tests, memory-provider ACL tests, rate limiting, per-principal provider budgets, approval UX, structured observability, encrypted backup/restore, and deployment hardening.
+These tests establish an application-level session ownership boundary, not complete tenant isolation. Before external multi-user deployment, add authentication integration tests, memory-provider ACL tests, rate limiting, per-principal provider budgets, approval UX, structured observability, encrypted backup storage, task/memory-store backups, retention and restore drills, and deployment hardening.
