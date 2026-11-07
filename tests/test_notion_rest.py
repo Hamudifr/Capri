@@ -327,8 +327,17 @@ class NotionRESTTransportTests(unittest.TestCase):
         ))
 
     def test_redirects_to_untrusted_origin_and_trashed_pages_rejected(self):
-        t,op=self.make(); op.response=FakeResponse(page(),url="https://attacker.example/steal")
-        with self.assertRaises(NotionTransportError): t.get_page(PAGE_ID)
+        for final_url in (
+            "https://attacker.example/steal",
+            "https://api.notion.com:8443/v1/pages",
+            "https://user:password@api.notion.com/v1/pages",
+            "https://api.notion.com:not-a-port/v1/pages",
+        ):
+            with self.subTest(final_url=final_url):
+                t, op = self.make()
+                op.response = FakeResponse(page(), url=final_url)
+                with self.assertRaises(NotionTransportError):
+                    t.get_page(PAGE_ID)
         raw=page(); raw["in_trash"]=True
         t,_=self.make(raw)
         with self.assertRaises(MemoryNotFoundError): t.get_page(PAGE_ID)
