@@ -69,39 +69,39 @@ class UntrustedMemoryContext:
     records: tuple[MemoryRecord, ...]
 
     def __post_init__(self) -> None:
-        if not isinstance(self.records, tuple) or len(self.records) > 20:
+        if type(self.records) is not tuple or len(self.records) > 20:
             raise MemoryValidationError("memory context must be a tuple of at most 20 records")
         seen: set[str] = set()
         total_bytes = 0
         now = _now()
         for record in self.records:
-            if not isinstance(record, MemoryRecord):
+            if type(record) is not MemoryRecord:
                 raise MemoryValidationError("memory context contains an invalid record")
-            memory_id = _validate_text(record.memory_id, "memory_id", 64)
+            if type(record.memory_id) is not str:\n                raise MemoryValidationError("memory_id must be a plain string")\n            memory_id = _validate_text(record.memory_id, "memory_id", 64)
             if memory_id in seen:
                 raise MemoryValidationError("memory context contains duplicate records")
             seen.add(memory_id)
-            if record.status != "active" or record.sensitivity != "non_sensitive":
+            if (type(record.status) is not str or type(record.sensitivity) is not str\n                    or record.status != "active" or record.sensitivity != "non_sensitive"):
                 raise MemoryValidationError("memory context accepts only active non-sensitive records")
             _validate_text(record.title, "title", _MAX_TITLE)
             _validate_text(record.content, "content", _MAX_CONTENT)
             _validate_text(record.scope, "scope", _MAX_SCOPE)
             _validate_text(record.source, "source", _MAX_SOURCE)
             if (
-                not isinstance(record.record_type, str)
+                type(record.record_type) is not str
                 or record.record_type not in _ALLOWED_TYPES
-                or not isinstance(record.confidence, str)
+                or type(record.confidence) is not str
                 or record.confidence not in _ALLOWED_CONFIDENCE
-                or not isinstance(record.retention, str)
+                or type(record.retention) is not str
                 or record.retention not in _ALLOWED_RETENTION
             ):
                 raise MemoryValidationError("memory context record metadata is invalid")
-            if not isinstance(record.tags, tuple):
+            if type(record.tags) is not tuple or any(type(tag) is not str for tag in record.tags):
                 raise MemoryValidationError("memory context tags must be immutable")
             _validate_tags(record.tags)
             for timestamp_field in ("created_at", "updated_at"):
                 timestamp_value = getattr(record, timestamp_field)
-                if not isinstance(timestamp_value, str):
+                if type(timestamp_value) is not str:
                     raise MemoryValidationError(f"{timestamp_field} must be a required timezone-aware timestamp")
                 _validate_expiry(timestamp_value)
             if record.supersedes_id is not None:
