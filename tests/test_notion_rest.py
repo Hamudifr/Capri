@@ -297,6 +297,51 @@ class NotionRESTTransportTests(unittest.TestCase):
                     {"Expires": {"date": {"start": value}}},
                 )
 
+    def test_outbound_encoder_rejects_unsupported_select_and_status_labels(self):
+        invalid = (
+            {"Type": "Unapproved Type"},
+            {"Scope": "Unapproved Scope"},
+            {"Confidence": "Unapproved Confidence"},
+            {"Retention": "Unapproved Retention"},
+            {"Status": "Unapproved Status"},
+        )
+        for properties in invalid:
+            with self.subTest(properties=properties):
+                with self.assertRaises(MemoryValidationError):
+                    NotionRESTTransport._encode_properties(properties)
+
+    def test_outbound_encoder_rejects_unsupported_or_duplicate_tags(self):
+        invalid = (
+            {"Tags": ["unknown-tag"]},
+            {"Tags": ["memory", "memory"]},
+            {"Tags": ["memory"] * 21},
+        )
+        for properties in invalid:
+            with self.subTest(properties=properties):
+                with self.assertRaises(MemoryValidationError):
+                    NotionRESTTransport._encode_properties(properties)
+
+    def test_outbound_encoder_rejects_non_http_source_urls(self):
+        for value in ("javascript:alert(1)", "file:///etc/passwd", "/relative/path", "https://"):
+            with self.subTest(value=value):
+                with self.assertRaises(MemoryValidationError):
+                    NotionRESTTransport._encode_properties({"Source": value})
+
+    def test_outbound_encoder_accepts_only_supported_memory_labels_and_tags(self):
+        properties = {
+            "Type": "Project Fact",
+            "Scope": "GitHub Repository",
+            "Confidence": "Verified",
+            "Retention": "Keep until deleted",
+            "Status": "Active",
+            "Tags": ["memory", "security"],
+            "Source": "https://example.com/source",
+        }
+        encoded = NotionRESTTransport._encode_properties(properties)
+        self.assertEqual(encoded["Type"], {"select": {"name": "Project Fact"}})
+        self.assertEqual(encoded["Tags"], {"multi_select": [{"name": "memory"}, {"name": "security"}]})
+        self.assertEqual(encoded["Source"], {"url": "https://example.com/source"})
+
     def test_outbound_encoder_rejects_string_and_container_subclasses(self):
         class TextSubclass(str):
             pass
