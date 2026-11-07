@@ -335,6 +335,28 @@ class ToolOrchestrationTests(unittest.TestCase):
         finally:
             store_temp.cleanup()
 
+    def test_memory_context_subclasses_are_rejected_before_adapter_or_tools(self):
+        temp = tempfile.TemporaryDirectory()
+        try:
+            store = SQLiteMemoryStore(temp.name + "/memory.sqlite3")
+            record = store.create(
+                title="Test", content="Untrusted", record_type="project_fact",
+                scope="Capri", source="https://example.com", confidence="verified",
+            )
+            class DerivedMemoryContext(UntrustedMemoryContext):
+                pass
+            memory = DerivedMemoryContext((record,))
+            class MemoryAdapter:
+                def complete_with_tools_and_memory(inner, *args):
+                    raise AssertionError("adapter must not receive a subclassed context")
+            with self.assertRaises(ToolOrchestrationError):
+                ToolOrchestrator(MemoryAdapter(), self.bridge).run(
+                    "s", "go", (), self.context, memory_context=memory
+                )
+            self.assertEqual(self.calls, [])
+        finally:
+            temp.cleanup()
+
     def test_permission_denied_is_returned_without_running_handler(self):
         adapter = ScriptedToolModelAdapter(
             AssistantTurn(tool_calls=(ToolCallRequest("call-1", "echo", {"value": "x"}),)),
