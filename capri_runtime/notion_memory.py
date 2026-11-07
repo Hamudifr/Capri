@@ -210,7 +210,7 @@ class NotionMemoryAdapter:
         updated_at = cls._timestamp(page.get("last_edited_time"), "last_edited_time")
         supersedes_id = props.get("Supersedes")
         if supersedes_id is not None:
-            supersedes_id = _validate_memory_id(supersedes_id, "Supersedes")
+            supersedes_id = _validate_memory_id(supersedes_id, "Supersedes id")
         return MemoryRecord(
             page_id, title, content, record_type, scope, "non_sensitive", source,
             confidence, retention, tags, created_at, updated_at, expires_at,
