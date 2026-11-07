@@ -1,6 +1,6 @@
 # Capri recovery plan
 
-## Live reconciliation — 2026-11-07 14:38 UTC (authoritative)
+## Live reconciliation — 2026-11-07 18:36 CET (authoritative)
 
 This section is the current repository snapshot. Older reconciliation blocks below are retained as historical records and must not be treated as current state.
 
@@ -8,20 +8,26 @@ This section is the current repository snapshot. Older reconciliation blocks bel
 
 - Private repository: `Hamudifr/Capri`.
 - Latest verified code-changing mainline commit: PR #120 merge `0965e539609b7fc94bcf000d0ba6f2fca8bc7f59`.
-- Open pull requests: 0.
+- Open pull requests: 2 Draft PRs: [#121](https://github.com/Hamudifr/Capri/pull/121) (memory input ordering) and [#122](https://github.com/Hamudifr/Capri/pull/122) (runtime documentation reconciliation). Neither has exact-head CI; both are intentionally CI-skipped while private-runner cost remains unverified.
 - Main includes the non-X5 recovery foundation, permissioned tool boundary, durable audit/approval storage, principal-owned SQLite sessions, the OpenAI Responses API adapter, request-scoped host composition, durable task engine/worker, SQLite/Notion memory providers, Notion REST transport hardening, expiring-memory invariants, and private consistent backups for all four local SQLite stores.
-- PR #120 exact-head CI run [42382331774](https://github.com/Hamudifr/Capri/actions/runs/42382331774) and post-merge push CI run [42382405035](https://github.com/Hamudifr/Capri/actions/runs/42382405035) both passed compilation, Capri Doctor 6/6, operational health 7/7, and 425 tests on Python 3.11, 3.12, and 3.13. All six Python job logs were inspected.
+- PR #120 exact-head CI run [42382331774](https://github.com/Hamudifr/Capri/actions/runs/42382331774), post-merge push run [42382405035](https://github.com/Hamudifr/Capri/actions/runs/42382405035), and latest-main push run [42382504366](https://github.com/Hamudifr/Capri/actions/runs/42382504366) passed compilation, Capri Doctor 6/6, operational health 7/7, and 425 tests on Python 3.11, 3.12, and 3.13. The latest run's three Python logs were inspected, including the actual hard-link alias failure tests and adversarial Doctor permission tests.
 - Optional live Notion REST smoke was skipped. No live OpenAI API request, API key creation, paid API usage, deployment, public release, or protected X5 access occurred.
 
 ### Model and host runtime
 
 - `OpenAIResponsesAdapter` implements the memory-aware model adapter using the standard library and the official Responses API. Function calls remain proposals and pass through ToolOrchestrator, ToolExecutionBridge, host permissions, approval controls, and audit.
 - Full provider output continuation items, including reasoning items returned alongside function calls, are retained in the bounded private session transcript and replayed with tool outputs.
-- Retrieved memory is sent separately from trusted host instructions. Offline tests cover request/response parsing, tool transcript replay, memory separation, continuation-state persistence, malformed responses, duplicate IDs, bounds, and credential/error suppression.
+- Retrieved memory is sent separately from trusted host instructions. Main currently appends that user input item after the conversation transcript; draft PR #121 proposes prepending it and explicitly labeling it as reference data, not a new request. PR #121 has no exact-head CI and remains Draft.
 - `CapriHostRuntime` composes a trusted HostAuthorityResolver, principal-owned SQLite sessions, ToolOrchestrator, optional principal-scoped memory resolver, and optional host-managed TaskWorker. It is request-scoped, not an HTTP server or daemon.
 - SQLite session owner rows are created atomically, cannot be reassigned/deleted through database triggers, and are checked before memory retrieval/model invocation. Cross-principal and legacy unowned sessions are hidden as not found.
 - Session, security, task, and memory SQLite stores all expose private consistent backup methods with integrity and store-specific validation. Backups are plaintext and must be protected.
 - No live provider call was made. `OPENAI_API_KEY` and `CAPRI_OPENAI_MODEL` require deliberate host provisioning; API usage may incur charges separate from ChatGPT subscriptions. No hard currency spend cap is implemented.
+
+### Current open work
+
+- Draft PR #121: memory-to-model input ordering mitigation; source/test/docs readback verified, but no local tests or exact-head CI. Keep Draft until a verified no-cost test route is available.
+- Draft PR #122: this runtime architecture/lifecycle documentation reconciliation; docs-only, CI intentionally skipped.
+- `main` remains unprotected (`protected: false`). Do not enable paid protection or rulesets; preserve feature-branch review and manual evidence checks.
 
 ### Remaining work, ordered
 
