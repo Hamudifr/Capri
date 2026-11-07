@@ -435,8 +435,15 @@ class NotionMemoryAdapterTests(unittest.TestCase):
             self.create(retention=[])
 
     def test_rejects_unsupported_properties_and_non_http_sources(self):
-        with self.assertRaises(MemoryValidationError):
-            self.create(source="file:///tmp/secret")
+        for source in (
+            "file:///tmp/secret",
+            "https://user:password@example.com/source",
+            "https://[invalid",
+            "https://example.com:bad",
+        ):
+            with self.subTest(source=source):
+                with self.assertRaises(MemoryValidationError):
+                    self.create(source=source)
         with self.assertRaises(MemoryValidationError):
             self.create(record_type="unknown")
 
