@@ -167,6 +167,8 @@ class NotionMemoryAdapter:
         props = page.get("properties")
         if not isinstance(props, Mapping):
             raise MemoryValidationError("Notion page properties are missing")
+        if "Expires" not in props or "Supersedes" not in props:
+            raise MemoryValidationError("Notion page is missing required Expires or Supersedes properties")
         title = _validate_transport_text(props.get("Name"), "title", 200)
         content = _validate_transport_text(props.get("Content"), "content", 20_000)
         type_label = _validate_transport_text(props.get("Type"), "Notion Type property", 100)
