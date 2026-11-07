@@ -166,6 +166,30 @@ class NotionRESTTransportTests(unittest.TestCase):
                 with self.assertRaises(NotionTransportError):
                     t.get_page(PAGE_ID)
 
+    def test_create_rejects_incomplete_memory_properties_before_network(self):
+        valid = {
+            "Name": "Title",
+            "Content": "Body",
+            "Type": "Project Fact",
+            "Scope": "GitHub Repository",
+            "Sensitive": False,
+            "Source": "https://example.com/source",
+            "Confidence": "Verified",
+            "Retention": "Keep until deleted",
+            "Tags": ["memory"],
+            "Status": "Active",
+            "Expires": None,
+            "Supersedes": None,
+        }
+        for missing in valid:
+            with self.subTest(missing=missing):
+                properties = dict(valid)
+                properties.pop(missing)
+                transport, opener = self.make()
+                with self.assertRaises(MemoryValidationError):
+                    transport.create_page(properties)
+                self.assertEqual(opener.requests, [])
+
     def test_create_uses_data_source_parent_and_chunks_rich_text(self):
         t,op=self.make()
         t.create_page({"Name":"Title","Content":"x"*4500,"Type":"Project Fact","Scope":"GitHub Repository","Sensitive":False,"Source":"https://github.com/Hamudifr/Capri","Confidence":"Verified","Retention":"Keep until deleted","Tags":["memory"],"Status":"Active","Expires":None,"Supersedes":None})

@@ -22,6 +22,10 @@ _SELECT_OPTIONS = {
 }
 _STATUS_OPTIONS = frozenset({"Active", "Review", "Archived"})
 _TAG_OPTIONS = frozenset({"autonomy", "delivery", "security", "memory", "architecture", "tooling"})
+_REQUIRED_CREATE_PROPERTIES = frozenset({
+    "Name", "Content", "Type", "Scope", "Sensitive", "Source",
+    "Confidence", "Retention", "Tags", "Status", "Expires", "Supersedes",
+})
 
 class _NoRedirectHandler(HTTPRedirectHandler):
     """Refuse redirects so bearer credentials are never forwarded to another origin."""
@@ -345,6 +349,11 @@ class NotionRESTTransport:
                 raise NotionTransportError(f"Notion data source property {name} is missing required options")
 
     def create_page(self, properties: Mapping[str,object]) -> Mapping[str,object]:
+        if not isinstance(properties, Mapping):
+            raise MemoryValidationError("Notion create properties must be a mapping")
+        missing = _REQUIRED_CREATE_PROPERTIES.difference(properties)
+        if missing:
+            raise MemoryValidationError("Notion memory page creation requires every schema property")
         raw=self._request("POST","/pages",{"parent":{"type":"data_source_id","data_source_id":self.data_source_id},"properties":self._encode_properties(properties)})
         return self._normalize_page(raw)
 
