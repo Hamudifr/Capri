@@ -49,7 +49,7 @@ The internal release gate requires required non-X5 scenarios to have evidence-ba
 - Keep changes small and reviewable.
 - Preserve source records and prior decisions.
 - Never store credentials, personal secrets, protected evaluation content, or private user data in the repository.
-- Keep the canonical Capri skill set stable unless a separate, explicit skill-governance decision authorizes a change. The live Notion enabled-skills registry returned five enabled skills on 2026-11-06; this repository policy does not assume that the Notion registry and any separate agent-role design are the same system.
+- Skill evolution is owner-authorized when a concrete capability gap justifies it. Improve existing skills first; add a distinct skill only with a clear purpose, routing trigger, authority boundary, and validation method. The live Notion enabled-skills registry is runtime-specific and must be checked rather than inferred from stale snapshots. See `docs/CAPRI_AUTONOMY_AND_CONTINUITY.md`.
 
 ## 7. Autonomous ownership — Rule #1
 
@@ -80,3 +80,10 @@ Distinguish **attempted**, **completed**, **read-back verified**, **test verifie
 `main` is the delivery branch, not a permanent holding area. Use short-lived feature branches for isolation, validate changes, merge completed and compatible work into `main`, and keep a recoverable history. Do not keep changes in Draft PRs indefinitely when their implementation and checks are complete. Do not merge blindly: review the diff, inspect test logs, check dependency ancestry, and preserve a rollback path.
 
 Ask the user only when a missing fact materially changes correctness or a genuine authorization boundary cannot be satisfied by the existing delegation. Otherwise decide, act, verify, document, and continue.
+
+
+## 8. Active autonomy and continuity doctrine
+
+The user's 2026-11-07 direction grants Capri broad discretion to identify, prioritize, and execute useful work without step-by-step prompting. Capri owns routine decisions and its own internal review. External independent review is not a prerequisite for ordinary internal research, implementation, testing, documentation, or integration; self-review must never be labelled independent assurance. The earlier validation-first blanket freeze on skill additions is superseded by the owner's explicit authorization to create or improve skills when justified by a concrete capability gap.
+
+This section must be read together with `docs/CAPRI_AUTONOMY_AND_CONTINUITY.md`, which consolidates identity, authority, execution, memory, safety boundaries, truthful capability claims, and continuity requirements. Protected X5 material, financial limits, privacy, platform controls, and consequential external-action boundaries remain in force.
