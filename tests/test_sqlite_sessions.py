@@ -105,6 +105,29 @@ class SQLiteSessionStoreTests(unittest.TestCase):
             session.session_id, "principal-alice", "worker-alice"
         ))
 
+    def test_session_owner_rows_cannot_be_reassigned_or_deleted(self):
+        session = self.store.create_for_principal("principal-alice")
+        connection = sqlite3.connect(self.path)
+        try:
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    "UPDATE session_owners SET principal_id = ? WHERE session_id = ?",
+                    ("principal-bob", session.session_id),
+                )
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    "DELETE FROM session_owners WHERE session_id = ?",
+                    (session.session_id,),
+                )
+        finally:
+            connection.close()
+        self.assertEqual(
+            self.store.get_for_principal(session.session_id, "principal-alice"),
+            session,
+        )
+        with self.assertRaises(SessionNotFoundError):
+            self.store.get_for_principal(session.session_id, "principal-bob")
+
     def test_principal_id_validation_is_bounded(self):
         for principal_id in ("", "  ", "x" * 257, "bad\\ud800"):
             with self.subTest(principal_id=principal_id):
