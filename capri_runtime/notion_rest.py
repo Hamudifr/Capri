@@ -211,10 +211,17 @@ class NotionRESTTransport:
         results=raw.get("results")
         if not isinstance(results,list) or any(not isinstance(x,Mapping) for x in results):
             raise NotionTransportError("Notion query returned malformed results")
-        has_more = raw.get("has_more") is True
-        next_cursor = raw.get("next_cursor") if has_more else None
-        if has_more and (not isinstance(next_cursor,str) or not next_cursor):
-            raise NotionTransportError("Notion query omitted its continuation cursor")
+        has_more = raw.get("has_more")
+        if type(has_more) is not bool:
+            raise NotionTransportError("Notion query omitted its pagination state")
+        if "next_cursor" not in raw:
+            raise NotionTransportError("Notion query omitted its cursor field")
+        next_cursor = raw["next_cursor"]
+        if has_more:
+            if type(next_cursor) is not str or not next_cursor:
+                raise NotionTransportError("Notion query omitted its continuation cursor")
+        elif next_cursor is not None:
+            raise NotionTransportError("Notion query returned a cursor without more results")
         return {"results":[self._normalize_page(x) for x in results],"next_cursor":next_cursor}
 
     def update_page(self, page_id: str, properties: Mapping[str,object]) -> Mapping[str,object]:
