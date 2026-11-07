@@ -151,6 +151,22 @@ class NotionMemoryAdapterTests(unittest.TestCase):
         with self.assertRaises(MemoryValidationError):
             self.store.get(record.memory_id)
 
+    def test_rejects_missing_or_non_boolean_sensitive_classification(self):
+        record = self.create()
+        properties = self.transport.pages[record.memory_id]["properties"]
+        original = properties.pop("Sensitive")
+        with self.assertRaises(MemoryValidationError):
+            self.store.get(record.memory_id)
+
+        for value in (None, 0, 1, "false", "__NO__"):
+            with self.subTest(value=value):
+                properties["Sensitive"] = value
+                with self.assertRaises(MemoryValidationError):
+                    self.store.get(record.memory_id)
+
+        properties["Sensitive"] = original
+        self.assertEqual(self.store.get(record.memory_id).memory_id, record.memory_id)
+
     def test_date_only_expiry_normalizes_to_end_of_day_utc(self):
         record = self.create(retention="expire_30d", expires_at="2026-11-06")
         self.assertEqual(record.expires_at, "2026-11-06T23:59:59.999999+00:00")
