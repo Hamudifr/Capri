@@ -270,8 +270,19 @@ class NotionRESTTransport:
             response=self._opener(request,timeout=self._timeout)
             with response as result:
                 final=result.geturl() if callable(getattr(result,"geturl",None)) else url
-                parsed=urlsplit(final)
-                if parsed.scheme!="https" or parsed.hostname!="api.notion.com": raise NotionTransportError("Notion API redirected outside approved HTTPS origin")
+                try:
+                    parsed = urlsplit(final)
+                    final_port = parsed.port
+                except ValueError:
+                    raise NotionTransportError("Notion API returned a malformed final URL") from None
+                if (
+                    parsed.scheme != "https"
+                    or parsed.hostname != "api.notion.com"
+                    or final_port not in (None, 443)
+                    or parsed.username is not None
+                    or parsed.password is not None
+                ):
+                    raise NotionTransportError("Notion API redirected outside approved HTTPS origin")
                 status=getattr(result,"status",result.getcode())
                 raw=result.read(_MAX_RESPONSE_BYTES+1)
             if len(raw)>_MAX_RESPONSE_BYTES: raise NotionTransportError("Notion API response exceeded size limit")
