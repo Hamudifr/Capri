@@ -119,6 +119,8 @@ class UntrustedMemoryContext:
             if record.expires_at is not None and type(record.expires_at) is not str:
                 raise MemoryValidationError("expires_at must be a plain string")
             expiry = _validate_expiry(record.expires_at)
+            if record.retention in {"expire_30d", "expire_90d"} and expiry is None:
+                raise MemoryValidationError("expiring memory retention requires expires_at")
             if expiry is not None and datetime.fromisoformat(expiry) <= now:
                 raise MemoryValidationError("memory context excludes expired records")
             total_bytes += sum(
