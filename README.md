@@ -14,7 +14,8 @@ Capri is a research and execution-assistance project. This repository contains p
 ## Repository map
 
 - `docs/OPERATING_MODEL.md` — scope, evidence rules, release gates, and safety boundaries.
-- `docs/CAPRI_AUTONOMY_AND_CONTINUITY.md` — canonical Capri identity, owner-granted autonomy, execution, layered memory, safety boundaries, and cross-session handoff doctrine.\n- `docs/CAPABILITY_ROADMAP.md` — active X6 foundation, X7 Autonomous Operations, X8 Adaptive Intelligence, acceptance metrics, and implementation sequence.
+- `docs/CAPRI_AUTONOMY_AND_CONTINUITY.md` — canonical Capri identity, owner-granted autonomy, execution, layered memory, safety boundaries, and cross-session handoff doctrine.
+- `docs/CAPABILITY_ROADMAP.md` — active X6 foundation, X7 Autonomous Operations, X8 Adaptive Intelligence, acceptance metrics, and implementation sequence.
 - `docs/RECOVERY_PLAN.md` — ordered recovery work and exit criteria.
 - `docs/EVALUATION_DATA_CONTRACT.md` — non-sensitive evaluation record contract.
 - `docs/RUNTIME_CORE.md` — narrow runtime-core prototype, API, limitations, and tests.
