@@ -382,7 +382,25 @@ class NotionRESTTransport:
 
     def delete_page(self, page_id: str) -> None:
         page_id = _validated_page_id(page_id)
-        self._request("PATCH",f"/pages/{quote(page_id,safe='')}",{"in_trash":True})
+        raw = self._request(
+            "PATCH",
+            f"/pages/{quote(page_id, safe='')}",
+            {"in_trash": True},
+        )
+        if (
+            raw.get("object") != "page"
+            or raw.get("id") != page_id
+            or type(raw.get("in_trash")) is not bool
+            or raw["in_trash"] is not True
+        ):
+            raise NotionTransportError("Notion trash response did not confirm the target page")
+        try:
+            self.get_page(page_id)
+        except MemoryNotFoundError:
+            return
+        except Exception:
+            raise NotionTransportError("Notion trash state could not be verified") from None
+        raise NotionTransportError("Notion page remained retrievable after trash request")
 
 
 def create_notion_memory_adapter_from_environment(
