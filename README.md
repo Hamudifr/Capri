@@ -25,7 +25,7 @@ Capri is a research and execution-assistance project. This repository contains a
 - `docs/LEDGER_OPERATIONS.md` — backup verification, integrity-incident response, and controlled recovery runbook.
 - `docs/LEDGER_SCALING_DECISION.md` — proposed transactional storage migration, explicitly not implemented.
 - `capri_core/` — immutable evaluation records, fail-closed validation, and hash-chained append-only ledger.
-- `capri_runtime/` — provider-neutral sessions, permissioned tool execution and model-call bridge, durable task execution, and bounded SQLite/Notion memory.
+- `capri_runtime/` — provider-neutral sessions, permissioned tool execution and model-call bridge, optional OpenAI Responses API adapter, durable task execution, and bounded SQLite/Notion memory.
 - `pyproject.toml` — minimal Python 3.11+ package metadata; no runtime dependencies are declared.
 - `docs/TOOL_EXECUTION.md` — trust model, schema subset, approvals, audit behavior, and limitations for tool execution.
 - `docs/OPENAI_RESPONSES_ADAPTER.md` — optional concrete OpenAI Responses API adapter, safe configuration, cost boundary, and offline validation.
@@ -36,15 +36,15 @@ Capri is a research and execution-assistance project. This repository contains a
 
 ## Current status
 
-**Verified checkpoint — 2026-11-07 (after PR #113 merge)**
+**Verified code checkpoint — 2026-11-07 (PR #113 code baseline)**
 
-- Current `main`: `2e5749c8a2cd3110a7ef9a909ba87866542ea5f4` (documentation refresh after PR #113).
+- Latest verified code-changing mainline commit at this checkpoint: PR #113 merge `252e7eed7543aa5fc91ea3eb57a54b408b384e84`. Later checkpoint-only documentation commits do not change this code baseline; re-read GitHub for the current branch tip.
 - Latest verified exact-head CI: PR #113 run [42379590963](https://github.com/Hamudifr/Capri/actions/runs/42379590963) passed compilation, Capri Doctor 6/6, operational health 7/7, and **390 tests** on Python 3.11, 3.12, and 3.13. All three job logs were inspected. This run tested the PR head before merge; post-merge push CI is not verified here. The optional live Notion REST smoke test was skipped.
 - The repository contains the integrated non-X5 recovery foundation, append-only hash-chain ledger, provider-neutral session runtime, permissioned tool-execution boundary, durable SQLite task engine and worker, durable audit/approval storage, and bounded local project memory.
 - Memory includes the SQLite provider, Notion memory adapter, standard-library Notion REST transport, explicit read-only data-source schema preflight, and `create_notion_memory_adapter_from_environment()`. `build_untrusted_memory_context()` prepares bounded eligible memory for separate model-adapter delivery.
 - The connected Notion data-source metadata was inspected read-only: required logical properties and supported option labels are present. The connector normalizes text fields as `text`; this is **not** an authenticated raw REST schema preflight.
 - The optional live Notion REST smoke test remains skipped. Authenticated REST create/read/correct/search/archive/trash behavior is not yet verified, and no always-on Capri process is connected to Notion.
-- `OpenAIResponsesAdapter` now implements the provider-neutral memory-aware tool-adapter protocol using the standard library and the Responses API. Offline fake-response tests cover request/response parsing and memory separation. No live API call, paid usage, running host process, or end-to-end prompt-injection resistance is claimed.
+- `OpenAIResponsesAdapter` implements the provider-neutral memory-aware tool-adapter protocol using the standard library and the Responses API. Offline fake-response tests cover request/response parsing and memory separation. No live API call, paid usage, running host process, or end-to-end prompt-injection resistance is claimed.
 - This remains an internal engineering prototype, not a claim of AGI, consciousness, or public/multi-tenant production readiness. No X5 work is included.
 
 ### Recent verified integration milestones
@@ -82,7 +82,7 @@ Capri is a research and execution-assistance project. This repository contains a
 - Host identity/tenant isolation, provider-aware budgets, observability, deployment packaging, and operational backup/restore/retention.
 - External services and paid infrastructure are not assumed or provisioned.
 
-## Model-to-tool orchestration\n\nThe provider-neutral `ToolExecutionBridge` validates bounded structured call batches and routes requests through the trusted `ToolExecutor`. It enforces both message-count and aggregate UTF-8 transcript budgets, reserving result capacity before executing side effects. The `ToolOrchestrator` adds a host-injected structured model adapter and bounded multi-round loop. It exposes only tools permitted by the host context, never derives authority from model output, preserves one-use approval requirements, and marks audit failures as uncertain rather than retrying. It remains provider-neutral: the host supplies provider integration, identity, and approval UX; `SessionTurnCoordinator` can provide same-process transcript persistence and concurrency control, while multi-process locking remains a host responsibility. See [docs/TOOL_EXECUTION.md](docs/TOOL_EXECUTION.md).\n\n## Durable task execution and recovery
+## Model-to-tool orchestration\n\nThe provider-neutral `ToolExecutionBridge` validates bounded structured call batches and routes requests through the trusted `ToolExecutor`. The `ToolOrchestrator` adds a bounded multi-round loop. `OpenAIResponsesAdapter` now provides one optional concrete model adapter; host identity, credentials, spend controls, and approval UX remain host responsibilities. The adapter never executes tools directly and returns proposals to the bridge. See [docs/TOOL_EXECUTION.md](docs/TOOL_EXECUTION.md) and [docs/OPENAI_RESPONSES_ADAPTER.md](docs/OPENAI_RESPONSES_ADAPTER.md).\n\n## Durable task execution and recovery
 
 The provider-neutral task engine in `capri_runtime.tasks` provides persistent ordered plans, atomic SQLite worker leases, per-step checkpoints, bounded retries with exponential backoff, cooperative cancellation, and lease-expiry recovery. It uses stable per-step idempotency keys and uses bounded retry delivery that may invoke a handler zero or multiple times across crash windows—not exactly-once side effects. See [docs/TASK_EXECUTION.md](docs/TASK_EXECUTION.md) for the handler contract, security boundaries, and limitations. The engine includes an explicit host-started TaskWorker polling loop with graceful stop-event handling and concurrent lease heartbeats; the host remains responsible for process supervision, scheduling policy, authenticated context, and permissioned handler integration. Shutdown is cooperative between tasks; an active handler is not forcibly interrupted.
 
