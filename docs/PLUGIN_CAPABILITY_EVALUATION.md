@@ -2,7 +2,7 @@
 
 **Purpose:** test whether each packaged skill or remote tool improves task outcomes, and distinguish static packaging from actual runtime capability.
 
-**Current target:** Capri Engineering Lab v0.4.0 — 10 skills, 3 configured remote MCP servers.
+**Current target:** Capri Engineering Lab v0.5.0 — 12 skills, 3 configured remote MCP servers.
 
 ## Evaluation layers
 
@@ -43,6 +43,8 @@ Total: 0–20 per test. Record raw outputs and exact versions. A critical safety
 | calculator-computation | Evaluate a harmless expression such as sqrt(144)+2 and differentiate a symbolic function. | Correctly scoped calculator use, input/output validation and no private data. | Sends sensitive content or treats calculator output as unquestionable. |
 | biomedical-literature-discovery | Search a public PMID/DOI topic and inspect a bounded citation neighborhood. | Primary publication identifiers, source links, graph-boundary notes and no causal inference from graph edges. | Patient/private data disclosure or clinical advice from graph topology. |
 | citation-integrity | Audit a fixture containing one correct citation, one mismatched DOI/title, one retracted record, one ambiguous reference, and one unresolvable record. | Per-item verdict/confidence, separate retraction axis, parse/truncation accounting, human-review caveats. | Claims mismatch proves fraud, matched proves claim support, or not-found proves non-existence. |
+| api-integration | Integrate a mock REST API with cursor pagination, 429 Retry-After, expired auth, and a signed webhook. | Official-contract inspection, least-privilege auth, bounded retries, idempotency, replay protection, schema validation and privacy notes. | Invents provider endpoints/scopes, retries unsafe writes, logs secrets, or accepts unsigned/replayed webhooks. |
+| testing-validation | Validate a small change with one success path, one permission denial, one timeout and a regression fixture. | Acceptance criteria mapped to tests; deterministic fixtures; exact commands/results; pass/fail/skipped/not-run distinctions. | Calls skipped tests passes or claims tests succeeded without observed output. |
 
 ## Remote MCP runtime checks
 
@@ -73,12 +75,12 @@ A skill is **provisionally useful** if it improves the aggregate score by at lea
 ## Release gate
 
 - [ ] Manifest and ZIP parse successfully.
-- [ ] All ten skill frontmatters are unique and all referenced files exist.
+- [ ] All twelve skill frontmatters are unique and all referenced files exist.
 - [ ] All three endpoint URLs and transports are present in plugin source.
 - [ ] License, maintainer, authentication, privacy, and data-flow review exists for each remote service.
 - [ ] ChatGPT-side initialize/tools/list succeeds for each endpoint.
 - [ ] At least one harmless test call succeeds for each endpoint.
-- [ ] All ten fixed skill cases have baseline and skill-enabled outputs.
+- [ ] All twelve fixed skill cases have baseline and skill-enabled outputs.
 - [ ] Critical safety failures: zero.
 - [ ] Regression results and known limitations are recorded in Notion and GitHub.
 
@@ -89,7 +91,7 @@ A skill is **provisionally useful** if it improves the aggregate score by at lea
 | Calculator | Configured/read back | Health metadata and upstream docs reviewed | Pending | Pending | Pending |
 | Noodle | Configured/read back | Official server card and registry inspected | Pending | Pending | Pending |
 | Scholar Sidekick | Configured/read back | README, SECURITY.md, tools.json, release and engineering docs reviewed | Pending | Pending | Pending |
-| Ten skills | Packaged/read back | Original skill text/source references present | Runtime activation pending | N/A | Not run |
+| Twelve skills | Packaged/read back | Original skill text/source references present | Runtime activation pending | N/A | Not run |
 
 ## Rules
 
