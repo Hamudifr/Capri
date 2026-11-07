@@ -138,6 +138,19 @@ class NotionRESTTransportTests(unittest.TestCase):
                 with self.assertRaises(NotionTransportError):
                     t.get_page(PAGE_ID)
 
+    def test_missing_or_malformed_tag_options_are_rejected(self):
+        invalid_values = ("missing", None, [None], [{"name": 7}], [{"name": "memory"}, {}])
+        for value in invalid_values:
+            with self.subTest(value=value):
+                raw = page()
+                if value == "missing":
+                    raw["properties"]["Tags"] = {}
+                else:
+                    raw["properties"]["Tags"] = {"multi_select": value}
+                t, _ = self.make(raw)
+                with self.assertRaises(NotionTransportError):
+                    t.get_page(PAGE_ID)
+
     def test_response_size_and_configuration_are_bounded(self):
         t,op=self.make()
         class Big(FakeResponse):
