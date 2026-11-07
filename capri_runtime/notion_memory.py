@@ -160,9 +160,12 @@ class NotionMemoryAdapter:
         scope = _validate_text(props.get("Scope"), "scope", 100)
         if scope not in _ALLOWED_SCOPES:
             raise MemoryValidationError("Notion Scope property is unsupported")
-        sensitive = props.get("Sensitive", False)
-        if sensitive not in (False, None, "__NO__"):
-            raise MemoryValidationError("sensitive Notion memory is not permitted")
+        # The transport contract requires an explicit boolean classification.
+        # Missing, null, string, and integer lookalikes must not silently become
+        # non-sensitive; an unclassified page is rejected fail-closed.
+        sensitive = props.get("Sensitive")
+        if type(sensitive) is not bool or sensitive:
+            raise MemoryValidationError("sensitive or unclassified Notion memory is not permitted")
         source = cls._source(props.get("Source"))
         confidence_label = props.get("Confidence")
         if not isinstance(confidence_label, str):
