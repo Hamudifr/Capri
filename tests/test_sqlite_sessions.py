@@ -105,6 +105,62 @@ class SQLiteSessionStoreTests(unittest.TestCase):
             session.session_id, "principal-alice", "worker-alice"
         ))
 
+    def test_backup_is_private_consistent_and_restores_owned_transcripts(self):
+        session = self.store.create_for_principal("principal-alice")
+        committed = self.store.commit_turn_messages_for_principal(
+            session.session_id,
+            "principal-alice",
+            0,
+            (
+                Message(role="user", content="hello"),
+                Message(role="assistant", content="private transcript"),
+            ),
+        )
+        backup_path = os.path.join(self.temp.name, "session-backup.sqlite3")
+        self.assertEqual(self.store.backup_to(backup_path), backup_path)
+        self.assertTrue(os.path.isfile(backup_path))
+        if os.name == "posix":
+            self.assertEqual(stat.S_IMODE(os.stat(backup_path).st_mode), 0o600)
+        restored = SQLiteSessionStore(backup_path)
+        self.assertEqual(restored.integrity_check(), "ok")
+        self.assertEqual(
+            restored.get_for_principal(session.session_id, "principal-alice"),
+            committed,
+        )
+        with self.assertRaises(SessionNotFoundError):
+            restored.get_for_principal(session.session_id, "principal-bob")
+        connection = sqlite3.connect(backup_path)
+        try:
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    "UPDATE session_owners SET principal_id = ? WHERE session_id = ?",
+                    ("principal-bob", session.session_id),
+                )
+        finally:
+            connection.close()
+
+    def test_backup_refuses_live_existing_and_symlink_destinations(self):
+        with self.assertRaises(ValidationError):
+            self.store.backup_to(self.path)
+        existing = os.path.join(self.temp.name, "existing.sqlite3")
+        with open(existing, "wb") as stream:
+            stream.write(b"preserve")
+        with self.assertRaises(ValidationError):
+            self.store.backup_to(existing)
+        link = os.path.join(self.temp.name, "link.sqlite3")
+        os.symlink(existing, link)
+        with self.assertRaises(ValidationError):
+            self.store.backup_to(link)
+        with open(existing, "rb") as stream:
+            self.assertEqual(stream.read(), b"preserve")
+
+    @unittest.skipUnless(os.name == "posix", "POSIX filesystem permissions are required")
+    def test_backup_rejects_non_private_destination_directory(self):
+        destination_dir = os.path.join(self.temp.name, "public")
+        os.mkdir(destination_dir, 0o755)
+        with self.assertRaises(ValidationError):
+            self.store.backup_to(os.path.join(destination_dir, "backup.sqlite3"))
+
     def test_session_owner_rows_cannot_be_reassigned_or_deleted(self):
         session = self.store.create_for_principal("principal-alice")
         connection = sqlite3.connect(self.path)
