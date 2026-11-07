@@ -121,13 +121,12 @@ class NotionRESTTransport:
                     raise MemoryValidationError("Sensitive must be exactly false; sensitive memory is not supported")
                 out[name] = {"checkbox":False}
             elif name == "Source":
-                if value is not None:
-                    if type(value) is not str:
-                        raise MemoryValidationError("Source must be plain URL text")
-                    _validate_text(value, "Source", 2_048)
-                    parsed = urlsplit(value)
-                    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-                        raise MemoryValidationError("Source must be an absolute HTTP(S) URL")
+                if type(value) is not str:
+                    raise MemoryValidationError("Source must be a required plain URL string")
+                _validate_text(value, "Source", 2_048)
+                parsed = urlsplit(value)
+                if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                    raise MemoryValidationError("Source must be an absolute HTTP(S) URL")
                 out[name] = {"url":value}
             elif name == "Tags":
                 if (
