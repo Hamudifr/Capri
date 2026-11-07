@@ -214,6 +214,53 @@ def build_untrusted_memory_context(
     return UntrustedMemoryContext(tuple(eligible))
 
 
+def serialize_untrusted_memory_context(context: UntrustedMemoryContext) -> str:
+    """Serialize memory as a bounded, escaped data block for a model adapter.
+
+    The wrapper is a delimiting convention, not a provider-enforced security
+    boundary. Adapters must place it in a data-only message or a provider-supported
+    untrusted-data field, never interpolate it into trusted system/developer policy.
+    """
+    if type(context) is not UntrustedMemoryContext:
+        raise MemoryValidationError("memory context must be an exact UntrustedMemoryContext")
+    payload = {
+        "format": "capri.untrusted-memory.v1",
+        "records": [
+            {
+                "memory_id": record.memory_id,
+                "title": record.title,
+                "content": record.content,
+                "record_type": record.record_type,
+                "scope": record.scope,
+                "sensitivity": record.sensitivity,
+                "source": record.source,
+                "confidence": record.confidence,
+                "retention": record.retention,
+                "tags": list(record.tags),
+                "created_at": record.created_at,
+                "updated_at": record.updated_at,
+                "expires_at": record.expires_at,
+                "status": record.status,
+                "supersedes_id": record.supersedes_id,
+            }
+            for record in context.records
+        ],
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=True,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    # Prevent imported content from closing or nesting the outer delimiter.
+    encoded = encoded.replace("&", "\\u0026").replace("<", "\\u003c").replace(">", "\\u003e")
+    result = f"<untrusted_text>{encoded}</untrusted_text>"
+    if len(result.encode("ascii")) > 1_000_000:
+        raise MemoryValidationError("serialized memory context exceeds the byte limit")
+    return result
+
+
 class SQLiteMemoryStore:
     """Private SQLite store for non-sensitive project memory.
 
