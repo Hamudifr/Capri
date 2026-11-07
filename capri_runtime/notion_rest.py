@@ -1,6 +1,7 @@
 """Concrete Notion REST transport for the injected memory adapter."""
 from __future__ import annotations
 import json, os, uuid
+from datetime import datetime
 from collections.abc import Mapping
 from typing import Callable
 from urllib.error import HTTPError, URLError
@@ -102,7 +103,15 @@ class NotionRESTTransport:
                 if type(value) not in (list,tuple) or any(type(x) is not str for x in value): raise MemoryValidationError("Tags must be a list or tuple of plain strings")
                 out[name] = {"multi_select":[{"name":x} for x in value]}
             elif name == "Expires":
-                if value is not None and type(value) is not str: raise MemoryValidationError("Expires must be a plain ISO timestamp")
+                if value is not None:
+                    if type(value) is not str:
+                        raise MemoryValidationError("Expires must be a plain timezone-aware ISO timestamp")
+                    try:
+                        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                    except ValueError:
+                        raise MemoryValidationError("Expires must be a valid ISO-8601 timestamp") from None
+                    if parsed.tzinfo is None or parsed.utcoffset() is None:
+                        raise MemoryValidationError("Expires must include a timezone")
                 out[name] = {"date":None if value is None else {"start":value}}
             else:
                 raise MemoryValidationError(f"unsupported Notion property: {name}")
