@@ -1,5 +1,49 @@
 # Capri recovery plan
 
+# Capri recovery plan
+
+## Live reconciliation — 2026-11-07 14:10 UTC (authoritative)
+
+This section is the current repository snapshot. Older reconciliation blocks below are retained as historical records and must not be treated as current state.
+
+### Current repository state
+
+- Private repository: `Hamudifr/Capri`.
+- Current `main`: `2e5749c8a2cd3110a7ef9a909ba87866542ea5f4`.
+- Open pull requests: 0.
+- Main contains the integrated non-X5 foundation, permissioned tool boundary, durable local audit/approval storage, SQLite sessions, SQLite/Notion memory providers, durable task engine and worker, Notion REST transport hardening, and the latest expiring-memory invariant.
+- Latest exact-head CI inspected in this session: PR #113 run [42379590963](https://github.com/Hamudifr/Capri/actions/runs/42379590963). Python 3.11, 3.12, and 3.13 each passed compileall, Capri Doctor 6/6, operational health 7/7, and 390 tests. The optional live Notion REST smoke job was skipped. This run tested the PR head before merge; main's subsequent commit `2e5749c...` is documentation-only. Post-merge push CI was not independently queried.
+- No public release, deployment, paid service, or protected X5 access is part of this work.
+
+### Provider integration progress
+
+- Added `capri_runtime.openai_responses.OpenAIResponsesAdapter`, a standard-library adapter for the official OpenAI Responses API.
+- The adapter converts model function calls into untrusted Capri tool-call proposals. Every proposal still passes through the existing `ToolOrchestrator`, `ToolExecutionBridge`, host permission checks, approval controls, and audit store.
+- Retrieved memory is sent as a separate untrusted input item, not inserted into trusted host instructions or tool authority.
+- Offline fake-response tests cover request construction, tool-call parsing, transcript reconstruction, memory separation, malformed responses, duplicate IDs, bounds, and credential/error suppression.
+- No live provider request was made. `OPENAI_API_KEY` and `CAPRI_OPENAI_MODEL` are host-managed configuration; no credentials are stored in Git. OpenAI API usage can incur charges separately from ChatGPT subscriptions. Do not make live calls unless the owner deliberately provisions credentials and accepts the cost.
+- This adapter is not a host process. It has no streaming, provider failover, in-flight cancellation, token-usage accounting, or hard currency spend cap.
+
+### Remaining work, ordered
+
+1. Build and test a host composition/supervision layer that wires authenticated identity, durable sessions, memory, the model adapter, tool gateway, and task worker without granting authority to model output.
+2. Implement host identity and session ownership; add negative cross-user/cross-tenant tests before any multi-user exposure.
+3. Add provider-aware token/request budgets and hard spend controls before enabling any paid provider.
+4. Add end-to-end adversarial tests for hostile memory, retrieved documents, forged tool calls, approval replay, and tool-result prompt injection.
+5. Add redacted structured observability, health probes for live dependencies, alerting hooks, and incident/recovery runbooks.
+6. Add encrypted backup/restore, retention/compaction, and verified deletion/restore workflows for local SQLite stores.
+7. Add deployment packaging and process supervision; keep deployment internal/private until the relevant host controls are tested.
+8. Verify live Notion REST only when a least-privilege token and the repository Actions secret/variables are deliberately configured. Never ask for or commit the token in chat/Git.
+
+### Delivery policy
+
+Capri owns routine design, implementation, self-review, testing, integration, and documentation. External independent review is not a prerequisite for ordinary internal engineering. Use isolated feature branches, inspect the exact diff, run and inspect CI, verify dependency ancestry, and integrate completed compatible work. Keep self-review distinct from independent assurance.
+
+No paid spend, subscriptions, credential/private-data exposure, destructive deletion, public release, platform-control bypass, or protected X5 access is authorized by this standing engineering mandate. Continue independent safe work when a provider credential or other external dependency is unavailable.
+
+---
+
+
 ## Current reconciliation — 2026-11-06 19:58 UTC
 
 This block is the current source of truth. Older snapshots below are retained as historical evidence and must not be read as current state.
