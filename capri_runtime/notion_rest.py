@@ -223,6 +223,64 @@ class NotionRESTTransport:
         if not isinstance(data,Mapping): raise NotionTransportError("Notion API returned non-object response")
         return data
 
+    def validate_data_source_schema(self) -> None:
+        """Fail closed unless the configured data source matches Capri's memory schema.
+
+        This is an explicit, read-only startup preflight. It does not create or
+        modify Notion properties and is not run implicitly on every request.
+        """
+        raw = self._request("GET", f"/data_sources/{self.data_source_id}")
+        if raw.get("object") != "data_source" or raw.get("id") != self.data_source_id:
+            raise NotionTransportError("Notion data source identity does not match configuration")
+        properties = raw.get("properties")
+        if not isinstance(properties, Mapping):
+            raise NotionTransportError("Notion data source schema is missing properties")
+
+        expected_types = {
+            "Name": ("title",),
+            "Content": ("rich_text",),
+            "Type": ("select",),
+            "Scope": ("select",),
+            "Sensitive": ("checkbox",),
+            "Source": ("url",),
+            "Confidence": ("select",),
+            "Retention": ("select",),
+            "Tags": ("multi_select",),
+            "Status": ("status", "select"),
+            "Expires": ("date",),
+            "Supersedes": ("rich_text",),
+        }
+        required_options = {
+            "Type": ("Operating Directive", "Architecture Decision", "Project Fact", "Security Boundary", "User Preference"),
+            "Scope": ("Capri System", "GitHub Repository", "Notion Workspace", "Tool Integration"),
+            "Confidence": ("User-Directed", "Verified", "Inferred", "Unverified"),
+            "Retention": ("Keep until deleted", "Expire after 30 days", "Expire after 90 days", "Archive when superseded"),
+            "Status": ("Active", "Review", "Archived"),
+        }
+
+        for name, allowed_types in expected_types.items():
+            descriptor = properties.get(name)
+            if (
+                not isinstance(descriptor, Mapping)
+                or type(descriptor.get("type")) is not str
+                or descriptor["type"] not in allowed_types
+            ):
+                raise NotionTransportError(f"Notion data source property {name} has an unexpected type")
+
+        for name, required_names in required_options.items():
+            descriptor = properties[name]
+            property_type = descriptor["type"]
+            config = descriptor.get(property_type)
+            if not isinstance(config, Mapping) or type(config.get("options")) is not list:
+                raise NotionTransportError(f"Notion data source property {name} has malformed options")
+            option_names = {
+                option.get("name")
+                for option in config["options"]
+                if isinstance(option, Mapping) and type(option.get("name")) is str
+            }
+            if not set(required_names).issubset(option_names):
+                raise NotionTransportError(f"Notion data source property {name} is missing required options")
+
     def create_page(self, properties: Mapping[str,object]) -> Mapping[str,object]:
         raw=self._request("POST","/pages",{"parent":{"type":"data_source_id","data_source_id":self.data_source_id},"properties":self._encode_properties(properties)})
         return self._normalize_page(raw)
