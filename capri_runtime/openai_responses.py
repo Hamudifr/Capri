@@ -207,13 +207,19 @@ class OpenAIResponsesAdapter:
                 except (TypeError, ValueError, json.JSONDecodeError):
                     decoded = None
                 if type(decoded) is dict and "tool_calls" in decoded:
-                    if set(decoded) != {"content", "tool_calls"} or type(decoded["tool_calls"]) is not list:
+                    allowed_keys = {"content", "tool_calls"}
+                    if set(decoded) == allowed_keys:
+                        provider_state = None
+                    elif set(decoded) == allowed_keys | {"provider_state"}:
+                        provider_state = decoded["provider_state"]
+                    else:
+                        raise OpenAIResponsesAdapterError("stored assistant tool-call envelope is invalid")
+                    if type(decoded["tool_calls"]) is not list:
                         raise OpenAIResponsesAdapterError("stored assistant tool-call envelope is invalid")
                     assistant_text = decoded["content"]
                     if not _valid_text(assistant_text, maximum=64_000, allow_empty=True):
                         raise OpenAIResponsesAdapterError("stored assistant text is invalid")
-                    if assistant_text:
-                        items.append({"role": "assistant", "content": assistant_text})
+                    calls_for_turn = []
                     for call in decoded["tool_calls"]:
                         if type(call) is not dict or set(call) != {"id", "name", "arguments"}:
                             raise OpenAIResponsesAdapterError("stored tool call is invalid")
@@ -235,13 +241,54 @@ class OpenAIResponsesAdapter:
                             raise OpenAIResponsesAdapterError(
                                 "stored tool arguments are not valid JSON"
                             ) from None
-                        items.append({
-                            "type": "function_call",
-                            "call_id": call_id,
-                            "name": name,
-                            "arguments": encoded_arguments,
-                        })
+                        calls_for_turn.append((call_id, name, arguments, encoded_arguments))
                         pending_calls.add(call_id)
+                    if provider_state is None:
+                        if assistant_text:
+                            items.append({"role": "assistant", "content": assistant_text})
+                        for call_id, name, _arguments, encoded_arguments in calls_for_turn:
+                            items.append({
+                                "type": "function_call",
+                                "call_id": call_id,
+                                "name": name,
+                                "arguments": encoded_arguments,
+                            })
+                    else:
+                        if type(provider_state) is not list or len(provider_state) > 256:
+                            raise OpenAIResponsesAdapterError("stored provider continuation state is invalid")
+                        try:
+                            state_bytes = json.dumps(
+                                provider_state, ensure_ascii=False, allow_nan=False,
+                                sort_keys=True, separators=(",", ":"),
+                            ).encode("utf-8", errors="strict")
+                        except (TypeError, ValueError, UnicodeEncodeError, RecursionError):
+                            raise OpenAIResponsesAdapterError("stored provider continuation state is invalid") from None
+                        if len(state_bytes) > 131_072:
+                            raise OpenAIResponsesAdapterError("stored provider continuation state is oversized")
+                        raw_calls = []
+                        for item in provider_state:
+                            if type(item) is not dict or item.get("type") not in {"reasoning", "message", "function_call"}:
+                                raise OpenAIResponsesAdapterError("stored provider continuation item is invalid")
+                            if item.get("type") == "message" and (
+                                item.get("role") != "assistant" or type(item.get("content")) is not list
+                            ):
+                                raise OpenAIResponsesAdapterError("stored provider message item is invalid")
+                            if item.get("type") == "function_call":
+                                raw_calls.append(item)
+                        if len(raw_calls) != len(calls_for_turn):
+                            raise OpenAIResponsesAdapterError("stored provider continuation does not match tool calls")
+                        for raw_call, (call_id, name, arguments, _encoded) in zip(raw_calls, calls_for_turn):
+                            try:
+                                raw_arguments = _loads_json(raw_call.get("arguments"))
+                            except (TypeError, ValueError, json.JSONDecodeError, RecursionError):
+                                raise OpenAIResponsesAdapterError("stored provider function arguments are invalid") from None
+                            if (
+                                raw_call.get("call_id") != call_id
+                                or raw_call.get("name") != name
+                                or raw_arguments != arguments
+                            ):
+                                raise OpenAIResponsesAdapterError("stored provider continuation does not match tool calls")
+                        items.extend(provider_state)
                 else:
                     if pending_calls:
                         raise OpenAIResponsesAdapterError("history contains unresolved tool calls")
@@ -323,9 +370,16 @@ class OpenAIResponsesAdapter:
             else:
                 raise OpenAIResponsesAdapterError("provider returned an unsupported output item")
         content = "\n".join(text_parts)
+        if len(content) > 64_000:
+            raise OpenAIResponsesAdapterError("provider response text exceeds the configured limit")
         if not content.strip() and not calls:
             raise OpenAIResponsesAdapterError("provider response contains neither text nor tool calls")
-        return AssistantTurn(content=content, tool_calls=tuple(calls))
+        provider_state = tuple(output) if calls else ()
+        return AssistantTurn(
+            content=content,
+            tool_calls=tuple(calls),
+            provider_state=provider_state,
+        )
 
     def _post(self, body: dict[str, Any]) -> AssistantTurn:
         try:
