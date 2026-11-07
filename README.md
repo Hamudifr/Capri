@@ -36,15 +36,16 @@ Capri is a research and execution-assistance project. This repository contains a
 
 ## Current status
 
-**Verified code checkpoint — 2026-11-07 (PR #113 code baseline)**
+**Verified code checkpoint — 2026-11-07 (PR #117 code baseline)**
 
-- Latest verified code-changing mainline commit at this checkpoint: PR #113 merge `252e7eed7543aa5fc91ea3eb57a54b408b384e84`. Later checkpoint-only documentation commits do not change this code baseline; re-read GitHub for the current branch tip.
-- Latest verified exact-head CI: PR #113 run [42379590963](https://github.com/Hamudifr/Capri/actions/runs/42379590963) passed compilation, Capri Doctor 6/6, operational health 7/7, and **390 tests** on Python 3.11, 3.12, and 3.13. All three job logs were inspected. This run tested the PR head before merge; post-merge push CI is not verified here. The optional live Notion REST smoke test was skipped.
+- Latest verified code-changing mainline commit at this checkpoint: PR #117 merge `4d38c85a28120b917601602ba664cb772246a419`. Re-read GitHub for the live branch tip before further changes.
+- PR #117 exact-head CI run [42380772978](https://github.com/Hamudifr/Capri/actions/runs/42380772978) passed compilation, Capri Doctor 6/6, operational health 7/7, and **405 tests** on Python 3.11, 3.12, and 3.13. All three job logs were inspected.
+- Post-merge push CI run [42380871240](https://github.com/Hamudifr/Capri/actions/runs/42380871240) also passed 405 tests on all three Python versions, Doctor 6/6, and operational health 7/7. All three logs were inspected. The optional live Notion REST smoke test was skipped.
 - The repository contains the integrated non-X5 recovery foundation, append-only hash-chain ledger, provider-neutral session runtime, permissioned tool-execution boundary, durable SQLite task engine and worker, durable audit/approval storage, and bounded local project memory.
 - Memory includes the SQLite provider, Notion memory adapter, standard-library Notion REST transport, explicit read-only data-source schema preflight, and `create_notion_memory_adapter_from_environment()`. `build_untrusted_memory_context()` prepares bounded eligible memory for separate model-adapter delivery.
 - The connected Notion data-source metadata was inspected read-only: required logical properties and supported option labels are present. The connector normalizes text fields as `text`; this is **not** an authenticated raw REST schema preflight.
 - The optional live Notion REST smoke test remains skipped. Authenticated REST create/read/correct/search/archive/trash behavior is not yet verified, and no always-on Capri process is connected to Notion.
-- `OpenAIResponsesAdapter` implements the provider-neutral memory-aware tool-adapter protocol using the standard library and the Responses API. Offline fake-response tests cover request/response parsing and memory separation. No live API call, paid usage, running host process, or end-to-end prompt-injection resistance is claimed.
+- `OpenAIResponsesAdapter` implements the provider-neutral memory-aware tool-adapter protocol using the standard library and the Responses API. Offline tests cover request/response parsing, memory separation, tool transcript replay, and provider reasoning continuation state. No live API call, paid usage, running host process, or end-to-end prompt-injection resistance is claimed.
 - This remains an internal engineering prototype, not a claim of AGI, consciousness, or public/multi-tenant production readiness. No X5 work is included.
 
 ### Recent verified integration milestones
@@ -66,6 +67,7 @@ Capri is a research and execution-assistance project. This repository contains a
 - [PR #78](https://github.com/Hamudifr/Capri/pull/78) — require all supported Notion Tags options.
 - [PR #79](https://github.com/Hamudifr/Capri/pull/79) — explicit environment factory that preflights before returning a Notion adapter.
 - [PR #113](https://github.com/Hamudifr/Capri/pull/113) — enforce required expiry timestamps for `expire_30d` / `expire_90d` records at the immutable untrusted-memory context boundary; exact-head CI passed 390 tests across Python 3.11/3.12/3.13.
+- [PR #117](https://github.com/Hamudifr/Capri/pull/117) — add the bounded OpenAI Responses API adapter, preserve reasoning continuation state, and keep memory separate from trusted instructions; exact-head and post-merge CI passed 405 tests across Python 3.11/3.12/3.13.
 
 ### Earlier foundation milestones
 
