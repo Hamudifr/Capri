@@ -239,7 +239,7 @@ class NotionRESTTransport:
         except (TimeoutError,OSError): raise NotionTransportError("Notion API transport failed") from None
         try: data=json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError,json.JSONDecodeError): raise NotionTransportError("Notion API returned malformed JSON") from None
-        if not isinstance(data,Mapping): raise NotionTransportError("Notion API returned non-object response")
+        if type(data) is not dict: raise NotionTransportError("Notion API returned non-object response")
         return data
 
     def validate_data_source_schema(self) -> None:
