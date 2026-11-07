@@ -157,8 +157,12 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         )
         tamper = (
             lambda claim: replace(claim, principal_id=None),
+            lambda claim: replace(claim, principal_id="mallory"),
             lambda claim: replace(claim, tool="admin", input={"elevated": True}),
             lambda claim: replace(claim, input={"value": "tampered"}),
+            lambda claim: replace(claim, attempt=claim.attempt + 1),
+            lambda claim: replace(claim, idempotency_key="attacker-key"),
+            lambda claim: replace(claim, lease_until="2099-01-01T00:00:00+00:00"),
         )
         for attack in tamper:
             with self.subTest(attack=attack):
@@ -177,6 +181,29 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 self.assertEqual(
                     calls[-1], ("principal", "alice", {"value": "original"})
                 )
+
+    def test_expired_claim_is_rejected_before_handler_invocation(self):
+        calls = []
+        self.store.create_for_principal(
+            "alice",
+            [{"tool": "prepare", "input": {"value": "original"}, "max_attempts": 2}],
+            now=NOW,
+        )
+        claim = self.store.claim_next("worker", lease_seconds=5, now=NOW)
+        engine = TaskEngine(
+            self.store,
+            {},
+            "worker",
+            principal_handlers={
+                "prepare": lambda data, key, principal: (
+                    calls.append((principal, data)) or {"ok": True}
+                )
+            },
+        )
+        with self.assertRaises(TaskConflictError):
+            engine.execute_claim(claim, now=NOW + timedelta(seconds=6))
+        self.assertEqual(calls, [])
+        self.assertEqual(self.store.get_for_principal(claim.task_id, "alice").state, "running")
 
     def test_principal_claims_require_principal_aware_handlers(self):
         calls = []
