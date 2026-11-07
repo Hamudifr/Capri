@@ -99,11 +99,42 @@ class NotionMemoryAdapterTests(unittest.TestCase):
         self.create(title="Beta")
         self.assertEqual(self.store.export_json(), self.store.export_json())
 
-    def test_repeated_empty_cursor_is_bounded_without_parsing_cursor(self):
+    def test_repeated_empty_cursor_is_rejected_immediately(self):
         self.transport.empty_repeated_cursor = True
-        bounded = NotionMemoryAdapter(self.transport, max_records=3)
-        with self.assertRaises(MemoryValidationError):
-            bounded.search("untrusted")
+        with self.assertRaisesRegex(MemoryValidationError, "cursor repeated"):
+            self.store.search("untrusted")
+
+    def test_pagination_rejects_duplicate_page_ids(self):
+        record = self.create()
+        page = self.transport.pages[record.memory_id]
+
+        class DuplicatePageTransport(FakeNotionTransport):
+            def __init__(inner):
+                super().__init__()
+                inner.calls = 0
+
+            def list_pages(inner, *, cursor, page_size):
+                inner.calls += 1
+                if inner.calls == 1:
+                    return {"results": [page], "next_cursor": "next"}
+                return {"results": [page], "next_cursor": None}
+
+        with self.assertRaisesRegex(MemoryValidationError, "duplicate page"):
+            NotionMemoryAdapter(DuplicatePageTransport()).search("untrusted")
+
+    def test_pagination_requires_cursor_field_and_list_results(self):
+        class MissingCursorTransport(FakeNotionTransport):
+            def list_pages(inner, *, cursor, page_size):
+                return {"results": []}
+
+        class NonListResultsTransport(FakeNotionTransport):
+            def list_pages(inner, *, cursor, page_size):
+                return {"results": "not-a-list", "next_cursor": None}
+
+        for transport in (MissingCursorTransport(), NonListResultsTransport()):
+            with self.subTest(transport=type(transport).__name__):
+                with self.assertRaises(MemoryValidationError):
+                    NotionMemoryAdapter(transport).search("untrusted")
 
     def test_pagination_walks_multiple_pages(self):
         store = NotionMemoryAdapter(self.transport, max_records=3)
