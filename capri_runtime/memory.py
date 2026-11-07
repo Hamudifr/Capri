@@ -370,10 +370,7 @@ class SQLiteMemoryStore:
                 ).fetchall()
                 ranked = []
                 for row in rows:
-                    haystack = (row["title"] + "
-" + row["content"] + "
-" + row["scope"] + "
-" + row["tags"]).casefold()
+                    haystack = (row["title"] + "\n" + row["content"] + "\n" + row["scope"] + "\n" + row["tags"]).casefold()
                     matched = sum(term in haystack for term in terms)
                     if matched == len(terms):
                         exact = int(row["title"].casefold() == query.casefold())
