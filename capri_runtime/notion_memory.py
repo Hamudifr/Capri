@@ -328,7 +328,7 @@ class NotionMemoryAdapter:
 
     def _list_all(self) -> tuple[MemoryRecord, ...]:
         records: list[MemoryRecord] = []
-        seen_memory_ids: set[str] = set()
+        seen_memory_ids: set[UUID] = set()
         seen_cursors: set[str] = set()
         cursor: str | None = None
         page_requests = 0
@@ -347,9 +347,10 @@ class NotionMemoryAdapter:
                 raise MemoryValidationError("Notion transport exceeded the requested page size")
             for page in batch:
                 record = self._record_from_page(page)
-                if record.memory_id in seen_memory_ids:
+                memory_uuid = UUID(record.memory_id)
+                if memory_uuid in seen_memory_ids:
                     raise MemoryValidationError("Notion pagination returned a duplicate page")
-                seen_memory_ids.add(record.memory_id)
+                seen_memory_ids.add(memory_uuid)
                 records.append(record)
             next_cursor = response["next_cursor"]
             if next_cursor is None:
