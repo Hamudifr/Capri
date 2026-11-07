@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 from capri_runtime.memory import (
     MemoryNotFoundError,
+    MemoryRecord,
     MemoryValidationError,
     UntrustedMemoryContext,
     SQLiteMemoryStore,
@@ -154,6 +155,31 @@ class SQLiteMemoryStoreTests(unittest.TestCase):
         mutable_record = replace(record, tags=["security"])
         with self.assertRaises(MemoryValidationError):
             UntrustedMemoryContext((mutable_record,))
+
+    def test_untrusted_memory_context_rejects_subclassed_records_and_tags(self):
+        record = self.create(tags=("security",))
+
+        class DerivedMemoryRecord(MemoryRecord):
+            pass
+
+        class DerivedTags(tuple):
+            pass
+
+        derived_record = DerivedMemoryRecord(
+            memory_id=record.memory_id, title=record.title, content=record.content,
+            record_type=record.record_type, scope=record.scope,
+            sensitivity=record.sensitivity, source=record.source,
+            confidence=record.confidence, retention=record.retention,
+            tags=record.tags, created_at=record.created_at,
+            updated_at=record.updated_at, expires_at=record.expires_at,
+            status=record.status, supersedes_id=record.supersedes_id,
+        )
+        derived_tags_record = replace(record, tags=DerivedTags(record.tags))
+
+        for invalid in (derived_record, derived_tags_record):
+            with self.subTest(record=type(invalid).__name__):
+                with self.assertRaises(MemoryValidationError):
+                    UntrustedMemoryContext((invalid,))
 
     def test_untrusted_memory_context_rejects_expired_and_oversized_records(self):
         past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
