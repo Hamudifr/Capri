@@ -68,7 +68,20 @@ class ToolModelAdapter(Protocol):
 
 
 class MemoryAwareToolModelAdapter(Protocol):
-    """Adapter that receives retrieved memory outside transcript and authority."""
+    """Host-supplied adapter for separately delivered, untrusted memory.
+
+    Implementations must serialize the exact memory envelope as data (the
+    `serialize_untrusted_memory_context` helper is the default), then place it
+    in a provider-supported untrusted-data field or a data-only message. Never
+    interpolate retrieved memory into trusted system/developer policy, derive
+    tool definitions or permissions from it, or execute tool calls directly.
+    The supplied `tools` are already host-filtered; returned calls still pass
+    through ToolExecutionBridge with the host ExecutionContext.
+
+    The serialization wrapper is a convention, not provider-enforced isolation.
+    Provider-specific prompt construction and adversarial integration tests are
+    required before claiming prompt-injection resistance.
+    """
 
     def complete_with_tools_and_memory(
         self,
