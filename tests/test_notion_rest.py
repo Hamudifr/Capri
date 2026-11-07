@@ -151,6 +151,26 @@ class NotionRESTTransportTests(unittest.TestCase):
                 with self.assertRaises(NotionTransportError):
                     t.get_page(PAGE_ID)
 
+    def test_malformed_rich_text_is_rejected_instead_of_partially_dropped(self):
+        cases = (
+            ("Name", "title", [None]),
+            ("Content", "rich_text", [{"plain_text": "kept"}, {}]),
+            ("Content", "rich_text", "not-a-list"),
+            ("Supersedes", "rich_text", [{"text": {}}]),
+        )
+        for property_name, field_name, value in cases:
+            with self.subTest(property_name=property_name, value=value):
+                raw = page()
+                raw["properties"][property_name][field_name] = value
+                t, _ = self.make(raw)
+                with self.assertRaises(NotionTransportError):
+                    t.get_page(PAGE_ID)
+
+        raw = page()
+        raw["properties"]["Content"]["rich_text"] = [{"text": {"content": "fallback text"}}]
+        t, _ = self.make(raw)
+        self.assertEqual(t.get_page(PAGE_ID)["properties"]["Content"], "fallback text")
+
     def test_response_size_and_configuration_are_bounded(self):
         t,op=self.make()
         class Big(FakeResponse):
