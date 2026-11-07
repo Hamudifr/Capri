@@ -6,7 +6,7 @@ from typing import Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
-from .memory import MemoryErrorBase, MemoryNotFoundError, MemoryValidationError, _ALLOWED_TAGS
+from .memory import MemoryErrorBase, MemoryNotFoundError, MemoryValidationError
 from .notion_memory import (
     NotionMemoryTransport,
     _ALLOWED_SCOPES,
