@@ -121,6 +121,18 @@ class CapriHostRuntime:
             raise HostRuntimeError("a durable SQLiteSessionStore is required")
         if not isinstance(orchestrator, ToolOrchestrator):
             raise HostRuntimeError("a configured ToolOrchestrator is required")
+        required_assistant_chars = max(
+            orchestrator.max_output_chars,
+            orchestrator.max_tool_message_bytes,
+        )
+        if session_store.max_output_chars < required_assistant_chars:
+            raise HostRuntimeError(
+                "session max_output_chars must cover assistant and tool-call message limits"
+            )
+        if session_store.max_tool_chars < orchestrator.max_tool_message_bytes:
+            raise HostRuntimeError(
+                "session max_tool_chars must cover the orchestrator tool-message limit"
+            )
         if coordinator is None:
             coordinator = SessionTurnCoordinator()
         if not isinstance(coordinator, SessionTurnCoordinator):
