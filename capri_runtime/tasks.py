@@ -16,6 +16,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Mapping
 from uuid import uuid4
 
+from .sqlite_backup import backup_sqlite_database
+
 
 class TaskError(Exception):
     """Base class for expected task-engine failures."""
@@ -602,12 +604,70 @@ class SQLiteTaskStore:
             finally:
                 connection.close()
 
+    def _validate_backup_snapshot(self, connection: sqlite3.Connection) -> None:
+        allowed_states = {"queued", "running", "retry_wait", "succeeded", "failed", "cancelled"}
+        rows = connection.execute(
+            """SELECT task_id,idempotency_key,state,created_at,updated_at,current_step,
+            attempts,available_at,cancel_requested,results_json,error_code,plan_json
+            FROM tasks"""
+        ).fetchall()
+        for row in rows:
+            self._record(row[:11])
+            if row[2] not in allowed_states:
+                raise TaskValidationError("backup contains an unsupported task state")
+            try:
+                plan = json.loads(row[11])
+            except (TypeError, ValueError, RecursionError):
+                raise TaskValidationError("backup contains a malformed task plan") from None
+            _validate_plan(plan)
+            if (
+                isinstance(row[5], bool) or not isinstance(row[5], int)
+                or not 0 <= row[5] <= len(plan)
+                or isinstance(row[6], bool) or not isinstance(row[6], int)
+                or row[6] < 0
+            ):
+                raise TaskValidationError("backup contains invalid task progress")
+        events = connection.execute(
+            "SELECT task_id,timestamp,state,step_index,attempt,error_code FROM task_events"
+        ).fetchall()
+        for task_id, timestamp, state, step_index, attempt, error_code in events:
+            _text(task_id, "task_id", 64)
+            _text(timestamp, "event timestamp", 64)
+            if state not in allowed_states:
+                raise TaskValidationError("backup contains an unsupported task event state")
+            if (
+                isinstance(step_index, bool) or not isinstance(step_index, int) or step_index < 0
+                or isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 0
+            ):
+                raise TaskValidationError("backup contains invalid task event progress")
+            if error_code is not None:
+                _text(error_code, "event error_code", 64)
+
+    def backup_to(self, destination_path: str) -> str:
+        """Create a private, consistent task-state snapshot without overwriting."""
+        return backup_sqlite_database(
+            self.path,
+            destination_path,
+            lock=self._lock,
+            connect=self._connect,
+            validate_snapshot=self._validate_backup_snapshot,
+            error_type=TaskValidationError,
+            prefix=".capri-task-backup-",
+        )
+
     def integrity_check(self) -> str:
         with self._lock:
             connection = self._connect()
             try:
                 row = connection.execute("PRAGMA integrity_check").fetchone()
-                return str(row[0]) if row else "no result"
+                foreign_key_errors = connection.execute("PRAGMA foreign_key_check").fetchall()
+                if not row:
+                    return "no result"
+                if row[0] != "ok":
+                    return str(row[0])
+                if foreign_key_errors:
+                    return "foreign key check failed"
+                return "ok"
             finally:
                 connection.close()
 
