@@ -1,4 +1,5 @@
 import os
+from dataclasses import replace
 import sqlite3
 import stat
 import tempfile
@@ -10,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from capri_runtime.tasks import (
     SQLiteTaskStore,
+    TaskClaim,
     TaskConflictError,
     TaskEngine,
     TaskIdempotencyConflict,
@@ -134,6 +136,47 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         with self.assertRaises(TaskNotFoundError):
             self.store.get_for_principal(legacy.task_id, "alice")
         self.assertEqual(self.store.get(legacy.task_id), legacy)
+
+    def test_worker_rejects_tampered_claim_identity_and_payload(self):
+        calls = []
+        engine = TaskEngine(
+            self.store,
+            {
+                "prepare": lambda data, key: calls.append(("legacy", data)) or {"ok": True},
+                "admin": lambda data, key: calls.append(("legacy-admin", data)) or {"ok": True},
+            },
+            "worker",
+            principal_handlers={
+                "prepare": lambda data, key, principal: (
+                    calls.append(("principal", principal, data)) or {"ok": True}
+                ),
+                "admin": lambda data, key, principal: (
+                    calls.append(("principal-admin", principal, data)) or {"ok": True}
+                ),
+            },
+        )
+        tamper = (
+            lambda claim: replace(claim, principal_id=None),
+            lambda claim: replace(claim, tool="admin", input={"elevated": True}),
+            lambda claim: replace(claim, input={"value": "tampered"}),
+        )
+        for attack in tamper:
+            with self.subTest(attack=attack):
+                self.store.create_for_principal(
+                    "alice",
+                    [{"tool": "prepare", "input": {"value": "original"}, "max_attempts": 1}],
+                    now=NOW,
+                )
+                claim = self.store.claim_next("worker", now=NOW)
+                self.assertIsInstance(claim, TaskClaim)
+                with self.assertRaises(TaskConflictError):
+                    engine.execute_claim(attack(claim), now=NOW)
+                self.assertEqual(calls, [])
+                completed = engine.execute_claim(claim, now=NOW)
+                self.assertEqual(completed.state, "succeeded")
+                self.assertEqual(
+                    calls[-1], ("principal", "alice", {"value": "original"})
+                )
 
     def test_principal_claims_require_principal_aware_handlers(self):
         calls = []
