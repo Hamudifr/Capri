@@ -580,6 +580,58 @@ class SQLiteTaskStore:
             finally:
                 connection.close()
 
+    def validate_claim(self, claim: TaskClaim) -> None:
+        """Verify every executable claim field against the authoritative SQLite row.
+
+        TaskClaim is a transport object, not an authority source. A caller can
+        construct or alter one, so worker dispatch must not trust its principal,
+        tool, input, attempt, or lease metadata without checking the stored task.
+        """
+        if not isinstance(claim, TaskClaim):
+            raise TaskValidationError("claim must be a TaskClaim")
+        _text(claim.task_id, "task_id", 64)
+        _text(claim.executor_id, "executor_id", 128)
+        stamp = _iso(_now())
+        with self._lock:
+            connection = self._connect()
+            try:
+                row = connection.execute(
+                    """SELECT tasks.state,tasks.lease_owner,tasks.lease_until,
+                    tasks.current_step,tasks.attempts,tasks.plan_json,
+                    task_owners.principal_id
+                    FROM tasks LEFT JOIN task_owners
+                    ON task_owners.task_id=tasks.task_id
+                    WHERE tasks.task_id=?""",
+                    (claim.task_id,),
+                ).fetchone()
+                if not row:
+                    raise TaskNotFoundError("task does not exist")
+                state, owner, until, index, attempt, plan_json, principal_id = row
+                if (
+                    state != "running"
+                    or owner != claim.executor_id
+                    or index != claim.step_index
+                    or attempt != claim.attempt
+                    or principal_id != claim.principal_id
+                    or until != claim.lease_until
+                ):
+                    raise TaskConflictError("task claim does not match its authoritative lease")
+                if _parse_time(until) <= _parse_time(stamp):
+                    raise TaskConflictError("task lease expired before handler invocation")
+                plan = json.loads(plan_json)
+                if index < 0 or index >= len(plan):
+                    raise TaskConflictError("task claim step is outside the persisted plan")
+                step = plan[index]
+                if (
+                    claim.idempotency_key != f"{claim.task_id}:{index}"
+                    or claim.tool != step["tool"]
+                    or type(claim.input) is not dict
+                    or claim.input != step["input"]
+                ):
+                    raise TaskConflictError("task claim payload differs from the persisted plan")
+            finally:
+                connection.close()
+
     def finish_step(self, claim: TaskClaim, result: Any,
                     now: datetime | None = None) -> TaskRecord:
         result_json, decoded = _json(result, label="step result")
