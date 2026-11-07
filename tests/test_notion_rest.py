@@ -126,6 +126,18 @@ class NotionRESTTransportTests(unittest.TestCase):
         t,_=self.make(raw)
         with self.assertRaises(MemoryNotFoundError): t.get_page(PAGE_ID)
 
+    def test_missing_or_malformed_trash_state_is_rejected(self):
+        for value in ("missing", None, 0, 1, "false"):
+            with self.subTest(value=value):
+                raw = page()
+                if value == "missing":
+                    raw.pop("in_trash")
+                else:
+                    raw["in_trash"] = value
+                t, _ = self.make(raw)
+                with self.assertRaises(NotionTransportError):
+                    t.get_page(PAGE_ID)
+
     def test_response_size_and_configuration_are_bounded(self):
         t,op=self.make()
         class Big(FakeResponse):
