@@ -30,7 +30,8 @@ Capri is a research and execution-assistance project. This repository contains a
 - `docs/TOOL_EXECUTION.md` — trust model, schema subset, approvals, audit behavior, and limitations for tool execution.
 - `docs/OPENAI_RESPONSES_ADAPTER.md` — optional concrete OpenAI Responses API adapter, safe configuration, cost boundary, and offline validation.
 - `docs/HOST_RUNTIME.md` — request-scoped host composition, authenticated session ownership, and worker boundaries.
-- `docs/SQLITE_SESSION_BACKUP.md` — consistent private session backups and controlled restore guidance.
+- `docs/SQLITE_SESSION_BACKUP.md` — session backup and restore details.
+- `docs/SQLITE_STORE_BACKUP.md` — backup coverage across all local SQLite stores and operational restore guidance.
 - `docs/MEMORY_STORE.md` — durable memory contract, trust rules, privacy constraints, and limitations.
 - `docs/NOTION_MEMORY_ADAPTER.md` — Notion REST setup, host transport contract, mapping, correction recovery, optional live smoke test, and limitations.
 - `tests/` — deterministic structural, ledger, and runtime tests.
@@ -38,11 +39,11 @@ Capri is a research and execution-assistance project. This repository contains a
 
 ## Current status
 
-**Verified code checkpoint — 2026-11-07 (PR #119 code baseline)**
+**Verified code checkpoint — 2026-11-07 (PR #120 code baseline)**
 
-- Latest verified code-changing mainline commit at this checkpoint: PR #119 merge `fceae5173a46252d547a87274b016422ea9f26fb`. Re-read GitHub for the live branch tip before further changes.
-- PR #119 exact-head CI run [42381733985](https://github.com/Hamudifr/Capri/actions/runs/42381733985) and post-merge push CI run [42381811001](https://github.com/Hamudifr/Capri/actions/runs/42381811001) both passed compilation, Capri Doctor 6/6, operational health 7/7, and **421 tests** on Python 3.11, 3.12, and 3.13. All six job logs were inspected. The optional live Notion REST smoke test was skipped.
-- The repository contains the integrated non-X5 recovery foundation, append-only hash-chain ledger, principal-owned SQLite session runtime, private session backup support, permissioned tool-execution boundary, durable SQLite task engine and worker, durable audit/approval storage, and bounded local project memory.
+- Latest verified code-changing mainline commit at this checkpoint: PR #120 merge `0965e539609b7fc94bcf000d0ba6f2fca8bc7f59`. Re-read GitHub for the live branch tip before further changes.
+- PR #120 exact-head CI run [42382331774](https://github.com/Hamudifr/Capri/actions/runs/42382331774) and post-merge push CI run [42382405035](https://github.com/Hamudifr/Capri/actions/runs/42382405035) both passed compilation, Capri Doctor 6/6, operational health 7/7, and **425 tests** on Python 3.11, 3.12, and 3.13. All six Python job logs were inspected. The optional live Notion REST smoke test was skipped.
+- The repository contains the integrated non-X5 recovery foundation, append-only hash-chain ledger, principal-owned SQLite session runtime, private consistent backups for all four local SQLite stores, permissioned tool-execution boundary, durable SQLite task engine and worker, durable audit/approval storage, and bounded local project memory.
 - Memory includes the SQLite provider, Notion memory adapter, standard-library Notion REST transport, explicit read-only data-source schema preflight, and `create_notion_memory_adapter_from_environment()`. `build_untrusted_memory_context()` prepares bounded eligible memory for separate model-adapter delivery.
 - The connected Notion data-source metadata was inspected read-only: required logical properties and supported option labels are present. The connector normalizes text fields as `text`; this is **not** an authenticated raw REST schema preflight.
 - The optional live Notion REST smoke test remains skipped. Authenticated REST create/read/correct/search/archive/trash behavior is not yet verified, and no always-on Capri process is connected to Notion.
@@ -71,6 +72,7 @@ Capri is a research and execution-assistance project. This repository contains a
 - [PR #117](https://github.com/Hamudifr/Capri/pull/117) — add the bounded OpenAI Responses API adapter, preserve reasoning continuation state, and keep memory separate from trusted instructions; exact-head and post-merge CI passed 405 tests across Python 3.11/3.12/3.13.
 - [PR #118](https://github.com/Hamudifr/Capri/pull/118) — add authenticated principal-owned sessions and request-scoped CapriHostRuntime; exact-head and post-merge CI passed 418 tests across Python 3.11/3.12/3.13.
 - [PR #119](https://github.com/Hamudifr/Capri/pull/119) — add private consistent SQLite session backups with integrity, foreign-key, transcript, and owner validation; exact-head and post-merge CI passed 421 tests across Python 3.11/3.12/3.13.
+- [PR #120](https://github.com/Hamudifr/Capri/pull/120) — add consistent private backups for task and memory stores, completing backup methods across the four local SQLite stores; exact-head and post-merge CI passed 425 tests across Python 3.11/3.12/3.13.
 
 ### Earlier foundation milestones
 
@@ -84,7 +86,7 @@ Capri is a research and execution-assistance project. This repository contains a
 - Authenticated live Notion REST verification and a successful create/read/correct/search/archive/trash smoke run.
 - A real host process that constructs and uses the Notion adapter, owns token rotation, and provides scheduling/process supervision.
 - Live provider verification for the optional OpenAI adapter (requires a deliberately provisioned API key and acceptance of separate API charges); no API key or paid request is assumed.
-- Authentication-provider integration and memory ACL tests beyond session ownership; per-principal rate limits and hard provider spend budgets; approval UX; redacted observability; task/memory-store backups; encrypted backup storage; retention/restore drills; deployment packaging and process supervision.
+- Authentication-provider integration and memory ACL tests beyond session ownership; per-principal rate limits and hard provider spend budgets; approval UX; redacted observability; encrypted backup storage; scheduled/off-site backup, retention and restore drills; deployment packaging and process supervision.
 - External services and paid infrastructure are not assumed or provisioned.
 
 ## Model-to-tool orchestration\n\nThe provider-neutral `ToolExecutionBridge` validates bounded structured call batches and routes requests through the trusted `ToolExecutor`. `ToolOrchestrator` adds a bounded multi-round loop. `OpenAIResponsesAdapter` supplies an optional concrete provider adapter; `CapriHostRuntime` composes trusted identity resolution with principal-owned sessions and durable turn commits. The adapter never executes tools directly and returns proposals to the bridge. The embedding host still owns authentication integration, memory ACLs, approval UX, provider budgets, and process supervision. See [docs/TOOL_EXECUTION.md](docs/TOOL_EXECUTION.md), [docs/OPENAI_RESPONSES_ADAPTER.md](docs/OPENAI_RESPONSES_ADAPTER.md), and [docs/HOST_RUNTIME.md](docs/HOST_RUNTIME.md).\n\n## Durable task execution and recovery
