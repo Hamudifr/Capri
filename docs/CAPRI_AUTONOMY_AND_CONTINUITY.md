@@ -87,14 +87,14 @@ Before integrating or merging code, inspect the exact diff, dependency ancestry,
 
 ## 9. Current verified repository anchor
 
-The README on the repository's default branch records the following checkpoint as of 2026-11-07:
+Live GitHub and the README were rechecked on 2026-11-07 13:55 UTC:
 - Repository: `Hamudifr/Capri`, private, default branch `main`.
-- Recorded main commit: `229ce67caa0614bd56bf7863df525d6793eafad0`.
-- Recorded post-merge CI run: `42358381131`, passing compilation, Capri Doctor 6/6, operational health 7/7, and 352 tests on Python 3.11, 3.12, and 3.13.
-- The README explicitly describes the project as an internal engineering prototype, not an AGI, consciousness, or public/multi-tenant production system.
-- Remaining gaps include authenticated live Notion REST smoke verification, a supervised host process, concrete provider adapter, host identity/tenant isolation, observability, deployment packaging, and operational backup/restore/retention.
+- Current main commit: `41348ece66177f7cca3027936e9bc44d82bfa529`.
+- Latest verified exact-head CI is PR #109 run `42379098826`: compilation, Capri Doctor 6/6, operational health 7/7, and 388 tests passed on Python 3.11, 3.12, and 3.13. This was PR-head CI before merge; post-merge push CI is not verified in this checkpoint.
+- The README describes the project as an internal engineering prototype, not an AGI, consciousness, or public/multi-tenant production system.
+- Remaining gaps include authenticated live Notion REST smoke verification, a supervised host process, concrete model-provider adapter, host identity/tenant isolation, observability, deployment packaging, and operational backup/restore/retention.
 
-This is a documented repository checkpoint, not a claim that every later feature branch or pull request has been reconciled into `main`. Re-read live GitHub state before making release or integration decisions.
+This is a read-back-verified mainline anchor, not a claim that every open or superseded feature branch is merged. Re-read live GitHub state before making release or integration decisions.
 
 ## 10. Handoff requirement
 
