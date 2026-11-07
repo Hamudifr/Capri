@@ -129,14 +129,17 @@ class NotionMemoryAdapter:
     def _expiry(value: object) -> str | None:
         if value is None:
             return None
-        if isinstance(value, date) and not isinstance(value, datetime):
+        if type(value) is date:
             value = datetime.combine(value, time.max, tzinfo=timezone.utc).isoformat()
-        if isinstance(value, str) and len(value) == 10:
-            try:
-                day = date.fromisoformat(value)
-                value = datetime.combine(day, time.max, tzinfo=timezone.utc).isoformat()
-            except ValueError:
-                pass
+        elif type(value) is str:
+            if len(value) == 10:
+                try:
+                    day = date.fromisoformat(value)
+                    value = datetime.combine(day, time.max, tzinfo=timezone.utc).isoformat()
+                except ValueError:
+                    pass
+        else:
+            raise MemoryValidationError("Expires must be a plain ISO timestamp, date, or None")
         return _validate_expiry(value)
 
     @staticmethod
