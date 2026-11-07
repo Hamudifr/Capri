@@ -580,7 +580,9 @@ class SQLiteTaskStore:
             finally:
                 connection.close()
 
-    def validate_claim(self, claim: TaskClaim) -> None:
+    def validate_claim(
+        self, claim: TaskClaim, now: datetime | None = None
+    ) -> None:
         """Verify every executable claim field against the authoritative SQLite row.
 
         TaskClaim is a transport object, not an authority source. A caller can
@@ -591,7 +593,7 @@ class SQLiteTaskStore:
             raise TaskValidationError("claim must be a TaskClaim")
         _text(claim.task_id, "task_id", 64)
         _text(claim.executor_id, "executor_id", 128)
-        stamp = _iso(_now())
+        stamp = _iso(now or _now())
         with self._lock:
             connection = self._connect()
             try:
@@ -885,7 +887,7 @@ class TaskEngine:
     def execute_claim(self, claim: TaskClaim, now: datetime | None = None) -> TaskRecord:
         if not isinstance(claim, TaskClaim) or claim.executor_id != self.executor_id:
             raise TaskConflictError("claim does not belong to this task engine")
-        self.store.validate_claim(claim)
+        self.store.validate_claim(claim, now=now)
         if claim.principal_id is None:
             handler = self.handlers.get(claim.tool)
             if handler is None:
