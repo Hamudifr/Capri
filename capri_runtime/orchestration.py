@@ -281,13 +281,14 @@ class ToolOrchestrator:
                 if len(state_bytes) > self.max_tool_message_bytes:
                     raise ToolOrchestrationError("provider_state exceeds the configured byte limit")
                 for raw_call, call in zip(raw_calls, response.tool_calls):
+                    try:
+                        raw_arguments = json.loads(raw_call.get("arguments", ""))
+                    except (TypeError, ValueError, json.JSONDecodeError, RecursionError):
+                        raise ToolOrchestrationError("provider_state contains invalid function arguments") from None
                     if (
                         raw_call.get("call_id") != call.call_id
                         or raw_call.get("name") != call.name
-                        or raw_call.get("arguments") != json.dumps(
-                            call.arguments, ensure_ascii=False, allow_nan=False,
-                            sort_keys=True, separators=(",", ":"),
-                        )
+                        or raw_arguments != call.arguments
                     ):
                         raise ToolOrchestrationError("provider_state does not match the tool-call data")
 
