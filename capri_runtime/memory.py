@@ -78,11 +78,13 @@ class UntrustedMemoryContext:
             if type(record) is not MemoryRecord:
                 raise MemoryValidationError("memory context contains an invalid record")
             if type(record.memory_id) is not str:
-                raise MemoryValidationError("memory_id must be a plain string")\n            memory_id = _validate_text(record.memory_id, "memory_id", 64)
+                raise MemoryValidationError("memory_id must be a plain string")
+            memory_id = _validate_text(record.memory_id, "memory_id", 64)
             if memory_id in seen:
                 raise MemoryValidationError("memory context contains duplicate records")
             seen.add(memory_id)
-            if (type(record.status) is not str or type(record.sensitivity) is not str\n                    or record.status != "active" or record.sensitivity != "non_sensitive"):
+            if (type(record.status) is not str or type(record.sensitivity) is not str
+                    or record.status != "active" or record.sensitivity != "non_sensitive"):
                 raise MemoryValidationError("memory context accepts only active non-sensitive records")
             _validate_text(record.title, "title", _MAX_TITLE)
             _validate_text(record.content, "content", _MAX_CONTENT)
@@ -359,7 +361,10 @@ class SQLiteMemoryStore:
                 ).fetchall()
                 ranked = []
                 for row in rows:
-                    haystack = (row["title"] + "\n" + row["content"] + "\n" + row["scope"] + "\n" + row["tags"]).casefold()
+                    haystack = (row["title"] + "
+" + row["content"] + "
+" + row["scope"] + "
+" + row["tags"]).casefold()
                     matched = sum(term in haystack for term in terms)
                     if matched == len(terms):
                         exact = int(row["title"].casefold() == query.casefold())
