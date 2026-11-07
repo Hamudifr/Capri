@@ -11,11 +11,19 @@ from datetime import datetime, timezone
 from urllib.error import HTTPError
 
 from capri_runtime import (
+    AssistantTurn,
+    ExecutionContext,
+    InMemoryAuditSink,
     Message,
     OpenAIResponsesAdapter,
     OpenAIResponsesAdapterError,
     ToolCallRequest,
     ToolDefinition,
+    ToolExecutionBridge,
+    ToolExecutor,
+    ToolOrchestrator,
+    ToolRegistry,
+    ToolSpec,
 )
 from capri_runtime.memory import MemoryRecord, UntrustedMemoryContext
 
@@ -129,6 +137,68 @@ class OpenAIResponsesAdapterTests(unittest.TestCase):
         self.assertEqual(body["tools"][0]["name"], "project_search")
         self.assertEqual(body["tools"][0]["strict"], False)
         self.assertEqual(body["tool_choice"], "auto")
+
+    def test_orchestrator_persists_provider_continuation_state_for_replay(self):
+        registry = ToolRegistry()
+        registry.register(
+            ToolSpec(
+                "project_search",
+                "tools:search",
+                {
+                    "type": "object",
+                    "properties": {"query": {"type": "string", "minLength": 1, "maxLength": 40}},
+                    "required": ["query"],
+                    "additionalProperties": False,
+                },
+            ),
+            lambda arguments: {"matched": arguments["query"]},
+        )
+        bridge = ToolExecutionBridge(ToolExecutor(registry, InMemoryAuditSink()))
+        provider_output = (
+            {
+                "type": "reasoning",
+                "id": "rs_saved",
+                "encrypted_content": "opaque",
+                "summary": [],
+            },
+            {
+                "type": "function_call",
+                "call_id": "call_saved",
+                "name": "project_search",
+                "arguments": '{"query":"runtime"}',
+                "status": "completed",
+            },
+        )
+
+        class SequencedAdapter:
+            def __init__(self):
+                self.rounds = 0
+
+            def complete_with_tools(self, session_id, history, tools):
+                self.rounds += 1
+                if self.rounds == 1:
+                    return AssistantTurn(
+                        tool_calls=(ToolCallRequest(
+                            "call_saved", "project_search", {"query": "runtime"}
+                        ),),
+                        provider_state=provider_output,
+                    )
+                return AssistantTurn(content="Search complete.")
+
+        orchestrator = ToolOrchestrator(SequencedAdapter(), bridge)
+        result = orchestrator.run(
+            "session-provider-state",
+            "Search the project.",
+            (),
+            ExecutionContext("trusted-principal", frozenset({"tools:search"})),
+        )
+        self.assertEqual(result.final_text, "Search complete.")
+        saved_envelope = json.loads(result.messages[1].content)
+        self.assertEqual(saved_envelope["provider_state"], list(provider_output))
+        replayed = OpenAIResponsesAdapter._history_to_input(tuple(result.messages[:-1]))
+        self.assertEqual(replayed[1:3], list(provider_output))
+        self.assertEqual(replayed[3]["type"], "function_call_output")
+        self.assertEqual(replayed[3]["call_id"], "call_saved")
 
     def test_reasoning_and_raw_output_items_are_preserved_for_tool_continuation(self):
         output = [
