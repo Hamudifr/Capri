@@ -129,6 +129,8 @@ class NotionRESTTransport:
 
     @classmethod
     def _normalize_page(cls, raw: Mapping[str,object]) -> dict[str,object]:
+        if type(raw) is not dict:
+            raise NotionTransportError("Notion page response must be a plain JSON object")
         in_trash = raw.get("in_trash")
         if type(in_trash) is not bool:
             raise NotionTransportError("Notion page response has no valid trash state")
