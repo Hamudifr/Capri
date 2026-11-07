@@ -20,7 +20,7 @@ Owner rows have no public reassignment or deletion API and SQLite triggers rejec
 
 ## Task ownership
 
-When a `SQLiteTaskStore` is configured, `create_task()`, `get_task()`, and `cancel_task()` authenticate the credential through `HostAuthorityResolver` and use the resulting principal ID for owner-scoped task operations. A foreign task and a legacy unowned task both appear as `TaskNotFoundError`. Task ownership is inserted atomically with the task and cannot be reassigned or deleted through normal SQLite operations.
+When a `SQLiteTaskStore` is configured, `create_task()`, `get_task()`, and `cancel_task()` authenticate the credential through `HostAuthorityResolver` and use the resulting principal ID for owner-scoped task operations. Creation additionally requires a configured `TaskWorker` and rejects any plan step whose tool name is absent from that worker's `principal_handlers` allowlist; a task store alone is sufficient for reading/cancelling existing owned tasks, but not for enqueueing new work. A foreign task and a legacy unowned task both appear as `TaskNotFoundError`. Task ownership is inserted atomically with the task and cannot be reassigned or deleted through normal SQLite operations.
 
 The task worker may share the same task database. Principal-owned claims carry the owner ID and are dispatched only through `TaskEngine(principal_handlers=...)`; the generic legacy handler map is never used for an owned task. Principal-aware handlers must independently enforce resource ACLs. Task ownership is not a substitute for an identity provider, resource authorization, or complete tenant isolation.
 
