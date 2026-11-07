@@ -1,43 +1,44 @@
 # Capri recovery plan
 
-## Live reconciliation — 2026-11-07 14:18 UTC (authoritative)
+## Live reconciliation — 2026-11-07 14:30 UTC (authoritative)
 
 This section is the current repository snapshot. Older reconciliation blocks below are retained as historical records and must not be treated as current state.
 
 ### Current repository state
 
 - Private repository: `Hamudifr/Capri`.
-- Latest verified code-changing mainline commit: PR #117 merge `4d38c85a28120b917601602ba664cb772246a419`.
+- Latest verified code-changing mainline commit: PR #119 merge `fceae5173a46252d547a87274b016422ea9f26fb`.
 - Open pull requests: 0.
-- Main includes the integrated non-X5 foundation, permissioned tool boundary, durable local audit/approval storage, SQLite sessions, SQLite/Notion memory providers, durable task engine and worker, Notion REST transport hardening, expiring-memory invariants, and the concrete OpenAI Responses API adapter.
-- PR #117 exact-head CI run [42380772978](https://github.com/Hamudifr/Capri/actions/runs/42380772978) and post-merge push CI run [42380871240](https://github.com/Hamudifr/Capri/actions/runs/42380871240) both passed compilation, Capri Doctor 6/6, operational health 7/7, and 405 tests on Python 3.11, 3.12, and 3.13. All six job logs were inspected.
-- The optional live Notion REST smoke test was skipped. No live OpenAI API request, API key creation, paid API usage, public release, deployment, or protected X5 access occurred.
+- Main includes the non-X5 recovery foundation, permissioned tool boundary, durable audit/approval storage, SQLite sessions, principal-owned session runtime, private session backups, SQLite/Notion memory providers, durable task engine/worker, Notion REST transport hardening, expiring-memory invariants, and the OpenAI Responses API adapter.
+- PR #119 exact-head CI run [42381733985](https://github.com/Hamudifr/Capri/actions/runs/42381733985) and post-merge push CI run [42381811001](https://github.com/Hamudifr/Capri/actions/runs/42381811001) both passed compilation, Capri Doctor 6/6, operational health 7/7, and 421 tests on Python 3.11, 3.12, and 3.13. All six Python job logs were inspected.
+- Optional live Notion REST smoke was skipped. No live OpenAI API request, API key creation, paid API usage, deployment, public release, or protected X5 access occurred.
 
-### Provider integration status
+### Model and host runtime
 
-- `capri_runtime.openai_responses.OpenAIResponsesAdapter` implements the memory-aware model-adapter protocol using only the Python standard library and the official Responses API endpoint.
-- Provider function calls remain untrusted proposals; all execution passes through `ToolOrchestrator`, `ToolExecutionBridge`, host permissions, approval controls, and audit.
-- Retrieved memory is sent separately from trusted host instructions. Full provider output continuation items, including reasoning items returned alongside tool calls, are retained in the bounded private session transcript and replayed with tool outputs.
-- Offline tests cover request/response parsing, tool transcript replay, memory separation, continuation-state persistence, malformed responses, duplicate IDs, bounds, and credential/error suppression.
-- A live provider call remains unperformed. `OPENAI_API_KEY` and `CAPRI_OPENAI_MODEL` must be provisioned by a host owner; API usage can incur charges separately from ChatGPT subscriptions. No live call is authorized by this work.
-- The adapter is not a host process. It has no streaming, provider failover, in-flight cancellation, token-usage accounting, or hard currency spend cap.
+- `OpenAIResponsesAdapter` implements the memory-aware model adapter using the standard library and the official Responses API. Function calls remain proposals and pass through ToolOrchestrator, ToolExecutionBridge, host permissions, approval controls, and audit.
+- Full provider output continuation items, including reasoning items returned alongside function calls, are retained in the bounded private session transcript and replayed with tool outputs.
+- Retrieved memory is sent separately from trusted host instructions. Offline tests cover request/response parsing, tool transcript replay, memory separation, continuation-state persistence, malformed responses, duplicate IDs, bounds, and credential/error suppression.
+- `CapriHostRuntime` composes a trusted HostAuthorityResolver, principal-owned SQLite sessions, ToolOrchestrator, optional principal-scoped memory resolver, and optional host-managed TaskWorker. It is request-scoped, not an HTTP server or daemon.
+- SQLite session owner rows are created atomically, cannot be reassigned/deleted through the database triggers, and are checked before memory retrieval/model invocation. Cross-principal and legacy unowned sessions are hidden as not found.
+- `SQLiteSessionStore.backup_to()` creates a private consistent SQLite snapshot with integrity, foreign-key, transcript, and owner validation. Session backups are plaintext. Task-store and memory-store backups remain outstanding.
+- No live provider call was made. `OPENAI_API_KEY` and `CAPRI_OPENAI_MODEL` require deliberate host provisioning; API usage may incur charges separate from ChatGPT subscriptions. No hard currency spend cap is implemented.
 
 ### Remaining work, ordered
 
-1. Build and test a host composition/supervision layer that wires authenticated identity, durable sessions, memory, the model adapter, tool gateway, and task worker without granting authority to model output.
-2. Implement authenticated session ownership and cross-user isolation; add negative tests before any multi-user exposure.
-3. Add provider-aware input/output token budgets and hard spend controls before enabling any paid provider.
+1. Integrate a real authentication provider and test memory-provider ACLs; session ownership is implemented but does not by itself prove complete tenant isolation.
+2. Build a supervised host process / API service with explicit lifecycle, approval UX, scheduling, health probes, and graceful shutdown.
+3. Add per-principal request/token budgets and hard spend controls before any paid provider is enabled.
 4. Add end-to-end adversarial tests for hostile memory, retrieved documents, forged tool calls, approval replay, and tool-result prompt injection.
 5. Add redacted structured observability, live-dependency health probes, alerting hooks, and incident/recovery runbooks.
-6. Add encrypted backup/restore, retention/compaction, and verified deletion/restore workflows for local SQLite stores.
-7. Add deployment packaging and process supervision; keep deployment internal/private until the relevant host controls are tested.
-8. Verify live Notion REST only when a least-privilege token and repository Actions secret/variables are deliberately configured. Never ask for or commit the token in chat/Git.
+6. Add consistent private backups for task and memory stores, encrypted backup storage, retention/compaction, and tested restore drills.
+7. Add deployment packaging and process supervision; keep deployment internal/private until controls are verified.
+8. Verify live Notion REST only when least-privilege credentials and repository Actions secrets/variables are deliberately configured. Verify live OpenAI only if the owner deliberately provisions an API key and accepts API charges. Never request or commit credentials in chat/Git.
 
 ### Delivery policy
 
 Capri owns routine design, implementation, self-review, testing, integration, and documentation. External independent review is not a prerequisite for ordinary internal engineering. Use isolated feature branches, inspect exact diffs, run and inspect CI, verify dependency ancestry, and integrate completed compatible work. Keep self-review distinct from independent assurance.
 
-No paid spend, subscriptions, credential/private-data exposure, destructive deletion, public release, platform-control bypass, or protected X5 access is authorized by this standing engineering mandate. Continue independent safe work when a provider credential or other external dependency is unavailable.
+No paid spend, subscriptions, credential/private-data exposure, destructive deletion, public release, platform-control bypass, or protected X5 access is authorized by this standing engineering mandate. Continue independent safe work when an external dependency is unavailable.
 
 ---
 
