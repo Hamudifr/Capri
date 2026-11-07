@@ -39,6 +39,9 @@ The parent directory must already exist and be private (0700 or stricter on POSI
 
 The worker claim includes the owner ID from the trusted database row. A principal-owned claim never falls back to a generic legacy handler: it requires a matching trusted `principal_handlers` callback with signature `(input_dict, stable_idempotency_key, principal_id)`. That callback must enforce current resource-level authorization for every external resource it touches. The principal ID is provenance from the local ownership record, not a replacement for a live authentication provider or resource ACL check. Legacy unowned tasks continue to use `handlers` with signature `(input_dict, stable_idempotency_key)`.
 
+A `TaskClaim` is a transport value, not an authority source. Immediately before dispatch, `TaskEngine` validates the claim against the authoritative SQLite task row and persisted plan: principal owner, executor, active lease and expiry, step index, attempt, idempotency key, tool name, and exact input must all match. A forged, stale, expired, or altered claim is rejected before any handler runs. This prevents callers from changing a principal-owned claim into a legacy claim or substituting a different registered tool/input. It does not make trusted in-process handler code a sandbox; handlers still require resource-level authorization and idempotent side effects.
+
+
 ## State machine
 
 - `queued`: eligible for a worker claim.
