@@ -13,7 +13,7 @@ from capri_runtime.orchestration import (
     ToolOrchestrator,
 )
 from capri_runtime.runtime import Message, SessionClosedError, SessionStore
-from capri_runtime.memory import UntrustedMemoryContext, SQLiteMemoryStore
+from capri_runtime.memory import UntrustedMemoryContext, SQLiteMemoryStore, build_untrusted_memory_context
 from capri_runtime.tool_bridge import ToolCallRequest, ToolExecutionBridge
 from capri_runtime.tools import (
     ApprovalGrant,
@@ -297,7 +297,7 @@ class ToolOrchestrationTests(unittest.TestCase):
                 source="https://github.com/Hamudifr/Capri/issues/19",
                 confidence="user_directed",
             )
-            memory = UntrustedMemoryContext((record,))
+            memory = build_untrusted_memory_context(store, "Host permissions")
             class MemoryAdapter:
                 def __init__(inner):
                     inner.received = []
