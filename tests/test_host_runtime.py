@@ -4,6 +4,7 @@ import unittest
 
 from capri_runtime import (
     AssistantTurn,
+    HostAuthorityError,
     HostAuthorityResolver,
     InMemoryAuditSink,
     SessionClosedError,
@@ -45,9 +46,10 @@ class CapriHostRuntimeTests(unittest.TestCase):
         )
         self.orchestrator = ToolOrchestrator(self.adapter, bridge)
         self.authority = HostAuthorityResolver(
-            authenticate=lambda credential: (
-                credential if credential in {"alice-token", "bob-token"} else None
-            ),
+            authenticate=lambda credential: {
+                "alice-token": "alice",
+                "bob-token": "bob",
+            }.get(credential),
             permissions_for=lambda principal_id: (),
         )
 
@@ -137,7 +139,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
 
     def test_invalid_credentials_are_rejected_by_trusted_authority(self):
         host = self.make_host()
-        with self.assertRaises(Exception):
+        with self.assertRaises(HostAuthorityError):
             host.create_session("invalid-token")
 
     def test_task_worker_requires_explicit_host_configuration(self):
