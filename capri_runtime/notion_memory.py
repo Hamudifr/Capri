@@ -462,6 +462,11 @@ class NotionMemoryAdapter:
         """Move the Notion page to trash; this is not secure or permanent erasure."""
         _validate_memory_id(memory_id)
         self._transport.delete_page(memory_id)
+        try:
+            self.get(memory_id)
+        except MemoryNotFoundError:
+            return
+        raise MemoryValidationError("Notion delete did not make the record unavailable")
 
     def expire(self, *, now: datetime | None = None) -> tuple[str, ...]:
         if now is not None and type(now) is not datetime:

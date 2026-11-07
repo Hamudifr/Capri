@@ -322,6 +322,18 @@ class NotionMemoryAdapterTests(unittest.TestCase):
         with self.assertRaises(MemoryNotFoundError):
             self.store.get(record.memory_id)
 
+    def test_delete_rejects_transport_that_leaves_page_retrievable(self):
+        class NoopDeleteTransport(FakeNotionTransport):
+            def delete_page(self, page_id):
+                return None
+
+        transport = NoopDeleteTransport()
+        store = NotionMemoryAdapter(transport)
+        record = self.create(store=store)
+        with self.assertRaisesRegex(MemoryValidationError, "did not make the record unavailable"):
+            store.delete(record.memory_id)
+        self.assertEqual(store.get(record.memory_id).memory_id, record.memory_id)
+
     def test_expiry_archives_due_records(self):
         past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
         record = self.create(retention="expire_30d", expires_at=past)
