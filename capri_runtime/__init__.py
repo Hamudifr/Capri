@@ -60,7 +60,7 @@ from .host import HostToolGateway
 from .approval import ApprovalChallenge, HostApprovalService, SQLiteApprovalChallengeStore
 from .sqlite_sessions import SQLiteSessionStore
 from .security_store import SQLiteSecurityStore
-from .memory import MemoryErrorBase, MemoryNotFoundError, MemoryProvider, MemoryRecord, MemoryValidationError, SQLiteMemoryStore, UntrustedMemoryContext, build_untrusted_memory_context
+from .memory import MemoryErrorBase, MemoryNotFoundError, MemoryProvider, MemoryRecord, MemoryValidationError, SQLiteMemoryStore, UntrustedMemoryContext, build_untrusted_memory_context, serialize_untrusted_memory_context
 from .notion_memory import MemorySyncError, NotionMemoryAdapter, NotionMemoryTransport
 from .notion_rest import NotionRateLimitError, NotionRESTTransport, NotionTransportError, create_notion_memory_adapter_from_environment
 from .tasks import (
@@ -108,6 +108,7 @@ __all__ = [
     "MemoryRecord",
     "UntrustedMemoryContext",
     "build_untrusted_memory_context",
+    "serialize_untrusted_memory_context",
     "MemoryValidationError",
     "MemorySyncError",
     "NotionMemoryAdapter",
