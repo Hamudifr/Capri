@@ -204,6 +204,18 @@ class NotionMemoryAdapterTests(unittest.TestCase):
         with self.assertRaises(MemoryValidationError):
             self.store.get(record.memory_id)
 
+    def test_rejects_non_uuid_page_and_supersession_ids(self):
+        record = self.create()
+        page = self.transport.pages[record.memory_id]
+        page["id"] = "not-a-uuid"
+        with self.assertRaisesRegex(MemoryValidationError, "page id must be a UUID"):
+            self.store.get(record.memory_id)
+
+        page["id"] = record.memory_id
+        page["properties"]["Supersedes"] = "not-a-uuid"
+        with self.assertRaisesRegex(MemoryValidationError, "Supersedes id must be a UUID"):
+            self.store.get(record.memory_id)
+
     def test_rejects_missing_or_non_boolean_sensitive_classification(self):
         record = self.create()
         properties = self.transport.pages[record.memory_id]["properties"]
