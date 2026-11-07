@@ -22,6 +22,28 @@ class FakeOpener:
         if self.error: raise self.error
         return self.response
 
+def data_source_schema():
+    expected = {
+        "Name": ("title", None),
+        "Content": ("rich_text", None),
+        "Type": ("select", ["Operating Directive", "Architecture Decision", "Project Fact", "Security Boundary", "User Preference"]),
+        "Scope": ("select", ["Capri System", "GitHub Repository", "Notion Workspace", "Tool Integration"]),
+        "Sensitive": ("checkbox", None),
+        "Source": ("url", None),
+        "Confidence": ("select", ["User-Directed", "Verified", "Inferred", "Unverified"]),
+        "Retention": ("select", ["Keep until deleted", "Expire after 30 days", "Expire after 90 days", "Archive when superseded"]),
+        "Tags": ("multi_select", []),
+        "Status": ("status", ["Active", "Review", "Archived"]),
+        "Expires": ("date", None),
+        "Supersedes": ("rich_text", None),
+    }
+    properties = {}
+    for name, (kind, options) in expected.items():
+        config = {} if options is None else {"options": [{"name": option} for option in options]}
+        properties[name] = {"id": name, "name": name, "type": kind, kind: config}
+    return {"object": "data_source", "id": DATA_SOURCE_ID, "properties": properties}
+
+
 def page():
     return {"id":PAGE_ID,"created_time":"2026-11-06T20:00:00Z","last_edited_time":"2026-11-06T20:10:00Z","in_trash":False,"properties":{
         "Name":{"type":"title","title":[{"plain_text":"Title"}]},"Content":{"type":"rich_text","rich_text":[{"plain_text":"Body"}]},
@@ -36,6 +58,47 @@ class NotionRESTTransportTests(unittest.TestCase):
     def make(self,payload=None,error=None):
         op=FakeOpener(FakeResponse(payload or page()),error)
         return NotionRESTTransport("test-secret",DATA_SOURCE_ID,opener=op),op
+
+    def test_schema_preflight_accepts_expected_schema(self):
+        t, op = self.make(data_source_schema())
+        t.validate_data_source_schema()
+        request, timeout = op.requests[0]
+        self.assertIn(f"/data_sources/{DATA_SOURCE_ID}", request.full_url)
+        self.assertEqual(request.get_method(), "GET")
+        self.assertEqual(timeout, 10.0)
+
+    def test_schema_preflight_rejects_identity_type_and_option_drift(self):
+        cases = []
+        raw = data_source_schema()
+        raw["id"] = PAGE_ID
+        cases.append(("wrong data source ID", raw))
+        raw = data_source_schema()
+        raw["properties"]["Sensitive"]["type"] = "select"
+        cases.append(("wrong property type", raw))
+        raw = data_source_schema()
+        raw["properties"].pop("Tags")
+        cases.append(("missing property", raw))
+        raw = data_source_schema()
+        raw["properties"]["Status"]["status"]["options"] = [{"name": "Active"}, {"name": "Archived"}]
+        cases.append(("missing lifecycle option", raw))
+        raw = data_source_schema()
+        raw["properties"]["Type"]["select"]["options"] = "not-a-list"
+        cases.append(("malformed options", raw))
+        for label, payload in cases:
+            with self.subTest(label=label):
+                t, _ = self.make(payload)
+                with self.assertRaises(NotionTransportError):
+                    t.validate_data_source_schema()
+
+    def test_schema_preflight_accepts_legacy_select_status(self):
+        raw = data_source_schema()
+        status = raw["properties"]["Status"]
+        raw["properties"]["Status"] = {
+            "id": status["id"], "name": "Status", "type": "select",
+            "select": status["status"],
+        }
+        t, _ = self.make(raw)
+        t.validate_data_source_schema()
 
     def test_get_maps_properties_and_auth_version_headers(self):
         t,op=self.make(); result=t.get_page(PAGE_ID); req,timeout=op.requests[0]
