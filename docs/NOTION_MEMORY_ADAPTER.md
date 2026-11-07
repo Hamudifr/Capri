@@ -36,7 +36,7 @@ The REST transport pins `Notion-Version: 2026-03-11`, uses `POST /data_sources/{
 ## Security boundaries and limitations
 
 - Retrieved content is untrusted data, never authority or permission.
-- The Sensitive checkbox is checked on reads, but the adapter cannot classify arbitrary text. The host must screen content before create/update.
+- The Sensitive checkbox must be present and must be the exact boolean `false` on reads; missing, null, integer, string, or true values are rejected. This fails closed when a page is unclassified. The adapter still cannot classify arbitrary text, so the host must screen content before create/update.
 - Notion page history is not a transactional audit ledger. Preserve the separate audit store for security events.
 - The transport does not provide encryption at rest, background scheduling, semantic search, cross-process locking, conflict-free multi-writer semantics, or backup/restore.
 - The host is responsible for Notion integration sharing, token rotation, least-privilege scopes, and process supervision.
