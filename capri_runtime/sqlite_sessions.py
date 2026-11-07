@@ -146,6 +146,16 @@ class SQLiteSessionStore(SessionStore):
                         expires_at TEXT NOT NULL
                     )"""
                 )
+                connection.execute(
+                    """CREATE TABLE IF NOT EXISTS session_owners (
+                        session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
+                        principal_id TEXT NOT NULL,
+                        created_at TEXT NOT NULL
+                    )"""
+                )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS session_owners_principal_id ON session_owners(principal_id)"
+                )
             finally:
                 connection.close()
 
@@ -245,6 +255,175 @@ class SQLiteSessionStore(SessionStore):
             finally:
                 connection.close()
         return session
+
+    @staticmethod
+    def _validate_principal_id(principal_id: str) -> str:
+        if (
+            not isinstance(principal_id, str)
+            or not principal_id.strip()
+            or len(principal_id) > 256
+            or _contains_surrogate(principal_id)
+        ):
+            raise ValidationError("principal_id must be bounded valid text")
+        return principal_id
+
+    def create_for_principal(self, principal_id: str) -> Session:
+        """Atomically create a session and bind it to one authenticated principal."""
+        principal_id = self._validate_principal_id(principal_id)
+        now = self._now()
+        session = Session(
+            session_id=str(uuid4()),
+            created_at=now,
+            updated_at=now,
+        )
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                connection.execute(
+                    """INSERT INTO sessions
+                    (session_id, created_at, updated_at, version, closed, messages_json)
+                    VALUES (?, ?, ?, 0, 0, '[]')""",
+                    (session.session_id, now, now),
+                )
+                connection.execute(
+                    """INSERT INTO session_owners (session_id, principal_id, created_at)
+                    VALUES (?, ?, ?)""",
+                    (session.session_id, principal_id, now),
+                )
+                connection.execute("COMMIT")
+            except Exception:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+            finally:
+                connection.close()
+        return session
+
+    def _require_owner(self, session_id: str, principal_id: str) -> None:
+        self._validate_principal_id(principal_id)
+        if (
+            not isinstance(session_id, str)
+            or not session_id.strip()
+            or len(session_id) > 256
+            or _contains_surrogate(session_id)
+        ):
+            raise ValidationError("session_id must be bounded valid text")
+        with self._lock:
+            connection = self._connect()
+            try:
+                row = connection.execute(
+                    "SELECT 1 FROM session_owners WHERE session_id = ? AND principal_id = ?",
+                    (session_id, principal_id),
+                ).fetchone()
+            finally:
+                connection.close()
+        if row is None:
+            # Deliberately conceal whether the session exists for another principal.
+            raise SessionNotFoundError("session does not exist")
+
+    def get_for_principal(self, session_id: str, principal_id: str) -> Session:
+        principal_id = self._validate_principal_id(principal_id)
+        if (
+            not isinstance(session_id, str)
+            or not session_id.strip()
+            or len(session_id) > 256
+            or _contains_surrogate(session_id)
+        ):
+            raise ValidationError("session_id must be bounded valid text")
+        with self._lock:
+            connection = self._connect()
+            try:
+                row = connection.execute(
+                    """SELECT s.session_id, s.created_at, s.updated_at, s.version,
+                    s.closed, s.messages_json
+                    FROM sessions AS s
+                    JOIN session_owners AS o ON o.session_id = s.session_id
+                    WHERE s.session_id = ? AND o.principal_id = ?""",
+                    (session_id, principal_id),
+                ).fetchone()
+            finally:
+                connection.close()
+        if row is None:
+            raise SessionNotFoundError("session does not exist")
+        return self._decode(row)
+
+    def close_for_principal(self, session_id: str, principal_id: str) -> Session:
+        principal_id = self._validate_principal_id(principal_id)
+        if (
+            not isinstance(session_id, str)
+            or not session_id.strip()
+            or len(session_id) > 256
+            or _contains_surrogate(session_id)
+        ):
+            raise ValidationError("session_id must be bounded valid text")
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    """SELECT s.session_id, s.created_at, s.updated_at, s.version,
+                    s.closed, s.messages_json
+                    FROM sessions AS s
+                    JOIN session_owners AS o ON o.session_id = s.session_id
+                    WHERE s.session_id = ? AND o.principal_id = ?""",
+                    (session_id, principal_id),
+                ).fetchone()
+                if row is None:
+                    raise SessionNotFoundError("session does not exist")
+                current = self._decode(row)
+                if current.closed:
+                    connection.execute("COMMIT")
+                    return current
+                updated_at = self._now()
+                connection.execute(
+                    "UPDATE sessions SET closed = 1, updated_at = ? WHERE session_id = ?",
+                    (updated_at, session_id),
+                )
+                connection.execute("COMMIT")
+                return replace(current, closed=True, updated_at=updated_at)
+            except Exception:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+            finally:
+                connection.close()
+
+    def commit_turn_messages_for_principal(
+        self,
+        session_id: str,
+        principal_id: str,
+        expected_version: int,
+        turn_messages: tuple[Message, ...],
+        *,
+        lease_owner: str | None = None,
+    ) -> Session:
+        # Ownership rows are immutable through the public API; this precondition
+        # therefore remains true through the underlying atomic versioned commit.
+        self._require_owner(session_id, principal_id)
+        return self.commit_turn_messages(
+            session_id, expected_version, turn_messages, lease_owner=lease_owner
+        )
+
+    def claim_turn_lease_for_principal(
+        self, session_id: str, principal_id: str, owner_token: str,
+        lease_seconds: float = 30.0,
+    ) -> str:
+        self._require_owner(session_id, principal_id)
+        return self.claim_turn_lease(session_id, owner_token, lease_seconds)
+
+    def renew_turn_lease_for_principal(
+        self, session_id: str, principal_id: str, owner_token: str,
+        lease_seconds: float = 30.0,
+    ) -> str:
+        self._require_owner(session_id, principal_id)
+        return self.renew_turn_lease(session_id, owner_token, lease_seconds)
+
+    def release_turn_lease_for_principal(
+        self, session_id: str, principal_id: str, owner_token: str,
+    ) -> bool:
+        self._require_owner(session_id, principal_id)
+        return self.release_turn_lease(session_id, owner_token)
 
     def get(self, session_id: str) -> Session:
         if not isinstance(session_id, str) or not session_id.strip():
