@@ -86,10 +86,15 @@ class UntrustedMemoryContext:
             if (type(record.status) is not str or type(record.sensitivity) is not str
                     or record.status != "active" or record.sensitivity != "non_sensitive"):
                 raise MemoryValidationError("memory context accepts only active non-sensitive records")
-            _validate_text(record.title, "title", _MAX_TITLE)
-            _validate_text(record.content, "content", _MAX_CONTENT)
-            _validate_text(record.scope, "scope", _MAX_SCOPE)
-            _validate_text(record.source, "source", _MAX_SOURCE)
+            for field_name, value, maximum in (
+                ("title", record.title, _MAX_TITLE),
+                ("content", record.content, _MAX_CONTENT),
+                ("scope", record.scope, _MAX_SCOPE),
+                ("source", record.source, _MAX_SOURCE),
+            ):
+                if type(value) is not str:
+                    raise MemoryValidationError(f"{field_name} must be a plain string")
+                _validate_text(value, field_name, maximum)
             if (
                 type(record.record_type) is not str
                 or record.record_type not in _ALLOWED_TYPES
@@ -108,7 +113,11 @@ class UntrustedMemoryContext:
                     raise MemoryValidationError(f"{timestamp_field} must be a required timezone-aware timestamp")
                 _validate_expiry(timestamp_value)
             if record.supersedes_id is not None:
+                if type(record.supersedes_id) is not str:
+                    raise MemoryValidationError("supersedes_id must be a plain string")
                 _validate_text(record.supersedes_id, "supersedes_id", 64)
+            if record.expires_at is not None and type(record.expires_at) is not str:
+                raise MemoryValidationError("expires_at must be a plain string")
             expiry = _validate_expiry(record.expires_at)
             if expiry is not None and datetime.fromisoformat(expiry) <= now:
                 raise MemoryValidationError("memory context excludes expired records")
