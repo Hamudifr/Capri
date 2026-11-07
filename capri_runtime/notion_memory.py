@@ -163,12 +163,7 @@ class NotionMemoryAdapter:
     def _record_from_page(cls, page: Mapping[str, object]) -> MemoryRecord:
         if not isinstance(page, Mapping):
             raise MemoryValidationError("Notion transport returned a non-object page")
-        page_id = page.get("id")
-        _validate_transport_text(page_id, "Notion page id", 64)
-        try:
-            UUID(page_id)
-        except (ValueError, TypeError, AttributeError):
-            raise MemoryValidationError("Notion page id must be a UUID") from None
+        page_id = _validate_memory_id(page.get("id"), "Notion page id")
         props = page.get("properties")
         if not isinstance(props, Mapping):
             raise MemoryValidationError("Notion page properties are missing")
@@ -215,16 +210,21 @@ class NotionMemoryAdapter:
         updated_at = cls._timestamp(page.get("last_edited_time"), "last_edited_time")
         supersedes_id = props.get("Supersedes")
         if supersedes_id is not None:
-            _validate_transport_text(supersedes_id, "Supersedes", 64)
-            try:
-                UUID(supersedes_id)
-            except (ValueError, TypeError, AttributeError):
-                raise MemoryValidationError("Notion Supersedes id must be a UUID") from None
+            supersedes_id = _validate_memory_id(supersedes_id, "Supersedes id")
         return MemoryRecord(
             page_id, title, content, record_type, scope, "non_sensitive", source,
             confidence, retention, tags, created_at, updated_at, expires_at,
             status, supersedes_id,
         )
+
+    @staticmethod
+    def _same_memory_payload(actual: MemoryRecord, expected: MemoryRecord) -> bool:
+        """Compare persisted content/lineage while ignoring timestamps and lifecycle state."""
+        fields = (
+            "memory_id", "title", "content", "record_type", "scope", "sensitivity",
+            "source", "confidence", "retention", "tags", "expires_at", "supersedes_id",
+        )
+        return all(getattr(actual, field) == getattr(expected, field) for field in fields)
 
     @staticmethod
     def _properties(
@@ -274,14 +274,29 @@ class NotionMemoryAdapter:
         if retention in {"expire_30d", "expire_90d"} and expires_at is None:
             raise MemoryValidationError("expiring retention requires expires_at")
         if supersedes_id is not None:
-            _validate_memory_id(supersedes_id, "supersedes_id")
+            supersedes_id = _validate_memory_id(supersedes_id, "supersedes_id")
         properties = self._properties(
             title=title, content=content, record_type=record_type, scope=scope,
             source=source, confidence=confidence, retention=retention, tags=tags,
             expires_at=expires_at, status=status, supersedes_id=supersedes_id,
         )
         page = self._transport.create_page(properties)
-        return self._record_from_page(page)
+        record = self._record_from_page(page)
+        expected = (
+            title, content, record_type, scope, "non_sensitive", source,
+            confidence, retention, tags, expires_at, status, supersedes_id,
+        )
+        actual = (
+            record.title, record.content, record.record_type, record.scope,
+            record.sensitivity, record.source, record.confidence, record.retention,
+            record.tags, record.expires_at, record.status, record.supersedes_id,
+        )
+        if actual != expected:
+            raise MemorySyncError(
+                f"Notion create response did not match the requested record; reconcile page {record.memory_id}",
+                record.memory_id,
+            )
+        return record
 
     def create(
         self, *, title: str, content: str, record_type: str, scope: str,
@@ -382,8 +397,12 @@ class NotionMemoryAdapter:
                 archived = self._record_from_page(
                     self._transport.update_page(old.memory_id, {"Status": "Archived"})
                 )
-                if archived.memory_id != old.memory_id or archived.status != "archived":
-                    raise MemoryValidationError("Notion did not confirm the old record was archived")
+                if (
+                    archived.memory_id != old.memory_id
+                    or archived.status != "archived"
+                    or not self._same_memory_payload(archived, old)
+                ):
+                    raise MemoryValidationError("Notion did not confirm the old record was archived without changing its payload")
 
                 activated = self._record_from_page(
                     self._transport.update_page(new.memory_id, {"Status": "Active"})
@@ -391,21 +410,24 @@ class NotionMemoryAdapter:
                 if (
                     activated.memory_id != new.memory_id
                     or activated.status != "active"
-                    or activated.supersedes_id != old.memory_id
+                    or not self._same_memory_payload(activated, new)
                 ):
-                    raise MemoryValidationError("Notion did not confirm the replacement was activated")
+                    raise MemoryValidationError("Notion did not confirm the replacement was activated without changing its payload")
 
                 # Read both pages back: a syntactically valid PATCH response is
                 # not sufficient evidence that the two-page lifecycle completed.
                 persisted_old = self.get(old.memory_id)
                 persisted_new = self.get(new.memory_id)
-                if persisted_old.status != "archived":
-                    raise MemoryValidationError("Notion old record did not persist as archived")
+                if (
+                    persisted_old.status != "archived"
+                    or not self._same_memory_payload(persisted_old, old)
+                ):
+                    raise MemoryValidationError("Notion old record did not persist unchanged as archived")
                 if (
                     persisted_new.status != "active"
-                    or persisted_new.supersedes_id != old.memory_id
+                    or not self._same_memory_payload(persisted_new, new)
                 ):
-                    raise MemoryValidationError("Notion replacement did not persist as active")
+                    raise MemoryValidationError("Notion replacement did not persist unchanged as active")
             except Exception as exc:
                 raise MemorySyncError(
                     f"Notion correction is partially complete; reconcile replacement {new.memory_id}",
@@ -415,12 +437,23 @@ class NotionMemoryAdapter:
 
     def archive(self, memory_id: str) -> MemoryRecord:
         _validate_memory_id(memory_id)
+        current = self.get(memory_id)
         archived = self._record_from_page(
             self._transport.update_page(memory_id, {"Status": "Archived"})
         )
-        if archived.memory_id != memory_id or archived.status != "archived":
-            raise MemoryValidationError("Notion did not confirm the record was archived")
-        return archived
+        if (
+            archived.memory_id != memory_id
+            or archived.status != "archived"
+            or not self._same_memory_payload(archived, current)
+        ):
+            raise MemoryValidationError("Notion did not confirm the record was archived without changing its payload")
+        persisted = self.get(memory_id)
+        if (
+            persisted.status != "archived"
+            or not self._same_memory_payload(persisted, current)
+        ):
+            raise MemoryValidationError("Notion archive state did not persist unchanged")
+        return persisted
 
     def delete(self, memory_id: str) -> None:
         """Move the Notion page to trash; this is not secure or permanent erasure."""
