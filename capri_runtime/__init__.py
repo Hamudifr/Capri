@@ -57,6 +57,7 @@ from .orchestration import (
     ToolOrchestrator,
 )
 from .host import HostToolGateway
+from .host_runtime import CapriHostRuntime, HostRuntimeError
 from .openai_responses import OpenAIResponsesAdapter, OpenAIResponsesAdapterError
 from .approval import ApprovalChallenge, HostApprovalService, SQLiteApprovalChallengeStore
 from .sqlite_sessions import SQLiteSessionStore
@@ -103,6 +104,8 @@ __all__ = [
     "HostAuthorityResolver",
     "HostApprovalService",
     "HostToolGateway",
+    "CapriHostRuntime",
+    "HostRuntimeError",
     "InMemoryAuditSink",
     "InMemoryApprovalStore",
     "MemoryErrorBase",
