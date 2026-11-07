@@ -216,6 +216,30 @@ class NotionMemoryAdapterTests(unittest.TestCase):
         with self.assertRaisesRegex(MemoryValidationError, "Supersedes id must be a UUID"):
             self.store.get(record.memory_id)
 
+    def test_transport_rejects_string_subclasses_for_record_fields(self):
+        class TextSubclass(str):
+            pass
+
+        def assert_rejected(mutator):
+            record = self.create()
+            page = self.transport.pages[record.memory_id]
+            mutator(page)
+            with self.assertRaises(MemoryValidationError):
+                self.store.get(record.memory_id)
+
+        assert_rejected(lambda page: page.__setitem__("id", TextSubclass(page["id"])))
+        assert_rejected(lambda page: page["properties"].__setitem__("Name", TextSubclass("title")))
+        assert_rejected(lambda page: page["properties"].__setitem__("Content", TextSubclass("content")))
+        assert_rejected(lambda page: page["properties"].__setitem__("Type", TextSubclass("Security Boundary")))
+        assert_rejected(lambda page: page["properties"].__setitem__("Scope", TextSubclass("GitHub Repository")))
+        assert_rejected(lambda page: page["properties"].__setitem__("Source", TextSubclass("https://example.com")))
+        assert_rejected(lambda page: page["properties"].__setitem__("Confidence", TextSubclass("Verified")))
+        assert_rejected(lambda page: page["properties"].__setitem__("Retention", TextSubclass("Keep until deleted")))
+        assert_rejected(lambda page: page["properties"].__setitem__("Tags", [TextSubclass("memory")]))
+        assert_rejected(lambda page: page.__setitem__("created_time", TextSubclass(page["created_time"])))
+        assert_rejected(lambda page: page.__setitem__("last_edited_time", TextSubclass(page["last_edited_time"])))
+        assert_rejected(lambda page: page["properties"].__setitem__("Supersedes", TextSubclass(str(uuid4()))))
+
     def test_rejects_missing_or_non_boolean_sensitive_classification(self):
         record = self.create()
         properties = self.transport.pages[record.memory_id]["properties"]
