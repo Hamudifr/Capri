@@ -75,6 +75,14 @@ from .tasks import (
     TaskValidationError,
     TaskWorker,
 )
+from .observability import (
+    InMemoryEventLog,
+    MetricEvent,
+    MetricRegistry,
+    ObservabilityError,
+    ObservabilityValidationError,
+    SQLiteEventLog,
+)
 
 __all__ = [
     "AssistantTurn",
@@ -82,7 +90,7 @@ __all__ = [
     "OrchestrationResult",
     "SessionTurnCoordinator",
     "ToolModelAdapter",
-    "MemoryAwareToolModelAdapter",
+   "MemoryAwareToolModelAdapter",
     "ToolOrchestrationError",
     "ToolOrchestrator",
     "ApprovalChallenge",
@@ -102,6 +110,12 @@ __all__ = [
     "HostToolGateway",
     "InMemoryAuditSink",
     "InMemoryApprovalStore",
+    "InMemoryEventLog",
+    "MetricEvent",
+    "MetricRegistry",
+    "ObservabilityError",
+    "ObservabilityValidationError",
+    "SQLiteEventLog",
     "MemoryErrorBase",
     "MemoryNotFoundError",
     "MemoryProvider",
@@ -157,4 +171,5 @@ __all__ = [
     "ToolSpec",
     "ToolValidationError",
     "ValidationError",
+
 ]
