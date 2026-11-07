@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 from typing import Protocol
 from uuid import uuid4
 
+from .sqlite_backup import backup_sqlite_database
+
 class MemoryErrorBase(Exception):
     """Base class for expected memory failures."""
 
@@ -619,5 +621,85 @@ class SQLiteMemoryStore:
                     (memory_id,),
                 ).fetchall()
                 return tuple((row["event_type"], row["occurred_at"]) for row in rows)
+            finally:
+                db.close()
+
+    def _validate_backup_snapshot(self, db: sqlite3.Connection) -> None:
+        db.row_factory = sqlite3.Row
+        allowed_statuses = {"active", "review", "archived"}
+        for row in db.execute("SELECT * FROM memories").fetchall():
+            record = self._record(row)
+            _validate_text(record.memory_id, "memory_id", 64)
+            _validate_text(record.title, "title", _MAX_TITLE)
+            _validate_text(record.content, "content", _MAX_CONTENT)
+            _validate_text(record.scope, "scope", _MAX_SCOPE)
+            _validate_text(record.source, "source", _MAX_SOURCE)
+            _validate_text(record.created_at, "created_at", 64)
+            _validate_text(record.updated_at, "updated_at", 64)
+            try:
+                created_at = datetime.fromisoformat(record.created_at)
+                updated_at = datetime.fromisoformat(record.updated_at)
+            except ValueError:
+                raise MemoryValidationError("backup contains invalid memory timestamps") from None
+            if (
+                created_at.tzinfo is None or created_at.utcoffset() is None
+                or updated_at.tzinfo is None or updated_at.utcoffset() is None
+            ):
+                raise MemoryValidationError("backup timestamps must be timezone-aware")
+            if record.supersedes_id is not None:
+                _validate_text(record.supersedes_id, "supersedes_id", 64)
+            if record.record_type not in _ALLOWED_TYPES:
+                raise MemoryValidationError("backup contains an unsupported record type")
+            if record.confidence not in _ALLOWED_CONFIDENCE:
+                raise MemoryValidationError("backup contains an unsupported confidence value")
+            if record.retention not in _ALLOWED_RETENTION or record.status not in allowed_statuses:
+                raise MemoryValidationError("backup contains unsupported memory metadata")
+            if record.retention in {"expire_30d", "expire_90d"} and record.expires_at is None:
+                raise MemoryValidationError("backup contains an expiring record without an expiry")
+            _validate_expiry(record.expires_at)
+            _validate_tags(record.tags)
+        allowed_events = {
+            "created", "superseded", "correction_created", "archived", "deleted", "expired"
+        }
+        for row in db.execute(
+            "SELECT event_id,memory_id,event_type,occurred_at FROM memory_events"
+        ).fetchall():
+            _validate_text(row["event_id"], "event_id", 64)
+            _validate_text(row["memory_id"], "memory_id", 64)
+            if row["event_type"] not in allowed_events:
+                raise MemoryValidationError("backup contains an unsupported memory event")
+            _validate_text(row["occurred_at"], "event timestamp", 64)
+            try:
+                occurred_at = datetime.fromisoformat(row["occurred_at"])
+            except ValueError:
+                raise MemoryValidationError("backup contains an invalid memory event timestamp") from None
+            if occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
+                raise MemoryValidationError("backup event timestamps must be timezone-aware")
+
+    def backup_to(self, destination_path: str) -> str:
+        """Create a private, consistent memory snapshot without overwriting."""
+        return backup_sqlite_database(
+            self.path,
+            destination_path,
+            lock=self._lock,
+            connect=self._connect,
+            validate_snapshot=self._validate_backup_snapshot,
+            error_type=MemoryValidationError,
+            prefix=".capri-memory-backup-",
+        )
+
+    def integrity_check(self) -> str:
+        with self._lock:
+            db = self._connect()
+            try:
+                row = db.execute("PRAGMA integrity_check").fetchone()
+                foreign_key_errors = db.execute("PRAGMA foreign_key_check").fetchall()
+                if not row:
+                    return "no result"
+                if row[0] != "ok":
+                    return str(row[0])
+                if foreign_key_errors:
+                    return "foreign key check failed"
+                return "ok"
             finally:
                 db.close()

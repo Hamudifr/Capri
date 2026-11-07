@@ -1,6 +1,7 @@
 import json
 import os
 import sqlite3
+import stat
 import tempfile
 from dataclasses import replace
 import unittest
@@ -38,6 +39,48 @@ class SQLiteMemoryStoreTests(unittest.TestCase):
         }
         values.update(overrides)
         return self.store.create(**values)
+
+    def test_backup_is_private_consistent_and_restores_memory_history(self):
+        original = self.create(tags=("security", "memory"))
+        corrected = self.store.correct(
+            original.memory_id,
+            content="Corrected untrusted-memory boundary.",
+        )
+        self.store.archive(corrected.memory_id)
+        backup_path = os.path.join(self.temp.name, "memory-backup.sqlite3")
+        self.assertEqual(self.store.backup_to(backup_path), backup_path)
+        if os.name == "posix":
+            self.assertEqual(stat.S_IMODE(os.stat(backup_path).st_mode), 0o600)
+        restored = SQLiteMemoryStore(backup_path)
+        self.assertEqual(restored.integrity_check(), "ok")
+        self.assertEqual(restored.export_json(), self.store.export_json())
+        self.assertEqual(restored.get(original.memory_id), self.store.get(original.memory_id))
+        self.assertEqual(
+            restored.events(original.memory_id),
+            self.store.events(original.memory_id),
+        )
+        self.assertEqual(
+            restored.events(corrected.memory_id),
+            self.store.events(corrected.memory_id),
+        )
+
+    def test_backup_refuses_existing_symlink_and_public_directory(self):
+        existing = os.path.join(self.temp.name, "existing.sqlite3")
+        with open(existing, "wb") as stream:
+            stream.write(b"preserve")
+        with self.assertRaises(MemoryValidationError):
+            self.store.backup_to(existing)
+        link = os.path.join(self.temp.name, "link.sqlite3")
+        os.symlink(existing, link)
+        with self.assertRaises(MemoryValidationError):
+            self.store.backup_to(link)
+        with open(existing, "rb") as stream:
+            self.assertEqual(stream.read(), b"preserve")
+        if os.name == "posix":
+            public_dir = os.path.join(self.temp.name, "public")
+            os.mkdir(public_dir, 0o755)
+            with self.assertRaises(MemoryValidationError):
+                self.store.backup_to(os.path.join(public_dir, "backup.sqlite3"))
 
     def test_create_and_read_round_trip(self):
         record = self.create()
