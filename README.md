@@ -28,6 +28,7 @@ Capri is a research and execution-assistance project. This repository contains a
 - `capri_runtime/` — provider-neutral sessions, permissioned tool execution and model-call bridge, durable task execution, and bounded SQLite/Notion memory.
 - `pyproject.toml` — minimal Python 3.11+ package metadata; no runtime dependencies are declared.
 - `docs/TOOL_EXECUTION.md` — trust model, schema subset, approvals, audit behavior, and limitations for tool execution.
+- `docs/OPENAI_RESPONSES_ADAPTER.md` — optional concrete OpenAI Responses API adapter, safe configuration, cost boundary, and offline validation.
 - `docs/MEMORY_STORE.md` — durable memory contract, trust rules, privacy constraints, and limitations.
 - `docs/NOTION_MEMORY_ADAPTER.md` — Notion REST setup, host transport contract, mapping, correction recovery, optional live smoke test, and limitations.
 - `tests/` — deterministic structural, ledger, and runtime tests.
@@ -37,13 +38,13 @@ Capri is a research and execution-assistance project. This repository contains a
 
 **Verified checkpoint — 2026-11-07 (after PR #113 merge)**
 
-- Current `main`: `252e7eed7543aa5fc91ea3eb57a54b408b384e84`.
+- Current `main`: `2e5749c8a2cd3110a7ef9a909ba87866542ea5f4` (documentation refresh after PR #113).
 - Latest verified exact-head CI: PR #113 run [42379590963](https://github.com/Hamudifr/Capri/actions/runs/42379590963) passed compilation, Capri Doctor 6/6, operational health 7/7, and **390 tests** on Python 3.11, 3.12, and 3.13. All three job logs were inspected. This run tested the PR head before merge; post-merge push CI is not verified here. The optional live Notion REST smoke test was skipped.
 - The repository contains the integrated non-X5 recovery foundation, append-only hash-chain ledger, provider-neutral session runtime, permissioned tool-execution boundary, durable SQLite task engine and worker, durable audit/approval storage, and bounded local project memory.
 - Memory includes the SQLite provider, Notion memory adapter, standard-library Notion REST transport, explicit read-only data-source schema preflight, and `create_notion_memory_adapter_from_environment()`. `build_untrusted_memory_context()` prepares bounded eligible memory for separate model-adapter delivery.
 - The connected Notion data-source metadata was inspected read-only: required logical properties and supported option labels are present. The connector normalizes text fields as `text`; this is **not** an authenticated raw REST schema preflight.
 - The optional live Notion REST smoke test remains skipped. Authenticated REST create/read/correct/search/archive/trash behavior is not yet verified, and no always-on Capri process is connected to Notion.
-- The model/tool orchestration layer is provider-neutral. No concrete model-provider adapter currently implements provider-specific memory placement, and no end-to-end prompt-injection resistance is claimed.
+- `OpenAIResponsesAdapter` now implements the provider-neutral memory-aware tool-adapter protocol using the standard library and the Responses API. Offline fake-response tests cover request/response parsing and memory separation. No live API call, paid usage, running host process, or end-to-end prompt-injection resistance is claimed.
 - This remains an internal engineering prototype, not a claim of AGI, consciousness, or public/multi-tenant production readiness. No X5 work is included.
 
 ### Recent verified integration milestones
@@ -77,7 +78,7 @@ Capri is a research and execution-assistance project. This repository contains a
 
 - Authenticated live Notion REST verification and a successful create/read/correct/search/archive/trash smoke run.
 - A real host process that constructs and uses the Notion adapter, owns token rotation, and provides scheduling/process supervision.
-- A concrete model-provider adapter with documented provider-specific prompt construction; memory must remain separate from trusted policy and tool authority.
+- Live provider verification for the optional OpenAI adapter (requires a deliberately provisioned API key and acceptance of separate API charges); no API key or paid request is assumed.
 - Host identity/tenant isolation, provider-aware budgets, observability, deployment packaging, and operational backup/restore/retention.
 - External services and paid infrastructure are not assumed or provisioned.
 
