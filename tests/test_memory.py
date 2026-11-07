@@ -12,6 +12,7 @@ from capri_runtime.memory import (
     MemoryValidationError,
     UntrustedMemoryContext,
     SQLiteMemoryStore,
+    build_untrusted_memory_context,
 )
 
 
@@ -136,6 +137,55 @@ class SQLiteMemoryStoreTests(unittest.TestCase):
         archived = self.store.archive(record.memory_id)
         with self.assertRaises(MemoryValidationError):
             UntrustedMemoryContext((archived,))
+
+    def test_builder_returns_only_active_non_sensitive_non_expired_records(self):
+        active = self.create(title="Shared memory", content="active record")
+        archived = self.create(title="Shared memory", content="archived record")
+        self.store.archive(archived.memory_id)
+        expired = self.create(
+            title="Shared memory", content="expired record",
+            expires_at=(datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
+            retention="expire_30d",
+        )
+        context = build_untrusted_memory_context(self.store, "Shared memory")
+        self.assertEqual(context.records, (active,))
+        self.assertNotIn(archived, context.records)
+        self.assertNotIn(expired, context.records)
+
+    def test_builder_excludes_sensitive_records_from_custom_provider(self):
+        record = self.create(title="Shared memory")
+        sensitive = replace(record, memory_id="sensitive-memory-id", sensitivity="sensitive")
+
+        class Provider:
+            def search(self, query, *, limit=20, offset=0):
+                return (record, sensitive)
+
+        context = build_untrusted_memory_context(Provider(), "Shared memory")
+        self.assertEqual(context.records, (record,))
+
+    def test_builder_rejects_invalid_provider_results_and_trust_metadata(self):
+        record = self.create(title="Shared memory")
+        class Provider:
+            def __init__(self, records):
+                self.records = records
+            def search(self, query, *, limit=20, offset=0):
+                return self.records
+
+        invalid = (
+            [record],
+            (record, record),
+            (replace(record, status=object()),),
+            (replace(record, expires_at="not-a-timestamp"),),
+        )
+        for records in invalid:
+            with self.subTest(records=records):
+                with self.assertRaises(MemoryValidationError):
+                    build_untrusted_memory_context(Provider(records), "Shared memory", limit=2)
+
+        with self.assertRaises(MemoryValidationError):
+            build_untrusted_memory_context(Provider((record,)), "Shared memory", limit=True)
+        with self.assertRaises(MemoryValidationError):
+            build_untrusted_memory_context(Provider((record,)), "Shared memory", limit=21)
 
     def test_untrusted_memory_context_rejects_malformed_timestamps_and_lineage(self):
         record = self.create()
