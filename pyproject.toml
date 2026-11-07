@@ -10,5 +10,8 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []
 
+[project.scripts]
+capri = "capri_core.__main__:main"
+
 [tool.setuptools.packages.find]
 include = ["capri_core", "capri_runtime"]

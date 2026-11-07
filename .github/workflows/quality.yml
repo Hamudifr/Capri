@@ -29,6 +29,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Build and install the package
         run: python -m pip install --no-deps .
+      - name: Verify installed CLI
+        run: |
+          capri --help
+          capri doctor --json
       - name: Compile source and tests
         run: python -m compileall -q capri_core capri_runtime tests
       - name: Run Capri Doctor
