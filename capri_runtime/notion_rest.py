@@ -43,12 +43,16 @@ class NotionRESTTransport:
             raise MemoryValidationError("Notion data source ID must be a UUID") from None
         if type(timeout) not in (int, float) or not 1 <= timeout <= 30:
             raise MemoryValidationError("timeout must be between 1 and 30 seconds")
+        if opener is not None and not callable(opener):
+            raise MemoryValidationError("opener must be callable")
         self._token = api_token
         self._timeout = float(timeout)
-        self._opener = opener or build_opener(_NoRedirectHandler()).open
+        self._opener = opener if opener is not None else build_opener(_NoRedirectHandler()).open
 
     @classmethod
     def from_environment(cls, *, token_env: str = "NOTION_API_TOKEN", data_source_env: str = "CAPRI_MEMORY_DATA_SOURCE_ID", timeout: float = 10.0, opener: Callable[..., object] | None = None) -> "NotionRESTTransport":
+        if type(token_env) is not str or not token_env or type(data_source_env) is not str or not data_source_env:
+            raise MemoryValidationError("Notion environment variable names must be plain non-empty strings")
         token, source = os.environ.get(token_env), os.environ.get(data_source_env)
         if not token: raise MemoryValidationError(f"{token_env} is not configured")
         if not source: raise MemoryValidationError(f"{data_source_env} is not configured")
