@@ -154,9 +154,16 @@ class NotionMemoryAdapter:
     @staticmethod
     def _source(value: object) -> str:
         source = _validate_transport_text(value, "source", 2_048)
-        parsed = urlsplit(source)
-        if parsed.scheme not in {"https", "http"} or not parsed.netloc:
-            raise MemoryValidationError("source must be an absolute HTTP(S) URL")
+        try:
+            parsed = urlsplit(source)
+            hostname = parsed.hostname
+            parsed.port  # Force validation of malformed port values.
+        except ValueError:
+            raise MemoryValidationError("source must be a valid absolute HTTP(S) URL") from None
+        if parsed.scheme not in {"https", "http"} or not hostname:
+            raise MemoryValidationError("source must be an absolute HTTP(S) URL with a valid host")
+        if parsed.username is not None or parsed.password is not None:
+            raise MemoryValidationError("source URL must not contain embedded credentials")
         return source
 
     @classmethod

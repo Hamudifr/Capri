@@ -425,7 +425,10 @@ class NotionRESTTransportTests(unittest.TestCase):
                     NotionRESTTransport._encode_properties(properties)
 
     def test_outbound_encoder_rejects_non_http_source_urls(self):
-        for value in (None, "javascript:alert(1)", "file:///etc/passwd", "/relative/path", "https://"):
+        for value in (
+            None, "javascript:alert(1)", "file:///etc/passwd", "/relative/path", "https://",
+            "https://user:password@example.com/source", "https://[invalid", "https://example.com:bad",
+        ):
             with self.subTest(value=value):
                 with self.assertRaises(MemoryValidationError):
                     NotionRESTTransport._encode_properties({"Source": value})

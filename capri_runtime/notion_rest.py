@@ -124,9 +124,16 @@ class NotionRESTTransport:
                 if type(value) is not str:
                     raise MemoryValidationError("Source must be a required plain URL string")
                 _validate_text(value, "Source", 2_048)
-                parsed = urlsplit(value)
-                if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-                    raise MemoryValidationError("Source must be an absolute HTTP(S) URL")
+                try:
+                    parsed = urlsplit(value)
+                    hostname = parsed.hostname
+                    parsed.port  # Force validation of malformed port values.
+                except ValueError:
+                    raise MemoryValidationError("Source must be a valid absolute HTTP(S) URL") from None
+                if parsed.scheme not in {"http", "https"} or not hostname:
+                    raise MemoryValidationError("Source must be an absolute HTTP(S) URL with a valid host")
+                if parsed.username is not None or parsed.password is not None:
+                    raise MemoryValidationError("Source URL must not contain embedded credentials")
                 out[name] = {"url":value}
             elif name == "Tags":
                 if (
