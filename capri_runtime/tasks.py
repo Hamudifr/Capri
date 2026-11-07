@@ -611,8 +611,19 @@ class SQLiteTaskStore:
             attempts,available_at,cancel_requested,results_json,error_code,plan_json
             FROM tasks"""
         ).fetchall()
+        task_plan_lengths = {}
         for row in rows:
             self._record(row[:11])
+            _text(row[0], "task_id", 64)
+            if row[1] is not None:
+                _text(row[1], "idempotency_key", 128)
+            for timestamp in (row[3], row[4], row[7]):
+                _text(timestamp, "task timestamp", 64)
+                _parse_time(timestamp)
+            if row[8] not in (0, 1):
+                raise TaskValidationError("backup contains invalid cancellation state")
+            if row[10] is not None:
+                _text(row[10], "task error_code", 64)
             if row[2] not in allowed_states:
                 raise TaskValidationError("backup contains an unsupported task state")
             try:
@@ -620,6 +631,7 @@ class SQLiteTaskStore:
             except (TypeError, ValueError, RecursionError):
                 raise TaskValidationError("backup contains a malformed task plan") from None
             _validate_plan(plan)
+            task_plan_lengths[row[0]] = len(plan)
             if (
                 isinstance(row[5], bool) or not isinstance(row[5], int)
                 or not 0 <= row[5] <= len(plan)
@@ -633,10 +645,12 @@ class SQLiteTaskStore:
         for task_id, timestamp, state, step_index, attempt, error_code in events:
             _text(task_id, "task_id", 64)
             _text(timestamp, "event timestamp", 64)
+            _parse_time(timestamp)
             if state not in allowed_states:
                 raise TaskValidationError("backup contains an unsupported task event state")
             if (
-                isinstance(step_index, bool) or not isinstance(step_index, int) or step_index < 0
+                isinstance(step_index, bool) or not isinstance(step_index, int)
+                or not 0 <= step_index <= task_plan_lengths.get(task_id, -1)
                 or isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 0
             ):
                 raise TaskValidationError("backup contains invalid task event progress")
