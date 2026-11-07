@@ -9,7 +9,7 @@ import sys
 from uuid import uuid4
 
 from .memory import MemoryNotFoundError
-from .notion_memory import MemorySyncError
+from .notion_memory import MemorySyncError, NotionMemoryAdapter
 from .notion_rest import create_notion_memory_adapter_from_environment
 
 
