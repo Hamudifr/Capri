@@ -183,9 +183,9 @@ class NotionMemoryAdapter:
         if not isinstance(tags_value, (list, tuple)):
             raise MemoryValidationError("Notion Tags property must be a list")
         tags = _validate_tags(tags_value)
-        status_label = props.get("Status", "Active")
-        if not isinstance(status_label, str):
-            raise MemoryValidationError("Notion Status property is unsupported")
+        status_label = props.get("Status")
+        if type(status_label) is not str:
+            raise MemoryValidationError("Notion Status property is missing or unsupported")
         status = _LABEL_TO_STATUS.get(status_label)
         if status not in _STATUS_TO_LABEL:
             raise MemoryValidationError("Notion Status property is unsupported")

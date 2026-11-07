@@ -112,7 +112,8 @@ class NotionRESTTransport:
             return value.get("name") if isinstance(value,Mapping) and isinstance(value.get("name"),str) else None
         expiry=p("Expires").get("date")
         tags=p("Tags").get("multi_select")
-        status=option("Status","status") or option("Status","select") or "Active"
+        # Missing lifecycle state must remain unclassified for the adapter to reject.
+        status=option("Status","status") or option("Status","select")
         return {
             "id":raw.get("id"),"created_time":raw.get("created_time"),
             "last_edited_time":raw.get("last_edited_time"),"in_trash":False,
@@ -120,7 +121,8 @@ class NotionRESTTransport:
                 "Name":cls._plain(p("Name").get("title")),
                 "Content":cls._plain(p("Content").get("rich_text")),
                 "Type":option("Type","select"),"Scope":option("Scope","select"),
-                "Sensitive":p("Sensitive").get("checkbox",False),"Source":p("Source").get("url"),
+                # Preserve absence; do not silently classify a missing checkbox as non-sensitive.
+                "Sensitive":p("Sensitive").get("checkbox"),"Source":p("Source").get("url"),
                 "Confidence":option("Confidence","select"),"Retention":option("Retention","select"),
                 "Tags":[x.get("name") for x in tags if isinstance(x,Mapping) and isinstance(x.get("name"),str)] if isinstance(tags,list) else [],
                 "Status":status,"Expires":expiry.get("start") if isinstance(expiry,Mapping) else None,

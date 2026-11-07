@@ -151,6 +151,13 @@ class NotionMemoryAdapterTests(unittest.TestCase):
         with self.assertRaises(MemoryValidationError):
             self.store.get(record.memory_id)
 
+    def test_rejects_missing_status_instead_of_treating_page_as_active(self):
+        record = self.create()
+        properties = self.transport.pages[record.memory_id]["properties"]
+        properties.pop("Status")
+        with self.assertRaises(MemoryValidationError):
+            self.store.get(record.memory_id)
+
     def test_rejects_missing_or_non_boolean_sensitive_classification(self):
         record = self.create()
         properties = self.transport.pages[record.memory_id]["properties"]
