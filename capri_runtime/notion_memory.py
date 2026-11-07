@@ -64,6 +64,15 @@ def _validate_transport_text(value: object, field: str, maximum: int) -> str:
     return _validate_text(value, field, maximum)
 
 
+def _validate_memory_id(value: object, field: str = "memory_id") -> str:
+    _validate_transport_text(value, field, 64)
+    try:
+        UUID(value)
+    except (ValueError, TypeError, AttributeError):
+        raise MemoryValidationError(f"{field} must be a UUID") from None
+    return value
+
+
 class MemorySyncError(MemoryErrorBase):
     """A multi-page Notion correction stopped in a recoverable partial state."""
 
@@ -105,7 +114,7 @@ class NotionMemoryAdapter:
     """
 
     def __init__(self, transport: NotionMemoryTransport, *, max_records: int = _MAX_RECORDS) -> None:
-        if not isinstance(max_records, int) or isinstance(max_records, bool) or not 1 <= max_records <= _MAX_RECORDS:
+        if type(max_records) is not int or not 1 <= max_records <= _MAX_RECORDS:
             raise MemoryValidationError("max_records must be between 1 and 10000")
         for name in ("create_page", "get_page", "list_pages", "update_page", "delete_page"):
             if not callable(getattr(transport, name, None)):
@@ -144,7 +153,7 @@ class NotionMemoryAdapter:
 
     @staticmethod
     def _source(value: object) -> str:
-        source = _validate_text(value, "source", 2_048)
+        source = _validate_transport_text(value, "source", 2_048)
         parsed = urlsplit(source)
         if parsed.scheme not in {"https", "http"} or not parsed.netloc:
             raise MemoryValidationError("source must be an absolute HTTP(S) URL")
@@ -244,26 +253,28 @@ class NotionMemoryAdapter:
         expires_at: str | None = None, status: str = "active",
         supersedes_id: str | None = None,
     ) -> MemoryRecord:
-        _validate_text(title, "title", 200)
-        _validate_text(content, "content", 20_000)
-        if not isinstance(record_type, str) or record_type not in _ALLOWED_TYPES:
+        _validate_transport_text(title, "title", 200)
+        _validate_transport_text(content, "content", 20_000)
+        if type(record_type) is not str or record_type not in _ALLOWED_TYPES:
             raise MemoryValidationError("unsupported record_type")
-        _validate_text(scope, "scope", 100)
+        _validate_transport_text(scope, "scope", 100)
         if scope not in _ALLOWED_SCOPES:
             raise MemoryValidationError("unsupported scope")
         source = self._source(source)
-        if not isinstance(confidence, str) or confidence not in _ALLOWED_CONFIDENCE:
+        if type(confidence) is not str or confidence not in _ALLOWED_CONFIDENCE:
             raise MemoryValidationError("unsupported confidence")
-        if not isinstance(retention, str) or retention not in _ALLOWED_RETENTION:
+        if type(retention) is not str or retention not in _ALLOWED_RETENTION:
             raise MemoryValidationError("unsupported retention")
-        if not isinstance(status, str) or status not in _STATUS_TO_LABEL:
+        if type(status) is not str or status not in _STATUS_TO_LABEL:
             raise MemoryValidationError("unsupported status")
+        if type(tags) not in (list, tuple) or any(type(tag) is not str for tag in tags):
+            raise MemoryValidationError("tags must be a list or tuple of plain strings")
         tags = _validate_tags(tags)
         expires_at = self._expiry(expires_at)
         if retention in {"expire_30d", "expire_90d"} and expires_at is None:
             raise MemoryValidationError("expiring retention requires expires_at")
         if supersedes_id is not None:
-            _validate_text(supersedes_id, "supersedes_id", 64)
+            _validate_memory_id(supersedes_id, "supersedes_id")
         properties = self._properties(
             title=title, content=content, record_type=record_type, scope=scope,
             source=source, confidence=confidence, retention=retention, tags=tags,
@@ -285,7 +296,7 @@ class NotionMemoryAdapter:
             )
 
     def get(self, memory_id: str) -> MemoryRecord:
-        _validate_text(memory_id, "memory_id", 64)
+        _validate_memory_id(memory_id)
         return self._record_from_page(self._transport.get_page(memory_id))
 
     def _list_all(self) -> tuple[MemoryRecord, ...]:
@@ -325,10 +336,10 @@ class NotionMemoryAdapter:
             cursor = next_cursor
 
     def search(self, query: str, *, limit: int = 20, offset: int = 0) -> tuple[MemoryRecord, ...]:
-        _validate_text(query, "query", 500)
-        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+        _validate_transport_text(query, "query", 500)
+        if type(limit) is not int or not 1 <= limit <= 100:
             raise MemoryValidationError("limit must be between 1 and 100")
-        if isinstance(offset, bool) or not isinstance(offset, int) or not 0 <= offset <= self._max_records:
+        if type(offset) is not int or not 0 <= offset <= self._max_records:
             raise MemoryValidationError("offset is outside the supported range")
         terms = tuple(dict.fromkeys(part.casefold() for part in query.split() if part))
         if not terms:
@@ -378,18 +389,20 @@ class NotionMemoryAdapter:
             return self.get(new.memory_id)
 
     def archive(self, memory_id: str) -> MemoryRecord:
-        _validate_text(memory_id, "memory_id", 64)
+        _validate_memory_id(memory_id)
         return self._record_from_page(
             self._transport.update_page(memory_id, {"Status": "Archived"})
         )
 
     def delete(self, memory_id: str) -> None:
         """Move the Notion page to trash; this is not secure or permanent erasure."""
-        _validate_text(memory_id, "memory_id", 64)
+        _validate_memory_id(memory_id)
         self._transport.delete_page(memory_id)
 
     def expire(self, *, now: datetime | None = None) -> tuple[str, ...]:
-        instant = _iso(now or _now())
+        if now is not None and type(now) is not datetime:
+            raise MemoryValidationError("now must be a plain datetime or None")
+        instant = _iso(now if now is not None else _now())
         expired = []
         with self._lock:
             for record in self._list_all():
