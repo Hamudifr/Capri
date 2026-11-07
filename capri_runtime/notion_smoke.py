@@ -9,8 +9,8 @@ import sys
 from uuid import uuid4
 
 from .memory import MemoryNotFoundError
-from .notion_memory import MemorySyncError, NotionMemoryAdapter
-from .notion_rest import NotionRESTTransport
+from .notion_memory import MemorySyncError
+from .notion_rest import create_notion_memory_adapter_from_environment
 
 
 def run_smoke(adapter: NotionMemoryAdapter) -> None:
@@ -77,9 +77,7 @@ def main() -> int:
         print("SKIP: set CAPRI_NOTION_LIVE_TESTS=true to enable live Notion smoke test")
         return 0
     try:
-        transport = NotionRESTTransport.from_environment()
-        transport.validate_data_source_schema()
-        run_smoke(NotionMemoryAdapter(transport))
+        run_smoke(create_notion_memory_adapter_from_environment())
     except Exception:
         print("FAIL: Notion REST smoke test failed; check sanitized transport errors and workspace sharing")
         return 1
