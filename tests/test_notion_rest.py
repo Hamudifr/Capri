@@ -1,7 +1,6 @@
 import io, json, os, unittest
 from urllib.error import HTTPError
 from capri_runtime.memory import MemoryNotFoundError, MemoryValidationError
-from capri_runtime.notion_memory import NotionMemoryAdapter
 from capri_runtime.notion_rest import NOTION_API_VERSION, NotionRateLimitError, NotionRESTTransport, NotionTransportError, _NoRedirectHandler
 
 PAGE_ID="b55c9c91-384d-452b-81db-d1ef79372b75"
@@ -25,12 +24,12 @@ class FakeOpener:
 
 def page():
     return {"id":PAGE_ID,"created_time":"2026-11-06T20:00:00Z","last_edited_time":"2026-11-06T20:10:00Z","in_trash":False,"properties":{
-        "Name":{"title":[{"plain_text":"Title"}]},"Content":{"rich_text":[{"plain_text":"Body"}]},
-        "Type":{"select":{"name":"Project Fact"}},"Scope":{"select":{"name":"GitHub Repository"}},
-        "Sensitive":{"checkbox":False},"Source":{"url":"https://github.com/Hamudifr/Capri"},
-        "Confidence":{"select":{"name":"Verified"}},"Retention":{"select":{"name":"Keep until deleted"}},
-        "Tags":{"multi_select":[{"name":"memory"}]},"Status":{"status":{"name":"Active"}},
-        "Expires":{"date":None},"Supersedes":{"rich_text":[]}
+        "Name":{"type":"title","title":[{"plain_text":"Title"}]},"Content":{"type":"rich_text","rich_text":[{"plain_text":"Body"}]},
+        "Type":{"type":"select","select":{"name":"Project Fact"}},"Scope":{"type":"select","select":{"name":"GitHub Repository"}},
+        "Sensitive":{"type":"checkbox","checkbox":False},"Source":{"type":"url","url":"https://github.com/Hamudifr/Capri"},
+        "Confidence":{"type":"select","select":{"name":"Verified"}},"Retention":{"type":"select","select":{"name":"Keep until deleted"}},
+        "Tags":{"type":"multi_select","multi_select":[{"name":"memory"}]},"Status":{"type":"status","status":{"name":"Active"}},
+        "Expires":{"type":"date","date":None},"Supersedes":{"type":"rich_text","rich_text":[]}
     }}
 
 class NotionRESTTransportTests(unittest.TestCase):
@@ -47,22 +46,43 @@ class NotionRESTTransportTests(unittest.TestCase):
         self.assertIn("Bearer test-secret",req.get_header("Authorization"))
         self.assertEqual(timeout,10.0)
 
-    def test_missing_sensitive_and_status_properties_remain_unclassified(self):
-        raw = page()
-        raw["properties"]["Sensitive"] = {}
-        t, _ = self.make(raw)
-        normalized = t.get_page(PAGE_ID)
-        self.assertIsNone(normalized["properties"]["Sensitive"])
-        with self.assertRaises(MemoryValidationError):
-            NotionMemoryAdapter(t).get(PAGE_ID)
+    def test_page_properties_require_expected_notion_types(self):
+        wrong_types = {
+            "Name": "rich_text", "Content": "title", "Type": "status",
+            "Scope": "url", "Sensitive": "select", "Source": "checkbox",
+            "Confidence": "status", "Retention": "rich_text",
+            "Tags": "rich_text", "Status": "checkbox",
+            "Expires": "rich_text", "Supersedes": "title",
+        }
+        for property_name, wrong_type in wrong_types.items():
+            with self.subTest(property_name=property_name, wrong_type=wrong_type):
+                raw = page()
+                raw["properties"][property_name]["type"] = wrong_type
+                t, _ = self.make(raw)
+                with self.assertRaises(NotionTransportError):
+                    t.get_page(PAGE_ID)
 
+    def test_malformed_expiry_value_is_rejected(self):
         raw = page()
-        raw["properties"]["Status"] = {}
+        raw["properties"]["Expires"]["date"] = "not-a-date-object"
         t, _ = self.make(raw)
-        normalized = t.get_page(PAGE_ID)
-        self.assertIsNone(normalized["properties"]["Status"])
-        with self.assertRaises(MemoryValidationError):
-            NotionMemoryAdapter(t).get(PAGE_ID)
+        with self.assertRaises(NotionTransportError):
+            t.get_page(PAGE_ID)
+
+    def test_legacy_select_status_type_remains_supported(self):
+        raw = page()
+        raw["properties"]["Status"] = {"type": "select", "select": {"name": "Active"}}
+        t, _ = self.make(raw)
+        self.assertEqual(t.get_page(PAGE_ID)["properties"]["Status"], "Active")
+
+    def test_missing_sensitive_and_status_properties_are_rejected(self):
+        for property_name in ("Sensitive", "Status"):
+            with self.subTest(property_name=property_name):
+                raw = page()
+                raw["properties"][property_name] = {}
+                t, _ = self.make(raw)
+                with self.assertRaises(NotionTransportError):
+                    t.get_page(PAGE_ID)
 
     def test_create_uses_data_source_parent_and_chunks_rich_text(self):
         t,op=self.make()
@@ -167,7 +187,7 @@ class NotionRESTTransportTests(unittest.TestCase):
                 if value == "missing":
                     raw["properties"]["Tags"] = {}
                 else:
-                    raw["properties"]["Tags"] = {"multi_select": value}
+                    raw["properties"]["Tags"] = {"type": "multi_select", "multi_select": value}
                 t, _ = self.make(raw)
                 with self.assertRaises(NotionTransportError):
                     t.get_page(PAGE_ID)
