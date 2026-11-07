@@ -78,6 +78,7 @@ def main() -> int:
         return 0
     try:
         transport = NotionRESTTransport.from_environment()
+        transport.validate_data_source_schema()
         run_smoke(NotionMemoryAdapter(transport))
     except Exception:
         print("FAIL: Notion REST smoke test failed; check sanitized transport errors and workspace sharing")
