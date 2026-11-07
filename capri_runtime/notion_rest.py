@@ -115,16 +115,36 @@ class NotionRESTTransport:
             raise NotionTransportError("Notion page response has no valid trash state")
         if in_trash:
             raise MemoryNotFoundError("Notion page is in trash")
-        props=raw.get("properties")
-        if not isinstance(props,Mapping): raise NotionTransportError("Notion page response has no properties")
-        def p(name):
-            value=props.get(name,{})
-            return value if isinstance(value,Mapping) else {}
-        def option(name,kind):
-            value=p(name).get(kind)
-            return value.get("name") if isinstance(value,Mapping) and isinstance(value.get("name"),str) else None
-        expiry=p("Expires").get("date")
-        tags=p("Tags").get("multi_select")
+        props = raw.get("properties")
+        if not isinstance(props, Mapping):
+            raise NotionTransportError("Notion page response has no properties")
+
+        def p(name, expected_type):
+            value = props.get(name)
+            expected = (expected_type,) if isinstance(expected_type, str) else expected_type
+            if (
+                not isinstance(value, Mapping)
+                or type(value.get("type")) is not str
+                or value["type"] not in expected
+            ):
+                raise NotionTransportError(f"Notion page property {name} has an unexpected type")
+            return value
+
+        def option(name, kind):
+            value = p(name, kind).get(kind)
+            if not isinstance(value, Mapping) or type(value.get("name")) is not str:
+                raise NotionTransportError(f"Notion page property {name} has a malformed option")
+            return value["name"]
+
+        expiry_value = p("Expires", "date").get("date")
+        if expiry_value is None:
+            expires_at = None
+        elif isinstance(expiry_value, Mapping) and type(expiry_value.get("start")) is str:
+            expires_at = expiry_value["start"]
+        else:
+            raise NotionTransportError("Notion Expires property is malformed")
+
+        tags = p("Tags", "multi_select").get("multi_select")
         if not isinstance(tags, list):
             raise NotionTransportError("Notion Tags property is missing or malformed")
         normalized_tags = []
@@ -132,21 +152,31 @@ class NotionRESTTransport:
             if not isinstance(item, Mapping) or type(item.get("name")) is not str:
                 raise NotionTransportError("Notion Tags contains a malformed option")
             normalized_tags.append(item["name"])
-        # Missing lifecycle state must remain unclassified for the adapter to reject.
-        status=option("Status","status") or option("Status","select")
+
+        status_property = props.get("Status")
+        if (
+            not isinstance(status_property, Mapping)
+            or type(status_property.get("type")) is not str
+            or status_property["type"] not in {"status", "select"}
+        ):
+            raise NotionTransportError("Notion Status property has an unexpected type")
+        status = option("Status", status_property["type"])
+
         return {
-            "id":raw.get("id"),"created_time":raw.get("created_time"),
-            "last_edited_time":raw.get("last_edited_time"),"in_trash":False,
-            "properties":{
-                "Name":cls._plain(p("Name").get("title")),
-                "Content":cls._plain(p("Content").get("rich_text")),
-                "Type":option("Type","select"),"Scope":option("Scope","select"),
-                # Preserve absence; do not silently classify a missing checkbox as non-sensitive.
-                "Sensitive":p("Sensitive").get("checkbox"),"Source":p("Source").get("url"),
-                "Confidence":option("Confidence","select"),"Retention":option("Retention","select"),
-                "Tags":normalized_tags,
-                "Status":status,"Expires":expiry.get("start") if isinstance(expiry,Mapping) else None,
-                "Supersedes":cls._plain(p("Supersedes").get("rich_text")) or None,
+            "id": raw.get("id"), "created_time": raw.get("created_time"),
+            "last_edited_time": raw.get("last_edited_time"), "in_trash": False,
+            "properties": {
+                "Name": cls._plain(p("Name", "title").get("title")),
+                "Content": cls._plain(p("Content", "rich_text").get("rich_text")),
+                "Type": option("Type", "select"), "Scope": option("Scope", "select"),
+                "Sensitive": p("Sensitive", "checkbox").get("checkbox"),
+                "Source": p("Source", "url").get("url"),
+                "Confidence": option("Confidence", "select"),
+                "Retention": option("Retention", "select"),
+                "Tags": normalized_tags,
+                "Status": status,
+                "Expires": expires_at,
+                "Supersedes": cls._plain(p("Supersedes", "rich_text").get("rich_text")) or None,
             }
         }
 
