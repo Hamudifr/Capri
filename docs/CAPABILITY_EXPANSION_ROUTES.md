@@ -221,3 +221,18 @@ Details: [citation-integrity integration record](https://github.com/Hamudifr/Cap
 ### Evaluation work
 
 A repeatable benchmark plan is now tracked in [PLUGIN_CAPABILITY_EVALUATION.md](https://github.com/Hamudifr/Capri/blob/main/docs/PLUGIN_CAPABILITY_EVALUATION.md). It distinguishes structural checks, source-contract checks, live transport tests, and behavioral skill evaluation. Do not label a skill validated merely because its package parses or a remote endpoint is documented.
+
+
+## Plugin v0.5.0: API integration and test engineering — 2026-11-07
+
+The same private plugin advanced to v0.5.0, adding two dedicated skills: api-integration and testing-validation. The capability router now routes API/GraphQL/MCP/webhook/OAuth/external data-source work to api-integration, and acceptance criteria, regression, CI, release gates and integration verification to testing-validation. These separate concerns from the general software-engineering skill.
+
+- Plugin ID: plugins_6aef721e946c81918014a2c04ff4476f
+- Release ID: pluginrel_6aef786d631881919e50282b20102edc
+- Total skills: 12.
+- Both root mcp.json and Codex .mcp.json retain the three configured servers: calculator, Noodle and Scholar Sidekick.
+- No API keys, credentials, paid subscriptions or external accounts were added.
+- Plugin Creator readback confirms both new skill files, router changes, both MCP manifests, and v0.5.0 metadata.
+- Runtime skill activation and all three ChatGPT-side MCP handshakes/tool calls remain pending.
+
+The evaluation plan was extended from ten to twelve skill cases; the two new cases test integration correctness/security and evidence-based test/release validation.
