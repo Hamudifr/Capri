@@ -191,3 +191,33 @@ Measure baseline vs skill-only vs skill+tool. Keep a tool only if it improves qu
 - No public plugin listing or workspace-wide sharing.
 - No broad filesystem, shell or database write access by default.
 - No sending private user data to third-party MCP servers.
+
+
+## Plugin v0.4.0: citation integrity — 2026-11-07
+
+The private Capri Engineering Lab plugin now has three configured remote MCP servers and ten skills. Release: pluginrel_6aef770eadc48191a82b293aefce6c4a.
+
+### Third remote MCP integration
+
+- Project: https://github.com/mlava/scholar-sidekick-mcp
+- Endpoint: https://scholar-sidekick.com/api/mcp
+- Transport: Streamable HTTP.
+- License: MIT; v0.8.13 was the latest release surfaced in this review.
+- Anonymous, rate-limited free access is documented. No API key, RapidAPI route, or paid service is configured.
+- Seven documented read-only tools: citation verification, bibliography audit (up to 25 records), retraction/correction checks, legal open-access discovery, identifier resolution, citation formatting, and bibliography export.
+- Security policy states that the MCP server makes HTTPS calls only to its configured API host, accepts citation identifiers/metadata rather than arbitrary URLs, and does not write files or execute shell commands. Operator engineering notes state raw citation inputs are not retained as application data; lookups can be forwarded to upstream resolvers such as Crossref and PubMed.
+- Privacy: send only public bibliographic metadata. Never send confidential manuscripts, private/unpublished bibliographies, patient/personal data, credentials, or private research records.
+- Interpretation: a match verifies identifier-to-record identity, not whether the paper supports a claim. Mismatch and not-found are discrepancies requiring review, not proof of fraud or non-existence. Retraction status is separate from citation identity. Optional LLM screening requires authentication and is not enabled.
+- The plugin source readback confirms the endpoint, skill and README. ChatGPT-side MCP handshake/tool execution remains pending.
+
+Details: [citation-integrity integration record](https://github.com/Hamudifr/Capri/blob/main/docs/CITATION_INTEGRITY_MCP.md). GitHub PR #128 merged as 51a2bf5a0559a1d9b4222d38d522f97537caadd3.
+
+### Current capability inventory
+
+- 10 skills: capability routing; scientific literature; AI/ML-GPU; defensive security; software engineering; database engineering; mathematics/data science; safe calculator use; biomedical literature discovery; citation integrity.
+- 3 remote MCP server configurations: calculator, Noodle, Scholar Sidekick.
+- No MCP integration is considered runtime-verified until the ChatGPT host completes initialize/tools-list and at least one harmless tool call. Static configuration and upstream health/card evidence are not sufficient.
+
+### Evaluation work
+
+A repeatable benchmark plan is now tracked in [PLUGIN_CAPABILITY_EVALUATION.md](https://github.com/Hamudifr/Capri/blob/main/docs/PLUGIN_CAPABILITY_EVALUATION.md). It distinguishes structural checks, source-contract checks, live transport tests, and behavioral skill evaluation. Do not label a skill validated merely because its package parses or a remote endpoint is documented.
