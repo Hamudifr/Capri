@@ -546,6 +546,8 @@ class SQLiteTaskStore:
         _text(claim.task_id, "task_id", 64)
         _text(claim.executor_id, "executor_id", 128)
         state, owner, until, index, attempt, plan_json, principal_id = row
+        if type(claim.step_index) is not int or type(claim.attempt) is not int:
+            raise TaskConflictError("task claim progress fields must be integers")
         if (
             state != "running"
             or owner != claim.executor_id
@@ -679,6 +681,8 @@ class SQLiteTaskStore:
 
     def finish_step(self, claim: TaskClaim, result: Any,
                     now: datetime | None = None) -> TaskRecord:
+        if not isinstance(claim, TaskClaim):
+            raise TaskValidationError("claim must be a TaskClaim")
         result_json, decoded = _json(result, label="step result")
         stamp = _iso(now or _now())
         with self._lock:
@@ -731,6 +735,8 @@ class SQLiteTaskStore:
     def fail_step(self, claim: TaskClaim, error_code: str = "handler_failed",
                   retry_delay_seconds: int = 5, now: datetime | None = None,
                   retryable: bool = True) -> TaskRecord:
+        if not isinstance(claim, TaskClaim):
+            raise TaskValidationError("claim must be a TaskClaim")
         _text(error_code, "error_code", 64)
         if not error_code.replace("_", "").isalnum():
             raise TaskValidationError("error_code must be a simple identifier")
