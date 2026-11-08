@@ -554,7 +554,6 @@ class SQLiteTaskStore:
             or index != claim.step_index
             or attempt != claim.attempt
             or principal_id != claim.principal_id
-            or until != claim.lease_until
         ):
             raise TaskConflictError("task claim does not match its authoritative lease")
         if _parse_time(until) <= _parse_time(stamp):
@@ -660,7 +659,6 @@ class SQLiteTaskStore:
                     or index != claim.step_index
                     or attempt != claim.attempt
                     or principal_id != claim.principal_id
-                    or until != claim.lease_until
                 ):
                     raise TaskConflictError("task claim does not match its authoritative lease")
                 if _parse_time(until) <= _parse_time(stamp):
