@@ -887,6 +887,19 @@ class TaskEngine:
     def execute_claim(self, claim: TaskClaim, now: datetime | None = None) -> TaskRecord:
         if not isinstance(claim, TaskClaim) or claim.executor_id != self.executor_id:
             raise TaskConflictError("claim does not belong to this task engine")
+        # TaskClaim is frozen, but its nested input dictionary is not. Snapshot
+        # the JSON payload before validation so a caller cannot mutate it between
+        # the authoritative check and handler dispatch.
+        if type(claim.input) is not dict:
+            raise TaskConflictError("task claim input is not an object")
+        _, input_snapshot = _json(claim.input, label="claim input")
+        if not isinstance(input_snapshot, dict):
+            raise TaskConflictError("task claim input is not an object")
+        claim = TaskClaim(
+            claim.task_id, claim.executor_id, claim.step_index, claim.attempt,
+            claim.idempotency_key, claim.tool, input_snapshot, claim.lease_until,
+            claim.principal_id,
+        )
         self.store.validate_claim(claim, now=now)
         if claim.principal_id is None:
             handler = self.handlers.get(claim.tool)
