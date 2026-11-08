@@ -459,7 +459,9 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         claim = self.store.claim_next("worker-a", lease_seconds=5, now=NOW)
         with self.assertRaises(TaskConflictError):
             self.store.renew_lease(
-                claim, lease_seconds=60, now=NOW + timedelta(seconds=6)
+                replace(claim, lease_until="2099-01-01T00:00:00+00:00"),
+                lease_seconds=60,
+                now=NOW + timedelta(seconds=6),
             )
 
     def test_stolen_lease_cannot_be_renewed_by_old_worker(self):
@@ -481,10 +483,11 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             lambda claim: replace(claim, tool="admin"),
             lambda claim: replace(claim, input={"elevated": True}),
             lambda claim: replace(claim, attempt=claim.attempt + 1),
+            lambda claim: replace(claim, step_index=claim.step_index + 1),
             lambda claim: replace(claim, step_index=True),
             lambda claim: replace(claim, attempt=True),
+            lambda claim: replace(claim, executor_id="attacker"),
             lambda claim: replace(claim, idempotency_key="forged-key"),
-            lambda claim: replace(claim, lease_until="2099-01-01T00:00:00+00:00"),
         )
         for method_name in engine_methods:
             for attack in attacks:
