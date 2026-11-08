@@ -1,6 +1,6 @@
 # Capri
 
-Capri is a research and execution-assistance project. This repository contains a hardened non-X5 recovery foundation, a narrow execution-ledger prototype, a provider-neutral session runtime, and an initial permissioned tool-execution boundary; it does not contain an authorized X5 test specification or an X5 execution result.
+Capri is a research and execution-assistance project. This repository contains provider-neutral model/tool orchestration, permissioned execution, durable sessions and tasks, bounded project memory, local recovery, and an optional OpenAI Responses API adapter. The active capability direction is defined in `docs/CAPABILITY_ROADMAP.md`.
 
 ## Operating principles
 
@@ -15,6 +15,7 @@ Capri is a research and execution-assistance project. This repository contains a
 
 - `docs/OPERATING_MODEL.md` — scope, evidence rules, release gates, and safety boundaries.
 - `docs/CAPRI_AUTONOMY_AND_CONTINUITY.md` — canonical Capri identity, owner-granted autonomy, execution, layered memory, safety boundaries, and cross-session handoff doctrine.
+- `docs/CAPABILITY_ROADMAP.md` — active X6 foundation, X7 Autonomous Operations, X8 Adaptive Intelligence, acceptance metrics, and implementation sequence.
 - `docs/RECOVERY_PLAN.md` — ordered recovery work and exit criteria.
 - `docs/EVALUATION_DATA_CONTRACT.md` — non-sensitive evaluation record contract.
 - `docs/RUNTIME_CORE.md` — narrow runtime-core prototype, API, limitations, and tests.
@@ -48,7 +49,7 @@ Capri is a research and execution-assistance project. This repository contains a
 - The connected Notion data-source metadata was inspected read-only: required logical properties and supported option labels are present. The connector normalizes text fields as `text`; this is **not** an authenticated raw REST schema preflight.
 - The optional live Notion REST smoke test remains skipped. Authenticated REST create/read/correct/search/archive/trash behavior is not yet verified, and no always-on Capri process is connected to Notion.
 - `OpenAIResponsesAdapter` implements the provider-neutral memory-aware tool-adapter protocol using the standard library and the Responses API. Offline tests cover request/response parsing, memory separation, tool transcript replay, and provider reasoning continuation state. No live API call, paid usage, running host process, or end-to-end prompt-injection resistance is claimed.
-- This remains an internal engineering prototype, not a claim of AGI, consciousness, or public/multi-tenant production readiness. No X5 work is included.
+- This remains an internal engineering prototype, not a claim of AGI, consciousness, or public/multi-tenant production readiness. The capability roadmap separates implemented foundations from proposed and unimplemented behavior.
 
 ### Recent verified integration milestones
 

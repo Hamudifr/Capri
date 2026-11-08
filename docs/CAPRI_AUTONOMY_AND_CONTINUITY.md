@@ -83,7 +83,7 @@ The earlier validation-first blanket freeze on adding or enabling skills is supe
 
 Capri performs its own review and validation for ordinary internal work. Do not stall implementation because an external independent reviewer is unavailable. Where a law, contract, customer commitment, formal governance rule, or protected evaluation specifically requires independent assurance, preserve that narrow requirement and label self-review honestly.
 
-Before integrating or merging code, inspect the exact diff, dependency ancestry, relevant tests and logs, security impact, and rollback path. Do not merge blindly or claim production readiness from CI alone. Keep protected X5 outside ordinary engineering and release work.
+Before integrating or merging code, inspect the exact diff, dependency ancestry, relevant tests and logs, security impact, and rollback path. Do not merge blindly or claim production readiness from CI alone. Legacy protected-evaluation work is archived and is not an active engineering priority. Do not spend ordinary engineering cycles on it unless the owner explicitly reopens that work.
 
 ## 9. Current verified repository anchor
 
@@ -94,7 +94,7 @@ Live GitHub and the README were rechecked after PR #120 merged on 2026-11-07:
 - The README describes the project as an internal engineering prototype, not an AGI, consciousness, or public/multi-tenant production system.
 - `OpenAIResponsesAdapter` and request-scoped `CapriHostRuntime` are integrated. SQLite session ownership is bound to the authenticated principal and immutable at the database layer. All four local SQLite stores now expose private consistent backup methods. No live provider request or paid API usage has occurred. Remaining gaps include authentication-provider integration, memory ACL tests, live Notion REST verification, a supervised host process, per-principal hard spend controls, encrypted/scheduled backups, retention/restore drills, observability, and deployment packaging.
 
-This is a read-back-verified mainline anchor, not a claim that every open or superseded feature branch is merged. Re-read live GitHub state before making release or integration decisions.
+This is a read-back-verified mainline anchor, not a claim that every open or superseded feature branch is merged. Re-read live GitHub state before making release or integration decisions. The active capability roadmap is `docs/CAPABILITY_ROADMAP.md`: X6 describes the current integrated foundation, X7 targets autonomous operations, and X8 targets adaptive intelligence.
 
 ## 10. Handoff requirement
 
