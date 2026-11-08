@@ -1,42 +1,71 @@
-# Capri core and runtime prototype
+# Capri core and runtime architecture
 
-This document describes the implemented non-X5 foundation in `capri_core` and `capri_runtime`. It is a narrow, dependency-free Python library prototype, not a complete Capri agent or a recovered historical product specification.
+This document summarizes the current non-X5 implementation. Capri is an evolving Python library and host-composition foundation, not a complete autonomous agent, hosted service, or production multi-tenant deployment.
 
-## Components
+## Core ledger
 
-### `capri_core`: records and execution ledger
+`capri_core` provides typed evaluation records, fail-closed validation, and `HashChainLedger`, an append-only JSONL ledger with a SHA-256 hash chain.
 
-- `EvaluationRecord`: immutable typed metadata with stable run/scenario identifiers, controlled status/evaluator/evidence-stage enums, timestamp, evidence reference, and optional retest parent.
-- `validate_record`: fail-closed validation, including defensive type checks, controlled dimensions, timezone-aware ISO 8601 timestamps, evidence-stage consistency, and rejection of lone Unicode surrogates.
-- `HashChainLedger`: append-only JSONL storage. Each entry hashes the canonical record plus the previous hash. Reads and appends validate record structure, unique run IDs, and retest-parent ordering. Malformed entries, duplicate JSON keys, non-standard numeric constants, broken links, invalid records, oversized entries, unterminated tails, symlink paths, and non-regular files are rejected.
+The ledger rejects malformed records, duplicate JSON keys, invalid hash links, oversized or unterminated entries, symlink/non-regular paths, and unsafe parent traversal. On supported POSIX systems it uses no-follow directory traversal and validates opened file identity. A write, flush, or fsync failure after writing begins latches both the normalized path and the opened inode in the current process; hard-link aliases are blocked. The inode guard pins descriptors up to a bounded cap, after which the process fails closed globally.
 
-Ledger security and operational limitations are documented in `docs/LEDGER_THREAT_MODEL.md` and `docs/LEDGER_OPERATIONS.md`. In particular, the ledger is plaintext, has no authenticity or application authorization, and supports one writer process per file. Platform-specific path-race limitations and the process-local uncertain-write latch are documented there.
+The ledger is plaintext, tamper-evident rather than authenticated, and supports one writer process per file. Platform fallback and recovery procedures are documented in [LEDGER_THREAT_MODEL.md](LEDGER_THREAT_MODEL.md) and [LEDGER_OPERATIONS.md](LEDGER_OPERATIONS.md).
 
-### `capri_runtime`: in-memory session lifecycle
+## Runtime layers
 
-The runtime provides:
+### Provider-neutral in-memory runtime
 
-- `SessionStore`: thread-safe, process-local storage for immutable session snapshots.
-- `Runtime`: synchronous orchestration around a host-injected `ModelAdapter`.
-- `ModelAdapter`: protocol with `complete(session_id, user_text, history) -> str`; the host owns provider SDKs and credentials.
-- `Session` and `Message`: immutable dataclasses representing lifecycle state and transcript messages.
-- Typed failures: `ValidationError`, `SessionNotFoundError`, `SessionClosedError`, `SessionConflictError`, `SessionLimitError`, and `RuntimeExecutionError`, all derived from `RuntimeErrorBase`.
+`capri_runtime.runtime.Runtime` and `SessionStore` remain a small provider-neutral, process-local prototype. The host injects a `ModelAdapter`; the runtime commits a user/assistant turn only after a successful response and uses optimistic version checks to prevent stale concurrent commits.
 
-The runtime commits a user/assistant pair only after a successful adapter response. It uses optimistic version checks so a concurrent turn or a close operation prevents a stale response from being committed. The store enforces its history limit again under the commit lock.
+Defaults for this in-memory API:
 
-### Runtime defaults
+| Setting | Default | Scope |
+| --- | ---: | --- |
+| `max_input_chars` | 16,000 | One user message |
+| `max_output_chars` | 64,000 | One assistant message |
+| `max_tool_chars` | 131,072 | One tool message |
+| `max_session_messages` | 200 | One transcript |
 
-| Setting | Default | Behavior |
-|---|---:|---|
-| `max_input_chars` | 16,000 | Reject larger user input before adapter invocation |
-| `max_output_chars` | 64,000 | Reject larger adapter output before transcript commit |
-| `max_session_messages` | 200 | Reject a turn that would exceed the limit; no automatic truncation |
+Limits count Python string characters, not UTF-8 bytes or provider tokens. There is no aggregate session-count or total-memory quota. Closing an in-memory session does not provide deletion, expiry, or retention management.
 
-The store independently enforces input/output character limits at the `commit_turn` boundary and rechecks the history limit under its commit lock. This matters because callers can access `SessionStore.commit_turn` directly; runtime-only checks are not a storage boundary. The history limit must allow at least one complete turn (two messages). Boolean, non-integer, or non-positive resource limits are rejected. An injected `SessionStore` must have the same input, output, and history limits configured on the `Runtime`. Limits count Python string characters, not UTF-8 bytes or provider tokens.
+### Durable sessions and host composition
 
-The store still has no aggregate session-count or total-memory quota. Session creation is therefore unbounded, and closed sessions remain resident in memory. This is an explicit prototype limitation: session expiry, deletion, cleanup, and retention semantics remain unresolved in the non-X5 specification and are not inferred or implemented here.
+`SQLiteSessionStore` persists transcripts in a private SQLite database and supports cross-process optimistic commits, durable turn leases, and immutable principal ownership. Default per-session limits match the table above. The parent directory must be private (0700 or stricter on POSIX); the database file is kept at 0600. Session transcripts are plaintext.
 
-## Minimal runtime use
+`CapriHostRuntime` is a request-scoped composition layer. It authenticates through an injected `HostAuthorityResolver`, binds every session operation to the resolved principal, checks ownership before memory retrieval or model invocation, and composes `ToolOrchestrator` with optional memory resolution and a host-managed `TaskWorker`.
+
+This is an application-level ownership boundary, not proof of complete tenant isolation. No concrete identity provider, HTTP server, daemon, or deployment package is included. Construction starts no background thread. The host owns authentication integration, process supervision, credentials, and lifecycle. See [HOST_RUNTIME.md](HOST_RUNTIME.md).
+
+### Model and tool execution
+
+`OpenAIResponsesAdapter` is the concrete bounded Responses API adapter. It preserves provider continuation items and converts model function calls into proposals for `ToolOrchestrator`; the model does not directly receive host permission or approval authority. The adapter reads `OPENAI_API_KEY` and `CAPRI_OPENAI_MODEL` only when explicitly constructed from the environment. A live provider request can incur separate API charges; no live request or credential provisioning is implied by this repository.
+
+The permissioned tool boundary uses an explicit registry, strict bounded schemas, host permission checks, action-bound one-use approvals, and redacted durable audit/replay metadata. Handlers are trusted host code executed with the process's privileges. This is not a sandbox. See [OPENAI_RESPONSES_ADAPTER.md](OPENAI_RESPONSES_ADAPTER.md) and [TOOL_EXECUTION.md](TOOL_EXECUTION.md).
+
+### Memory
+
+SQLite and Notion memory providers, bounded retrieval, expiry checks, immutable context validation, and escaped serialization are implemented. Search is deterministic substring matching, not semantic/vector retrieval. Retrieved content is untrusted reference data and must never be promoted into trusted host instructions or tool authority. Serialization and prompt placement are mitigations, not provider-enforced isolation or proof of end-to-end prompt-injection resistance.
+
+The current mainline adapter sends memory separately from the trusted `instructions` field. Draft PR #121 proposes placing that memory item before the conversation transcript so it cannot appear as the newest user turn; that ordering change is not part of main until merged. See [MEMORY_STORE.md](MEMORY_STORE.md) and [MEMORY_AWARE_MODEL_ADAPTER.md](MEMORY_AWARE_MODEL_ADAPTER.md).
+
+### Durable tasks
+
+`SQLiteTaskStore`, `TaskEngine`, and `TaskWorker` provide bounded plans, atomic claims, leases, checkpoints, retries, cancellation at step boundaries, and abandoned-work recovery. Plans contain 1–32 steps; each step permits 1–10 attempts; leases are bounded to 5–3,600 seconds; retry backoff is capped at one hour. Execution is at-least-once, not exactly-once. Side-effecting handlers must enforce the stable per-step idempotency key at the side-effect boundary.
+
+The worker is explicitly host-managed. It starts no thread during construction, does not forcibly interrupt a running handler, and is not a scheduler daemon. See [TASK_EXECUTION.md](TASK_EXECUTION.md).
+
+## Storage, lifecycle, and resource limits
+
+- SQLite session, memory, task, and security stores use private local files and store-specific validation. Their database contents and current backups are plaintext; encryption and key management are not implemented.
+- Session limits are per transcript. There is no aggregate session-count, total-memory, or provider-token quota. Sessions have no implemented expiry/deletion/retention workflow; closed sessions remain persisted.
+- Memory expiry is evaluated during retrieval and by an explicit sweep; no background expiry worker or continuous synchronization service is started.
+- Task plans and individual JSON payloads are bounded, but there is no hosted scheduler or global spend control.
+- No per-principal request/token budgets, hard provider spend cap, or automatic rate limiter is implemented.
+- Backup methods exist for all four local SQLite stores, but there is no backup scheduler, off-site policy, encrypted backup format, retention/compaction policy, or tested automated restore drill.
+- Durable local audit and approval replay protection exist, but the store is not encrypted and approval records are not cryptographically authenticated.
+- Host authentication is injected; a production identity provider and complete remote tenant isolation are not implemented.
+- Tool handlers run with process privileges; no general sandbox or privilege-separated execution service is implemented.
+
+## Minimal in-memory runtime example
 
 ```python
 from capri_runtime import Runtime, SessionStore
@@ -45,71 +74,26 @@ class EchoAdapter:
     def complete(self, session_id, user_text, history):
         return f"You said: {user_text}"
 
-store = SessionStore(max_session_messages=200)
-runtime = Runtime(
-    adapter=EchoAdapter(),
-    store=store,
-    max_input_chars=16_000,
-    max_output_chars=64_000,
-    max_session_messages=200,
-)
-
+runtime = Runtime(adapter=EchoAdapter(), store=SessionStore())
 session = runtime.create_session()
 updated = runtime.respond(session.session_id, "Hello, Capri")
 print(updated.version, updated.messages[-1].content)
 runtime.close_session(session.session_id)
 ```
 
-The adapter receives an immutable snapshot of prior messages. It must return non-empty text. Adapter exception details are suppressed behind `RuntimeExecutionError`; the runtime does not log transcripts or provider credentials.
-
-## Minimal ledger use
-
-```python
-from capri_core import (
-    EvaluationRecord, EvidenceStage, EvaluatorType,
-    HashChainLedger, Status,
-)
-
-ledger = HashChainLedger("data/non-x5-runs.jsonl")
-record = EvaluationRecord(
-    run_id="run-001",
-    scenario_id="scenario-alpha",
-    dimension="Agency",
-    status=Status.PASS,
-    evaluator_type=EvaluatorType.SELF,
-    evidence_stage=EvidenceStage.SELF_SCORED,
-    evidence_ref="evidence://your-authorized-reference",
-    run_at="2026-11-05T08:00:00Z",
-)
-ledger.append(record)
-print(ledger.verify())
-```
-
-## Security and operational boundaries
-
-The session runtime is a library boundary, not an authentication or tenant-isolation boundary. A session UUID is an identifier, never an authorization token. The host application must authenticate callers, authorize access to each session, isolate tenants, protect adapter credentials, and control logging.
-
-The runtime has no concrete model provider, network transport, retrieval, durable transcript storage, cross-process session sharing, session expiry, deletion/retention policy, provider-aware token or spend budgets, rate limiting, cancellation contract, or deployment packaging. A provider-neutral permissioned tool execution boundary now exists in `capri_runtime.tools`; it is an injected-handler gate, not a sandbox or a provider integration. See `docs/TOOL_EXECUTION.md` for its trust assumptions and limitations. Add these capabilities incrementally with explicit trust boundaries, least-privilege tool authorization, bounded resource use, privacy/retention controls, adversarial tests, and rollback behavior. Do not treat an unresolved proposal as an approved product requirement.
-
-The ledger hash chain is tamper-evident, not a digital signature or proof of authorship. It is plaintext, has no application access control, and does not provide cross-process locking or automatic repair. Use one writer process per file. Preserve corrupt originals and recover only from a verified backup through an operator-approved procedure.
-
-Do not put protected evaluation instructions, rubrics, expected answers, scoring keys, credentials, secrets, or personal data in the repository, test fixtures, ledger, or CI artifacts. This prototype does not implement protected evaluation behavior.
+For durable principal-owned sessions, use the host composition described in [HOST_RUNTIME.md](HOST_RUNTIME.md), not this in-memory example.
 
 ## Validation
 
-Run:
+Run locally:
 
 ```bash
 python -m compileall -q capri_core capri_runtime tests
 python -m unittest discover -s tests -v
 ```
 
-CI runs compilation and the regression suite on Python 3.11, 3.12, and 3.13. Exact commit-specific test counts and outcomes belong to the associated GitHub Actions run, not a hard-coded documentation claim.
+The quality workflow validates Python 3.11, 3.12, and 3.13. Commit-specific counts and outcomes belong to exact-head GitHub Actions evidence, not a hard-coded claim in this document.
 
-## Remaining gates
+## Release position
 
-- The non-X5 runtime design and specification template contain proposed defaults; unresolved owner decisions remain blockers, not implied authorization.
-- Capri's internal design, code, and security self-review is the default review path; external independent review is not a prerequisite for ordinary internal implementation or merging. Any specific contractual, regulatory, or protected-evaluation requirement for independent assessment remains narrowly scoped and must not be misrepresented as self-review.
-- Host authentication/authorization, tenant isolation, durable user-controllable memory, retention/deletion, provider integration, operational budgets, durable audit/approval replay protection, handler isolation, and production deployment remain unimplemented. Tool execution is a narrow injected-handler foundation only.
-- The six-value non-protected dimension vocabulary is intentionally controlled and must be versioned before changing.
-- This prototype is not approved for public or multi-tenant production deployment.
+The implemented foundation is meaningful internal capability, not a claim of AGI or production readiness. Internal self-review is the default for ordinary engineering; it must not be described as independent assurance. Public or hosted multi-tenant release remains blocked on identity-provider integration, tenant-isolation evidence, provider budgets, retention/deletion controls, encrypted backup and restore drills, operational observability, process supervision, handler isolation, and end-to-end adversarial validation. The protected evaluation boundary remains separate and must not be crossed by ordinary engineering work.
