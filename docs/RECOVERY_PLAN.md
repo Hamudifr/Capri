@@ -1,27 +1,43 @@
 # Capri recovery plan
 
-## Live reconciliation — 2026-11-07 14:38 UTC (authoritative)
+## Repository snapshot — 2026-11-08 18:24 CET
 
-This section is the current repository snapshot. Older reconciliation blocks below are retained as historical records and must not be treated as current state.
+This is a timestamped snapshot of the repository state observed before this documentation PR is integrated. Use live GitHub metadata for any later exact branch or PR pointers. Older reconciliation blocks below are retained as historical records and must not be treated as current state.
 
 ### Current repository state
 
-- Private repository: `Hamudifr/Capri`.
-- Latest verified code-changing mainline commit: PR #120 merge `0965e539609b7fc94bcf000d0ba6f2fca8bc7f59`.
-- Open pull requests: 0.
-- Main includes the non-X5 recovery foundation, permissioned tool boundary, durable audit/approval storage, principal-owned SQLite sessions, the OpenAI Responses API adapter, request-scoped host composition, durable task engine/worker, SQLite/Notion memory providers, Notion REST transport hardening, expiring-memory invariants, and private consistent backups for all four local SQLite stores.
-- PR #120 exact-head CI run [42382331774](https://github.com/Hamudifr/Capri/actions/runs/42382331774) and post-merge push CI run [42382405035](https://github.com/Hamudifr/Capri/actions/runs/42382405035) both passed compilation, Capri Doctor 6/6, operational health 7/7, and 425 tests on Python 3.11, 3.12, and 3.13. All six Python job logs were inspected.
-- Optional live Notion REST smoke was skipped. No live OpenAI API request, API key creation, paid API usage, deployment, public release, or protected X5 access occurred.
+- Private repository: `Hamudifr/Capri`; default branch `main`.
+- Main at this snapshot: `31e20985eac2a6999e2339555744f97fae436ff2`.
+- Last verified code baseline: `1190623d6006aea308d9d983ae841ce927febd52`. Push run [42382504366](https://github.com/Hamudifr/Capri/actions/runs/42382504366) completed successfully: package/CLI checks, compilation, Capri Doctor, and 425 tests on Python 3.11, 3.12, and 3.13. The optional live Notion job was skipped.
+- Current main is eight documentation-only commits ahead of that verified code baseline. No combined status was returned for the current main SHA; do not describe the current head as exact-head CI-verified.
+- Main includes the non-X5 recovery foundation, permissioned tool boundary, durable audit/approval storage, principal-owned SQLite sessions, OpenAI Responses adapter, request-scoped host composition, durable task engine/worker, SQLite/Notion memory providers, Notion REST transport hardening, expiring-memory invariants, and private consistent backups for all four local SQLite stores.
+- Three active Draft PRs target current main. They are cleanly mergeable and 0 commits behind; original PR diffs are retained:
+  - [#121](https://github.com/Hamudifr/Capri/pull/121), head `86d09cf312daba44f8747d7162633e73c32798eb`, 4 ahead, 3-file memory-ordering diff.
+  - [#122](https://github.com/Hamudifr/Capri/pull/122), this recovery-plan/runtime-documentation reconciliation; 2-file documentation-only diff. Track its exact head in GitHub PR metadata rather than duplicating a self-referential SHA here.
+  - [#124](https://github.com/Hamudifr/Capri/pull/124), head `051e75cbe3665e668c9fcf4aec17d5393789a8ab`, 29 ahead, 6-file principal-owned task diff.
+- No exact-head Actions run or combined status is available for any of those three current PR heads. Their synchronization commits use `[skip ci]` because private-repository runner cost eligibility could not be verified as free. No local checkout or test run is claimed.
+- PR #124's previous code parent `2c5d73ec46a68b37b14922493a734bc0c6ad2450` ran as [42490189944](https://github.com/Hamudifr/Capri/actions/runs/42490189944). All three Python matrix jobs concluded failure, but all three job-log downloads returned 404 `BlobNotFound` and no steps were available. Failure cause remains unknown.
+- No submitted review or inline review thread exists on #121, #122, or #124. Internal source/diff review is not independent review.
+- Branch-protection read returned 403 `Resource not accessible by integration`; repository-rulesets read returned 403 stating GitHub Pro or public visibility is required. Current protection state is unknown through this integration. No upgrade, public exposure, or protection change was attempted.
+- Optional live Notion REST smoke remains skipped. No live OpenAI API request, API-key provisioning, paid API usage, deployment, public release, or protected X5 access occurred.
 
 ### Model and host runtime
 
 - `OpenAIResponsesAdapter` implements the memory-aware model adapter using the standard library and the official Responses API. Function calls remain proposals and pass through ToolOrchestrator, ToolExecutionBridge, host permissions, approval controls, and audit.
 - Full provider output continuation items, including reasoning items returned alongside function calls, are retained in the bounded private session transcript and replayed with tool outputs.
-- Retrieved memory is sent separately from trusted host instructions. Offline tests cover request/response parsing, tool transcript replay, memory separation, continuation-state persistence, malformed responses, duplicate IDs, bounds, and credential/error suppression.
+- Retrieved memory is sent separately from trusted host instructions. Main currently appends that user input item after the conversation transcript; draft PR #121 proposes prepending it and explicitly labeling it as reference data, not a new request. PR #121 has no exact-head CI and remains Draft.
 - `CapriHostRuntime` composes a trusted HostAuthorityResolver, principal-owned SQLite sessions, ToolOrchestrator, optional principal-scoped memory resolver, and optional host-managed TaskWorker. It is request-scoped, not an HTTP server or daemon.
 - SQLite session owner rows are created atomically, cannot be reassigned/deleted through database triggers, and are checked before memory retrieval/model invocation. Cross-principal and legacy unowned sessions are hidden as not found.
 - Session, security, task, and memory SQLite stores all expose private consistent backup methods with integrity and store-specific validation. Backups are plaintext and must be protected.
 - No live provider call was made. `OPENAI_API_KEY` and `CAPRI_OPENAI_MODEL` require deliberate host provisioning; API usage may incur charges separate from ChatGPT subscriptions. No hard currency spend cap is implemented.
+
+### Current open work
+
+- Draft PR #121: memory-to-model input ordering mitigation; source/test/docs readback verified, but no local tests or exact-head CI. It is 0 commits behind current main.
+- Draft PR #122: runtime architecture/lifecycle documentation reconciliation; docs-only. This branch is synchronized to current main; no exact-head CI.
+- Draft PR #124: principal-owned durable task execution and claim-tampering hardening; source/test readback verified, but the latest prior code-parent run failed with unavailable logs and the current head has no CI. It is 0 commits behind current main.
+- Keep all three PRs Draft/unmerged until their relevant exact-head validation is complete. Do not trigger private Actions until cost-free execution is established.
+- Branch-protection state is unknown through the current integration (403); rulesets require GitHub Pro or public visibility. Do not upgrade or expose the repository to enable protection.
 
 ### Remaining work, ordered
 
@@ -36,9 +52,12 @@ This section is the current repository snapshot. Older reconciliation blocks bel
 
 ### Delivery policy
 
-Capri owns routine design, implementation, self-review, testing, integration, and documentation. External independent review is not a prerequisite for ordinary internal engineering. Use isolated feature branches, inspect exact diffs, run and inspect CI, verify dependency ancestry, and integrate completed compatible work. Keep self-review distinct from independent assurance.
+The owner explicitly authorizes Capri to choose, implement, test, self-review, branch, commit, push, update PRs/issues/workflows, and merge/release/deploy when the evidence and applicable release criteria justify the action. External independent review is not a prerequisite for ordinary internal engineering. Label internal self-review honestly; never describe it as independent assurance.
 
-No paid spend, subscriptions, credential/private-data exposure, destructive deletion, public release, platform-control bypass, or protected X5 access is authorized by this standing engineering mandate. Continue independent safe work when an external dependency is unavailable.
+This engineering authorization does not itself approve unresolved product/runtime scope decisions. Keep product requirements marked unapproved until the owner explicitly approves them.
+
+The retained financial boundary is strict: no purchases, paid subscriptions, upgrades, charges, or personal/payment information for transactions. Verify any potentially billable operation is free before triggering it; if cost is uncertain, do not trigger it. Keep the repository private. Do not expose credentials, bypass platform controls, perform destructive bulk deletion, rotate secrets, change account permissions, or rewrite history without a concrete security need and a safely scoped plan. Preserve the protected X5 clean-room boundary absolutely.
+
 
 ---
 
