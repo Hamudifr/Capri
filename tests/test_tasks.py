@@ -450,7 +450,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             datetime.fromisoformat(claim.lease_until),
         )
         result = self.store.finish_step(
-            claim, {"completed": True}, now=NOW + timedelta(seconds=20)
+            renewed, {"completed": True}, now=NOW + timedelta(seconds=20)
         )
         self.assertEqual(result.state, "succeeded")
 
@@ -481,6 +481,8 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             lambda claim: replace(claim, tool="admin"),
             lambda claim: replace(claim, input={"elevated": True}),
             lambda claim: replace(claim, attempt=claim.attempt + 1),
+            lambda claim: replace(claim, step_index=True),
+            lambda claim: replace(claim, attempt=True),
             lambda claim: replace(claim, idempotency_key="forged-key"),
             lambda claim: replace(claim, lease_until="2099-01-01T00:00:00+00:00"),
         )
