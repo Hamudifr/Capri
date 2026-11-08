@@ -1,13 +1,13 @@
 # Capri recovery plan
 
-## Live reconciliation — 2026-11-08 18:24 CET (authoritative)
+## Repository snapshot — 2026-11-08 18:24 CET
 
-This section is the current repository snapshot. Older reconciliation blocks below are retained as historical records and must not be treated as current state.
+This is a timestamped snapshot of the repository state observed before this documentation PR is integrated. Use live GitHub metadata for any later exact branch or PR pointers. Older reconciliation blocks below are retained as historical records and must not be treated as current state.
 
 ### Current repository state
 
 - Private repository: `Hamudifr/Capri`; default branch `main`.
-- Current main: `31e20985eac2a6999e2339555744f97fae436ff2`.
+- Main at this snapshot: `31e20985eac2a6999e2339555744f97fae436ff2`.
 - Last verified code baseline: `1190623d6006aea308d9d983ae841ce927febd52`. Push run [42382504366](https://github.com/Hamudifr/Capri/actions/runs/42382504366) completed successfully: package/CLI checks, compilation, Capri Doctor, and 425 tests on Python 3.11, 3.12, and 3.13. The optional live Notion job was skipped.
 - Current main is eight documentation-only commits ahead of that verified code baseline. No combined status was returned for the current main SHA; do not describe the current head as exact-head CI-verified.
 - Main includes the non-X5 recovery foundation, permissioned tool boundary, durable audit/approval storage, principal-owned SQLite sessions, OpenAI Responses adapter, request-scoped host composition, durable task engine/worker, SQLite/Notion memory providers, Notion REST transport hardening, expiring-memory invariants, and private consistent backups for all four local SQLite stores.
