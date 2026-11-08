@@ -161,8 +161,10 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             lambda claim: replace(claim, tool="admin", input={"elevated": True}),
             lambda claim: replace(claim, input={"value": "tampered"}),
             lambda claim: replace(claim, attempt=claim.attempt + 1),
+            lambda claim: replace(claim, step_index=True),
+            lambda claim: replace(claim, attempt=True),
+            lambda claim: replace(claim, executor_id="attacker"),
             lambda claim: replace(claim, idempotency_key="attacker-key"),
-            lambda claim: replace(claim, lease_until="2099-01-01T00:00:00+00:00"),
         )
         for attack in tamper:
             with self.subTest(attack=attack):
@@ -232,7 +234,10 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             },
         )
         with self.assertRaises(TaskConflictError):
-            engine.execute_claim(claim, now=NOW + timedelta(seconds=6))
+            engine.execute_claim(
+                replace(claim, lease_until="2099-01-01T00:00:00+00:00"),
+                now=NOW + timedelta(seconds=6),
+            )
         self.assertEqual(calls, [])
         self.assertEqual(self.store.get_for_principal(claim.task_id, "alice").state, "running")
 
