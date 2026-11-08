@@ -652,28 +652,7 @@ class SQLiteTaskStore:
                 ).fetchone()
                 if not row:
                     raise TaskNotFoundError("task does not exist")
-                state, owner, until, index, attempt, plan_json, principal_id = row
-                if (
-                    state != "running"
-                    or owner != claim.executor_id
-                    or index != claim.step_index
-                    or attempt != claim.attempt
-                    or principal_id != claim.principal_id
-                ):
-                    raise TaskConflictError("task claim does not match its authoritative lease")
-                if _parse_time(until) <= _parse_time(stamp):
-                    raise TaskConflictError("task lease expired before handler invocation")
-                plan = json.loads(plan_json)
-                if index < 0 or index >= len(plan):
-                    raise TaskConflictError("task claim step is outside the persisted plan")
-                step = plan[index]
-                if (
-                    claim.idempotency_key != f"{claim.task_id}:{index}"
-                    or claim.tool != step["tool"]
-                    or type(claim.input) is not dict
-                    or claim.input != step["input"]
-                ):
-                    raise TaskConflictError("task claim payload differs from the persisted plan")
+                self._assert_claim_matches(claim, row, stamp)
             finally:
                 connection.close()
 
