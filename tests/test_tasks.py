@@ -182,6 +182,37 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                     calls[-1], ("principal", "alice", {"value": "original"})
                 )
 
+    def test_claim_input_is_snapshotted_before_validation_and_dispatch(self):
+        calls = []
+        self.store.create_for_principal(
+            "alice",
+            [{"tool": "prepare", "input": {"value": "persisted"}, "max_attempts": 1}],
+            now=NOW,
+        )
+        claim = self.store.claim_next("worker", now=NOW)
+        engine = TaskEngine(
+            self.store,
+            {},
+            "worker",
+            principal_handlers={
+                "prepare": lambda data, key, principal: (
+                    calls.append((principal, data)) or {"ok": True}
+                )
+            },
+        )
+        original_validate = self.store.validate_claim
+
+        def mutate_original_after_validation(candidate, now=None):
+            original_validate(candidate, now=now)
+            # Simulate a concurrent caller mutating the public claim object
+            # after its authoritative validation but before dispatch.
+            claim.input["value"] = "mutated-after-validation"
+
+        self.store.validate_claim = mutate_original_after_validation
+        result = engine.execute_claim(claim, now=NOW)
+        self.assertEqual(result.state, "succeeded")
+        self.assertEqual(calls, [("alice", {"value": "persisted"})])
+
     def test_expired_claim_is_rejected_before_handler_invocation(self):
         calls = []
         self.store.create_for_principal(
