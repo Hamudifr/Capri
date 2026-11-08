@@ -536,13 +536,56 @@ class SQLiteTaskStore:
             finally:
                 connection.close()
 
+    @staticmethod
+    def _assert_claim_matches(
+        claim: TaskClaim, row: tuple[Any, ...], stamp: str
+    ) -> list[dict[str, Any]]:
+        """Validate a claim against an authoritative row inside its write transaction."""
+        if not isinstance(claim, TaskClaim):
+            raise TaskValidationError("claim must be a TaskClaim")
+        _text(claim.task_id, "task_id", 64)
+        _text(claim.executor_id, "executor_id", 128)
+        state, owner, until, index, attempt, plan_json, principal_id = row
+        if (
+            state != "running"
+            or owner != claim.executor_id
+            or index != claim.step_index
+            or attempt != claim.attempt
+            or principal_id != claim.principal_id
+            or until != claim.lease_until
+        ):
+            raise TaskConflictError("task claim does not match its authoritative lease")
+        if _parse_time(until) <= _parse_time(stamp):
+            raise TaskConflictError("task lease expired before the requested transition")
+        try:
+            plan = json.loads(plan_json)
+        except (TypeError, ValueError, RecursionError):
+            raise TaskValidationError("persisted task plan is corrupt") from None
+        if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < len(plan):
+            raise TaskConflictError("task claim step is outside the persisted plan")
+        step = plan[index]
+        if (
+            claim.idempotency_key != f"{claim.task_id}:{index}"
+            or claim.tool != step["tool"]
+            or type(claim.input) is not dict
+            or claim.input != step["input"]
+        ):
+            raise TaskConflictError("task claim payload differs from the persisted plan")
+        return plan
+
     def renew_lease(self, claim: TaskClaim, lease_seconds: int = 60,
                     now: datetime | None = None) -> TaskClaim:
         """Extend a live claim before expiry; expired or superseded owners fail closed."""
-        if not isinstance(claim, TaskClaim):
-            raise TaskValidationError("claim must be a TaskClaim")
+        if not isinstance(claim, TaskClaim) or type(claim.input) is not dict:
+            raise TaskValidationError("claim must contain a TaskClaim with object input")
         if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int) or not 5 <= lease_seconds <= 3600:
             raise TaskValidationError("lease_seconds must be between 5 and 3600")
+        _, input_snapshot = _json(claim.input, label="claim input")
+        claim = TaskClaim(
+            claim.task_id, claim.executor_id, claim.step_index, claim.attempt,
+            claim.idempotency_key, claim.tool, input_snapshot, claim.lease_until,
+            claim.principal_id,
+        )
         current = now or _now()
         stamp = _iso(current)
         lease_until = _iso(current + timedelta(seconds=lease_seconds))
@@ -551,16 +594,16 @@ class SQLiteTaskStore:
             try:
                 connection.execute("BEGIN IMMEDIATE")
                 row = connection.execute(
-                    "SELECT state,lease_owner,lease_until,current_step FROM tasks WHERE task_id=?",
+                    """SELECT tasks.state,tasks.lease_owner,tasks.lease_until,
+                    tasks.current_step,tasks.attempts,tasks.plan_json,
+                    task_owners.principal_id
+                    FROM tasks LEFT JOIN task_owners
+                    ON task_owners.task_id=tasks.task_id WHERE tasks.task_id=?""",
                     (claim.task_id,),
                 ).fetchone()
                 if not row:
                     raise TaskNotFoundError("task does not exist")
-                state, owner, existing_until, index = row
-                if state != "running" or owner != claim.executor_id or index != claim.step_index:
-                    raise TaskConflictError("task lease is no longer owned by this executor")
-                if _parse_time(existing_until) <= _parse_time(stamp):
-                    raise TaskConflictError("an expired task lease cannot be renewed")
+                self._assert_claim_matches(claim, row, stamp)
                 connection.execute(
                     "UPDATE tasks SET lease_until=?,updated_at=? WHERE task_id=?",
                     (lease_until, stamp, claim.task_id),
@@ -568,7 +611,7 @@ class SQLiteTaskStore:
                 connection.execute("COMMIT")
                 return TaskClaim(
                     claim.task_id, claim.executor_id, claim.step_index, claim.attempt,
-                    claim.idempotency_key, claim.tool, claim.input, lease_until,
+                    claim.idempotency_key, claim.tool, input_snapshot, lease_until,
                     claim.principal_id,
                 )
             except Exception:
@@ -643,20 +686,21 @@ class SQLiteTaskStore:
             try:
                 connection.execute("BEGIN IMMEDIATE")
                 row = connection.execute(
-                    "SELECT state,lease_owner,lease_until,current_step,cancel_requested,results_json,plan_json FROM tasks WHERE task_id=?",
+                    """SELECT tasks.state,tasks.lease_owner,tasks.lease_until,
+                    tasks.current_step,tasks.attempts,tasks.plan_json,
+                    task_owners.principal_id,tasks.cancel_requested,tasks.results_json
+                    FROM tasks LEFT JOIN task_owners
+                    ON task_owners.task_id=tasks.task_id WHERE tasks.task_id=?""",
                     (claim.task_id,),
                 ).fetchone()
                 if not row:
                     raise TaskNotFoundError("task does not exist")
-                state, owner, until, index, cancel, results_json, plan_json = row
-                if state != "running" or owner != claim.executor_id or index != claim.step_index:
-                    raise TaskConflictError("task lease is no longer owned by this executor")
-                if _parse_time(until) <= _parse_time(stamp):
-                    raise TaskConflictError("task lease expired before completion was recorded")
+                plan = self._assert_claim_matches(claim, row[:7], stamp)
+                cancel, results_json = row[7], row[8]
+                index = claim.step_index
                 results = json.loads(results_json)
                 results.append(decoded)
                 next_index = index + 1
-                plan = json.loads(plan_json)
                 if cancel:
                     next_state = "cancelled"
                 elif next_index >= len(plan):
@@ -699,17 +743,18 @@ class SQLiteTaskStore:
             try:
                 connection.execute("BEGIN IMMEDIATE")
                 row = connection.execute(
-                    "SELECT state,lease_owner,lease_until,current_step,plan_json,cancel_requested FROM tasks WHERE task_id=?",
+                    """SELECT tasks.state,tasks.lease_owner,tasks.lease_until,
+                    tasks.current_step,tasks.attempts,tasks.plan_json,
+                    task_owners.principal_id,tasks.cancel_requested
+                    FROM tasks LEFT JOIN task_owners
+                    ON task_owners.task_id=tasks.task_id WHERE tasks.task_id=?""",
                     (claim.task_id,),
                 ).fetchone()
                 if not row:
                     raise TaskNotFoundError("task does not exist")
-                state, owner, until, index, plan_json, cancel = row
-                if state != "running" or owner != claim.executor_id or index != claim.step_index:
-                    raise TaskConflictError("task lease is no longer owned by this executor")
-                if _parse_time(until) <= _parse_time(stamp):
-                    raise TaskConflictError("task lease expired before failure was recorded")
-                plan = json.loads(plan_json)
+                plan = self._assert_claim_matches(claim, row[:7], stamp)
+                index = claim.step_index
+                cancel = row[7]
                 retry = retryable and not cancel and claim.attempt < plan[index]["max_attempts"]
                 next_state = "cancelled" if cancel else ("retry_wait" if retry else "failed")
                 delay = min(retry_delay_seconds * (2 ** max(0, claim.attempt - 1)), 3600)
