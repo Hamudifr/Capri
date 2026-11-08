@@ -474,6 +474,44 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             )
 
 
+    def test_all_lease_transitions_reject_tampered_claims_atomically(self):
+        engine_methods = ("renew_lease", "finish_step", "fail_step")
+        attacks = (
+            lambda claim: replace(claim, principal_id=None),
+            lambda claim: replace(claim, tool="admin"),
+            lambda claim: replace(claim, input={"elevated": True}),
+            lambda claim: replace(claim, attempt=claim.attempt + 1),
+            lambda claim: replace(claim, idempotency_key="forged-key"),
+            lambda claim: replace(claim, lease_until="2099-01-01T00:00:00+00:00"),
+        )
+        for method_name in engine_methods:
+            for attack in attacks:
+                with self.subTest(method=method_name, attack=attack):
+                    task = self.store.create_for_principal(
+                        "alice",
+                        [{"tool": "prepare", "input": {"value": "original"}, "max_attempts": 2}],
+                        now=NOW,
+                    )
+                    claim = self.store.claim_next("worker", now=NOW)
+                    forged = attack(claim)
+                    with self.assertRaises(TaskConflictError):
+                        if method_name == "renew_lease":
+                            self.store.renew_lease(forged, lease_seconds=60, now=NOW)
+                        elif method_name == "finish_step":
+                            self.store.finish_step(forged, {"forged": True}, now=NOW)
+                        else:
+                            self.store.fail_step(forged, now=NOW)
+                    self.assertEqual(self.store.get_for_principal(task.task_id, "alice").state, "running")
+                    connection = self.store._connect()
+                    try:
+                        lease = connection.execute(
+                            "SELECT lease_until FROM tasks WHERE task_id=?",
+                            (task.task_id,),
+                        ).fetchone()[0]
+                    finally:
+                        connection.close()
+                    self.assertEqual(lease, claim.lease_until)
+
     def test_managed_worker_renews_lease_during_long_handler(self):
         started = Event()
         release = Event()
