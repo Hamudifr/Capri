@@ -929,13 +929,16 @@ class TaskEngine:
             claim.principal_id,
         )
         self.store.validate_claim(claim, now=now)
+        # Handlers are trusted host code, but must not mutate the validated claim
+        # through nested references shared by a shallow dict copy.
+        handler_input = _json(claim.input, label="handler input")[1]
         if claim.principal_id is None:
             handler = self.handlers.get(claim.tool)
             if handler is None:
                 return self.store.fail_step(
                     claim, "unknown_handler", retry_delay_seconds=0, now=now, retryable=False
                 )
-            invoke = lambda: handler(dict(claim.input), claim.idempotency_key)
+            invoke = lambda: handler(handler_input, claim.idempotency_key)
         else:
             handler = self.principal_handlers.get(claim.tool)
             if handler is None:
@@ -944,7 +947,7 @@ class TaskEngine:
                     now=now, retryable=False,
                 )
             invoke = lambda: handler(
-                dict(claim.input), claim.idempotency_key, claim.principal_id
+                handler_input, claim.idempotency_key, claim.principal_id
             )
         try:
             result = invoke()
