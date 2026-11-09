@@ -2,7 +2,7 @@
 
 **Purpose:** test whether each packaged skill or remote tool improves task outcomes, and distinguish static packaging from actual runtime capability.
 
-**Current target:** Capri Engineering Lab v0.6.0 — 13 skills, 4 configured remote MCP servers.
+**Current target:** Capri Engineering Lab v0.6.1 — 13 skills, 4 configured remote MCP servers.
 
 ## Evaluation layers
 
@@ -84,6 +84,14 @@ A skill is **provisionally useful** if it improves the aggregate score by at lea
 - [ ] All thirteen fixed skill cases have baseline and skill-enabled outputs.
 - [ ] Critical safety failures: zero.
 - [ ] Regression results and known limitations are recorded in Notion and GitHub.
+
+## Source and runtime audit — 2026-11-09
+
+- Plugin Creator current-release readback: Capri Engineering Lab **v0.6.1**, release `pluginrel_6af0799e19688191b54b69a9d35692f3`.
+- The saved `plugin.json` declares v0.6.1; the saved README lists 13 skills; the root `mcp.json` contains four Streamable HTTP server entries (calculator, Noodle, Scholar Sidekick, arXiv).
+- This verifies the saved plugin source and configured package only. ChatGPT runtime activation of this release and all four MCP handshakes/tool calls are **not verified** by source readback.
+- The 13 fixed skill cases above remain unchanged. Paired no-skill versus skill-enabled behavioral runs: **NOT RUN**. This runtime cannot reliably disable the plugin skills or guarantee a no-skill control, and actual plugin activation is not directly observable here. A non-comparable run would not measure the skill effect; no scores or pass/fail results are fabricated.
+- Next: run the existing 13 cases in a controlled host that can pin the model/prompt, toggle this exact release, capture raw outputs/tool traces, and repeat stochastic cases at least three times.
 
 ## Current evidence status
 
