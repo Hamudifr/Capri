@@ -215,6 +215,35 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         self.assertEqual(result.state, "succeeded")
         self.assertEqual(calls, [("alice", {"value": "persisted"})])
 
+    def test_handler_mutating_nested_input_does_not_mutate_claim_snapshot(self):
+        calls = []
+
+        def mutate_nested(data, key, principal):
+            data["nested"]["values"].append(2)
+            calls.append((principal, data))
+            return {"ok": True}
+
+        self.store.create_for_principal(
+            "alice",
+            [{"tool": "prepare", "input": {"nested": {"values": [1]}}, "max_attempts": 1}],
+            now=NOW,
+        )
+        engine = TaskEngine(
+            self.store,
+            {},
+            "worker",
+            principal_handlers={"prepare": mutate_nested},
+        )
+        result = engine.run_once(now=NOW)
+
+        self.assertEqual(result.state, "succeeded")
+        self.assertEqual(result.current_step, 1)
+        self.assertEqual(calls, [("alice", {"nested": {"values": [1, 2]}})])
+        self.assertEqual(
+            self.store.get_for_principal(result.task_id, "alice").state,
+            "succeeded",
+        )
+
     def test_expired_claim_is_rejected_before_handler_invocation(self):
         calls = []
         self.store.create_for_principal(
