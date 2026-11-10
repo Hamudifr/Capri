@@ -69,11 +69,11 @@ def _assert_json_value(value: Any, depth: int = 0) -> None:
         if any(0xD800 <= ord(ch) <= 0xDFFF for ch in value):
             raise TaskValidationError("JSON strings must contain Unicode scalar values")
         return
-    if isinstance(value, list):
+    if type(value) is list:
         for child in value:
             _assert_json_value(child, depth + 1)
         return
-    if isinstance(value, dict):
+    if type(value) is dict:
         for key, child in value.items():
             if not isinstance(key, str):
                 raise TaskValidationError("JSON object keys must be strings")

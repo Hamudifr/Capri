@@ -244,6 +244,47 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             "succeeded",
         )
 
+    def test_claim_rejects_non_native_json_containers_before_handler_dispatch(self):
+        calls = []
+
+        class HostileDict(dict):
+            def items(self):
+                raise AssertionError("custom dict iteration must not execute")
+
+        class HostileList(list):
+            def __iter__(self):
+                raise AssertionError("custom list iteration must not execute")
+
+        self.store.create_for_principal(
+            "alice",
+            [{"tool": "prepare", "input": {"nested": {"value": "persisted"}}, "max_attempts": 1}],
+            now=NOW,
+        )
+        claim = self.store.claim_next("worker", now=NOW)
+        engine = TaskEngine(
+            self.store,
+            {},
+            "worker",
+            principal_handlers={
+                "prepare": lambda data, key, principal: (
+                    calls.append((principal, data)) or {"ok": True}
+                )
+            },
+        )
+        attacks = [
+            {"nested": HostileDict(value="persisted")},
+            {"nested": {"value": HostileList([1])}},
+        ]
+        for hostile_input in attacks:
+            with self.subTest(container=type(next(iter(hostile_input.values()))).__name__):
+                with self.assertRaises(TaskValidationError):
+                    engine.execute_claim(replace(claim, input=hostile_input), now=NOW)
+
+        self.assertEqual(calls, [])
+        result = engine.execute_claim(claim, now=NOW)
+        self.assertEqual(result.state, "succeeded")
+        self.assertEqual(calls, [("alice", {"nested": {"value": "persisted"}})])
+
     def test_expired_claim_is_rejected_before_handler_invocation(self):
         calls = []
         self.store.create_for_principal(
