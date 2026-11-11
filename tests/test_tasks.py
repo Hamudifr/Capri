@@ -612,6 +612,34 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                         connection.close()
                     self.assertEqual(lease, claim.lease_until)
 
+    def test_claim_text_fields_reject_string_subclasses_before_comparison(self):
+        class HostileString(str):
+            def __eq__(self, other):
+                raise AssertionError("custom claim string comparison must not execute")
+
+            def __ne__(self, other):
+                raise AssertionError("custom claim string comparison must not execute")
+
+        task = self.store.create_for_principal(
+            "alice",
+            [{"tool": "prepare", "input": {"value": "original"}, "max_attempts": 2}],
+            now=NOW,
+        )
+        claim = self.store.claim_next("worker", now=NOW)
+        attacks = (
+            replace(claim, idempotency_key=HostileString(claim.idempotency_key)),
+            replace(claim, tool=HostileString(claim.tool)),
+            replace(claim, principal_id=HostileString("alice")),
+        )
+        for forged in attacks:
+            with self.subTest(field="claim text metadata"):
+                with self.assertRaises(TaskValidationError):
+                    self.store.renew_lease(forged, lease_seconds=60, now=NOW)
+                self.assertEqual(
+                    self.store.get_for_principal(task.task_id, "alice").state,
+                    "running",
+                )
+
     def test_managed_worker_renews_lease_during_long_handler(self):
         started = Event()
         release = Event()
