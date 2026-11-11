@@ -192,9 +192,9 @@ class CapriHostRuntime:
         if self._task_worker is None:
             raise HostRuntimeError("principal task creation requires a configured task worker")
         allowed = self._task_worker.engine.principal_handlers
-        if isinstance(plan, list):
+        if type(plan) is list:
             for step in plan:
-                if isinstance(step, dict) and isinstance(step.get("tool"), str):
+                if type(step) is dict and isinstance(step.get("tool"), str):
                     if step["tool"] not in allowed:
                         raise HostRuntimeError("task plan references an unavailable principal handler")
         return self._task_store.create_for_principal(
