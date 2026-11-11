@@ -545,6 +545,10 @@ class SQLiteTaskStore:
             raise TaskValidationError("claim must be a TaskClaim")
         _text(claim.task_id, "task_id", 64)
         _text(claim.executor_id, "executor_id", 128)
+        _text(claim.idempotency_key, "idempotency_key", 128)
+        _text(claim.tool, "tool", 64)
+        if claim.principal_id is not None:
+            _text(claim.principal_id, "principal_id", 128)
         state, owner, until, index, attempt, plan_json, principal_id = row
         if type(claim.step_index) is not int or type(claim.attempt) is not int:
             raise TaskConflictError("task claim progress fields must be integers")
