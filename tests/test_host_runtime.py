@@ -13,6 +13,7 @@ from capri_runtime import (
     SQLiteTaskStore,
     TaskEngine,
     TaskNotFoundError,
+    TaskValidationError,
     TaskWorker,
     ToolExecutionBridge,
     ToolExecutor,
@@ -117,6 +118,34 @@ class CapriHostRuntimeTests(unittest.TestCase):
         with self.assertRaises(HostRuntimeError):
             host.create_task(
                 "alice-token", [{"tool": "not-registered", "input": {}}]
+            )
+
+    def test_task_creation_rejects_hostile_plan_containers_before_inspection(self):
+        class HostileList(list):
+            def __iter__(self):
+                raise AssertionError("host must not iterate a custom list")
+
+        class HostileDict(dict):
+            def get(self, *args, **kwargs):
+                raise AssertionError("host must not inspect a custom dict")
+
+        worker = TaskWorker(TaskEngine(
+            self.task_store,
+            {},
+            "worker",
+            principal_handlers={"collect": lambda data, key, principal: {"ok": True}},
+        ))
+        host = self.make_host(task_worker=worker)
+
+        with self.assertRaises(TaskValidationError):
+            host.create_task(
+                "alice-token",
+                HostileList([{"tool": "collect", "input": {}}]),
+            )
+        with self.assertRaises(TaskValidationError):
+            host.create_task(
+                "alice-token",
+                [HostileDict(tool="collect", input={})],
             )
 
     def test_principal_task_creation_requires_a_configured_worker_registry(self):
