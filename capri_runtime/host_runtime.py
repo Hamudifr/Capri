@@ -194,7 +194,7 @@ class CapriHostRuntime:
         allowed = self._task_worker.engine.principal_handlers
         if type(plan) is list:
             for step in plan:
-                if type(step) is dict and isinstance(step.get("tool"), str):
+                if type(step) is dict and type(step.get("tool")) is str:
                     if step["tool"] not in allowed:
                         raise HostRuntimeError("task plan references an unavailable principal handler")
         return self._task_store.create_for_principal(
