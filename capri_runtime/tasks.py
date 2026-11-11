@@ -63,9 +63,9 @@ def _parse_time(value: str) -> datetime:
 def _assert_json_value(value: Any, depth: int = 0) -> None:
     if depth > 16:
         raise TaskValidationError("JSON nesting exceeds 16 levels")
-    if value is None or isinstance(value, (bool, int, float)):
+    if value is None or type(value) in (bool, int, float):
         return
-    if isinstance(value, str):
+    if type(value) is str:
         if any(0xD800 <= ord(ch) <= 0xDFFF for ch in value):
             raise TaskValidationError("JSON strings must contain Unicode scalar values")
         return
@@ -75,7 +75,7 @@ def _assert_json_value(value: Any, depth: int = 0) -> None:
         return
     if type(value) is dict:
         for key, child in value.items():
-            if not isinstance(key, str):
+            if type(key) is not str:
                 raise TaskValidationError("JSON object keys must be strings")
             _assert_json_value(key, depth + 1)
             _assert_json_value(child, depth + 1)
@@ -102,7 +102,7 @@ def _json(value: Any, *, label: str, limit: int = 65_536) -> tuple[str, Any]:
 
 
 def _text(value: Any, label: str, limit: int) -> str:
-    if (not isinstance(value, str) or not value or len(value) > limit
+    if (type(value) is not str or not value or len(value) > limit
             or any(0xD800 <= ord(ch) <= 0xDFFF for ch in value)):
         raise TaskValidationError(f"{label} is invalid")
     return value
