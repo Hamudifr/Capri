@@ -147,6 +147,15 @@ class CapriHostRuntimeTests(unittest.TestCase):
                 "alice-token",
                 [HostileDict(tool="collect", input={})],
             )
+        class HostileString(str):
+            def __hash__(self):
+                raise AssertionError("host must not hash a custom tool string")
+
+        with self.assertRaises(TaskValidationError):
+            host.create_task(
+                "alice-token",
+                [{"tool": HostileString("collect"), "input": {}}],
+            )
 
     def test_principal_task_creation_requires_a_configured_worker_registry(self):
         host = self.make_host()
