@@ -514,6 +514,26 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                     self.store.create(plan, now=NOW)
 
 
+    def test_plan_rejects_scalar_subclasses_before_custom_methods(self):
+        class HostileString(str):
+            def __iter__(self):
+                raise AssertionError("custom string iteration must not execute")
+
+        class HostileInt(int):
+            def __repr__(self):
+                raise AssertionError("custom integer representation must not execute")
+
+        invalid = [
+            [{"tool": HostileString("prepare"), "input": {}}],
+            [{"tool": "prepare", "input": {"value": HostileString("payload")}}],
+            [{"tool": "prepare", "input": {"value": HostileInt(7)}}],
+        ]
+        for plan in invalid:
+            with self.subTest(value_type=type(plan[0].get("tool"))):
+                with self.assertRaises(TaskValidationError):
+                    self.store.create(plan, now=NOW)
+
+
     def test_live_lease_can_be_renewed_for_long_handler(self):
         self.store.create([{"tool": "prepare", "input": {}, "max_attempts": 2}], now=NOW)
         claim = self.store.claim_next("worker", lease_seconds=5, now=NOW)
