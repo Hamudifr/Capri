@@ -1,11 +1,11 @@
 name: Non-X5 quality checks
 
 on:
-  # PR heads are validated by pull_request; keep push checks for the integration branches.
+  # push runs only on integration branches. pull_request.branches filters the PR base/target branch.
   push:
     branches: ["main", "recovery/non-x5-foundation"]
   pull_request:
-    branches: ["main", "recovery/non-x5-foundation", "feature/capri-doctor"]
+    branches: ["main", "recovery/non-x5-foundation", "feature/capri-doctor", "security/ledger-private-permissions-v2", "security/ledger-path-hardening"]
   workflow_dispatch:
 
 permissions:
