@@ -640,6 +640,167 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                     "running",
                 )
 
+
+    def test_direct_claim_apis_reject_nested_non_native_input_before_comparison(self):
+        class HostileDict(dict):
+            def __eq__(self, other):
+                raise AssertionError("hostile nested dict equality must not execute")
+
+            def __ne__(self, other):
+                raise AssertionError("hostile nested dict inequality must not execute")
+
+        class HostileList(list):
+            def __eq__(self, other):
+                raise AssertionError("hostile nested list equality must not execute")
+
+            def __ne__(self, other):
+                raise AssertionError("hostile nested list inequality must not execute")
+
+        class HostileString(str):
+            def __eq__(self, other):
+                raise AssertionError("hostile nested scalar equality must not execute")
+
+            def __ne__(self, other):
+                raise AssertionError("hostile nested scalar inequality must not execute")
+
+        cases = (
+            (
+                {"nested": {"value": "persisted"}},
+                {"nested": HostileDict(value="persisted")},
+            ),
+            (
+                {"nested": ["persisted"]},
+                {"nested": HostileList(["persisted"])},
+            ),
+            (
+                {"nested": {"value": "persisted"}},
+                {"nested": {"value": HostileString("persisted")}},
+            ),
+        )
+        for method_name in ("validate_claim", "finish_step", "fail_step"):
+            for persisted_input, hostile_input in cases:
+                with self.subTest(method=method_name, hostile=type(
+                    next(iter(hostile_input["nested"].values()))
+                    if type(hostile_input["nested"]) is dict
+                    else hostile_input["nested"]
+                ).__name__):
+                    task = self.store.create_for_principal(
+                        "alice",
+                        [{"tool": "prepare", "input": persisted_input, "max_attempts": 2}],
+                        now=NOW,
+                    )
+                    claim = self.store.claim_next("worker", now=NOW)
+                    forged = replace(claim, input=hostile_input)
+                    before_record = self.store.get(task.task_id)
+                    before_events = self.store.events(task.task_id)
+                    connection = self.store._connect()
+                    try:
+                        before_lease_state = connection.execute(
+                            "SELECT state,lease_owner,lease_until,current_step,attempts,"
+                            "results_json,error_code FROM tasks WHERE task_id=?",
+                            (task.task_id,),
+                        ).fetchone()
+                    finally:
+                        connection.close()
+
+                    with self.assertRaises(TaskValidationError):
+                        if method_name == "validate_claim":
+                            self.store.validate_claim(forged, now=NOW)
+                        elif method_name == "finish_step":
+                            self.store.finish_step(forged, {"forged": True}, now=NOW)
+                        else:
+                            self.store.fail_step(forged, now=NOW)
+
+                    self.assertEqual(self.store.get(task.task_id), before_record)
+                    self.assertEqual(self.store.events(task.task_id), before_events)
+                    connection = self.store._connect()
+                    try:
+                        after_lease_state = connection.execute(
+                            "SELECT state,lease_owner,lease_until,current_step,attempts,"
+                            "results_json,error_code FROM tasks WHERE task_id=?",
+                            (task.task_id,),
+                        ).fetchone()
+                    finally:
+                        connection.close()
+                    self.assertEqual(after_lease_state, before_lease_state)
+
+    def test_public_claim_apis_reject_taskclaim_subclasses_before_field_access(self):
+        claim_fields = {
+            "task_id", "executor_id", "step_index", "attempt",
+            "idempotency_key", "tool", "input", "lease_until", "principal_id",
+        }
+
+        class HostileTaskClaim(TaskClaim):
+            def __getattribute__(self, name):
+                if name in claim_fields:
+                    raise AssertionError("TaskClaim subclass field access must not execute")
+                return super().__getattribute__(name)
+
+        methods = (
+            "validate_claim", "renew_lease", "finish_step", "fail_step", "execute_claim"
+        )
+        handler_calls = []
+        engine = TaskEngine(
+            self.store,
+            {},
+            "worker",
+            principal_handlers={
+                "prepare": lambda data, key, principal: (
+                    handler_calls.append((data, key, principal)) or {"ok": True}
+                )
+            },
+        )
+        for method_name in methods:
+            with self.subTest(method=method_name):
+                task = self.store.create_for_principal(
+                    "alice",
+                    [{"tool": "prepare", "input": {"value": "original"}, "max_attempts": 2}],
+                    now=NOW,
+                )
+                claim = self.store.claim_next("worker", now=NOW)
+                hostile = HostileTaskClaim(
+                    claim.task_id, claim.executor_id, claim.step_index, claim.attempt,
+                    claim.idempotency_key, claim.tool, claim.input, claim.lease_until,
+                    claim.principal_id,
+                )
+                before_record = self.store.get(task.task_id)
+                before_events = self.store.events(task.task_id)
+                connection = self.store._connect()
+                try:
+                    before_lease_state = connection.execute(
+                        "SELECT state,lease_owner,lease_until,current_step,attempts,"
+                        "results_json,error_code FROM tasks WHERE task_id=?",
+                        (task.task_id,),
+                    ).fetchone()
+                finally:
+                    connection.close()
+
+                with self.assertRaises(TaskValidationError):
+                    if method_name == "validate_claim":
+                        self.store.validate_claim(hostile, now=NOW)
+                    elif method_name == "renew_lease":
+                        self.store.renew_lease(hostile, lease_seconds=60, now=NOW)
+                    elif method_name == "finish_step":
+                        self.store.finish_step(hostile, {"ok": True}, now=NOW)
+                    elif method_name == "fail_step":
+                        self.store.fail_step(hostile, now=NOW)
+                    else:
+                        engine.execute_claim(hostile, now=NOW)
+
+                self.assertEqual(self.store.get(task.task_id), before_record)
+                self.assertEqual(self.store.events(task.task_id), before_events)
+                self.assertEqual(handler_calls, [])
+                connection = self.store._connect()
+                try:
+                    after_lease_state = connection.execute(
+                        "SELECT state,lease_owner,lease_until,current_step,attempts,"
+                        "results_json,error_code FROM tasks WHERE task_id=?",
+                        (task.task_id,),
+                    ).fetchone()
+                finally:
+                    connection.close()
+                self.assertEqual(after_lease_state, before_lease_state)
+
     def test_managed_worker_renews_lease_during_long_handler(self):
         started = Event()
         release = Event()
