@@ -541,7 +541,7 @@ class SQLiteTaskStore:
         claim: TaskClaim, row: tuple[Any, ...], stamp: str
     ) -> list[dict[str, Any]]:
         """Validate a claim against an authoritative row inside its write transaction."""
-        if not isinstance(claim, TaskClaim):
+        if type(claim) is not TaskClaim:
             raise TaskValidationError("claim must be a TaskClaim")
         _text(claim.task_id, "task_id", 64)
         _text(claim.executor_id, "executor_id", 128)
@@ -549,6 +549,9 @@ class SQLiteTaskStore:
         _text(claim.tool, "tool", 64)
         if claim.principal_id is not None:
             _text(claim.principal_id, "principal_id", 128)
+        if type(claim.input) is not dict:
+            raise TaskValidationError("claim input must be a JSON object")
+        _, input_snapshot = _json(claim.input, label="claim input")
         state, owner, until, index, attempt, plan_json, principal_id = row
         if type(claim.step_index) is not int or type(claim.attempt) is not int:
             raise TaskConflictError("task claim progress fields must be integers")
@@ -572,8 +575,7 @@ class SQLiteTaskStore:
         if (
             claim.idempotency_key != f"{claim.task_id}:{index}"
             or claim.tool != step["tool"]
-            or type(claim.input) is not dict
-            or claim.input != step["input"]
+            or input_snapshot != step["input"]
         ):
             raise TaskConflictError("task claim payload differs from the persisted plan")
         return plan
@@ -581,7 +583,7 @@ class SQLiteTaskStore:
     def renew_lease(self, claim: TaskClaim, lease_seconds: int = 60,
                     now: datetime | None = None) -> TaskClaim:
         """Extend a live claim before expiry; expired or superseded owners fail closed."""
-        if not isinstance(claim, TaskClaim) or type(claim.input) is not dict:
+        if type(claim) is not TaskClaim or type(claim.input) is not dict:
             raise TaskValidationError("claim must contain a TaskClaim with object input")
         if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int) or not 5 <= lease_seconds <= 3600:
             raise TaskValidationError("lease_seconds must be between 5 and 3600")
@@ -637,7 +639,7 @@ class SQLiteTaskStore:
         construct or alter one, so worker dispatch must not trust its principal,
         tool, input, attempt, or lease metadata without checking the stored task.
         """
-        if not isinstance(claim, TaskClaim):
+        if type(claim) is not TaskClaim:
             raise TaskValidationError("claim must be a TaskClaim")
         _text(claim.task_id, "task_id", 64)
         _text(claim.executor_id, "executor_id", 128)
@@ -917,7 +919,10 @@ class TaskEngine:
         self.lease_seconds = lease_seconds
 
     def execute_claim(self, claim: TaskClaim, now: datetime | None = None) -> TaskRecord:
-        if not isinstance(claim, TaskClaim) or claim.executor_id != self.executor_id:
+        if type(claim) is not TaskClaim:
+            raise TaskValidationError("claim must be a TaskClaim")
+        _text(claim.executor_id, "executor_id", 128)
+        if claim.executor_id != self.executor_id:
             raise TaskConflictError("claim does not belong to this task engine")
         # TaskClaim is frozen, but its nested input dictionary is not. Snapshot
         # the JSON payload before validation so a caller cannot mutate it between
