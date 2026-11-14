@@ -549,6 +549,12 @@ class SQLiteTaskStore:
         _text(claim.tool, "tool", 64)
         if claim.principal_id is not None:
             _text(claim.principal_id, "principal_id", 128)
+        if type(claim.input) is not dict:
+            raise TaskValidationError("claim input must be a plain JSON object")
+        # Validate and normalize the complete nested payload before equality checks.
+        # Otherwise custom nested containers/scalars could run attacker-controlled
+        # comparison methods while this claim is checked against the persisted plan.
+        _, claim_input = _json(claim.input, label="claim input")
         state, owner, until, index, attempt, plan_json, principal_id = row
         if type(claim.step_index) is not int or type(claim.attempt) is not int:
             raise TaskConflictError("task claim progress fields must be integers")
@@ -572,8 +578,7 @@ class SQLiteTaskStore:
         if (
             claim.idempotency_key != f"{claim.task_id}:{index}"
             or claim.tool != step["tool"]
-            or type(claim.input) is not dict
-            or claim.input != step["input"]
+            or claim_input != step["input"]
         ):
             raise TaskConflictError("task claim payload differs from the persisted plan")
         return plan
