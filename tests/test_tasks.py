@@ -640,6 +640,41 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                     "running",
                 )
 
+    def test_direct_claim_transitions_reject_nested_custom_input_objects(self):
+        class HostileDict(dict):
+            def __eq__(self, other):
+                raise AssertionError("custom nested dictionary comparison must not execute")
+
+        class HostileString(str):
+            def __eq__(self, other):
+                raise AssertionError("custom nested scalar comparison must not execute")
+
+        attacks = (
+            {"nested": HostileDict(value="original")},
+            {"nested": {"value": HostileString("original")}},
+        )
+        for method_name in ("validate_claim", "finish_step", "fail_step"):
+            for hostile_input in attacks:
+                with self.subTest(method=method_name, hostile_type=type(hostile_input["nested"]).__name__):
+                    task = self.store.create_for_principal(
+                        "alice",
+                        [{"tool": "prepare", "input": {"nested": {"value": "original"}}, "max_attempts": 2}],
+                        now=NOW,
+                    )
+                    claim = self.store.claim_next("worker", now=NOW)
+                    forged = replace(claim, input=hostile_input)
+                    with self.assertRaises(TaskValidationError):
+                        if method_name == "validate_claim":
+                            self.store.validate_claim(forged, now=NOW)
+                        elif method_name == "finish_step":
+                            self.store.finish_step(forged, {"ok": True}, now=NOW)
+                        else:
+                            self.store.fail_step(forged, now=NOW)
+                    self.assertEqual(
+                        self.store.get_for_principal(task.task_id, "alice").state,
+                        "running",
+                    )
+
     def test_managed_worker_renews_lease_during_long_handler(self):
         started = Event()
         release = Event()
