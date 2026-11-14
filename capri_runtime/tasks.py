@@ -664,7 +664,7 @@ class SQLiteTaskStore:
 
     def finish_step(self, claim: TaskClaim, result: Any,
                     now: datetime | None = None) -> TaskRecord:
-        if not isinstance(claim, TaskClaim):
+        if type(claim) is not TaskClaim:
             raise TaskValidationError("claim must be a TaskClaim")
         result_json, decoded = _json(result, label="step result")
         stamp = _iso(now or _now())
@@ -718,7 +718,7 @@ class SQLiteTaskStore:
     def fail_step(self, claim: TaskClaim, error_code: str = "handler_failed",
                   retry_delay_seconds: int = 5, now: datetime | None = None,
                   retryable: bool = True) -> TaskRecord:
-        if not isinstance(claim, TaskClaim):
+        if type(claim) is not TaskClaim:
             raise TaskValidationError("claim must be a TaskClaim")
         _text(error_code, "error_code", 64)
         if not error_code.replace("_", "").isalnum():
