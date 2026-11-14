@@ -801,6 +801,42 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                     connection.close()
                 self.assertEqual(after_lease_state, before_lease_state)
 
+    def test_execute_claim_rejects_hostile_executor_id_before_comparison(self):
+        class HostileString(str):
+            def __eq__(self, other):
+                raise AssertionError("hostile executor equality must not execute")
+
+            def __ne__(self, other):
+                raise AssertionError("hostile executor inequality must not execute")
+
+        task = self.store.create_for_principal(
+            "alice",
+            [{"tool": "prepare", "input": {"value": "original"}, "max_attempts": 2}],
+            now=NOW,
+        )
+        claim = self.store.claim_next("worker", now=NOW)
+        hostile = replace(claim, executor_id=HostileString("worker"))
+        handler_calls = []
+        engine = TaskEngine(
+            self.store,
+            {},
+            "worker",
+            principal_handlers={
+                "prepare": lambda data, key, principal: (
+                    handler_calls.append((data, key, principal)) or {"ok": True}
+                )
+            },
+        )
+        before_record = self.store.get(task.task_id)
+        before_events = self.store.events(task.task_id)
+
+        with self.assertRaises(TaskValidationError):
+            engine.execute_claim(hostile, now=NOW)
+
+        self.assertEqual(self.store.get(task.task_id), before_record)
+        self.assertEqual(self.store.events(task.task_id), before_events)
+        self.assertEqual(handler_calls, [])
+
     def test_managed_worker_renews_lease_during_long_handler(self):
         started = Event()
         release = Event()
