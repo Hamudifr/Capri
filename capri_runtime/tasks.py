@@ -541,7 +541,7 @@ class SQLiteTaskStore:
         claim: TaskClaim, row: tuple[Any, ...], stamp: str
     ) -> list[dict[str, Any]]:
         """Validate a claim against an authoritative row inside its write transaction."""
-        if not isinstance(claim, TaskClaim):
+        if type(claim) is not TaskClaim:
             raise TaskValidationError("claim must be a TaskClaim")
         _text(claim.task_id, "task_id", 64)
         _text(claim.executor_id, "executor_id", 128)
@@ -586,7 +586,7 @@ class SQLiteTaskStore:
     def renew_lease(self, claim: TaskClaim, lease_seconds: int = 60,
                     now: datetime | None = None) -> TaskClaim:
         """Extend a live claim before expiry; expired or superseded owners fail closed."""
-        if not isinstance(claim, TaskClaim) or type(claim.input) is not dict:
+        if type(claim) is not TaskClaim or type(claim.input) is not dict:
             raise TaskValidationError("claim must contain a TaskClaim with object input")
         if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int) or not 5 <= lease_seconds <= 3600:
             raise TaskValidationError("lease_seconds must be between 5 and 3600")
@@ -642,7 +642,7 @@ class SQLiteTaskStore:
         construct or alter one, so worker dispatch must not trust its principal,
         tool, input, attempt, or lease metadata without checking the stored task.
         """
-        if not isinstance(claim, TaskClaim):
+        if type(claim) is not TaskClaim:
             raise TaskValidationError("claim must be a TaskClaim")
         _text(claim.task_id, "task_id", 64)
         _text(claim.executor_id, "executor_id", 128)
@@ -667,7 +667,7 @@ class SQLiteTaskStore:
 
     def finish_step(self, claim: TaskClaim, result: Any,
                     now: datetime | None = None) -> TaskRecord:
-        if not isinstance(claim, TaskClaim):
+        if type(claim) is not TaskClaim:
             raise TaskValidationError("claim must be a TaskClaim")
         result_json, decoded = _json(result, label="step result")
         stamp = _iso(now or _now())
@@ -721,7 +721,7 @@ class SQLiteTaskStore:
     def fail_step(self, claim: TaskClaim, error_code: str = "handler_failed",
                   retry_delay_seconds: int = 5, now: datetime | None = None,
                   retryable: bool = True) -> TaskRecord:
-        if not isinstance(claim, TaskClaim):
+        if type(claim) is not TaskClaim:
             raise TaskValidationError("claim must be a TaskClaim")
         _text(error_code, "error_code", 64)
         if not error_code.replace("_", "").isalnum():
@@ -922,7 +922,10 @@ class TaskEngine:
         self.lease_seconds = lease_seconds
 
     def execute_claim(self, claim: TaskClaim, now: datetime | None = None) -> TaskRecord:
-        if not isinstance(claim, TaskClaim) or claim.executor_id != self.executor_id:
+        if type(claim) is not TaskClaim:
+            raise TaskValidationError("claim must be a TaskClaim")
+        _text(claim.executor_id, "executor_id", 128)
+        if claim.executor_id != self.executor_id:
             raise TaskConflictError("claim does not belong to this task engine")
         # TaskClaim is frozen, but its nested input dictionary is not. Snapshot
         # the JSON payload before validation so a caller cannot mutate it between
