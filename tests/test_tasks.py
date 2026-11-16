@@ -728,5 +728,93 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             TaskWorker(engine, heartbeat_interval_seconds=5)
 
 
+    def test_legacy_worker_leaves_principal_task_for_principal_aware_worker(self):
+        created_at = datetime.now(timezone.utc)
+        task = self.store.create_for_principal(
+            "alice",
+            [{"tool": "prepare", "input": {"value": "private"}, "max_attempts": 2}],
+            now=created_at,
+        )
+        legacy_calls = []
+        legacy_engine = TaskEngine(
+            self.store,
+            {"prepare": lambda data, key: legacy_calls.append((data, key)) or {"legacy": True}},
+            "legacy-worker",
+        )
+        before_events = self.store.events(task.task_id)
+
+        self.assertIsNone(TaskWorker(legacy_engine).run_once())
+        connection = self.store._connect()
+        try:
+            state_after_legacy_poll = connection.execute(
+                "SELECT state,attempts,lease_owner,lease_until FROM tasks WHERE task_id=?",
+                (task.task_id,),
+            ).fetchone()
+        finally:
+            connection.close()
+        self.assertEqual(state_after_legacy_poll, ("queued", 0, None, None))
+        self.assertEqual(self.store.events(task.task_id), before_events)
+        self.assertEqual(legacy_calls, [])
+
+        principal_calls = []
+        principal_engine = TaskEngine(
+            self.store,
+            {},
+            "principal-worker",
+            principal_handlers={
+                "prepare": lambda data, key, principal: (
+                    principal_calls.append((data, key, principal)) or {"principal": principal}
+                )
+            },
+        )
+        result = TaskWorker(principal_engine).run_once()
+        self.assertEqual(result.state, "succeeded")
+        self.assertEqual([call[2] for call in principal_calls], ["alice"])
+
+    def test_legacy_engine_does_not_reclaim_expired_principal_lease(self):
+        task = self.store.create_for_principal(
+            "alice",
+            [{"tool": "prepare", "input": {"value": "private"}, "max_attempts": 2}],
+            now=NOW,
+        )
+        original = self.store.claim_next(
+            "principal-worker",
+            lease_seconds=5,
+            now=NOW,
+            principal_tools=frozenset({"prepare"}),
+        )
+        self.assertEqual(original.task_id, task.task_id)
+        before_events = self.store.events(task.task_id)
+
+        legacy_engine = TaskEngine(
+            self.store,
+            {"prepare": lambda data, key: {"legacy": True}},
+            "legacy-worker",
+        )
+        self.assertIsNone(legacy_engine.run_once(now=NOW + timedelta(seconds=6)))
+        connection = self.store._connect()
+        try:
+            state_after_legacy_poll = connection.execute(
+                "SELECT state,attempts,lease_owner,lease_until FROM tasks WHERE task_id=?",
+                (task.task_id,),
+            ).fetchone()
+        finally:
+            connection.close()
+        self.assertEqual(
+            state_after_legacy_poll,
+            ("running", 1, "principal-worker", original.lease_until),
+        )
+        self.assertEqual(self.store.events(task.task_id), before_events)
+
+        principal_engine = TaskEngine(
+            self.store,
+            {},
+            "principal-worker-2",
+            principal_handlers={"prepare": lambda data, key, principal: {"principal": principal}},
+        )
+        result = principal_engine.run_once(now=NOW + timedelta(seconds=6))
+        self.assertEqual(result.state, "succeeded")
+
+
 if __name__ == "__main__":
     unittest.main()
