@@ -851,5 +851,26 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 self.assertEqual(record.attempts, 0)
 
 
+    def test_low_level_claim_requires_explicit_principal_tool_allowlist(self):
+        task = self.store.create_for_principal(
+            "alice",
+            [{"tool": "prepare", "input": {}, "max_attempts": 1}],
+            now=NOW,
+        )
+
+        self.assertIsNone(self.store.claim_next("legacy-caller", now=NOW))
+        self.assertEqual(
+            self.store.get_for_principal(task.task_id, "alice").state,
+            "queued",
+        )
+
+        claim = self.store.claim_next(
+            "principal-caller",
+            now=NOW,
+            principal_tools=frozenset({"prepare"}),
+        )
+        self.assertEqual(claim.task_id, task.task_id)
+
+
 if __name__ == "__main__":
     unittest.main()
