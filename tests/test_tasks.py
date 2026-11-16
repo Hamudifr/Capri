@@ -819,5 +819,37 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         self.assertEqual(result.state, "succeeded")
 
 
+    def test_principal_worker_skips_unsupported_queue_prefix_beyond_claim_batch_limit(self):
+        unsupported_tasks = []
+        for index in range(40):
+            unsupported_tasks.append(
+                self.store.create_for_principal(
+                    f"owner-{index}",
+                    [{"tool": "unsupported", "input": {"index": index}, "max_attempts": 1}],
+                    now=NOW + timedelta(seconds=index),
+                )
+            )
+        supported_task = self.store.create_for_principal(
+            "alice",
+            [{"tool": "prepare", "input": {"value": "supported"}, "max_attempts": 1}],
+            now=NOW + timedelta(seconds=40),
+        )
+        engine = TaskEngine(
+            self.store,
+            {},
+            "capable-worker",
+            principal_handlers={"prepare": lambda data, key, principal: {"principal": principal}},
+        )
+
+        result = engine.run_once(now=NOW + timedelta(seconds=41))
+        self.assertEqual(result.task_id, supported_task.task_id)
+        self.assertEqual(result.state, "succeeded")
+        for task in unsupported_tasks:
+            with self.subTest(task_id=task.task_id):
+                record = self.store.get_for_principal(task.task_id, task.principal_id)
+                self.assertEqual(record.state, "queued")
+                self.assertEqual(record.attempts, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
