@@ -844,9 +844,9 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         result = engine.run_once(now=NOW + timedelta(seconds=41))
         self.assertEqual(result.task_id, supported_task.task_id)
         self.assertEqual(result.state, "succeeded")
-        for task in unsupported_tasks:
+        for index, task in enumerate(unsupported_tasks):
             with self.subTest(task_id=task.task_id):
-                record = self.store.get_for_principal(task.task_id, task.principal_id)
+                record = self.store.get_for_principal(task.task_id, f"owner-{index}")
                 self.assertEqual(record.state, "queued")
                 self.assertEqual(record.attempts, 0)
 
