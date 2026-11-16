@@ -313,7 +313,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
 
     def test_principal_claims_require_principal_aware_handlers(self):
         calls = []
-        self.store.create_for_principal(
+        alice = self.store.create_for_principal(
             "alice", [{"tool": "prepare", "input": {}, "max_attempts": 1}], now=NOW
         )
         generic = TaskEngine(
@@ -321,13 +321,14 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             {"prepare": lambda data, key: calls.append("generic") or {"ok": True}},
             "worker",
         )
-        failed = generic.run_once(now=NOW)
-        self.assertEqual(failed.state, "failed")
-        self.assertEqual(failed.error_code, "principal_handler_required")
+        self.assertIsNone(generic.run_once(now=NOW))
+        self.assertEqual(self.store.get_for_principal(alice.task_id, "alice").state, "queued")
         self.assertEqual(calls, [])
 
-        self.store.create_for_principal(
-            "bob", [{"tool": "prepare", "input": {}, "max_attempts": 1}], now=NOW
+        bob = self.store.create_for_principal(
+            "bob",
+            [{"tool": "prepare", "input": {}, "max_attempts": 1}],
+            now=NOW + timedelta(seconds=1),
         )
         scoped = TaskEngine(
             self.store,
@@ -339,10 +340,12 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 )
             },
         )
-        succeeded = scoped.run_once(now=NOW)
-        self.assertEqual(succeeded.state, "succeeded")
-        self.assertEqual(calls, ["bob"])
-        self.assertEqual(succeeded.result, ({"principal": "bob"},))
+        succeeded_alice = scoped.run_once(now=NOW + timedelta(seconds=2))
+        succeeded_bob = scoped.run_once(now=NOW + timedelta(seconds=3))
+        self.assertEqual(succeeded_alice.state, "succeeded")
+        self.assertEqual(succeeded_bob.state, "succeeded")
+        self.assertEqual(calls, ["alice", "bob"])
+        self.assertEqual(succeeded_bob.result, ({"principal": "bob"},))
 
     def test_plan_validation_is_strict_and_bounded(self):
         invalid = (
