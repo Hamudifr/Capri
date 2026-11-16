@@ -463,19 +463,18 @@ class SQLiteTaskStore:
 
     def claim_next(self, executor_id: str, lease_seconds: int = 60,
                    now: datetime | None = None, *,
-                   principal_tools: frozenset[str] | None = None) -> TaskClaim | None:
-        """Claim the next task; optionally restrict principal-owned work to supported tools.
+                   principal_tools: frozenset[str] = frozenset()) -> TaskClaim | None:
+        """Claim the next task, failing closed for unsupported principal-owned work.
 
-        An omitted allowlist preserves the low-level unrestricted claim API.
-        TaskEngine and TaskWorker always pass their principal-handler allowlist
-        so mixed worker pools cannot lease principal tasks they cannot execute.
+        Principal tasks are excluded by default. Callers must provide the exact
+        trusted handler-name allowlist they can execute. TaskEngine and TaskWorker
+        pass their principal-handler keys automatically.
         """
         _text(executor_id, "executor_id", 128)
-        if principal_tools is not None:
-            if type(principal_tools) is not frozenset or len(principal_tools) > 128:
-                raise TaskValidationError("principal_tools must be a frozenset of at most 128 names")
-            for tool_name in principal_tools:
-                _text(tool_name, "principal handler name", 64)
+        if type(principal_tools) is not frozenset or len(principal_tools) > 128:
+            raise TaskValidationError("principal_tools must be a frozenset of at most 128 names")
+        for tool_name in principal_tools:
+            _text(tool_name, "principal handler name", 64)
         if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int) or not 5 <= lease_seconds <= 3600:
             raise TaskValidationError("lease_seconds must be between 5 and 3600")
         current = now or _now()
@@ -493,10 +492,9 @@ class SQLiteTaskStore:
                     (tasks.state='running' AND tasks.lease_until<=?)
                     )"""
                 params = [stamp, stamp]
-                if principal_tools is not None:
-                    if not principal_tools:
-                        query += " AND task_owners.principal_id IS NULL"
-                    else:
+                if not principal_tools:
+                    query += " AND task_owners.principal_id IS NULL"
+                else:
                         placeholders = ",".join("?" for _ in principal_tools)
                         query += (
                             " AND (task_owners.principal_id IS NULL"
@@ -547,7 +545,6 @@ class SQLiteTaskStore:
                     step = plan[index]
                     if (
                         principal_id is not None
-                        and principal_tools is not None
                         and step["tool"] not in principal_tools
                     ):
                         # Leave unsupported principal work queued (or expired) so
