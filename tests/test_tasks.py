@@ -173,7 +173,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                     [{"tool": "prepare", "input": {"value": "original"}, "max_attempts": 1}],
                     now=NOW,
                 )
-                claim = self.store.claim_next("worker", now=NOW)
+                claim = self.store.claim_next("worker", now=NOW, principal_tools=frozenset({"prepare"}))
                 self.assertIsInstance(claim, TaskClaim)
                 with self.assertRaises(TaskConflictError):
                     engine.execute_claim(attack(claim), now=NOW)
@@ -191,7 +191,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             [{"tool": "prepare", "input": {"value": "persisted"}, "max_attempts": 1}],
             now=NOW,
         )
-        claim = self.store.claim_next("worker", now=NOW)
+        claim = self.store.claim_next("worker", now=NOW, principal_tools=frozenset({"prepare"}))
         engine = TaskEngine(
             self.store,
             {},
@@ -260,7 +260,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             [{"tool": "prepare", "input": {"nested": {"value": "persisted"}}, "max_attempts": 1}],
             now=NOW,
         )
-        claim = self.store.claim_next("worker", now=NOW)
+        claim = self.store.claim_next("worker", now=NOW, principal_tools=frozenset({"prepare"}))
         engine = TaskEngine(
             self.store,
             {},
@@ -292,7 +292,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             [{"tool": "prepare", "input": {"value": "original"}, "max_attempts": 2}],
             now=NOW,
         )
-        claim = self.store.claim_next("worker", lease_seconds=5, now=NOW)
+        claim = self.store.claim_next("worker", lease_seconds=5, now=NOW, principal_tools=frozenset({"prepare"}))
         engine = TaskEngine(
             self.store,
             {},
@@ -392,7 +392,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
 
     def test_retry_backoff_and_attempt_limit(self):
         task = self.store.create(PLAN, now=NOW)
-        claim = self.store.claim_next("worker", now=NOW)
+        claim = self.store.claim_next("worker", now=NOW, principal_tools=frozenset({"prepare"}))
         waiting = self.store.fail_step(claim, now=NOW)
         self.assertEqual(waiting.state, "retry_wait")
         self.assertIsNone(self.store.claim_next("worker", now=NOW + timedelta(seconds=4)))
@@ -442,11 +442,11 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         task = self.store.create(PLAN, now=NOW)
         cancelled = self.store.request_cancel(task.task_id, now=NOW)
         self.assertEqual(cancelled.state, "cancelled")
-        self.assertIsNone(self.store.claim_next("worker", now=NOW))
+        self.assertIsNone(self.store.claim_next("worker", now=NOW, principal_tools=frozenset({"prepare"})))
 
     def test_cancel_running_task_finishes_current_step_then_stops(self):
         task = self.store.create(PLAN, now=NOW)
-        claim = self.store.claim_next("worker", now=NOW)
+        claim = self.store.claim_next("worker", now=NOW, principal_tools=frozenset({"prepare"}))
         self.store.request_cancel(task.task_id, now=NOW + timedelta(seconds=1))
         result = self.store.finish_step(claim, {"completed": True}, now=NOW + timedelta(seconds=2))
         self.assertEqual(result.state, "cancelled")
@@ -455,7 +455,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
 
     def test_events_are_durable_and_ordered(self):
         task = self.store.create(PLAN, now=NOW)
-        self.store.claim_next("worker", now=NOW)
+        self.store.claim_next("worker", now=NOW, principal_tools=frozenset({"prepare"}))
         events = SQLiteTaskStore(self.path).events(task.task_id)
         self.assertEqual([event["state"] for event in events], ["queued", "running"])
 
@@ -498,7 +498,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
 
     def test_cancellation_during_failed_step_does_not_schedule_retry(self):
         self.store.create([{"tool": "prepare", "input": {}, "max_attempts": 5}], now=NOW)
-        claim = self.store.claim_next("worker", now=NOW)
+        claim = self.store.claim_next("worker", now=NOW, principal_tools=frozenset({"prepare"}))
         self.store.request_cancel(claim.task_id, now=NOW + timedelta(seconds=1))
         result = self.store.fail_step(claim, now=NOW + timedelta(seconds=2))
         self.assertEqual(result.state, "cancelled")
@@ -539,7 +539,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
 
     def test_live_lease_can_be_renewed_for_long_handler(self):
         self.store.create([{"tool": "prepare", "input": {}, "max_attempts": 2}], now=NOW)
-        claim = self.store.claim_next("worker", lease_seconds=5, now=NOW)
+        claim = self.store.claim_next("worker", lease_seconds=5, now=NOW, principal_tools=frozenset({"prepare"}))
         renewed = self.store.renew_lease(
             claim, lease_seconds=60, now=NOW + timedelta(seconds=4)
         )
@@ -595,7 +595,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                         [{"tool": "prepare", "input": {"value": "original"}, "max_attempts": 2}],
                         now=NOW,
                     )
-                    claim = self.store.claim_next("worker", now=NOW)
+                    claim = self.store.claim_next("worker", now=NOW, principal_tools=frozenset({"prepare"}))
                     forged = attack(claim)
                     with self.assertRaises(TaskConflictError):
                         if method_name == "renew_lease":
@@ -628,7 +628,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             [{"tool": "prepare", "input": {"value": "original"}, "max_attempts": 2}],
             now=NOW,
         )
-        claim = self.store.claim_next("worker", now=NOW)
+        claim = self.store.claim_next("worker", now=NOW, principal_tools=frozenset({"prepare"}))
         attacks = (
             replace(claim, idempotency_key=HostileString(claim.idempotency_key)),
             replace(claim, tool=HostileString(claim.tool)),
@@ -664,7 +664,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                         [{"tool": "prepare", "input": {"nested": {"value": "original"}}, "max_attempts": 2}],
                         now=NOW,
                     )
-                    claim = self.store.claim_next("worker", now=NOW)
+                    claim = self.store.claim_next("worker", now=NOW, principal_tools=frozenset({"prepare"}))
                     forged = replace(claim, input=hostile_input)
                     with self.assertRaises(TaskValidationError):
                         if method_name == "validate_claim":
