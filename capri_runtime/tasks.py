@@ -462,8 +462,20 @@ class SQLiteTaskStore:
                 connection.close()
 
     def claim_next(self, executor_id: str, lease_seconds: int = 60,
-                   now: datetime | None = None) -> TaskClaim | None:
+                   now: datetime | None = None, *,
+                   principal_tools: frozenset[str] | None = None) -> TaskClaim | None:
+        """Claim the next task; optionally restrict principal-owned work to supported tools.
+
+        An omitted allowlist preserves the low-level unrestricted claim API.
+        TaskEngine and TaskWorker always pass their principal-handler allowlist
+        so mixed worker pools cannot lease principal tasks they cannot execute.
+        """
         _text(executor_id, "executor_id", 128)
+        if principal_tools is not None:
+            if type(principal_tools) is not frozenset:
+                raise TaskValidationError("principal_tools must be a frozenset")
+            for tool_name in principal_tools:
+                _text(tool_name, "principal handler name", 64)
         if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int) or not 5 <= lease_seconds <= 3600:
             raise TaskValidationError("lease_seconds must be between 5 and 3600")
         current = now or _now()
@@ -511,6 +523,15 @@ class SQLiteTaskStore:
                             (task_id, stamp, index, attempts),
                         )
                         continue
+                    step = plan[index]
+                    if (
+                        principal_id is not None
+                        and principal_tools is not None
+                        and step["tool"] not in principal_tools
+                    ):
+                        # Leave unsupported principal work queued (or expired) so
+                        # a worker with the correct trusted handler can claim it.
+                        continue
                     attempt = attempts + 1
                     connection.execute(
                         "UPDATE tasks SET state='running',attempts=?,lease_owner=?,lease_until=?,updated_at=? WHERE task_id=?",
@@ -520,7 +541,6 @@ class SQLiteTaskStore:
                         "INSERT INTO task_events(task_id,timestamp,state,step_index,attempt) VALUES(?,?,'running',?,?)",
                         (task_id, stamp, index, attempt),
                     )
-                    step = plan[index]
                     connection.execute("COMMIT")
                     return TaskClaim(task_id, executor_id, index, attempt,
                                      f"{task_id}:{index}", step["tool"], step["input"],
@@ -966,7 +986,12 @@ class TaskEngine:
         return self.store.finish_step(claim, result, now=now)
 
     def run_once(self, now: datetime | None = None) -> TaskRecord | None:
-        claim = self.store.claim_next(self.executor_id, self.lease_seconds, now)
+        claim = self.store.claim_next(
+            self.executor_id,
+            self.lease_seconds,
+            now,
+            principal_tools=frozenset(self.principal_handlers),
+        )
         if claim is None:
             return None
         return self.execute_claim(claim, now=now)
@@ -997,7 +1022,11 @@ class TaskWorker:
 
     def run_once(self) -> TaskRecord | None:
         engine = self.engine
-        claim = engine.store.claim_next(engine.executor_id, engine.lease_seconds)
+        claim = engine.store.claim_next(
+            engine.executor_id,
+            engine.lease_seconds,
+            principal_tools=frozenset(engine.principal_handlers),
+        )
         if claim is None:
             return None
         heartbeat_stop = threading.Event()
