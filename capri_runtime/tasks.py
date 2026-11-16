@@ -472,8 +472,8 @@ class SQLiteTaskStore:
         """
         _text(executor_id, "executor_id", 128)
         if principal_tools is not None:
-            if type(principal_tools) is not frozenset:
-                raise TaskValidationError("principal_tools must be a frozenset")
+            if type(principal_tools) is not frozenset or len(principal_tools) > 128:
+                raise TaskValidationError("principal_tools must be a frozenset of at most 128 names")
             for tool_name in principal_tools:
                 _text(tool_name, "principal handler name", 64)
         if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int) or not 5 <= lease_seconds <= 3600:
@@ -485,16 +485,37 @@ class SQLiteTaskStore:
             connection = self._connect()
             try:
                 connection.execute("BEGIN IMMEDIATE")
-                rows = connection.execute(
-                    """SELECT tasks.task_id,tasks.state,tasks.plan_json,tasks.current_step,
+                query = """SELECT tasks.task_id,tasks.state,tasks.plan_json,tasks.current_step,
                     tasks.attempts,tasks.cancel_requested,task_owners.principal_id
                     FROM tasks LEFT JOIN task_owners ON task_owners.task_id=tasks.task_id
-                    WHERE
+                    WHERE (
                     (tasks.state IN ('queued','retry_wait') AND tasks.available_at<=?) OR
                     (tasks.state='running' AND tasks.lease_until<=?)
-                    ORDER BY tasks.created_at LIMIT 32""",
-                    (stamp, stamp),
-                ).fetchall()
+                    )"""
+                params = [stamp, stamp]
+                if principal_tools is not None:
+                    if not principal_tools:
+                        query += " AND task_owners.principal_id IS NULL"
+                    else:
+                        placeholders = ",".join("?" for _ in principal_tools)
+                        query += (
+                            " AND (task_owners.principal_id IS NULL"
+                            " OR NOT json_valid(tasks.plan_json)"
+                            " OR json_extract(tasks.plan_json, '$[' || tasks.current_step || '].tool')"
+                            f" IN ({placeholders}))"
+                        )
+                        params.extend(sorted(principal_tools))
+                query += " ORDER BY tasks.created_at,tasks.task_id LIMIT 32"
+                try:
+                    rows = connection.execute(query, params).fetchall()
+                except sqlite3.OperationalError as exc:
+                    if principal_tools and (
+                        "json_valid" in str(exc) or "json_extract" in str(exc)
+                    ):
+                        raise TaskValidationError(
+                            "SQLite JSON support is required for principal task capability filtering"
+                        ) from None
+                    raise
                 for task_id, state, plan_json, index, attempts, cancel, principal_id in rows:
                     plan = json.loads(plan_json)
                     if cancel:
