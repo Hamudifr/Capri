@@ -872,5 +872,58 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         self.assertEqual(claim.task_id, task.task_id)
 
 
+    def test_corrupt_principal_plan_fails_closed_before_claiming_later_work(self):
+        corrupt = self.store.create_for_principal(
+            "corrupt-owner",
+            [{"tool": "prepare", "input": {}, "max_attempts": 1}],
+            now=NOW,
+        )
+        valid = self.store.create_for_principal(
+            "alice",
+            [{"tool": "prepare", "input": {}, "max_attempts": 1}],
+            now=NOW + timedelta(seconds=1),
+        )
+        corrupt_events_before = self.store.events(corrupt.task_id)
+        valid_events_before = self.store.events(valid.task_id)
+
+        connection = self.store._connect()
+        try:
+            connection.execute(
+                "UPDATE tasks SET plan_json=? WHERE task_id=?",
+                ("{broken", corrupt.task_id),
+            )
+        finally:
+            connection.close()
+
+        engine = TaskEngine(
+            self.store,
+            {},
+            "capable-worker",
+            principal_handlers={
+                "prepare": lambda data, key, principal: {"principal": principal}
+            },
+        )
+        with self.assertRaisesRegex(TaskValidationError, "persisted task plan is corrupt"):
+            engine.run_once(now=NOW + timedelta(seconds=2))
+
+        connection = self.store._connect()
+        try:
+            corrupt_state = connection.execute(
+                "SELECT state,attempts,lease_owner,lease_until FROM tasks WHERE task_id=?",
+                (corrupt.task_id,),
+            ).fetchone()
+            valid_state = connection.execute(
+                "SELECT state,attempts,lease_owner,lease_until FROM tasks WHERE task_id=?",
+                (valid.task_id,),
+            ).fetchone()
+        finally:
+            connection.close()
+
+        self.assertEqual(corrupt_state, ("queued", 0, None, None))
+        self.assertEqual(valid_state, ("queued", 0, None, None))
+        self.assertEqual(self.store.events(corrupt.task_id), corrupt_events_before)
+        self.assertEqual(self.store.events(valid.task_id), valid_events_before)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -515,7 +515,12 @@ class SQLiteTaskStore:
                         ) from None
                     raise
                 for task_id, state, plan_json, index, attempts, cancel, principal_id in rows:
-                    plan = json.loads(plan_json)
+                    try:
+                        plan = json.loads(plan_json)
+                    except (TypeError, ValueError, RecursionError):
+                        # A corrupt persisted plan is a queue-wide integrity failure.
+                        # Do not silently skip it or claim later work from an untrusted queue.
+                        raise TaskValidationError("persisted task plan is corrupt") from None
                     if cancel:
                         connection.execute(
                             "UPDATE tasks SET state='cancelled',updated_at=?,lease_owner=NULL,lease_until=NULL WHERE task_id=?",
