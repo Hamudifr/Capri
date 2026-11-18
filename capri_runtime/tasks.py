@@ -130,6 +130,20 @@ def _validate_plan(plan: Any) -> tuple[str, list[dict[str, Any]]]:
     return _json(normalized, label="normalized plan")[0], normalized
 
 
+def _decode_persisted_plan(value: Any) -> list[dict[str, Any]]:
+    """Decode and fully validate the canonical plan stored in SQLite."""
+    try:
+        if type(value) is not str or len(value.encode("utf-8", errors="strict")) > 65_536:
+            raise TaskValidationError("persisted task plan is corrupt")
+        decoded = json.loads(value)
+        encoded, normalized = _validate_plan(decoded)
+        if encoded != value:
+            raise TaskValidationError("persisted task plan is corrupt")
+        return normalized
+    except (TaskValidationError, TypeError, ValueError, UnicodeEncodeError, RecursionError):
+        raise TaskValidationError("persisted task plan is corrupt") from None
+
+
 @dataclass(frozen=True, slots=True)
 class TaskRecord:
     task_id: str
@@ -483,6 +497,24 @@ class SQLiteTaskStore:
         with self._lock:
             connection = self._connect()
             try:
+                if principal_tools:
+                    def principal_task_candidate(plan_json: Any, step_index: Any) -> int:
+                        try:
+                            plan = _decode_persisted_plan(plan_json)
+                        except TaskValidationError:
+                            return 1
+                        if type(step_index) is not int or not 0 <= step_index <= len(plan):
+                            return 1
+                        if step_index == len(plan):
+                            return 1
+                        return int(plan[step_index]["tool"] in principal_tools)
+
+                    connection.create_function(
+                        "capri_principal_task_candidate",
+                        2,
+                        principal_task_candidate,
+                        deterministic=True,
+                    )
                 connection.execute("BEGIN IMMEDIATE")
                 query = """SELECT tasks.task_id,tasks.state,tasks.plan_json,tasks.current_step,
                     tasks.attempts,tasks.cancel_requested,task_owners.principal_id
@@ -495,32 +527,14 @@ class SQLiteTaskStore:
                 if not principal_tools:
                     query += " AND task_owners.principal_id IS NULL"
                 else:
-                        placeholders = ",".join("?" for _ in principal_tools)
-                        query += (
-                            " AND (task_owners.principal_id IS NULL"
-                            " OR NOT json_valid(tasks.plan_json)"
-                            " OR json_extract(tasks.plan_json, '$[' || tasks.current_step || '].tool')"
-                            f" IN ({placeholders}))"
-                        )
-                        params.extend(sorted(principal_tools))
+                    query += (
+                        " AND (task_owners.principal_id IS NULL"
+                        " OR capri_principal_task_candidate(tasks.plan_json,tasks.current_step)=1)"
+                    )
                 query += " ORDER BY tasks.created_at,tasks.task_id LIMIT 32"
-                try:
-                    rows = connection.execute(query, params).fetchall()
-                except sqlite3.OperationalError as exc:
-                    if principal_tools and (
-                        "json_valid" in str(exc) or "json_extract" in str(exc)
-                    ):
-                        raise TaskValidationError(
-                            "SQLite JSON support is required for principal task capability filtering"
-                        ) from None
-                    raise
+                rows = connection.execute(query, params).fetchall()
                 for task_id, state, plan_json, index, attempts, cancel, principal_id in rows:
-                    try:
-                        plan = json.loads(plan_json)
-                    except (TypeError, ValueError, RecursionError):
-                        # A corrupt persisted plan is a queue-wide integrity failure.
-                        # Do not silently skip it or claim later work from an untrusted queue.
-                        raise TaskValidationError("persisted task plan is corrupt") from None
+                    plan = _decode_persisted_plan(plan_json)
                     if cancel:
                         connection.execute(
                             "UPDATE tasks SET state='cancelled',updated_at=?,lease_owner=NULL,lease_until=NULL WHERE task_id=?",
@@ -531,7 +545,9 @@ class SQLiteTaskStore:
                             (task_id, stamp, index, attempts),
                         )
                         continue
-                    if index >= len(plan):
+                    if type(index) is not int or index < 0 or index > len(plan):
+                        raise TaskValidationError("persisted task progress is corrupt")
+                    if index == len(plan):
                         connection.execute(
                             "UPDATE tasks SET state='succeeded',updated_at=?,lease_owner=NULL,lease_until=NULL WHERE task_id=?",
                             (stamp, task_id),
