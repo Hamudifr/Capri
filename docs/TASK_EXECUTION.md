@@ -45,7 +45,7 @@ A `TaskClaim` is a transport value, not an authority source. Before dispatch, `T
 
 ## Persisted-plan integrity failure
 
-A malformed persisted plan is a store-integrity error, not a retryable step failure. When an eligible candidate's stored plan cannot be decoded, `SQLiteTaskStore.claim_next()` raises `TaskValidationError` and aborts the current claim transaction. It does not mark the row failed or silently skip it; later candidates in that poll are not claimed. A corrupt row can therefore block later work in queue order. This is an intentional fail-closed tradeoff: preserve task-store integrity rather than execute later work from a queue containing an unreadable record.
+A malformed persisted plan is a store-integrity error, not a retryable step failure. This includes invalid JSON, a non-canonical stored representation, or a JSON value that no longer satisfies the normalized task-plan schema. `SQLiteTaskStore.claim_next()` raises `TaskValidationError` and aborts the current claim transaction; it does not mark the row failed or silently skip it. The principal-worker capability filter deliberately includes malformed plans so a structurally invalid plan cannot disappear merely because its current tool name is unsupported. Later candidates in that poll are not claimed. A corrupt row can therefore block later work in queue order. This is an intentional fail-closed tradeoff: preserve task-store integrity rather than execute later work from a queue containing an unreadable or malformed record.
 
 The host should stop the worker, preserve the original database and backups, inspect a copy or restore from a verified backup, and restart only after the integrity fault is resolved. Do not edit the live database or bypass the corrupt row.
 
