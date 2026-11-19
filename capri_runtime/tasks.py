@@ -627,10 +627,9 @@ class SQLiteTaskStore:
             raise TaskConflictError("task claim does not match its authoritative lease")
         if _parse_time(until) <= _parse_time(stamp):
             raise TaskConflictError("task lease expired before the requested transition")
-        try:
-            plan = json.loads(plan_json)
-        except (TypeError, ValueError, RecursionError):
-            raise TaskValidationError("persisted task plan is corrupt") from None
+        # Validate the entire canonical plan, not only the current step. A
+        # malformed later step must not be hidden until after this handler runs.
+        plan = _decode_persisted_plan(plan_json)
         if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < len(plan):
             raise TaskConflictError("task claim step is outside the persisted plan")
         step = plan[index]
