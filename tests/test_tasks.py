@@ -981,5 +981,91 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         self.assertEqual(self.store.events(valid.task_id), valid_events_before)
 
 
+    def test_post_claim_later_step_corruption_rejected_by_all_claim_paths(self):
+        handler_calls = []
+
+        def handler(data, key, principal):
+            handler_calls.append((data, key, principal))
+            return {"ok": True}
+
+        engine = TaskEngine(
+            self.store,
+            {},
+            "worker",
+            principal_handlers={"prepare": handler, "finish": handler},
+        )
+        corrupt_plan = (
+            '[{"input":{"value":"one"},"max_attempts":2,"tool":"prepare"},'
+            '{"input":{"value":"two"},"tool":"finish"}]'
+        )
+        actions = (
+            "validate_claim",
+            "renew_lease",
+            "finish_step",
+            "fail_step",
+            "execute_claim",
+        )
+
+        for offset, action in enumerate(actions):
+            with self.subTest(action=action):
+                created_at = NOW + timedelta(seconds=offset * 10)
+                task = self.store.create_for_principal("alice", PLAN, now=created_at)
+                claim = self.store.claim_next(
+                    "worker",
+                    now=created_at,
+                    principal_tools=frozenset({"prepare", "finish"}),
+                )
+                self.assertEqual(claim.task_id, task.task_id)
+
+                connection = self.store._connect()
+                try:
+                    connection.execute(
+                        "UPDATE tasks SET plan_json=? WHERE task_id=?",
+                        (corrupt_plan, task.task_id),
+                    )
+                    before = connection.execute(
+                        """SELECT state,current_step,attempts,lease_owner,lease_until,
+                        results_json,error_code,available_at,plan_json
+                        FROM tasks WHERE task_id=?""",
+                        (task.task_id,),
+                    ).fetchone()
+                finally:
+                    connection.close()
+                events_before = self.store.events(task.task_id)
+                transition_time = created_at + timedelta(seconds=1)
+
+                with self.assertRaisesRegex(
+                    TaskValidationError, "persisted task plan is corrupt"
+                ):
+                    if action == "validate_claim":
+                        self.store.validate_claim(claim, now=transition_time)
+                    elif action == "renew_lease":
+                        self.store.renew_lease(claim, now=transition_time)
+                    elif action == "finish_step":
+                        self.store.finish_step(
+                            claim, {"completed": True}, now=transition_time
+                        )
+                    elif action == "fail_step":
+                        self.store.fail_step(claim, now=transition_time)
+                    else:
+                        engine.execute_claim(claim, now=transition_time)
+
+                connection = self.store._connect()
+                try:
+                    after = connection.execute(
+                        """SELECT state,current_step,attempts,lease_owner,lease_until,
+                        results_json,error_code,available_at,plan_json
+                        FROM tasks WHERE task_id=?""",
+                        (task.task_id,),
+                    ).fetchone()
+                finally:
+                    connection.close()
+
+                self.assertEqual(after, before)
+                self.assertEqual(self.store.events(task.task_id), events_before)
+
+        self.assertEqual(handler_calls, [])
+
+
 if __name__ == "__main__":
     unittest.main()
