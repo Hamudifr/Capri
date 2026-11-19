@@ -996,7 +996,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         )
         corrupt_plan = (
             '[{"input":{"value":"one"},"max_attempts":2,"tool":"prepare"},'
-            '{"input":{"value":"two"},"tool":"finish"}]'
+            '{"input":{"value":"two"},"max_attempts":0,"tool":"finish"}]'
         )
         actions = (
             "validate_claim",
