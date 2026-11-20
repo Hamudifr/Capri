@@ -10,6 +10,7 @@ import hashlib
 import json
 import math
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Literal
@@ -45,7 +46,7 @@ class LearningStore:
     def __init__(self, database: str | Path) -> None:
         self.database = str(database)
         Path(self.database).parent.mkdir(parents=True, exist_ok=True)
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS learning_examples (
@@ -75,6 +76,15 @@ class LearningStore:
         connection = sqlite3.connect(self.database)
         connection.row_factory = sqlite3.Row
         return connection
+
+    @contextmanager
+    def _connection(self):
+        connection = self._connect()
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     @staticmethod
     def _validate(example: LearningExample) -> None:
@@ -145,8 +155,13 @@ class LearningStore:
         allowed_capabilities: Iterable[str] | None = None,
     ) -> dict[str, int]:
         """Export only verified-success examples into disjoint stable splits."""
-        if not 0.0 <= minimum_quality <= 1.0:
-            raise LearningDataError("minimum_quality must be between 0 and 1")
+        if (
+            isinstance(minimum_quality, bool)
+            or not isinstance(minimum_quality, (int, float))
+            or not math.isfinite(minimum_quality)
+            or not 0.0 <= minimum_quality <= 1.0
+        ):
+            raise LearningDataError("minimum_quality must be a finite number between 0 and 1")
         allowed = set(allowed_capabilities) if allowed_capabilities is not None else None
         with self._connect() as connection:
             rows = connection.execute(
