@@ -81,7 +81,7 @@ class LearningStoreTests(unittest.TestCase):
         self.assertEqual(counts["excluded_duplicate"], 1)
         self.assertEqual(sum(counts[s] for s in ("train", "validation", "test")), 1)
 
-    def test_splits_are_deterministic_and_disjoint_by_example_id(self):
+    def test_splits_are_deterministic(self):
         self.store.record(example())
         first = self.root / "first.jsonl"
         second = self.root / "second.jsonl"
@@ -90,6 +90,12 @@ class LearningStoreTests(unittest.TestCase):
         self.assertEqual(first.read_text(), second.read_text())
         rows = [json.loads(line) for line in first.read_text().splitlines()]
         self.assertIn(rows[0]["split"], {"train", "validation", "test"})
+
+    def test_rejects_invalid_export_threshold(self):
+        for value in (-0.1, 1.1, float("nan"), "0.9", True):
+            with self.subTest(value=value):
+                with self.assertRaises(LearningDataError):
+                    self.store.export_jsonl(self.root / "bad.jsonl", minimum_quality=value)
 
     def test_examples_from_same_task_share_a_split(self):
         self.store.record(example())
