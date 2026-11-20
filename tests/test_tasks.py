@@ -173,7 +173,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                     [{"tool": "prepare", "input": {"value": "original"}, "max_attempts": 1}],
                     now=NOW,
                 )
-                claim = self.store.claim_next("worker", now=NOW)
+                claim = self.store.claim_next("worker", now=NOW, principal_tools=frozenset({"prepare"}))
                 self.assertIsInstance(claim, TaskClaim)
                 with self.assertRaises(TaskConflictError):
                     engine.execute_claim(attack(claim), now=NOW)
@@ -191,7 +191,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             [{"tool": "prepare", "input": {"value": "persisted"}, "max_attempts": 1}],
             now=NOW,
         )
-        claim = self.store.claim_next("worker", now=NOW)
+        claim = self.store.claim_next("worker", now=NOW, principal_tools=frozenset({"prepare"}))
         engine = TaskEngine(
             self.store,
             {},
@@ -260,7 +260,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             [{"tool": "prepare", "input": {"nested": {"value": "persisted"}}, "max_attempts": 1}],
             now=NOW,
         )
-        claim = self.store.claim_next("worker", now=NOW)
+        claim = self.store.claim_next("worker", now=NOW, principal_tools=frozenset({"prepare"}))
         engine = TaskEngine(
             self.store,
             {},
@@ -292,7 +292,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             [{"tool": "prepare", "input": {"value": "original"}, "max_attempts": 2}],
             now=NOW,
         )
-        claim = self.store.claim_next("worker", lease_seconds=5, now=NOW)
+        claim = self.store.claim_next("worker", lease_seconds=5, now=NOW, principal_tools=frozenset({"prepare"}))
         engine = TaskEngine(
             self.store,
             {},
@@ -313,7 +313,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
 
     def test_principal_claims_require_principal_aware_handlers(self):
         calls = []
-        self.store.create_for_principal(
+        alice = self.store.create_for_principal(
             "alice", [{"tool": "prepare", "input": {}, "max_attempts": 1}], now=NOW
         )
         generic = TaskEngine(
@@ -321,13 +321,14 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             {"prepare": lambda data, key: calls.append("generic") or {"ok": True}},
             "worker",
         )
-        failed = generic.run_once(now=NOW)
-        self.assertEqual(failed.state, "failed")
-        self.assertEqual(failed.error_code, "principal_handler_required")
+        self.assertIsNone(generic.run_once(now=NOW))
+        self.assertEqual(self.store.get_for_principal(alice.task_id, "alice").state, "queued")
         self.assertEqual(calls, [])
 
-        self.store.create_for_principal(
-            "bob", [{"tool": "prepare", "input": {}, "max_attempts": 1}], now=NOW
+        bob = self.store.create_for_principal(
+            "bob",
+            [{"tool": "prepare", "input": {}, "max_attempts": 1}],
+            now=NOW + timedelta(seconds=1),
         )
         scoped = TaskEngine(
             self.store,
@@ -339,10 +340,12 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 )
             },
         )
-        succeeded = scoped.run_once(now=NOW)
-        self.assertEqual(succeeded.state, "succeeded")
-        self.assertEqual(calls, ["bob"])
-        self.assertEqual(succeeded.result, ({"principal": "bob"},))
+        succeeded_alice = scoped.run_once(now=NOW + timedelta(seconds=2))
+        succeeded_bob = scoped.run_once(now=NOW + timedelta(seconds=3))
+        self.assertEqual(succeeded_alice.state, "succeeded")
+        self.assertEqual(succeeded_bob.state, "succeeded")
+        self.assertEqual(calls, ["alice", "bob"])
+        self.assertEqual(succeeded_bob.result, ({"principal": "bob"},))
 
     def test_plan_validation_is_strict_and_bounded(self):
         invalid = (
@@ -389,7 +392,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
 
     def test_retry_backoff_and_attempt_limit(self):
         task = self.store.create(PLAN, now=NOW)
-        claim = self.store.claim_next("worker", now=NOW)
+        claim = self.store.claim_next("worker", now=NOW, principal_tools=frozenset({"prepare"}))
         waiting = self.store.fail_step(claim, now=NOW)
         self.assertEqual(waiting.state, "retry_wait")
         self.assertIsNone(self.store.claim_next("worker", now=NOW + timedelta(seconds=4)))
@@ -439,11 +442,11 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         task = self.store.create(PLAN, now=NOW)
         cancelled = self.store.request_cancel(task.task_id, now=NOW)
         self.assertEqual(cancelled.state, "cancelled")
-        self.assertIsNone(self.store.claim_next("worker", now=NOW))
+        self.assertIsNone(self.store.claim_next("worker", now=NOW, principal_tools=frozenset({"prepare"})))
 
     def test_cancel_running_task_finishes_current_step_then_stops(self):
         task = self.store.create(PLAN, now=NOW)
-        claim = self.store.claim_next("worker", now=NOW)
+        claim = self.store.claim_next("worker", now=NOW, principal_tools=frozenset({"prepare"}))
         self.store.request_cancel(task.task_id, now=NOW + timedelta(seconds=1))
         result = self.store.finish_step(claim, {"completed": True}, now=NOW + timedelta(seconds=2))
         self.assertEqual(result.state, "cancelled")
@@ -452,7 +455,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
 
     def test_events_are_durable_and_ordered(self):
         task = self.store.create(PLAN, now=NOW)
-        self.store.claim_next("worker", now=NOW)
+        self.store.claim_next("worker", now=NOW, principal_tools=frozenset({"prepare"}))
         events = SQLiteTaskStore(self.path).events(task.task_id)
         self.assertEqual([event["state"] for event in events], ["queued", "running"])
 
@@ -495,7 +498,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
 
     def test_cancellation_during_failed_step_does_not_schedule_retry(self):
         self.store.create([{"tool": "prepare", "input": {}, "max_attempts": 5}], now=NOW)
-        claim = self.store.claim_next("worker", now=NOW)
+        claim = self.store.claim_next("worker", now=NOW, principal_tools=frozenset({"prepare"}))
         self.store.request_cancel(claim.task_id, now=NOW + timedelta(seconds=1))
         result = self.store.fail_step(claim, now=NOW + timedelta(seconds=2))
         self.assertEqual(result.state, "cancelled")
@@ -536,7 +539,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
 
     def test_live_lease_can_be_renewed_for_long_handler(self):
         self.store.create([{"tool": "prepare", "input": {}, "max_attempts": 2}], now=NOW)
-        claim = self.store.claim_next("worker", lease_seconds=5, now=NOW)
+        claim = self.store.claim_next("worker", lease_seconds=5, now=NOW, principal_tools=frozenset({"prepare"}))
         renewed = self.store.renew_lease(
             claim, lease_seconds=60, now=NOW + timedelta(seconds=4)
         )
@@ -592,7 +595,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                         [{"tool": "prepare", "input": {"value": "original"}, "max_attempts": 2}],
                         now=NOW,
                     )
-                    claim = self.store.claim_next("worker", now=NOW)
+                    claim = self.store.claim_next("worker", now=NOW, principal_tools=frozenset({"prepare"}))
                     forged = attack(claim)
                     with self.assertRaises(TaskConflictError):
                         if method_name == "renew_lease":
@@ -625,7 +628,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             [{"tool": "prepare", "input": {"value": "original"}, "max_attempts": 2}],
             now=NOW,
         )
-        claim = self.store.claim_next("worker", now=NOW)
+        claim = self.store.claim_next("worker", now=NOW, principal_tools=frozenset({"prepare"}))
         attacks = (
             replace(claim, idempotency_key=HostileString(claim.idempotency_key)),
             replace(claim, tool=HostileString(claim.tool)),
@@ -661,7 +664,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                         [{"tool": "prepare", "input": {"nested": {"value": "original"}}, "max_attempts": 2}],
                         now=NOW,
                     )
-                    claim = self.store.claim_next("worker", now=NOW)
+                    claim = self.store.claim_next("worker", now=NOW, principal_tools=frozenset({"prepare"}))
                     forged = replace(claim, input=hostile_input)
                     with self.assertRaises(TaskValidationError):
                         if method_name == "validate_claim":
@@ -674,7 +677,6 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                         self.store.get_for_principal(task.task_id, "alice").state,
                         "running",
                     )
-
 
     def test_public_claim_apis_reject_taskclaim_subclasses_before_field_access(self):
         claim_fields = {
@@ -711,7 +713,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                     [{"tool": "prepare", "input": {"value": "original"}, "max_attempts": 2}],
                     now=NOW,
                 )
-                claim = self.store.claim_next("worker", now=NOW)
+                claim = self.store.claim_next("worker", now=NOW, principal_tools=frozenset({"prepare"}))
                 hostile = HostileTaskClaim(
                     claim.task_id, claim.executor_id, claim.step_index, claim.attempt,
                     claim.idempotency_key, claim.tool, claim.input, claim.lease_until,
@@ -755,6 +757,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                     connection.close()
                 self.assertEqual(after_lease_state, before_lease_state)
 
+
     def test_execute_claim_rejects_hostile_executor_id_before_comparison(self):
         class HostileString(str):
             def __eq__(self, other):
@@ -768,7 +771,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             [{"tool": "prepare", "input": {"value": "original"}, "max_attempts": 2}],
             now=NOW,
         )
-        claim = self.store.claim_next("worker", now=NOW)
+        claim = self.store.claim_next("worker", now=NOW, principal_tools=frozenset({"prepare"}))
         hostile = replace(claim, executor_id=HostileString("worker"))
         handler_calls = []
         engine = TaskEngine(
@@ -790,6 +793,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         self.assertEqual(self.store.get(task.task_id), before_record)
         self.assertEqual(self.store.events(task.task_id), before_events)
         self.assertEqual(handler_calls, [])
+
 
     def test_managed_worker_renews_lease_during_long_handler(self):
         started = Event()
@@ -842,6 +846,342 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         engine = TaskEngine(self.store, {}, "worker", lease_seconds=5)
         with self.assertRaises(TaskValidationError):
             TaskWorker(engine, heartbeat_interval_seconds=5)
+
+
+    def test_legacy_worker_leaves_principal_task_for_principal_aware_worker(self):
+        created_at = datetime.now(timezone.utc)
+        task = self.store.create_for_principal(
+            "alice",
+            [{"tool": "prepare", "input": {"value": "private"}, "max_attempts": 2}],
+            now=created_at,
+        )
+        legacy_calls = []
+        legacy_engine = TaskEngine(
+            self.store,
+            {"prepare": lambda data, key: legacy_calls.append((data, key)) or {"legacy": True}},
+            "legacy-worker",
+        )
+        before_events = self.store.events(task.task_id)
+
+        self.assertIsNone(TaskWorker(legacy_engine).run_once())
+        connection = self.store._connect()
+        try:
+            state_after_legacy_poll = connection.execute(
+                "SELECT state,attempts,lease_owner,lease_until FROM tasks WHERE task_id=?",
+                (task.task_id,),
+            ).fetchone()
+        finally:
+            connection.close()
+        self.assertEqual(state_after_legacy_poll, ("queued", 0, None, None))
+        self.assertEqual(self.store.events(task.task_id), before_events)
+        self.assertEqual(legacy_calls, [])
+
+        principal_calls = []
+        principal_engine = TaskEngine(
+            self.store,
+            {},
+            "principal-worker",
+            principal_handlers={
+                "prepare": lambda data, key, principal: (
+                    principal_calls.append((data, key, principal)) or {"principal": principal}
+                )
+            },
+        )
+        result = TaskWorker(principal_engine).run_once()
+        self.assertEqual(result.state, "succeeded")
+        self.assertEqual([call[2] for call in principal_calls], ["alice"])
+
+    def test_legacy_engine_does_not_reclaim_expired_principal_lease(self):
+        task = self.store.create_for_principal(
+            "alice",
+            [{"tool": "prepare", "input": {"value": "private"}, "max_attempts": 2}],
+            now=NOW,
+        )
+        original = self.store.claim_next(
+            "principal-worker",
+            lease_seconds=5,
+            now=NOW,
+            principal_tools=frozenset({"prepare"}),
+        )
+        self.assertEqual(original.task_id, task.task_id)
+        before_events = self.store.events(task.task_id)
+
+        legacy_engine = TaskEngine(
+            self.store,
+            {"prepare": lambda data, key: {"legacy": True}},
+            "legacy-worker",
+        )
+        self.assertIsNone(legacy_engine.run_once(now=NOW + timedelta(seconds=6)))
+        connection = self.store._connect()
+        try:
+            state_after_legacy_poll = connection.execute(
+                "SELECT state,attempts,lease_owner,lease_until FROM tasks WHERE task_id=?",
+                (task.task_id,),
+            ).fetchone()
+        finally:
+            connection.close()
+        self.assertEqual(
+            state_after_legacy_poll,
+            ("running", 1, "principal-worker", original.lease_until),
+        )
+        self.assertEqual(self.store.events(task.task_id), before_events)
+
+        principal_engine = TaskEngine(
+            self.store,
+            {},
+            "principal-worker-2",
+            principal_handlers={"prepare": lambda data, key, principal: {"principal": principal}},
+        )
+        result = principal_engine.run_once(now=NOW + timedelta(seconds=6))
+        self.assertEqual(result.state, "succeeded")
+
+
+    def test_principal_worker_skips_unsupported_queue_prefix_beyond_claim_batch_limit(self):
+        unsupported_tasks = []
+        for index in range(40):
+            unsupported_tasks.append(
+                self.store.create_for_principal(
+                    f"owner-{index}",
+                    [{"tool": "unsupported", "input": {"index": index}, "max_attempts": 1}],
+                    now=NOW + timedelta(seconds=index),
+                )
+            )
+        supported_task = self.store.create_for_principal(
+            "alice",
+            [{"tool": "prepare", "input": {"value": "supported"}, "max_attempts": 1}],
+            now=NOW + timedelta(seconds=40),
+        )
+        engine = TaskEngine(
+            self.store,
+            {},
+            "capable-worker",
+            principal_handlers={"prepare": lambda data, key, principal: {"principal": principal}},
+        )
+
+        result = engine.run_once(now=NOW + timedelta(seconds=41))
+        self.assertEqual(result.task_id, supported_task.task_id)
+        self.assertEqual(result.state, "succeeded")
+        for index, task in enumerate(unsupported_tasks):
+            with self.subTest(task_id=task.task_id):
+                record = self.store.get_for_principal(task.task_id, f"owner-{index}")
+                self.assertEqual(record.state, "queued")
+                self.assertEqual(record.attempts, 0)
+
+
+    def test_low_level_claim_requires_explicit_principal_tool_allowlist(self):
+        task = self.store.create_for_principal(
+            "alice",
+            [{"tool": "prepare", "input": {}, "max_attempts": 1}],
+            now=NOW,
+        )
+
+        self.assertIsNone(self.store.claim_next("legacy-caller", now=NOW))
+        self.assertEqual(
+            self.store.get_for_principal(task.task_id, "alice").state,
+            "queued",
+        )
+
+        claim = self.store.claim_next(
+            "principal-caller",
+            now=NOW,
+            principal_tools=frozenset({"prepare"}),
+        )
+        self.assertEqual(claim.task_id, task.task_id)
+
+
+    def test_corrupt_principal_plan_fails_closed_before_claiming_later_work(self):
+        corrupt = self.store.create_for_principal(
+            "corrupt-owner",
+            [{"tool": "prepare", "input": {}, "max_attempts": 1}],
+            now=NOW,
+        )
+        valid = self.store.create_for_principal(
+            "alice",
+            [{"tool": "prepare", "input": {}, "max_attempts": 1}],
+            now=NOW + timedelta(seconds=1),
+        )
+        corrupt_events_before = self.store.events(corrupt.task_id)
+        valid_events_before = self.store.events(valid.task_id)
+
+        connection = self.store._connect()
+        try:
+            connection.execute(
+                "UPDATE tasks SET plan_json=? WHERE task_id=?",
+                ("{broken", corrupt.task_id),
+            )
+        finally:
+            connection.close()
+
+        engine = TaskEngine(
+            self.store,
+            {},
+            "capable-worker",
+            principal_handlers={
+                "prepare": lambda data, key, principal: {"principal": principal}
+            },
+        )
+        with self.assertRaisesRegex(TaskValidationError, "persisted task plan is corrupt"):
+            engine.run_once(now=NOW + timedelta(seconds=2))
+
+        connection = self.store._connect()
+        try:
+            corrupt_state = connection.execute(
+                "SELECT state,attempts,lease_owner,lease_until FROM tasks WHERE task_id=?",
+                (corrupt.task_id,),
+            ).fetchone()
+            valid_state = connection.execute(
+                "SELECT state,attempts,lease_owner,lease_until FROM tasks WHERE task_id=?",
+                (valid.task_id,),
+            ).fetchone()
+        finally:
+            connection.close()
+
+        self.assertEqual(corrupt_state, ("queued", 0, None, None))
+        self.assertEqual(valid_state, ("queued", 0, None, None))
+        self.assertEqual(self.store.events(corrupt.task_id), corrupt_events_before)
+        self.assertEqual(self.store.events(valid.task_id), valid_events_before)
+
+
+    def test_valid_json_with_invalid_principal_plan_is_not_hidden_by_capability_filter(self):
+        corrupt = self.store.create_for_principal(
+            "corrupt-owner",
+            [{"tool": "prepare", "input": {}, "max_attempts": 1}],
+            now=NOW,
+        )
+        valid = self.store.create_for_principal(
+            "alice",
+            [{"tool": "prepare", "input": {}, "max_attempts": 1}],
+            now=NOW + timedelta(seconds=1),
+        )
+        corrupt_events_before = self.store.events(corrupt.task_id)
+        valid_events_before = self.store.events(valid.task_id)
+
+        connection = self.store._connect()
+        try:
+            # Valid JSON, but not a valid normalized task step: max_attempts is absent.
+            # Its unsupported tool name would previously be filtered out by SQL,
+            # hiding the persisted-plan integrity failure from this capable worker.
+            connection.execute(
+                "UPDATE tasks SET plan_json=? WHERE task_id=?",
+                ('[{"input":{},"tool":"unsupported"}]', corrupt.task_id),
+            )
+        finally:
+            connection.close()
+
+        engine = TaskEngine(
+            self.store,
+            {},
+            "capable-worker",
+            principal_handlers={
+                "prepare": lambda data, key, principal: {"principal": principal}
+            },
+        )
+        with self.assertRaisesRegex(TaskValidationError, "persisted task plan is corrupt"):
+            engine.run_once(now=NOW + timedelta(seconds=2))
+
+        connection = self.store._connect()
+        try:
+            corrupt_state = connection.execute(
+                "SELECT state,attempts,lease_owner,lease_until FROM tasks WHERE task_id=?",
+                (corrupt.task_id,),
+            ).fetchone()
+            valid_state = connection.execute(
+                "SELECT state,attempts,lease_owner,lease_until FROM tasks WHERE task_id=?",
+                (valid.task_id,),
+            ).fetchone()
+        finally:
+            connection.close()
+
+        self.assertEqual(corrupt_state, ("queued", 0, None, None))
+        self.assertEqual(valid_state, ("queued", 0, None, None))
+        self.assertEqual(self.store.events(corrupt.task_id), corrupt_events_before)
+        self.assertEqual(self.store.events(valid.task_id), valid_events_before)
+
+
+    def test_post_claim_later_step_corruption_rejected_by_all_claim_paths(self):
+        handler_calls = []
+
+        def handler(data, key, principal):
+            handler_calls.append((data, key, principal))
+            return {"ok": True}
+
+        engine = TaskEngine(
+            self.store,
+            {},
+            "worker",
+            principal_handlers={"prepare": handler, "finish": handler},
+        )
+        corrupt_plan = (
+            '[{"input":{"value":"one"},"max_attempts":2,"tool":"prepare"},'
+            '{"input":{"value":"two"},"max_attempts":0,"tool":"finish"}]'
+        )
+        actions = (
+            "validate_claim",
+            "renew_lease",
+            "finish_step",
+            "fail_step",
+            "execute_claim",
+        )
+
+        for offset, action in enumerate(actions):
+            with self.subTest(action=action):
+                created_at = NOW + timedelta(seconds=offset * 10)
+                task = self.store.create_for_principal("alice", PLAN, now=created_at)
+                claim = self.store.claim_next(
+                    "worker",
+                    now=created_at,
+                    principal_tools=frozenset({"prepare", "finish"}),
+                )
+                self.assertEqual(claim.task_id, task.task_id)
+
+                connection = self.store._connect()
+                try:
+                    connection.execute(
+                        "UPDATE tasks SET plan_json=? WHERE task_id=?",
+                        (corrupt_plan, task.task_id),
+                    )
+                    before = connection.execute(
+                        """SELECT state,current_step,attempts,lease_owner,lease_until,
+                        results_json,error_code,available_at,plan_json
+                        FROM tasks WHERE task_id=?""",
+                        (task.task_id,),
+                    ).fetchone()
+                finally:
+                    connection.close()
+                events_before = self.store.events(task.task_id)
+                transition_time = created_at + timedelta(seconds=1)
+
+                with self.assertRaisesRegex(
+                    TaskValidationError, "persisted task plan is corrupt"
+                ):
+                    if action == "validate_claim":
+                        self.store.validate_claim(claim, now=transition_time)
+                    elif action == "renew_lease":
+                        self.store.renew_lease(claim, now=transition_time)
+                    elif action == "finish_step":
+                        self.store.finish_step(
+                            claim, {"completed": True}, now=transition_time
+                        )
+                    elif action == "fail_step":
+                        self.store.fail_step(claim, now=transition_time)
+                    else:
+                        engine.execute_claim(claim, now=transition_time)
+
+                connection = self.store._connect()
+                try:
+                    after = connection.execute(
+                        """SELECT state,current_step,attempts,lease_owner,lease_until,
+                        results_json,error_code,available_at,plan_json
+                        FROM tasks WHERE task_id=?""",
+                        (task.task_id,),
+                    ).fetchone()
+                finally:
+                    connection.close()
+
+                self.assertEqual(after, before)
+                self.assertEqual(self.store.events(task.task_id), events_before)
+
+        self.assertEqual(handler_calls, [])
 
 
 if __name__ == "__main__":

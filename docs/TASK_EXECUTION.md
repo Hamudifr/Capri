@@ -42,6 +42,13 @@ The worker claim includes the owner ID from the trusted database row. A principa
 A `TaskClaim` is a transport value, not an authority source. Before dispatch, `TaskEngine` validates the claim against the authoritative SQLite task row and persisted plan: principal owner, executor, active lease and expiry, step index, attempt, idempotency key, tool name, and exact input must all match. The database's current lease and expiry are authoritative; the claim's lease timestamp is only a snapshot because a host heartbeat may extend the persisted lease while a handler is running. The store repeats full claim validation inside the same write transaction for lease renewal, successful completion, and failure transitions, preventing a forged claim from changing task state or extending a lease between a separate validation and write. A forged, stale, expired, or altered claim is rejected before the requested transition. This prevents callers from changing a principal-owned claim into a legacy claim or substituting a different registered tool/input. It does not make trusted in-process handler code a sandbox; handlers still require resource-level authorization and idempotent side effects.
 
 
+
+## Persisted-plan integrity failure
+
+A malformed persisted plan is a store-integrity error, not a retryable step failure. This includes invalid JSON, a non-canonical stored representation, or a JSON value that no longer satisfies the normalized task-plan schema. `SQLiteTaskStore.claim_next()` raises `TaskValidationError` and aborts the current claim transaction; it does not mark the row failed or silently skip it. The principal-worker capability filter deliberately includes malformed plans so a structurally invalid plan cannot disappear merely because its current tool name is unsupported. Later candidates in that poll are not claimed. A corrupt row can therefore block later work in queue order. This is an intentional fail-closed tradeoff: preserve task-store integrity rather than execute later work from a queue containing an unreadable or malformed record.
+
+The host should stop the worker, preserve the original database and backups, inspect a copy or restore from a verified backup, and restart only after the integrity fault is resolved. Do not edit the live database or bypass the corrupt row.
+
 ## State machine
 
 - `queued`: eligible for a worker claim.

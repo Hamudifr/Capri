@@ -130,6 +130,20 @@ def _validate_plan(plan: Any) -> tuple[str, list[dict[str, Any]]]:
     return _json(normalized, label="normalized plan")[0], normalized
 
 
+def _decode_persisted_plan(value: Any) -> list[dict[str, Any]]:
+    """Decode and fully validate the canonical plan stored in SQLite."""
+    try:
+        if type(value) is not str or len(value.encode("utf-8", errors="strict")) > 65_536:
+            raise TaskValidationError("persisted task plan is corrupt")
+        decoded = json.loads(value)
+        encoded, normalized = _validate_plan(decoded)
+        if encoded != value:
+            raise TaskValidationError("persisted task plan is corrupt")
+        return normalized
+    except (TaskValidationError, TypeError, ValueError, UnicodeEncodeError, RecursionError):
+        raise TaskValidationError("persisted task plan is corrupt") from None
+
+
 @dataclass(frozen=True, slots=True)
 class TaskRecord:
     task_id: str
@@ -462,8 +476,19 @@ class SQLiteTaskStore:
                 connection.close()
 
     def claim_next(self, executor_id: str, lease_seconds: int = 60,
-                   now: datetime | None = None) -> TaskClaim | None:
+                   now: datetime | None = None, *,
+                   principal_tools: frozenset[str] = frozenset()) -> TaskClaim | None:
+        """Claim the next task, failing closed for unsupported principal-owned work.
+
+        Principal tasks are excluded by default. Callers must provide the exact
+        trusted handler-name allowlist they can execute. TaskEngine and TaskWorker
+        pass their principal-handler keys automatically.
+        """
         _text(executor_id, "executor_id", 128)
+        if type(principal_tools) is not frozenset or len(principal_tools) > 128:
+            raise TaskValidationError("principal_tools must be a frozenset of at most 128 names")
+        for tool_name in principal_tools:
+            _text(tool_name, "principal handler name", 64)
         if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int) or not 5 <= lease_seconds <= 3600:
             raise TaskValidationError("lease_seconds must be between 5 and 3600")
         current = now or _now()
@@ -472,19 +497,44 @@ class SQLiteTaskStore:
         with self._lock:
             connection = self._connect()
             try:
+                if principal_tools:
+                    def principal_task_candidate(plan_json: Any, step_index: Any) -> int:
+                        try:
+                            plan = _decode_persisted_plan(plan_json)
+                        except TaskValidationError:
+                            return 1
+                        if type(step_index) is not int or not 0 <= step_index <= len(plan):
+                            return 1
+                        if step_index == len(plan):
+                            return 1
+                        return int(plan[step_index]["tool"] in principal_tools)
+
+                    connection.create_function(
+                        "capri_principal_task_candidate",
+                        2,
+                        principal_task_candidate,
+                        deterministic=True,
+                    )
                 connection.execute("BEGIN IMMEDIATE")
-                rows = connection.execute(
-                    """SELECT tasks.task_id,tasks.state,tasks.plan_json,tasks.current_step,
+                query = """SELECT tasks.task_id,tasks.state,tasks.plan_json,tasks.current_step,
                     tasks.attempts,tasks.cancel_requested,task_owners.principal_id
                     FROM tasks LEFT JOIN task_owners ON task_owners.task_id=tasks.task_id
-                    WHERE
+                    WHERE (
                     (tasks.state IN ('queued','retry_wait') AND tasks.available_at<=?) OR
                     (tasks.state='running' AND tasks.lease_until<=?)
-                    ORDER BY tasks.created_at LIMIT 32""",
-                    (stamp, stamp),
-                ).fetchall()
+                    )"""
+                params = [stamp, stamp]
+                if not principal_tools:
+                    query += " AND task_owners.principal_id IS NULL"
+                else:
+                    query += (
+                        " AND (task_owners.principal_id IS NULL"
+                        " OR capri_principal_task_candidate(tasks.plan_json,tasks.current_step)=1)"
+                    )
+                query += " ORDER BY tasks.created_at,tasks.task_id LIMIT 32"
+                rows = connection.execute(query, params).fetchall()
                 for task_id, state, plan_json, index, attempts, cancel, principal_id in rows:
-                    plan = json.loads(plan_json)
+                    plan = _decode_persisted_plan(plan_json)
                     if cancel:
                         connection.execute(
                             "UPDATE tasks SET state='cancelled',updated_at=?,lease_owner=NULL,lease_until=NULL WHERE task_id=?",
@@ -495,7 +545,9 @@ class SQLiteTaskStore:
                             (task_id, stamp, index, attempts),
                         )
                         continue
-                    if index >= len(plan):
+                    if type(index) is not int or index < 0 or index > len(plan):
+                        raise TaskValidationError("persisted task progress is corrupt")
+                    if index == len(plan):
                         connection.execute(
                             "UPDATE tasks SET state='succeeded',updated_at=?,lease_owner=NULL,lease_until=NULL WHERE task_id=?",
                             (stamp, task_id),
@@ -511,6 +563,14 @@ class SQLiteTaskStore:
                             (task_id, stamp, index, attempts),
                         )
                         continue
+                    step = plan[index]
+                    if (
+                        principal_id is not None
+                        and step["tool"] not in principal_tools
+                    ):
+                        # Leave unsupported principal work queued (or expired) so
+                        # a worker with the correct trusted handler can claim it.
+                        continue
                     attempt = attempts + 1
                     connection.execute(
                         "UPDATE tasks SET state='running',attempts=?,lease_owner=?,lease_until=?,updated_at=? WHERE task_id=?",
@@ -520,7 +580,6 @@ class SQLiteTaskStore:
                         "INSERT INTO task_events(task_id,timestamp,state,step_index,attempt) VALUES(?,?,'running',?,?)",
                         (task_id, stamp, index, attempt),
                     )
-                    step = plan[index]
                     connection.execute("COMMIT")
                     return TaskClaim(task_id, executor_id, index, attempt,
                                      f"{task_id}:{index}", step["tool"], step["input"],
@@ -568,10 +627,9 @@ class SQLiteTaskStore:
             raise TaskConflictError("task claim does not match its authoritative lease")
         if _parse_time(until) <= _parse_time(stamp):
             raise TaskConflictError("task lease expired before the requested transition")
-        try:
-            plan = json.loads(plan_json)
-        except (TypeError, ValueError, RecursionError):
-            raise TaskValidationError("persisted task plan is corrupt") from None
+        # Validate the entire canonical plan, not only the current step. A
+        # malformed later step must not be hidden until after this handler runs.
+        plan = _decode_persisted_plan(plan_json)
         if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < len(plan):
             raise TaskConflictError("task claim step is outside the persisted plan")
         step = plan[index]
@@ -969,7 +1027,12 @@ class TaskEngine:
         return self.store.finish_step(claim, result, now=now)
 
     def run_once(self, now: datetime | None = None) -> TaskRecord | None:
-        claim = self.store.claim_next(self.executor_id, self.lease_seconds, now)
+        claim = self.store.claim_next(
+            self.executor_id,
+            self.lease_seconds,
+            now,
+            principal_tools=frozenset(self.principal_handlers),
+        )
         if claim is None:
             return None
         return self.execute_claim(claim, now=now)
@@ -1000,7 +1063,11 @@ class TaskWorker:
 
     def run_once(self) -> TaskRecord | None:
         engine = self.engine
-        claim = engine.store.claim_next(engine.executor_id, engine.lease_seconds)
+        claim = engine.store.claim_next(
+            engine.executor_id,
+            engine.lease_seconds,
+            principal_tools=frozenset(engine.principal_handlers),
+        )
         if claim is None:
             return None
         heartbeat_stop = threading.Event()
