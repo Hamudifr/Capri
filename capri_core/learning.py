@@ -163,7 +163,7 @@ class LearningStore:
         ):
             raise LearningDataError("minimum_quality must be a finite number between 0 and 1")
         allowed = set(allowed_capabilities) if allowed_capabilities is not None else None
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 """
                 SELECT * FROM learning_examples
@@ -204,7 +204,7 @@ class LearningStore:
         return counts
 
     def counts(self) -> dict[str, int]:
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 "SELECT outcome, COUNT(*) AS n FROM learning_examples GROUP BY outcome"
             ).fetchall()
