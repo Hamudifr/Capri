@@ -50,7 +50,7 @@ class LearningStoreTests(unittest.TestCase):
             self.store.record(example(sensitive=True))
 
     def test_rejects_invalid_quality(self):
-        for value in (1.1, -0.1, float("nan"), float("inf"), "0.9", True):
+        for value in (1.1, -0.1, float("nan"), float("inf"), float("-inf"), "0.9", True):
             with self.subTest(value=value):
                 with self.assertRaises(LearningDataError):
                     self.store.record(example(quality_score=value))
@@ -102,15 +102,17 @@ class LearningStoreTests(unittest.TestCase):
         self.assertIn(rows[0]["split"], {"train", "validation", "test"})
 
     def test_rejects_non_integer_schema_version(self):
-        with self.assertRaises(LearningDataError):
-            self.store.record(example(schema_version=1.0))
+        for value in (1.0, True, "1"):
+            with self.subTest(value=value):
+                with self.assertRaises(LearningDataError):
+                    self.store.record(example(schema_version=value))
 
     def test_rejects_oversized_integer_quality_score(self):
         with self.assertRaises(LearningDataError):
             self.store.record(example(quality_score=10**10000))
 
     def test_rejects_invalid_export_threshold(self):
-        for value in (-0.1, 1.1, float("nan"), "0.9", True):
+        for value in (-0.1, 1.1, float("nan"), float("inf"), float("-inf"), "0.9", True):
             with self.subTest(value=value):
                 with self.assertRaises(LearningDataError):
                     self.store.export_jsonl(self.root / "bad.jsonl", minimum_quality=value)
