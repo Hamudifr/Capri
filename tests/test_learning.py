@@ -101,6 +101,14 @@ class LearningStoreTests(unittest.TestCase):
         rows = [json.loads(line) for line in first.read_text().splitlines()]
         self.assertIn(rows[0]["split"], {"train", "validation", "test"})
 
+    def test_rejects_non_integer_schema_version(self):
+        with self.assertRaises(LearningDataError):
+            self.store.record(example(schema_version=1.0))
+
+    def test_rejects_oversized_integer_quality_score(self):
+        with self.assertRaises(LearningDataError):
+            self.store.record(example(quality_score=10**10000))
+
     def test_rejects_invalid_export_threshold(self):
         for value in (-0.1, 1.1, float("nan"), "0.9", True):
             with self.subTest(value=value):
@@ -118,6 +126,13 @@ class LearningStoreTests(unittest.TestCase):
         rows = [json.loads(line) for line in output.read_text().splitlines()]
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[0]["split"], rows[1]["split"])
+
+    def test_rejects_oversized_integer_export_threshold(self):
+        with self.assertRaises(LearningDataError):
+            self.store.export_jsonl(
+                self.root / "bad-large-threshold.jsonl",
+                minimum_quality=10**10000,
+            )
 
     def test_capability_allowlist(self):
         self.store.record(example(capability="research"))
