@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -88,7 +87,7 @@ class LearningStore:
 
     @staticmethod
     def _validate(example: LearningExample) -> None:
-        if isinstance(example.schema_version, bool) or example.schema_version != 1:
+        if type(example.schema_version) is not int or example.schema_version != 1:
             raise LearningDataError("unsupported schema_version")
         for name in ("example_id", "task_id", "capability", "prompt",
                      "completion", "evidence_ref", "source"):
@@ -106,7 +105,6 @@ class LearningStore:
         if (
             isinstance(example.quality_score, bool)
             or not isinstance(example.quality_score, (int, float))
-            or not math.isfinite(example.quality_score)
             or not 0.0 <= example.quality_score <= 1.0
         ):
             raise LearningDataError("quality_score must be a finite number between 0 and 1")
@@ -158,7 +156,6 @@ class LearningStore:
         if (
             isinstance(minimum_quality, bool)
             or not isinstance(minimum_quality, (int, float))
-            or not math.isfinite(minimum_quality)
             or not 0.0 <= minimum_quality <= 1.0
         ):
             raise LearningDataError("minimum_quality must be a finite number between 0 and 1")
