@@ -118,7 +118,7 @@ class LearningStore:
             ensure_ascii=False, separators=(",", ":"),
         )
         content_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 """
                 INSERT INTO learning_examples (
