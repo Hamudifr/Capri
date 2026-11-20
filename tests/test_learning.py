@@ -32,8 +32,18 @@ class LearningStoreTests(unittest.TestCase):
             self.store.record(example(consent=False))
 
     def test_rejects_missing_privacy_review(self):
+        for value in (False, "yes", 1):
+            with self.subTest(value=value):
+                with self.assertRaises(LearningDataError):
+                    self.store.record(example(privacy_reviewed=value))
+
+    def test_rejects_non_boolean_consent(self):
         with self.assertRaises(LearningDataError):
-            self.store.record(example(privacy_reviewed=False))
+            self.store.record(example(consent="yes"))
+
+    def test_rejects_unclassified_sensitive_flag(self):
+        with self.assertRaises(LearningDataError):
+            self.store.record(example(sensitive=None))
 
     def test_rejects_sensitive_content(self):
         with self.assertRaises(LearningDataError):
