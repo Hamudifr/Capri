@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -39,12 +40,14 @@ class LearningStoreTests(unittest.TestCase):
             self.store.record(example(sensitive=True))
 
     def test_rejects_invalid_quality(self):
-        with self.assertRaises(LearningDataError):
-            self.store.record(example(quality_score=1.1))
+        for value in (1.1, -0.1, float("nan"), float("inf"), "0.9", True):
+            with self.subTest(value=value):
+                with self.assertRaises(LearningDataError):
+                    self.store.record(example(quality_score=value))
 
     def test_rejects_duplicate_identifier(self):
         self.store.record(example())
-        with self.assertRaises(Exception):
+        with self.assertRaises(sqlite3.IntegrityError):
             self.store.record(example())
 
     def test_only_verified_success_is_exported(self):
@@ -87,6 +90,18 @@ class LearningStoreTests(unittest.TestCase):
         self.assertEqual(first.read_text(), second.read_text())
         rows = [json.loads(line) for line in first.read_text().splitlines()]
         self.assertIn(rows[0]["split"], {"train", "validation", "test"})
+
+    def test_examples_from_same_task_share_a_split(self):
+        self.store.record(example())
+        self.store.record(example(
+            example_id="ex-002", prompt="A different prompt",
+            completion="A different completion",
+        ))
+        output = self.root / "grouped.jsonl"
+        self.store.export_jsonl(output)
+        rows = [json.loads(line) for line in output.read_text().splitlines()]
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["split"], rows[1]["split"])
 
     def test_capability_allowlist(self):
         self.store.record(example(capability="research"))
