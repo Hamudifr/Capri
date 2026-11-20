@@ -88,19 +88,19 @@ class LearningStore:
 
     @staticmethod
     def _validate(example: LearningExample) -> None:
-        if example.schema_version != 1:
+        if isinstance(example.schema_version, bool) or example.schema_version != 1:
             raise LearningDataError("unsupported schema_version")
         for name in ("example_id", "task_id", "capability", "prompt",
                      "completion", "evidence_ref", "source"):
             value = getattr(example, name)
             if not isinstance(value, str) or not value.strip():
                 raise LearningDataError(f"{name} must be non-empty text")
-        if not example.consent:
-            raise LearningDataError("explicit consent is required")
-        if not example.privacy_reviewed:
-            raise LearningDataError("human privacy review is required")
-        if example.sensitive:
-            raise LearningDataError("sensitive examples are never admitted")
+        if example.consent is not True:
+            raise LearningDataError("explicit boolean consent is required")
+        if example.privacy_reviewed is not True:
+            raise LearningDataError("explicit human privacy review is required")
+        if example.sensitive is not False:
+            raise LearningDataError("sensitive or unclassified examples are never admitted")
         if example.outcome not in ("verified_success", "verified_failure", "unverified"):
             raise LearningDataError("invalid outcome")
         if (
