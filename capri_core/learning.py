@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -92,8 +93,13 @@ class LearningStore:
             raise LearningDataError("sensitive examples are never admitted")
         if example.outcome not in ("verified_success", "verified_failure", "unverified"):
             raise LearningDataError("invalid outcome")
-        if isinstance(example.quality_score, bool) or not 0.0 <= example.quality_score <= 1.0:
-            raise LearningDataError("quality_score must be between 0 and 1")
+        if (
+            isinstance(example.quality_score, bool)
+            or not isinstance(example.quality_score, (int, float))
+            or not math.isfinite(example.quality_score)
+            or not 0.0 <= example.quality_score <= 1.0
+        ):
+            raise LearningDataError("quality_score must be a finite number between 0 and 1")
 
     def record(self, example: LearningExample) -> None:
         self._validate(example)
@@ -122,8 +128,9 @@ class LearningStore:
             )
 
     @staticmethod
-    def _split(example_id: str) -> Split:
-        bucket = int(hashlib.sha256(example_id.encode("utf-8")).hexdigest()[:8], 16) % 100
+    def _split(task_id: str) -> Split:
+        # Keep all examples from one task in the same partition to reduce leakage.
+        bucket = int(hashlib.sha256(task_id.encode("utf-8")).hexdigest()[:8], 16) % 100
         if bucket < 80:
             return "train"
         if bucket < 90:
@@ -165,7 +172,7 @@ class LearningStore:
                     counts["excluded_duplicate"] += 1
                     continue
                 seen_hashes.add(row["content_hash"])
-                split = self._split(row["example_id"])
+                split = self._split(row["task_id"])
                 payload = {
                     "schema_version": 1,
                     "example_id": row["example_id"],
