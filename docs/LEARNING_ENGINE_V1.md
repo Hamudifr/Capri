@@ -16,8 +16,8 @@ not a self-modifying hosted model and not an automatic training service.
 - Failed and unverified outcomes remain available for analysis but are never
   exported as positive supervised fine-tuning examples.
 - Export defaults to quality >= 0.90, supports a capability allowlist, removes
-  exact prompt/completion duplicates, and assigns deterministic train,
-  validation, and test splits.
+  exact prompt/completion duplicates, and assigns deterministic task-level train,
+  validation, and test splits so examples from one task cannot cross partitions.
 - Exported examples retain evidence references and stable identifiers.
 
 ## Non-goals and safety
