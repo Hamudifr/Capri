@@ -274,7 +274,8 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 connection = self.store._connect()
                 try:
                     connection.execute(
-                        "UPDATE tasks SET state='queued',attempts=0,lease_owner=NULL,lease_until=NULL WHERE task_id=?",
+                        """UPDATE tasks SET state='failed',attempts=1,
+                        lease_owner=NULL,lease_until=NULL WHERE task_id=?""",
                         (task.task_id,),
                     )
                 finally:
@@ -1398,7 +1399,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 connection = self.store._connect()
                 try:
                     connection.execute(
-                        """UPDATE tasks SET state='queued',attempts=0,
+                        """UPDATE tasks SET state='failed',attempts=1,
                         lease_owner=NULL,lease_until=NULL WHERE task_id=?""",
                         (task.task_id,),
                     )
