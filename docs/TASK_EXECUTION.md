@@ -92,7 +92,7 @@ This validation checks the task-store snapshot's semantic consistency. It is not
 
 ## Validation
 
-`tests/test_tasks.py` covers persistent state, idempotent creation, principal-scoped task isolation, immutable owner rows, principal-aware worker dispatch, backup/restore of ownership, plan validation, concurrent claims, lease recovery, stale-worker rejection, tampered-claim rejection across renewal/completion/failure transitions, bounded retries, step checkpointing, handler failure suppression, cancellation, event persistence, symlink rejection, and directory privacy. The repository quality workflow runs the full suite on Python 3.11, 3.12, and 3.13.
+`tests/test_tasks.py` covers persistent state, idempotent creation, principal-scoped task isolation, immutable owner rows, principal-aware worker dispatch, backup/restore of ownership, plan and persisted attempt-count validation, concurrent claims, lease recovery, stale-worker rejection, tampered-claim rejection across renewal/completion/failure transitions, bounded retries, step checkpointing, handler failure suppression, cancellation, event persistence, symlink rejection, and directory privacy. The repository quality workflow runs the full suite on Python 3.11, 3.12, and 3.13.
 
 
 ## Persisted attempt-count integrity
