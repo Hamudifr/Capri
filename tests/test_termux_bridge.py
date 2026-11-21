@@ -262,10 +262,6 @@ class TermuxBridgeManifestTests(unittest.TestCase):
         self.assertIn("[REDACTED]", redact("failed with " + token))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TermuxBridgeGitConcurrencyIntegrationTests(unittest.TestCase):
     def test_two_independent_checkouts_cannot_create_the_same_claim_branch(self):
         """Exercise the real Git ref race with two separate worker checkouts."""
@@ -348,7 +344,6 @@ class TermuxBridgeGitConcurrencyIntegrationTests(unittest.TestCase):
                 return_codes.count(0), 1,
                 msg=f"Expected exactly one claim winner; codes={return_codes}, output={outcomes}",
             )
-            self.assertEqual(return_codes.count(0), 1)
             stored = subprocess.run(
                 ["git", "--git-dir", str(bare), "show", f"refs/heads/{branch}:bridge_claim.json"],
                 check=True, capture_output=True, text=True,
@@ -356,3 +351,7 @@ class TermuxBridgeGitConcurrencyIntegrationTests(unittest.TestCase):
             winning_claim = json.loads(stored.stdout)
             self.assertIn(winning_claim["owner_id"], {claim["owner_id"] for claim in claims})
             self.assertEqual(winning_claim["job_id"], job_id)
+
+
+if __name__ == "__main__":
+    unittest.main()
