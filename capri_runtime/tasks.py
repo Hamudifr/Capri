@@ -677,6 +677,7 @@ class SQLiteTaskStore:
         if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < len(plan):
             raise TaskConflictError("task claim step is outside the persisted plan")
         step = plan[index]
+        _validate_persisted_attempts(state, attempt, step["max_attempts"])
         if (
             claim.idempotency_key != f"{claim.task_id}:{index}"
             or claim.tool != step["tool"]
