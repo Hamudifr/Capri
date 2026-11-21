@@ -43,7 +43,10 @@ TASKS = {
         [sys.executable, "-m", "capri_core", "doctor"],
     ],
     "bridge_tests": [
-        [sys.executable, "-m", "unittest", "tests.test_termux_bridge", "-v"],
+        [
+            sys.executable, "-m", "unittest", "discover",
+            "-s", "tests", "-p", "test_termux_bridge.py", "-v",
+        ],
     ],
 }
 SECRET_PATTERNS = [
