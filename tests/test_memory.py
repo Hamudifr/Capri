@@ -76,6 +76,42 @@ class SQLiteMemoryStoreTests(unittest.TestCase):
         self.assertEqual(restored.integrity_check(), "ok")
         self.assertEqual(restored.export_json(), self.store.export_json())
 
+    def test_backup_fallback_fsyncs_data_before_making_destination_readable(self):
+        backup_path = os.path.join(self.temp.name, "durability-fallback.sqlite3")
+        events = []
+        real_fchmod = os.fchmod
+        real_fsync = os.fsync
+
+        def is_destination(descriptor):
+            try:
+                opened = os.fstat(descriptor)
+                current = os.stat(backup_path, follow_symlinks=False)
+            except FileNotFoundError:
+                return False
+            return (opened.st_dev, opened.st_ino) == (current.st_dev, current.st_ino)
+
+        def tracked_fchmod(descriptor, mode):
+            if is_destination(descriptor):
+                events.append("chmod")
+            return real_fchmod(descriptor, mode)
+
+        def tracked_fsync(descriptor):
+            if is_destination(descriptor):
+                events.append("fsync")
+            return real_fsync(descriptor)
+
+        with (
+            mock.patch.object(sqlite_backup_module.os, "link", None, create=True),
+            mock.patch.object(sqlite_backup_module.os, "fchmod", side_effect=tracked_fchmod),
+            mock.patch.object(sqlite_backup_module.os, "fsync", side_effect=tracked_fsync),
+        ):
+            self.assertEqual(self.store.backup_to(backup_path), backup_path)
+
+        self.assertEqual(events, ["fsync", "chmod", "fsync"])
+        restored = SQLiteMemoryStore(backup_path)
+        self.assertEqual(restored.integrity_check(), "ok")
+        self.assertEqual(restored.export_json(), self.store.export_json())
+
     def test_backup_refuses_existing_symlink_and_public_directory(self):
         existing = os.path.join(self.temp.name, "existing.sqlite3")
         with open(existing, "wb") as stream:
