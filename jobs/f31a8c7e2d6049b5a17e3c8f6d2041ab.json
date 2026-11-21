@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "job_id": "f31a8c7e2d6049b5a17e3c8f6d2041ab",
+  "target_commit": "9ce60022970caa049e3597f5cf29f8422571eb75",
+  "task": "bridge_tests"
+}
