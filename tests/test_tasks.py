@@ -69,6 +69,39 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         with self.assertRaises(TaskNotFoundError):
             restored_owned.get_for_principal(owned.task_id, "other-owner")
 
+    def test_backup_accepts_valid_running_lease(self):
+        task = self.store.create(PLAN, now=NOW)
+        claim = self.store.claim_next("backup-worker", now=NOW)
+        self.assertEqual(claim.task_id, task.task_id)
+        backup_path = os.path.join(self.temp.name, "running-task-backup.sqlite3")
+        self.assertEqual(self.store.backup_to(backup_path), backup_path)
+
+    def test_backup_rejects_inconsistent_task_lease_state(self):
+        cases = (
+            ("running_missing_owner", "running", None, (NOW + timedelta(seconds=30)).isoformat()),
+            ("running_missing_expiry", "running", "backup-worker", None),
+            ("running_invalid_expiry", "running", "backup-worker", "not-a-timestamp"),
+            ("queued_with_lease", "queued", "orphan-worker", (NOW + timedelta(seconds=30)).isoformat()),
+        )
+        for suffix, state, owner, expiry in cases:
+            with self.subTest(case=suffix):
+                task = self.store.create(PLAN, now=NOW)
+                if state == "running":
+                    claim = self.store.claim_next("backup-worker", now=NOW)
+                    self.assertEqual(claim.task_id, task.task_id)
+                connection = self.store._connect()
+                try:
+                    connection.execute(
+                        "UPDATE tasks SET lease_owner=?,lease_until=? WHERE task_id=?",
+                        (owner, expiry, task.task_id),
+                    )
+                finally:
+                    connection.close()
+                backup_path = os.path.join(self.temp.name, f"{suffix}.sqlite3")
+                with self.assertRaises(TaskValidationError):
+                    self.store.backup_to(backup_path)
+                self.assertFalse(os.path.exists(backup_path))
+
     def test_backup_refuses_existing_symlink_and_public_directory(self):
         existing = os.path.join(self.temp.name, "existing.sqlite3")
         with open(existing, "wb") as stream:
