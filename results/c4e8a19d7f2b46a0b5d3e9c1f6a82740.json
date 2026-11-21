@@ -1,0 +1,18 @@
+{
+  "finished_at": "2026-11-21T13:19:06.748600+00:00",
+  "schema_version": 1,
+  "started_at": "2026-11-21T13:19:06.663155+00:00",
+  "status": "failed",
+  "steps": [
+    {
+      "command_id": "bridge_tests",
+      "duration_seconds": 0.085,
+      "exit_code": 5,
+      "output_tail": "\n----------------------------------------------------------------------\nRan 0 tests in 0.000s\n\nNO TESTS RAN\n",
+      "step": 1,
+      "timed_out": false
+    }
+  ],
+  "target_commit": "d890cc825ab440eb8326e2cd7bbc90bf89aaf9de",
+  "task": "bridge_tests"
+}
