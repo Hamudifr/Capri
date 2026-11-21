@@ -489,7 +489,7 @@ class TermuxBridgeTargetWorktreeTests(unittest.TestCase):
                 ["git", "config", "user.email", "capri-test@example.invalid"],
                 cwd=seed, check=True,
             )
-            (seed / "worker.txt").write_text("worker checkout\\n", encoding="utf-8")
+            (seed / "worker.txt").write_text("worker checkout\n", encoding="utf-8")
             subprocess.run(["git", "add", "worker.txt"], cwd=seed, check=True, capture_output=True, text=True)
             subprocess.run(["git", "commit", "-m", "worker base"], cwd=seed, check=True, capture_output=True, text=True)
             subprocess.run(["git", "remote", "add", "origin", str(bare)], cwd=seed, check=True)
@@ -503,7 +503,7 @@ class TermuxBridgeTargetWorktreeTests(unittest.TestCase):
                 ["git", "rm", "-rf", "."],
                 cwd=seed, check=False, capture_output=True, text=True,
             )
-            (seed / "candidate.txt").write_text("exact candidate commit\\n", encoding="utf-8")
+            (seed / "candidate.txt").write_text("exact candidate commit\n", encoding="utf-8")
             subprocess.run(["git", "add", "candidate.txt"], cwd=seed, check=True, capture_output=True, text=True)
             subprocess.run(["git", "commit", "-m", "candidate commit"], cwd=seed, check=True, capture_output=True, text=True)
             subprocess.run(["git", "push", "origin", "candidate"], cwd=seed, check=True, capture_output=True, text=True)
