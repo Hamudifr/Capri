@@ -10,9 +10,10 @@ from typing import Callable
 _AT_FDCWD = -100
 _RENAME_NOREPLACE = 1
 
+
 def _load_renameat2() -> Callable | None:
     """Return libc renameat2 when the host exports it, otherwise None."""
-    if os.name != "posix" or not sys.platform.startswith("linux"):
+    if os.name != "posix" or not sys.platform.startswith(("linux", "android")):
         return None
     try:
         function = getattr(ctypes.CDLL(None, use_errno=True), "renameat2", None)
@@ -27,6 +28,7 @@ def _load_renameat2() -> Callable | None:
     ]
     function.restype = ctypes.c_int
     return function
+
 
 def publish_no_replace(source_path: str, destination_path: str) -> str:
     """Atomically publish source without replacing an existing destination.
