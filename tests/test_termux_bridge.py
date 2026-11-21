@@ -94,6 +94,19 @@ class TermuxBridgeManifestTests(unittest.TestCase):
         with self.assertRaises(BridgeError):
             parse_claim(json.dumps(claim), self.valid_manifest()["job_id"])
 
+    def test_claim_branch_is_scoped_to_job_id(self):
+        from tools.termux_bridge import claim_branch
+        self.assertEqual(
+            claim_branch(self.valid_manifest()["job_id"]),
+            "capri-termux-claim-0123456789abcdef0123456789abcdef",
+        )
+
+    def test_claim_attempt_limit_is_enforced(self):
+        claim = self.valid_claim()
+        claim["attempt"] = 4
+        with self.assertRaises(BridgeError):
+            parse_claim(json.dumps(claim), self.valid_manifest()["job_id"])
+
     def test_claim_lease_expiry_is_deterministic(self):
         claim = self.valid_claim()
         self.assertTrue(claim_is_live(claim, 199))
