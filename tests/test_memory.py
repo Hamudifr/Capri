@@ -91,6 +91,7 @@ class SQLiteMemoryStoreTests(unittest.TestCase):
         if os.name == "posix":
             public_dir = os.path.join(self.temp.name, "public")
             os.mkdir(public_dir, 0o755)
+            os.chmod(public_dir, 0o755)
             with self.assertRaises(MemoryValidationError):
                 self.store.backup_to(os.path.join(public_dir, "backup.sqlite3"))
 
