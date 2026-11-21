@@ -25,6 +25,9 @@ INBOX_BRANCH = "capri-termux-bridge-inbox"
 RESULTS_BRANCH = "capri-termux-bridge-results"
 JOB_PATH = "bridge/job.json"  # Legacy single-job compatibility
 QUEUE_PREFIX = "jobs/"
+CLAIM_PREFIX = "capri-termux-claim-"
+CLAIM_LEASE_SECONDS = 3600
+MAX_CLAIM_ATTEMPTS = 3
 MAX_OUTPUT = 48_000
 STEP_TIMEOUT = 900
 TASKS = {
@@ -96,6 +99,140 @@ def parse_queue_paths(raw: str) -> list[str]:
         if re.fullmatch(r"jobs/[0-9a-f]{32}\.json", line.strip())
     }
     return sorted(paths)
+
+
+
+def parse_claim(raw: str, expected_job_id: str) -> dict[str, Any]:
+    try:
+        claim = json.loads(raw)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise BridgeError("Claim record is not valid JSON") from exc
+    required = {
+        "schema_version", "job_id", "owner_id", "attempt",
+        "claimed_at", "lease_expires_at", "status",
+    }
+    if not isinstance(claim, dict) or set(claim) != required:
+        raise BridgeError("Claim record has missing or unexpected fields")
+    if type(claim["schema_version"]) is not int or claim["schema_version"] != 1:
+        raise BridgeError("Unsupported claim schema version")
+    if claim["job_id"] != expected_job_id:
+        raise BridgeError("Claim job_id does not match queue entry")
+    if not isinstance(claim["owner_id"], str) or not re.fullmatch(r"[0-9a-f]{32}", claim["owner_id"]):
+        raise BridgeError("Claim owner_id is invalid")
+    if type(claim["attempt"]) is not int or not 1 <= claim["attempt"] <= MAX_CLAIM_ATTEMPTS:
+        raise BridgeError("Claim attempt is outside the allowed range")
+    if type(claim["claimed_at"]) is not int or type(claim["lease_expires_at"]) is not int:
+        raise BridgeError("Claim timestamps must be integer Unix timestamps")
+    if claim["lease_expires_at"] <= claim["claimed_at"]:
+        raise BridgeError("Claim lease must expire after it is created")
+    if claim["status"] not in {"active", "abandoned"}:
+        raise BridgeError("Claim status is invalid")
+    return claim
+
+
+def claim_branch(job_id: str) -> str:
+    return f"{CLAIM_PREFIX}{job_id}"
+
+
+def read_claim(job_id: str) -> tuple[str | None, dict[str, Any] | None]:
+    branch = claim_branch(job_id)
+    remote = git("ls-remote", "--heads", "origin", f"refs/heads/{branch}")
+    if not remote.stdout.strip():
+        return None, None
+    git(
+        "fetch", "--quiet", "origin",
+        f"+refs/heads/{branch}:refs/remotes/origin/{branch}",
+    )
+    ref = f"refs/remotes/origin/{branch}"
+    raw = remote_file(ref, "bridge_claim.json")
+    if raw is None:
+        raise BridgeError(f"Claim branch {branch} has no bridge_claim.json")
+    return ref, parse_claim(raw, job_id)
+
+
+def write_claim(
+    job_id: str,
+    claim: dict[str, Any],
+    base_ref: str,
+) -> None:
+    branch = claim_branch(job_id)
+    with tempfile.TemporaryDirectory(prefix="capri-bridge-claim-") as temporary:
+        worktree = Path(temporary) / "claim"
+        git("worktree", "add", "--detach", str(worktree), base_ref)
+        try:
+            destination = worktree / "bridge_claim.json"
+            destination.write_text(
+                json.dumps(claim, indent=2, sort_keys=True) + "\\n",
+                encoding="utf-8",
+            )
+            git("add", "bridge_claim.json", cwd=worktree)
+            git(
+                "-c", "user.name=Capri Bridge Claim",
+                "-c", "user.email=capri-bridge-claim@users.noreply.github.com",
+                "commit", "-m", f"bridge: claim {job_id}", cwd=worktree,
+            )
+            pushed = git(
+                "push", "origin", f"HEAD:refs/heads/{branch}",
+                cwd=worktree, check=False,
+            )
+            if pushed.returncode:
+                detail = redact((pushed.stderr or pushed.stdout)[-2000:])
+                raise BridgeError(
+                    f"Could not acquire/update distributed claim for {job_id}; "
+                    f"another worker may have won the race: {detail}"
+                )
+        finally:
+            git("worktree", "remove", "--force", str(worktree), check=False)
+
+
+def claim_job(job_id: str) -> tuple[bool, dict[str, Any] | None]:
+    now = int(time.time())
+    current_ref, current = read_claim(job_id)
+    if current and current["status"] == "abandoned":
+        return False, current
+    if current and current["lease_expires_at"] > now:
+        return False, current
+
+    if current is None:
+        attempt = 1
+        base_ref = f"refs/remotes/origin/{INBOX_BRANCH}"
+    else:
+        base_ref = current_ref
+        if current["attempt"] >= MAX_CLAIM_ATTEMPTS:
+            terminal = {
+                "schema_version": 1,
+                "job_id": job_id,
+                "owner_id": uuid.uuid4().hex,
+                "attempt": current["attempt"],
+                "claimed_at": now,
+                "lease_expires_at": now + 1,
+                "status": "abandoned",
+            }
+            write_claim(job_id, terminal, base_ref)
+            return False, terminal
+        attempt = current["attempt"] + 1
+
+    claim = {
+        "schema_version": 1,
+        "job_id": job_id,
+        "owner_id": uuid.uuid4().hex,
+        "attempt": attempt,
+        "claimed_at": now,
+        "lease_expires_at": now + CLAIM_LEASE_SECONDS,
+        "status": "active",
+    }
+    write_claim(job_id, claim, base_ref)
+    return True, claim
+
+
+def owns_live_claim(job_id: str, owner_id: str) -> bool:
+    _, current = read_claim(job_id)
+    return bool(
+        current
+        and current["status"] == "active"
+        and current["owner_id"] == owner_id
+        and current["lease_expires_at"] > int(time.time())
+    )
 
 
 def acquire_worker_lock() -> int:
@@ -277,6 +414,26 @@ def process_once() -> bool:
         if result_exists(job["job_id"]):
             continue
 
+        try:
+            acquired, claim = claim_job(job["job_id"])
+        except BridgeError as exc:
+            print(f"Could not claim job {job['job_id']}: {exc}")
+            continue
+        if not acquired:
+            if claim and claim["status"] == "abandoned":
+                abandoned = {
+                    "schema_version": 1,
+                    "target_commit": job["target_commit"],
+                    "task": job["task"],
+                    "status": "abandoned",
+                    "reason": f"Distributed claim expired after {MAX_CLAIM_ATTEMPTS} attempts.",
+                    "finished_at": utc_now(),
+                    "steps": [],
+                }
+                publish_result(job["job_id"], abandoned)
+                did_work = True
+            continue
+
         local_commit = git("rev-parse", "HEAD").stdout.strip()
         if local_commit != job["target_commit"]:
             result = {
@@ -292,6 +449,9 @@ def process_once() -> bool:
         else:
             print(f"Executing allowlisted task '{job['task']}' at {local_commit}...")
             result = execute_task(job["task"], local_commit)
+        if not owns_live_claim(job["job_id"], claim["owner_id"]):
+            print(f"Job {job['job_id']}: claim expired or ownership changed; result not published.")
+            continue
         publish_result(job["job_id"], result)
         print(f"Job {job['job_id']}: {result['status']}; result published to {RESULTS_BRANCH}.")
         did_work = True
