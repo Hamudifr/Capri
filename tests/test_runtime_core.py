@@ -31,9 +31,18 @@ def passing(run_id="r1", parent=None):
     )
 
 
+def _ledger_test_tempdir():
+    """Keep ledger fixtures beneath the trusted home anchor."""
+    return tempfile.TemporaryDirectory(dir=Path.home())
+
+
+@unittest.skipUnless(
+    ledger_module._supports_secure_dirfd_walk(),
+    "secure POSIX dirfd traversal required",
+)
 class CLITests(unittest.TestCase):
     def test_verify_cli_reports_metadata_only_and_does_not_modify_file(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             path = Path(directory) / "runs.jsonl"
             ledger = HashChainLedger(path)
             ledger.append(passing("cli-run"))
@@ -47,19 +56,19 @@ class CLITests(unittest.TestCase):
             self.assertEqual(path.read_bytes(), before)
 
     def test_library_verify_rejects_missing_file(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             path = Path(directory) / "missing.jsonl"
             with self.assertRaises(LedgerIntegrityError):
                 HashChainLedger(path).verify()
 
     def test_records_rejects_missing_file(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             path = Path(directory) / "missing.jsonl"
             with self.assertRaises(LedgerIntegrityError):
                 HashChainLedger(path).records()
 
     def test_verify_cli_rejects_missing_file(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             output = io.StringIO()
             with redirect_stderr(output):
                 code = cli_main(["verify", str(Path(directory) / "missing.jsonl")])
@@ -67,7 +76,7 @@ class CLITests(unittest.TestCase):
             self.assertIn("not an existing regular file", output.getvalue())
 
     def test_verify_cli_fails_on_corrupted_ledger(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             path = Path(directory) / "runs.jsonl"
             path.write_text('{"bad":true}\n', encoding="utf-8")
             output = io.StringIO()
@@ -128,23 +137,31 @@ class ValidationTests(unittest.TestCase):
         with self.assertRaises(RecordValidationError):
             validate_record(record)
 
+    @unittest.skipUnless(
+        ledger_module._supports_secure_dirfd_walk(),
+        "secure POSIX dirfd traversal required",
+    )
     def test_lone_unicode_surrogates_are_rejected_before_ledger_serialization(self):
         for field in ("run_id", "scenario_id", "evidence_ref", "parent_run_id", "rubric_version"):
             with self.subTest(field=field):
                 record = replace(passing(), **{field: "invalid-\ud800"})
                 with self.assertRaises(RecordValidationError):
                     validate_record(record)
-                with tempfile.TemporaryDirectory() as directory:
+                with _ledger_test_tempdir() as directory:
                     path = Path(directory) / "runs.jsonl"
                     with self.assertRaises(RecordValidationError):
                         HashChainLedger(path).append(record)
                     self.assertFalse(path.exists())
 
 
+@unittest.skipUnless(
+    ledger_module._supports_secure_dirfd_walk(),
+    "secure POSIX dirfd traversal required",
+)
 class LedgerTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "posix", "POSIX file modes required")
     def test_new_ledger_uses_private_file_and_parent_permissions(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             path = Path(directory) / "private" / "runs.jsonl"
             HashChainLedger(path).append(passing("private-run"))
             self.assertEqual(stat.S_IMODE(path.parent.stat().st_mode), 0o700)
@@ -152,7 +169,7 @@ class LedgerTests(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "posix", "POSIX file modes required")
     def test_append_tightens_existing_ledger_file_permissions(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             path = Path(directory) / "runs.jsonl"
             ledger = HashChainLedger(path)
             ledger.append(passing("first"))
@@ -162,7 +179,7 @@ class LedgerTests(unittest.TestCase):
             self.assertEqual(ledger.verify()["records"], 2)
 
     def test_append_verify_and_retest_lineage(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             ledger = HashChainLedger(Path(directory) / "runs.jsonl")
             ledger.append(passing("r1"))
             ledger.append(passing("r2", parent="r1"))
@@ -172,20 +189,20 @@ class LedgerTests(unittest.TestCase):
             self.assertEqual(ledger.records()[1].parent_run_id, "r1")
 
     def test_duplicate_run_id_rejected(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             ledger = HashChainLedger(Path(directory) / "runs.jsonl")
             ledger.append(passing("r1"))
             with self.assertRaises(LedgerIntegrityError):
                 ledger.append(passing("r1"))
 
     def test_unknown_parent_rejected(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             ledger = HashChainLedger(Path(directory) / "runs.jsonl")
             with self.assertRaises(LedgerIntegrityError):
                 ledger.append(passing("r2", parent="missing"))
 
     def test_tampering_is_detected(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             path = Path(directory) / "runs.jsonl"
             ledger = HashChainLedger(path)
             ledger.append(passing("r1"))
@@ -196,7 +213,7 @@ class LedgerTests(unittest.TestCase):
                 ledger.verify()
 
     def test_rehashed_invalid_record_is_rejected(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             path = Path(directory) / "runs.jsonl"
             ledger = HashChainLedger(path)
             ledger.append(passing("r1"))
@@ -209,7 +226,7 @@ class LedgerTests(unittest.TestCase):
                 ledger.verify()
 
     def test_unknown_retest_parent_in_existing_file_is_rejected(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             path = Path(directory) / "runs.jsonl"
             entry_record = passing("r2", parent="missing").to_dict()
             canonical = json.dumps(entry_record, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
@@ -220,7 +237,7 @@ class LedgerTests(unittest.TestCase):
                 HashChainLedger(path).verify()
 
     def test_duplicate_json_keys_are_rejected(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             path = Path(directory) / "runs.jsonl"
             path.write_text(
                 '{"previous_hash":"' + ("0" * 64) + '","record":{},"hash":"' +
@@ -231,7 +248,7 @@ class LedgerTests(unittest.TestCase):
                 HashChainLedger(path).verify()
 
     def test_malformed_entry_shape_is_rejected(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             path = Path(directory) / "runs.jsonl"
             path.write_text(json.dumps({"record": {}, "hash": "0" * 64}) + "\n")
             with self.assertRaises(LedgerIntegrityError):
@@ -239,7 +256,7 @@ class LedgerTests(unittest.TestCase):
 
 
     def test_append_after_corrupted_tail_fails_without_modifying_file(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             path = Path(directory) / "runs.jsonl"
             ledger = HashChainLedger(path)
             ledger.append(passing("r1"))
@@ -251,7 +268,7 @@ class LedgerTests(unittest.TestCase):
             self.assertEqual(path.read_bytes(), before)
 
     def test_streaming_verify_and_records_agree(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             ledger = HashChainLedger(Path(directory) / "runs.jsonl")
             ledger.append(passing("r1"))
             ledger.append(passing("r2", parent="r1"))
@@ -260,14 +277,14 @@ class LedgerTests(unittest.TestCase):
             self.assertTrue(result["valid"])
 
     def test_ledger_entry_size_limit_is_validated(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             path = Path(directory) / "runs.jsonl"
             path.write_bytes(b"x" * 33 + b"\n")
             with self.assertRaises(LedgerIntegrityError):
                 HashChainLedger(path, max_entry_bytes=32).verify()
 
     def test_ledger_accepts_crlf_line_endings(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             path = Path(directory) / "runs.jsonl"
             ledger = HashChainLedger(path)
             ledger.append(passing("r1"))
@@ -275,7 +292,7 @@ class LedgerTests(unittest.TestCase):
             self.assertEqual(ledger.verify()["records"], 1)
 
     def test_entry_at_exact_configured_byte_limit_is_accepted(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             path = Path(directory) / "runs.jsonl"
             HashChainLedger(path).append(passing("r1"))
             entry_size = len(path.read_bytes().rstrip(b"\n"))
@@ -284,7 +301,7 @@ class LedgerTests(unittest.TestCase):
                 HashChainLedger(path, max_entry_bytes=entry_size - 1).verify()
 
     def test_append_rejects_entry_larger_than_configured_limit(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             path = Path(directory) / "runs.jsonl"
             ledger = HashChainLedger(path, max_entry_bytes=128)
             with self.assertRaises(LedgerIntegrityError):
@@ -292,7 +309,7 @@ class LedgerTests(unittest.TestCase):
             self.assertFalse(path.exists())
 
     def test_unterminated_final_line_fails_closed(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             path = Path(directory) / "runs.jsonl"
             ledger = HashChainLedger(path)
             ledger.append(passing("r1"))
@@ -301,7 +318,7 @@ class LedgerTests(unittest.TestCase):
                 ledger.verify()
 
     def test_deeply_nested_json_fails_as_ledger_integrity_error(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             path = Path(directory) / "runs.jsonl"
             nested = b"[" * 1200 + b"0" + b"]" * 1200
             line = (
@@ -313,7 +330,7 @@ class LedgerTests(unittest.TestCase):
                 HashChainLedger(path).verify()
 
     def test_entry_size_limit_requires_positive_non_boolean_integer(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             path = Path(directory) / "runs.jsonl"
             for value in (0, -1, True, 1.5, "1024"):
                 with self.subTest(value=value):
@@ -321,12 +338,25 @@ class LedgerTests(unittest.TestCase):
                         HashChainLedger(path, max_entry_bytes=value)
 
     def test_threaded_appends_preserve_a_valid_chain(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             ledger = HashChainLedger(Path(directory) / "runs.jsonl")
             with ThreadPoolExecutor(max_workers=8) as pool:
                 hashes = list(pool.map(lambda i: ledger.append(passing(f"thread-{i}")), range(24)))
             self.assertEqual(len(set(hashes)), 24)
             self.assertEqual(ledger.verify()["records"], 24)
+
+
+class LedgerCapabilityTests(unittest.TestCase):
+    def test_parent_directory_fails_closed_without_secure_dirfd_walk(self):
+        with mock.patch.object(
+            ledger_module, "_supports_secure_dirfd_walk", return_value=False
+        ):
+            with self.assertRaisesRegex(
+                LedgerIntegrityError,
+                "secure directory-descriptor traversal is unavailable",
+            ):
+                ledger_module._open_parent_directory(Path.home(), create=False)
+
 
 
 class DoctorTests(unittest.TestCase):
@@ -729,30 +759,111 @@ class DoctorTests(unittest.TestCase):
 
 
 
+@unittest.skipUnless(
+    ledger_module._supports_secure_dirfd_walk(),
+    "secure POSIX dirfd traversal required",
+)
 class LedgerPathSafetyTests(unittest.TestCase):
-    def test_android_style_root_open_denial_uses_checked_path_fallback(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "runs.jsonl"
+    def test_root_permission_uses_trusted_home_anchor_and_dirfd_walk(self):
+        with _ledger_test_tempdir() as directory:
+            parent = Path(directory) / "nested"
             real_open = os.open
+            opened = []
 
             def deny_root_open(target, flags, *args, **kwargs):
-                if (
-                    os.fspath(target) == os.path.abspath(os.sep)
-                    and kwargs.get("dir_fd") is None
-                ):
-                    raise PermissionError("simulated app-sandbox root restriction")
+                target_path = os.fspath(target)
+                dir_fd = kwargs.get("dir_fd")
+                opened.append((target_path, dir_fd))
+                if target_path == os.path.abspath(os.sep) and dir_fd is None:
+                    raise PermissionError(
+                        "simulated app-sandbox root restriction"
+                    )
                 return real_open(target, flags, *args, **kwargs)
 
             with mock.patch.object(
                 ledger_module.os, "open", side_effect=deny_root_open
             ):
-                HashChainLedger(path).append(passing("sandbox-path-fallback"))
+                parent_fd = ledger_module._open_parent_directory(
+                    parent, create=True
+                )
+            try:
+                self.assertTrue(stat.S_ISDIR(os.fstat(parent_fd).st_mode))
+            finally:
+                os.close(parent_fd)
 
-            self.assertTrue(HashChainLedger(path).verify()["valid"])
-            self.assertEqual(HashChainLedger(path).verify()["records"], 1)
+            self.assertEqual(
+                opened[0], (os.path.abspath(os.sep), None)
+            )
+            self.assertEqual(
+                opened[1], (os.fspath(Path.home()), None)
+            )
+            self.assertTrue(opened[2:])
+            self.assertTrue(
+                all(dir_fd is not None for _, dir_fd in opened[2:])
+            )
+
+    def test_root_permission_outside_trusted_home_fails_closed(self):
+        outside = Path(os.path.abspath(os.sep)) / "tmp" / "capri-ledger-outside-home"
+        real_open = os.open
+        opened = []
+
+        def deny_root_open(target, flags, *args, **kwargs):
+            target_path = os.fspath(target)
+            dir_fd = kwargs.get("dir_fd")
+            opened.append((target_path, dir_fd))
+            if target_path == os.path.abspath(os.sep) and dir_fd is None:
+                raise PermissionError(
+                    "simulated app-sandbox root restriction"
+                )
+            return real_open(target, flags, *args, **kwargs)
+
+        with mock.patch.object(
+            ledger_module.os, "open", side_effect=deny_root_open
+        ):
+            with self.assertRaisesRegex(
+                LedgerIntegrityError, "outside the trusted home anchor"
+            ):
+                ledger_module._open_parent_directory(outside, create=True)
+
+        self.assertEqual(
+            opened, [(os.path.abspath(os.sep), None)]
+        )
+        self.assertFalse(outside.exists())
+
+    def test_permission_denied_descendant_fails_closed(self):
+        with _ledger_test_tempdir() as directory:
+            blocked = Path(directory) / "blocked"
+            blocked.mkdir()
+            parent = blocked / "nested"
+            real_open = os.open
+            opened = []
+
+            def deny_blocked_component(target, flags, *args, **kwargs):
+                target_path = os.fspath(target)
+                dir_fd = kwargs.get("dir_fd")
+                opened.append((target_path, dir_fd))
+                if target_path == "blocked" and dir_fd is not None:
+                    raise PermissionError(
+                        "simulated inaccessible descendant"
+                    )
+                return real_open(target, flags, *args, **kwargs)
+
+            with mock.patch.object(
+                ledger_module.os, "open", side_effect=deny_blocked_component
+            ):
+                with self.assertRaisesRegex(
+                    LedgerIntegrityError, "safe directory"
+                ):
+                    ledger_module._open_parent_directory(parent, create=True)
+
+            self.assertTrue(
+                any(target == "blocked" and dir_fd is not None
+                    for target, dir_fd in opened)
+            )
+            self.assertFalse(parent.exists())
 
     def test_final_symlink_is_rejected_without_changing_target(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             target = Path(directory) / "target.jsonl"
             link = Path(directory) / "linked.jsonl"
             HashChainLedger(target).append(passing("target-record"))
@@ -767,7 +878,7 @@ class LedgerPathSafetyTests(unittest.TestCase):
             self.assertEqual(target.read_bytes(), before)
 
     def test_parent_symlink_is_rejected(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             root = Path(directory)
             real_parent = root / "real"
             real_parent.mkdir()
@@ -779,7 +890,7 @@ class LedgerPathSafetyTests(unittest.TestCase):
             self.assertFalse((real_parent / "runs.jsonl").exists())
 
     def test_non_regular_ledger_path_is_rejected(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             path = Path(directory) / "ledger-directory"
             path.mkdir()
             with self.assertRaises(LedgerIntegrityError):
@@ -788,7 +899,7 @@ class LedgerPathSafetyTests(unittest.TestCase):
 
 
     def test_missing_file_scan_closes_parent_descriptor(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             path = Path(directory) / "missing.jsonl"
             opened = []
             real_open = os.open
@@ -807,7 +918,7 @@ class LedgerPathSafetyTests(unittest.TestCase):
                     os.fstat(descriptor)
 
     def test_invalid_ledger_is_not_repermissioned_by_failed_append(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             path = Path(directory) / "runs.jsonl"
             path.write_bytes(b"not-a-valid-ledger\\n")
             path.chmod(0o644)
@@ -819,7 +930,7 @@ class LedgerPathSafetyTests(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "posix", "POSIX directory fsync is required")
     def test_first_creation_fsyncs_file_then_parent_directory(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             path = Path(directory) / "runs.jsonl"
             real_fsync = os.fsync
             observed = []
@@ -836,7 +947,7 @@ class LedgerPathSafetyTests(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "posix", "POSIX directory fsync is required")
     def test_existing_append_does_not_fsync_parent_directory(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             path = Path(directory) / "runs.jsonl"
             ledger = HashChainLedger(path)
             ledger.append(passing("first"))
@@ -854,7 +965,7 @@ class LedgerPathSafetyTests(unittest.TestCase):
             self.assertEqual(observed, ["file"])
 
     def _assert_failed_append_is_latched_and_closes_descriptors(self, helper, failure):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             path = Path(directory) / "runs.jsonl"
             ledger = HashChainLedger(path)
             opened = []
@@ -909,7 +1020,7 @@ class LedgerPathSafetyTests(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "posix", "POSIX directory fsync is required")
     def test_nested_new_parent_directories_are_synced_before_file_creation(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             path = Path(directory) / "first" / "second" / "runs.jsonl"
             real_fsync = os.fsync
             observed = []
@@ -940,7 +1051,7 @@ class LedgerPathSafetyTests(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "posix", "POSIX descriptor semantics are required")
     def test_uncertain_inode_guard_cap_fails_closed_globally(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             root = Path(directory)
             uncertain = HashChainLedger(root / "uncertain.jsonl")
             unrelated = HashChainLedger(root / "unrelated.jsonl")
@@ -969,7 +1080,7 @@ class LedgerPathSafetyTests(unittest.TestCase):
                     unrelated.append(passing("must-fail-closed"))
 
     def _assert_hard_link_alias_is_latched_after_failure(self, helper, failure):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             root = Path(directory)
             original_path = root / "runs.jsonl"
             alias_path = root / "alias.jsonl"
@@ -1052,7 +1163,7 @@ class LedgerPathSafetyTests(unittest.TestCase):
         "POSIX hard-link and directory-fsync support is required",
     )
     def test_z_hard_link_alias_is_latched_after_first_create_directory_fsync_failure(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with _ledger_test_tempdir() as directory:
             root = Path(directory)
             original_path = root / "runs.jsonl"
             alias_path = root / "alias.jsonl"
