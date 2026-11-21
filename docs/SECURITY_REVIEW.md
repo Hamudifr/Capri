@@ -39,6 +39,7 @@ Assets requiring protection as the runtime grows:
 - Redacted audit-start persistence must succeed before a handler is invoked; a post-handler audit failure is surfaced as an uncertain outcome.
 - `SQLiteSecurityStore` persists redacted audit events and consumed approval IDs using SQLite transactions, a unique grant-ID constraint, and `BEGIN IMMEDIATE` for atomic cross-executor/process replay prevention.
 - On POSIX, the SQLite store requires a current-user-owned private parent directory, rejects symlink/non-regular and hard-linked database paths, and enforces database mode 0600; it rechecks parent/file permissions before each connection.
+- SQLite backup publication uses an atomic no-replace primitive: Python hard-link publication where available, or Linux `renameat2(RENAME_NOREPLACE)` when `os.link` is unavailable. Unsupported hosts fail closed rather than risk overwriting an existing backup destination.
 - The runtime does not log transcript content or provider credentials.
 - CI declares `contents: read` and pins checkout/setup-python actions to immutable commit SHAs.
 
