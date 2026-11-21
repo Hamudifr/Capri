@@ -931,12 +931,12 @@ class SQLiteTaskStore:
                 if not 0 <= index < len(plan):
                     raise TaskValidationError("backup contains invalid task lifecycle progress")
                 maximum = plan[index]["max_attempts"]
-                valid_attempts = (
-                    attempts == 0 if state == "queued"
-                    else 1 <= attempts < maximum if state == "retry_wait"
-                    else 1 <= attempts <= maximum if state in {"running", "failed"}
-                    else False
-                )
+                if state == "queued":
+                    valid_attempts = attempts == 0
+                elif state == "retry_wait":
+                    valid_attempts = 1 <= attempts < maximum
+                else:  # running and failed retain the current step's final attempt
+                    valid_attempts = 1 <= attempts <= maximum
             elif state == "succeeded":
                 valid_attempts = index == len(plan) and attempts == 0
             else:  # cancelled can occur before, during, or after the final step
