@@ -101,6 +101,14 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 with self.assertRaises(TaskValidationError):
                     self.store.backup_to(backup_path)
                 self.assertFalse(os.path.exists(backup_path))
+                connection = self.store._connect()
+                try:
+                    connection.execute(
+                        "UPDATE tasks SET state='queued',lease_owner=NULL,lease_until=NULL WHERE task_id=?",
+                        (task.task_id,),
+                    )
+                finally:
+                    connection.close()
 
     def test_backup_refuses_existing_symlink_and_public_directory(self):
         existing = os.path.join(self.temp.name, "existing.sqlite3")
