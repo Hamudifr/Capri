@@ -93,7 +93,7 @@ def parse_queue_paths(raw: str) -> list[str]:
     paths = {
         line.strip()
         for line in raw.splitlines()
-        if re.fullmatch(r"jobs/[0-9a-f]{32}\\.json", line.strip())
+        if re.fullmatch(r"jobs/[0-9a-f]{32}\.json", line.strip())
     }
     return sorted(paths)
 
