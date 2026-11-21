@@ -50,15 +50,15 @@ class TermuxBridgeManifestTests(unittest.TestCase):
     def test_queue_paths_are_sorted_and_deduplicated(self):
         first = "jobs/0123456789abcdef0123456789abcdef.json"
         second = "jobs/abcdef0123456789abcdef0123456789.json"
-        raw = f"{second}\\n{first}\\n{second}\\n"
+        raw = f"{second}\n{first}\n{second}\n"
         self.assertEqual(parse_queue_paths(raw), [first, second])
 
     def test_queue_paths_reject_traversal_and_noncanonical_names(self):
         raw = (
-            "jobs/../job.json\\n"
-            "jobs/ABCDEF0123456789ABCDEF0123456789.json\\n"
-            "jobs/0123456789abcdef0123456789abcdef.txt\\n"
-            "bridge/job.json\\n"
+            "jobs/../job.json\n"
+            "jobs/ABCDEF0123456789ABCDEF0123456789.json\n"
+            "jobs/0123456789abcdef0123456789abcdef.txt\n"
+            "bridge/job.json\n"
         )
         self.assertEqual(parse_queue_paths(raw), [])
 
