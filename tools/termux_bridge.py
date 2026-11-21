@@ -7,6 +7,7 @@ the manifest cannot supply commands, arguments, paths, or environment variables.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import re
@@ -22,7 +23,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 INBOX_BRANCH = "capri-termux-bridge-inbox"
 RESULTS_BRANCH = "capri-termux-bridge-results"
-JOB_PATH = "bridge/job.json"
+JOB_PATH = "bridge/job.json"  # Legacy single-job compatibility
+QUEUE_PREFIX = "jobs/"
 MAX_OUTPUT = 48_000
 STEP_TIMEOUT = 900
 TASKS = {
@@ -83,6 +85,34 @@ def parse_job(raw: str) -> dict[str, Any]:
     if not isinstance(job["task"], str) or job["task"] not in TASKS:
         raise BridgeError("Task is not in the fixed allowlist")
     return job
+
+
+
+def parse_queue_paths(raw: str) -> list[str]:
+    """Return only canonical immutable queue entries, in deterministic order."""
+    paths = {
+        line.strip()
+        for line in raw.splitlines()
+        if re.fullmatch(r"jobs/[0-9a-f]{32}\\.json", line.strip())
+    }
+    return sorted(paths)
+
+
+def acquire_worker_lock() -> int:
+    """Ensure only one watcher in this local checkout can execute jobs."""
+    git_path = git("rev-parse", "--git-path", "capri-termux-bridge.lock").stdout.strip()
+    lock_path = Path(git_path)
+    if not lock_path.is_absolute():
+        lock_path = ROOT / lock_path
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as exc:
+        os.close(descriptor)
+        raise BridgeError("Another Termux bridge worker is already active in this checkout") from exc
+    return descriptor
+
 
 
 def git(*args: str, cwd: Path = ROOT, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -199,35 +229,50 @@ def publish_result(job_id: str, result: dict[str, Any]) -> None:
 
 def process_once() -> bool:
     fetch_branches()
-    raw = remote_file(f"refs/remotes/origin/{INBOX_BRANCH}", JOB_PATH)
-    if raw is None:
-        return False
-    try:
-        job = parse_job(raw)
-    except BridgeError as exc:
-        print(f"Rejected inbox job: {exc}")
-        return False
-    if result_exists(job["job_id"]):
-        return False
+    inbox_ref = f"refs/remotes/origin/{INBOX_BRANCH}"
+    tree = git("ls-tree", "-r", "--name-only", inbox_ref, QUEUE_PREFIX).stdout
+    paths = parse_queue_paths(tree)
 
-    local_commit = git("rev-parse", "HEAD").stdout.strip()
-    if local_commit != job["target_commit"]:
-        result = {
-            "schema_version": 1,
-            "target_commit": job["target_commit"],
-            "local_commit": local_commit,
-            "task": job["task"],
-            "status": "rejected",
-            "reason": "Local checkout does not match target_commit; no task was executed.",
-            "finished_at": utc_now(),
-            "steps": [],
-        }
-    else:
-        print(f"Executing allowlisted task '{job['task']}' at {local_commit}...")
-        result = execute_task(job["task"], local_commit)
-    publish_result(job["job_id"], result)
-    print(f"Job {job['job_id']}: {result['status']}; result published to {RESULTS_BRANCH}.")
-    return True
+    # Keep the original path readable during migration, but new jobs use
+    # immutable jobs/<job_id>.json entries and are never overwritten.
+    if remote_file(inbox_ref, JOB_PATH) is not None:
+        paths.append(JOB_PATH)
+
+    did_work = False
+    for path in paths:
+        raw = remote_file(inbox_ref, path)
+        if raw is None:
+            continue
+        try:
+            job = parse_job(raw)
+        except BridgeError as exc:
+            print(f"Rejected inbox entry {path}: {exc}")
+            continue
+        if path.startswith(QUEUE_PREFIX) and path != f"jobs/{job['job_id']}.json":
+            print(f"Rejected inbox entry {path}: filename does not match job_id")
+            continue
+        if result_exists(job["job_id"]):
+            continue
+
+        local_commit = git("rev-parse", "HEAD").stdout.strip()
+        if local_commit != job["target_commit"]:
+            result = {
+                "schema_version": 1,
+                "target_commit": job["target_commit"],
+                "local_commit": local_commit,
+                "task": job["task"],
+                "status": "rejected",
+                "reason": "Local checkout does not match target_commit; no task was executed.",
+                "finished_at": utc_now(),
+                "steps": [],
+            }
+        else:
+            print(f"Executing allowlisted task '{job['task']}' at {local_commit}...")
+            result = execute_task(job["task"], local_commit)
+        publish_result(job["job_id"], result)
+        print(f"Job {job['job_id']}: {result['status']}; result published to {RESULTS_BRANCH}.")
+        did_work = True
+    return did_work
 
 
 def main() -> int:
@@ -242,16 +287,21 @@ def main() -> int:
     remote = git("remote", "get-url", "origin").stdout.strip().lower()
     if "github.com/hamudifr/capri" not in remote and "github.com:hamudifr/capri" not in remote:
         raise BridgeError("origin must point to the private Hamudifr/Capri repository")
-    print(f"Capri Termux Bridge ready. Repository: {remote}")
-    if not args.watch:
-        process_once()
-        return 0
-    while True:
-        try:
+    lock_fd = acquire_worker_lock()
+    try:
+        print(f"Capri Termux Bridge ready. Repository: {remote}")
+        if not args.watch:
             process_once()
-        except BridgeError as exc:
-            print(f"Bridge cycle failed safely: {exc}")
-        time.sleep(args.interval)
+            return 0
+        while True:
+            try:
+                process_once()
+            except BridgeError as exc:
+                print(f"Bridge cycle failed safely: {exc}")
+            time.sleep(args.interval)
+    finally:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        os.close(lock_fd)
 
 
 if __name__ == "__main__":
