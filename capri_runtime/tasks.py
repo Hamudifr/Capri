@@ -896,6 +896,7 @@ class SQLiteTaskStore:
             FROM tasks"""
         ).fetchall()
         task_plan_lengths = {}
+        task_step_max_attempts = {}
         for row in rows:
             self._record(row[:11])
             _text(row[0], "task_id", 64)
@@ -922,6 +923,7 @@ class SQLiteTaskStore:
                 raise TaskValidationError("backup contains a malformed task plan") from None
             _validate_plan(plan)
             task_plan_lengths[row[0]] = len(plan)
+            task_step_max_attempts[row[0]] = [step["max_attempts"] for step in plan]
             index, attempts, state = row[5], row[6], row[2]
             if type(index) is not int or type(attempts) is not int:
                 raise TaskValidationError("backup contains invalid task lifecycle progress")
@@ -963,10 +965,16 @@ class SQLiteTaskStore:
             _parse_time(timestamp)
             if state not in allowed_states:
                 raise TaskValidationError("backup contains an unsupported task event state")
+            step_limits = task_step_max_attempts.get(task_id, [])
             if (
-                isinstance(step_index, bool) or not isinstance(step_index, int)
-                or not 0 <= step_index <= task_plan_lengths.get(task_id, -1)
-                or isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 0
+                type(step_index) is not int
+                or not 0 <= step_index < len(step_limits)
+                or type(attempt) is not int
+                or not 0 <= attempt <= step_limits[step_index]
+                or (
+                    state in {"running", "retry_wait", "failed", "succeeded"}
+                    and attempt < 1
+                )
             ):
                 raise TaskValidationError("backup contains invalid task event progress")
             if error_code is not None:
