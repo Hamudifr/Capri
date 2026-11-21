@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from tools.termux_bridge import BridgeError, parse_job, parse_queue_paths, redact
+from tools.termux_bridge import BridgeError, claim_is_live, parse_claim, parse_job, parse_queue_paths, redact
 
 
 class TermuxBridgeManifestTests(unittest.TestCase):
@@ -61,6 +61,45 @@ class TermuxBridgeManifestTests(unittest.TestCase):
             "bridge/job.json\n"
         )
         self.assertEqual(parse_queue_paths(raw), [])
+
+    def valid_claim(self):
+        return {
+            "schema_version": 1,
+            "job_id": "0123456789abcdef0123456789abcdef",
+            "owner_id": "abcdef0123456789abcdef0123456789",
+            "attempt": 1,
+            "claimed_at": 100,
+            "lease_expires_at": 200,
+            "status": "active",
+        }
+
+    def test_valid_distributed_claim_is_accepted(self):
+        claim = parse_claim(json.dumps(self.valid_claim()), self.valid_manifest()["job_id"])
+        self.assertEqual(claim["attempt"], 1)
+
+    def test_claim_rejects_invalid_owner_attempt_and_status(self):
+        for key, value in (("owner_id", "../bad"), ("attempt", 0), ("status", [])):
+            claim = self.valid_claim()
+            claim[key] = value
+            with self.subTest(key=key), self.assertRaises(BridgeError):
+                parse_claim(json.dumps(claim), self.valid_manifest()["job_id"])
+
+    def test_claim_rejects_job_id_mismatch_and_expiry_before_claim(self):
+        claim = self.valid_claim()
+        claim["job_id"] = "abcdef0123456789abcdef0123456789"
+        with self.assertRaises(BridgeError):
+            parse_claim(json.dumps(claim), self.valid_manifest()["job_id"])
+        claim = self.valid_claim()
+        claim["lease_expires_at"] = claim["claimed_at"]
+        with self.assertRaises(BridgeError):
+            parse_claim(json.dumps(claim), self.valid_manifest()["job_id"])
+
+    def test_claim_lease_expiry_is_deterministic(self):
+        claim = self.valid_claim()
+        self.assertTrue(claim_is_live(claim, 199))
+        self.assertFalse(claim_is_live(claim, 200))
+        claim["status"] = "abandoned"
+        self.assertFalse(claim_is_live(claim, 199))
 
     def test_secret_like_values_are_redacted(self):
         token = "ghp_" + ("A" * 32)
