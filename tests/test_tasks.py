@@ -255,11 +255,16 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         )
         for suffix, state, owner, expiry in cases:
             with self.subTest(case=suffix):
-                task = self.store.create(PLAN, now=NOW)
+                # Isolate each malformed snapshot so an earlier queued task
+                # cannot win the next claim by created_at/task_id ordering.
+                store = SQLiteTaskStore(
+                    os.path.join(self.temp.name, f"{suffix}-source.sqlite3")
+                )
+                task = store.create(PLAN, now=NOW)
                 if state == "running":
-                    claim = self.store.claim_next("backup-worker", now=NOW)
+                    claim = store.claim_next("backup-worker", now=NOW)
                     self.assertEqual(claim.task_id, task.task_id)
-                connection = self.store._connect()
+                connection = store._connect()
                 try:
                     connection.execute(
                         "UPDATE tasks SET lease_owner=?,lease_until=? WHERE task_id=?",
@@ -269,16 +274,8 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                     connection.close()
                 backup_path = os.path.join(self.temp.name, f"{suffix}.sqlite3")
                 with self.assertRaises(TaskValidationError):
-                    self.store.backup_to(backup_path)
+                    store.backup_to(backup_path)
                 self.assertFalse(os.path.exists(backup_path))
-                connection = self.store._connect()
-                try:
-                    connection.execute(
-                        "UPDATE tasks SET state='queued',attempts=0,lease_owner=NULL,lease_until=NULL WHERE task_id=?",
-                        (task.task_id,),
-                    )
-                finally:
-                    connection.close()
 
     def test_backup_refuses_existing_symlink_and_public_directory(self):
         existing = os.path.join(self.temp.name, "existing.sqlite3")
@@ -1335,27 +1332,33 @@ class SQLiteTaskStoreTests(unittest.TestCase):
 
 
     def test_corrupt_running_attempts_rejected_by_every_claim_transition(self):
-        handler_calls = []
-        engine = TaskEngine(
-            self.store,
-            {"prepare": lambda data, key: handler_calls.append((data, key)) or {"ok": True}},
-            "worker",
-        )
         transitions = ("validate", "renew", "finish", "fail", "execute")
 
-        for offset, transition in enumerate(transitions):
+        for transition in transitions:
             with self.subTest(transition=transition):
-                now = NOW + timedelta(minutes=offset)
-                task = self.store.create(
+                # Each transition gets a fresh database. Otherwise the previous
+                # intentionally corrupt, expired running row poisons claim_next
+                # in the following subtest before its own fixture is reached.
+                store = SQLiteTaskStore(
+                    os.path.join(self.temp.name, f"corrupt-{transition}.sqlite3")
+                )
+                handler_calls = []
+                engine = TaskEngine(
+                    store,
+                    {"prepare": lambda data, key: handler_calls.append((data, key)) or {"ok": True}},
+                    "worker",
+                )
+                now = NOW
+                task = store.create(
                     [{"tool": "prepare", "input": {}, "max_attempts": 2}],
                     now=now,
                 )
-                claim = self.store.claim_next(
+                claim = store.claim_next(
                     "worker", lease_seconds=60, now=now
                 )
                 self.assertEqual(claim.task_id, task.task_id)
 
-                connection = self.store._connect()
+                connection = store._connect()
                 try:
                     connection.execute(
                         "UPDATE tasks SET attempts=3 WHERE task_id=?",
@@ -1367,19 +1370,19 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 # Match the corrupt row deliberately. The shared validator must
                 # reject its lifecycle invariant, not merely detect a stale claim.
                 corrupt_claim = replace(claim, attempt=3)
-                record_before = self.store.get(task.task_id)
-                events_before = self.store.events(task.task_id)
+                record_before = store.get(task.task_id)
+                events_before = store.events(task.task_id)
                 operations = {
-                    "validate": lambda: self.store.validate_claim(
+                    "validate": lambda: store.validate_claim(
                         corrupt_claim, now=now + timedelta(seconds=1)
                     ),
-                    "renew": lambda: self.store.renew_lease(
+                    "renew": lambda: store.renew_lease(
                         corrupt_claim, now=now + timedelta(seconds=1)
                     ),
-                    "finish": lambda: self.store.finish_step(
+                    "finish": lambda: store.finish_step(
                         corrupt_claim, {"done": True}, now=now + timedelta(seconds=1)
                     ),
-                    "fail": lambda: self.store.fail_step(
+                    "fail": lambda: store.fail_step(
                         corrupt_claim, now=now + timedelta(seconds=1)
                     ),
                     "execute": lambda: engine.execute_claim(
@@ -1391,8 +1394,8 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 ):
                     operations[transition]()
 
-                self.assertEqual(self.store.get(task.task_id), record_before)
-                self.assertEqual(self.store.events(task.task_id), events_before)
+                self.assertEqual(store.get(task.task_id), record_before)
+                self.assertEqual(store.events(task.task_id), events_before)
                 self.assertEqual(handler_calls, [])
 
 
