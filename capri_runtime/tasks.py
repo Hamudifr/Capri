@@ -846,7 +846,8 @@ class SQLiteTaskStore:
         allowed_states = {"queued", "running", "retry_wait", "succeeded", "failed", "cancelled"}
         rows = connection.execute(
             """SELECT task_id,idempotency_key,state,created_at,updated_at,current_step,
-            attempts,available_at,cancel_requested,results_json,error_code,plan_json
+            attempts,available_at,cancel_requested,results_json,error_code,plan_json,
+            lease_owner,lease_until
             FROM tasks"""
         ).fetchall()
         task_plan_lengths = {}
@@ -864,6 +865,12 @@ class SQLiteTaskStore:
                 _text(row[10], "task error_code", 64)
             if row[2] not in allowed_states:
                 raise TaskValidationError("backup contains an unsupported task state")
+            if row[2] == "running":
+                _text(row[12], "task lease_owner", 128)
+                _text(row[13], "task lease_until", 64)
+                _parse_time(row[13])
+            elif row[12] is not None or row[13] is not None:
+                raise TaskValidationError("backup contains lease data for a non-running task")
             try:
                 plan = json.loads(row[11])
             except (TypeError, ValueError, RecursionError):
