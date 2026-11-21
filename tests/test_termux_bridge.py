@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from tools.termux_bridge import BridgeError, parse_job, redact
+from tools.termux_bridge import BridgeError, parse_job, parse_queue_paths, redact
 
 
 class TermuxBridgeManifestTests(unittest.TestCase):
@@ -46,6 +46,21 @@ class TermuxBridgeManifestTests(unittest.TestCase):
         manifest["job_id"] = "../job"
         with self.assertRaises(BridgeError):
             parse_job(json.dumps(manifest))
+
+    def test_queue_paths_are_sorted_and_deduplicated(self):
+        first = "jobs/0123456789abcdef0123456789abcdef.json"
+        second = "jobs/abcdef0123456789abcdef0123456789.json"
+        raw = f"{second}\\n{first}\\n{second}\\n"
+        self.assertEqual(parse_queue_paths(raw), [first, second])
+
+    def test_queue_paths_reject_traversal_and_noncanonical_names(self):
+        raw = (
+            "jobs/../job.json\\n"
+            "jobs/ABCDEF0123456789ABCDEF0123456789.json\\n"
+            "jobs/0123456789abcdef0123456789abcdef.txt\\n"
+            "bridge/job.json\\n"
+        )
+        self.assertEqual(parse_queue_paths(raw), [])
 
     def test_secret_like_values_are_redacted(self):
         token = "ghp_" + ("A" * 32)
