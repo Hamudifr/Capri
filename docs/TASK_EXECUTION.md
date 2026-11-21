@@ -86,7 +86,7 @@ Cancellation is cooperative. Queued/retry-wait tasks cancel immediately. A runni
 
 ## Backup snapshot integrity
 
-Before producing a SQLite backup, the task store validates the snapshot's task records and ownership metadata, including the same canonical persisted-plan format required by normal recovery. Lease state must agree with task state: a `running` task must have a non-empty executor owner and a valid timezone-aware lease expiry; every non-running task must have both lease fields set to NULL. A snapshot that violates these invariants is rejected rather than copied as a backup. An expired but structurally valid running lease may still be backed up; normal lease recovery can reclaim it after restore.
+Before producing a SQLite backup, the task store validates the snapshot's task records and ownership metadata, including the same canonical persisted-plan format required by normal recovery and consistency between task state and cancellation metadata. Lease state must agree with task state: a `running` task must have a non-empty executor owner and a valid timezone-aware lease expiry; every non-running task must have both lease fields set to NULL. A snapshot that violates these invariants is rejected rather than copied as a backup. An expired but structurally valid running lease may still be backed up; normal lease recovery can reclaim it after restore.
 
 This validation checks the task-store snapshot's semantic consistency. It is not a substitute for protecting backup files, retaining independent copies, or testing restore procedures.
 
