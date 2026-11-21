@@ -93,10 +93,67 @@ def _open_parent_directory(path: Path, *, create: bool) -> int:
     directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
 
     if _supports_secure_dirfd_walk():
+        components = absolute.parts[1:]
         current_fd: int | None = None
+        current_path = Path(absolute.anchor)
+        start_index = 0
         try:
-            current_fd = os.open(absolute.anchor, directory_flags)
-            for component in absolute.parts[1:]:
+            # Some sandboxed POSIX environments (notably Android/Termux) deny
+            # opening the filesystem root even though the application can
+            # access its own home directory. Find the deepest existing
+            # directory we can safely open, then continue the walk relative
+            # to that pinned descriptor. lstat plus identity comparison
+            # rejects observed symlinks and path swaps at the chosen anchor.
+            for index, component in enumerate(components):
+                candidate = current_path / component
+                try:
+                    info = candidate.lstat()
+                except FileNotFoundError:
+                    break
+                except PermissionError:
+                    current_path = candidate
+                    continue
+                if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+                    raise LedgerIntegrityError(
+                        "ledger parent path contains a symlink or is not a safe directory"
+                    )
+                try:
+                    candidate_fd = os.open(
+                        candidate, directory_flags | os.O_NOFOLLOW
+                    )
+                except PermissionError:
+                    current_path = candidate
+                    continue
+                except FileNotFoundError:
+                    break
+                except OSError as exc:
+                    raise LedgerIntegrityError(
+                        "ledger parent path contains a symlink or is not a safe directory"
+                    ) from exc
+                try:
+                    opened_info = os.fstat(candidate_fd)
+                    if (
+                        not stat.S_ISDIR(opened_info.st_mode)
+                        or (opened_info.st_dev, opened_info.st_ino)
+                        != (info.st_dev, info.st_ino)
+                    ):
+                        raise LedgerIntegrityError(
+                            "ledger parent path changed while it was being opened"
+                        )
+                except BaseException:
+                    _close_fd(candidate_fd)
+                    raise
+                _close_fd(current_fd)
+                current_fd = candidate_fd
+                current_path = candidate
+                start_index = index + 1
+
+            if current_fd is None:
+                raise LedgerIntegrityError(
+                    "no accessible existing directory anchors the ledger parent path"
+                )
+
+            for component in components[start_index:]:
                 flags = directory_flags | os.O_NOFOLLOW
                 created_child = False
                 try:
