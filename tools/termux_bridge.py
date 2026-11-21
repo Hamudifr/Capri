@@ -70,7 +70,7 @@ def parse_job(raw: str) -> dict[str, Any]:
         raise BridgeError("Job manifest must be an object")
     if set(job) != {"schema_version", "job_id", "target_commit", "task"}:
         raise BridgeError("Job manifest has missing or unexpected fields")
-    if job["schema_version"] != 1:
+    if type(job["schema_version"]) is not int or job["schema_version"] != 1:
         raise BridgeError("Unsupported job schema version")
     if not isinstance(job["job_id"], str) or not re.fullmatch(r"[0-9a-f]{32}", job["job_id"]):
         raise BridgeError("job_id must be 32 lowercase hexadecimal characters")
