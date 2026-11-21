@@ -140,9 +140,13 @@ def execute_task(task_name: str, target_commit: str) -> dict[str, Any]:
             code = proc.returncode
             timed_out = False
         except subprocess.TimeoutExpired as exc:
-            output = redact((exc.stdout or "") + (exc.stderr or "") + "\n[step timed out]")
-            if isinstance(output, bytes):
-                output = output.decode("utf-8", "replace")
+            stdout = exc.stdout or ""
+            stderr = exc.stderr or ""
+            if isinstance(stdout, bytes):
+                stdout = stdout.decode("utf-8", "replace")
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode("utf-8", "replace")
+            output = redact(stdout + stderr + "\n[step timed out]")
             code = 124
             timed_out = True
         except OSError as exc:
