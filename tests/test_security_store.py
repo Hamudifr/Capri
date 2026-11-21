@@ -186,7 +186,10 @@ class SQLiteSecurityStoreTests(unittest.TestCase):
         finally:
             os.chmod(self.temp.name, 0o700)
 
-    @unittest.skipUnless(os.name == "posix", "POSIX hard-link semantics are required")
+    @unittest.skipUnless(
+        os.name == "posix" and hasattr(os, "link"),
+        "POSIX hard-link support is required",
+    )
     def test_database_hard_link_alias_is_rejected(self):
         SQLiteSecurityStore(self.path)
         alias = os.path.join(self.temp.name, "alias.sqlite3")
