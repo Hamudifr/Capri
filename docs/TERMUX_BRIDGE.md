@@ -64,4 +64,4 @@ The bridge uses the existing private GitHub repository and does not require a ne
 
 The Termux bridge currently transports only its fixed validation-task allowlist. It does not deserialize GitHub inbox manifests into `SQLiteTaskStore` plans or execute arbitrary `TaskWorker` handlers. The durable task runtime is a separate host-managed capability: principal-owned work requires authenticated ownership and explicitly injected `principal_handlers` with resource-level authorization. Do not treat repository write access as a task principal or use the bridge to bypass that boundary.
 
-The `bridge_tests` job runs the focused `tests.test_termux_bridge` suite, including manifest validation, claim lifecycle, lease recovery, and concurrent result-publish retry behavior.
+The `bridge_tests` job runs the focused `tests.test_termux_bridge` suite, including manifest validation, claim lifecycle, lease recovery, a real two-independent-checkout Git ref race against a temporary bare remote, and concurrent result-publish retry behavior.
