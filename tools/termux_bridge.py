@@ -42,6 +42,9 @@ TASKS = {
     "doctor": [
         [sys.executable, "-m", "capri_core", "doctor"],
     ],
+    "bridge_tests": [
+        [sys.executable, "-m", "unittest", "tests.test_termux_bridge", "-v"],
+    ],
 }
 SECRET_PATTERNS = [
     re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b"),
