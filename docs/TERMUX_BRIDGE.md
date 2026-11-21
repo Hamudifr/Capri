@@ -59,3 +59,9 @@ python tools/termux_bridge.py --watch --interval 5
 ```
 
 The bridge uses the existing private GitHub repository and does not require a new cloud service or GitHub Actions workflow.
+
+## Relationship to the durable task runtime
+
+The Termux bridge currently transports only its fixed validation-task allowlist. It does not deserialize GitHub inbox manifests into `SQLiteTaskStore` plans or execute arbitrary `TaskWorker` handlers. The durable task runtime is a separate host-managed capability: principal-owned work requires authenticated ownership and explicitly injected `principal_handlers` with resource-level authorization. Do not treat repository write access as a task principal or use the bridge to bypass that boundary.
+
+The `bridge_tests` job runs the focused `tests.test_termux_bridge` suite, including manifest validation, claim lifecycle, lease recovery, and concurrent result-publish retry behavior.
