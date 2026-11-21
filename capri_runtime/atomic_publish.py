@@ -31,12 +31,12 @@ def _load_renameat2() -> Callable | None:
 def publish_no_replace(source_path: str, destination_path: str) -> str:
     """Atomically publish source without replacing an existing destination.
 
-    Returns the primitive used: hard-link or renameat2. Unsupported hosts fail closed.
+    Returns the primitive used: hard-link or renameat2. The hard-link path leaves
+    source cleanup to the caller so publication state can be recorded first.
     """
     link = getattr(os, "link", None)
     if callable(link):
         link(source_path, destination_path, follow_symlinks=False)
-        os.unlink(source_path)
         return "hard-link"
 
     renameat2 = _load_renameat2()
