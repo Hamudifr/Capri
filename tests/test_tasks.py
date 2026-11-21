@@ -222,8 +222,11 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 try:
                     connection.execute(
                         """UPDATE tasks SET state=?,current_step=?,attempts=?,
-                        lease_owner=?,lease_until=? WHERE task_id=?""",
-                        (state, index, attempts, lease_owner, lease_until, task.task_id),
+                        cancel_requested=?,lease_owner=?,lease_until=? WHERE task_id=?""",
+                        (
+                            state, index, attempts, 1 if state == "cancelled" else 0,
+                            lease_owner, lease_until, task.task_id,
+                        ),
                     )
                 finally:
                     connection.close()
@@ -237,7 +240,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 try:
                     connection.execute(
                         """UPDATE tasks SET state='queued',current_step=0,attempts=0,
-                        lease_owner=NULL,lease_until=NULL WHERE task_id=?""",
+                        cancel_requested=0,lease_owner=NULL,lease_until=NULL WHERE task_id=?""",
                         (task.task_id,),
                     )
                 finally:
@@ -376,6 +379,9 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         )
         for attack in tamper:
             with self.subTest(attack=attack):
+                # Each valid execution below intentionally records one handler
+                # call. Clear it before the next hostile-claim regression.
+                calls.clear()
                 self.store.create_for_principal(
                     "alice",
                     [{"tool": "prepare", "input": {"value": "original"}, "max_attempts": 1}],
@@ -389,7 +395,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 completed = engine.execute_claim(claim, now=NOW)
                 self.assertEqual(completed.state, "succeeded")
                 self.assertEqual(
-                    calls[-1], ("principal", "alice", {"value": "original"})
+                    calls, [("principal", "alice", {"value": "original"})]
                 )
 
     def test_claim_input_is_snapshotted_before_validation_and_dispatch(self):
@@ -635,7 +641,10 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         finished = self.store.finish_step(
             current, {"current": True}, now=NOW + timedelta(seconds=8)
         )
-        self.assertEqual(finished.state, "succeeded")
+        # PLAN has two steps; finishing the reclaimed first step must queue
+        # the second step rather than mark the whole task succeeded.
+        self.assertEqual(finished.state, "queued")
+        self.assertEqual(finished.current_step, 1)
         self.assertEqual(finished.result, ({"current": True},))
 
     def test_retry_backoff_and_attempt_limit(self):
