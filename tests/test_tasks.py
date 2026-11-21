@@ -105,6 +105,31 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 backup_path = os.path.join(self.temp.name, f"{scenario}-backup.sqlite3")
                 self.assertEqual(store.backup_to(backup_path), backup_path)
 
+    def test_backup_rejects_inconsistent_cancellation_metadata(self):
+        cases = (
+            ("queued_with_cancel_flag", "queued", 0, 0, 1, "[]"),
+            ("cancelled_without_cancel_flag", "cancelled", 0, 0, 0, "[]"),
+            ("succeeded_with_cancel_flag", "succeeded", len(PLAN), 0, 1, "[{},{}]"),
+        )
+        for suffix, state, index, attempts, cancel_requested, results_json in cases:
+            with self.subTest(case=suffix):
+                task = self.store.create(PLAN, now=NOW)
+                connection = self.store._connect()
+                try:
+                    connection.execute(
+                        """UPDATE tasks SET state=?,current_step=?,attempts=?,
+                        cancel_requested=?,results_json=? WHERE task_id=?""",
+                        (state, index, attempts, cancel_requested, results_json, task.task_id),
+                    )
+                finally:
+                    connection.close()
+                backup_path = os.path.join(self.temp.name, f"{suffix}.sqlite3")
+                with self.assertRaisesRegex(
+                    TaskValidationError, "backup contains inconsistent cancellation state"
+                ):
+                    self.store.backup_to(backup_path)
+                self.assertFalse(os.path.exists(backup_path))
+
     def test_backup_rejects_noncanonical_persisted_plan(self):
         task = self.store.create(PLAN, now=NOW)
         connection = self.store._connect()
