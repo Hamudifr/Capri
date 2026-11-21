@@ -443,18 +443,27 @@ class SQLiteTaskStoreTests(unittest.TestCase):
 
         record_before = self.store.get(task.task_id)
         events_before = self.store.events(task.task_id)
+        handler_calls = []
+        engine = TaskEngine(
+            self.store,
+            {"prepare": lambda data, key: handler_calls.append((data, key)) or {"ok": True}},
+            "worker",
+        )
         stale_transitions = (
+            lambda: self.store.validate_claim(old, now=NOW + timedelta(seconds=7)),
             lambda: self.store.renew_lease(old, now=NOW + timedelta(seconds=7)),
             lambda: self.store.finish_step(
                 old, {"stale": True}, now=NOW + timedelta(seconds=7)
             ),
             lambda: self.store.fail_step(old, now=NOW + timedelta(seconds=7)),
+            lambda: engine.execute_claim(old, now=NOW + timedelta(seconds=7)),
         )
         for transition in stale_transitions:
             with self.assertRaises(TaskConflictError):
                 transition()
             self.assertEqual(self.store.get(task.task_id), record_before)
             self.assertEqual(self.store.events(task.task_id), events_before)
+        self.assertEqual(handler_calls, [])
 
         finished = self.store.finish_step(
             current, {"current": True}, now=NOW + timedelta(seconds=8)
