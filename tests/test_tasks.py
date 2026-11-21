@@ -99,6 +99,14 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 ):
                     self.store.backup_to(backup_path)
                 self.assertFalse(os.path.exists(backup_path))
+                connection = self.store._connect()
+                try:
+                    connection.execute(
+                        "UPDATE task_events SET step_index=0,attempt=0 WHERE task_id=?",
+                        (task.task_id,),
+                    )
+                finally:
+                    connection.close()
 
     def test_backup_rejects_inconsistent_attempt_and_step_lifecycle(self):
         cases = (
@@ -134,6 +142,15 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 ):
                     self.store.backup_to(backup_path)
                 self.assertFalse(os.path.exists(backup_path))
+                connection = self.store._connect()
+                try:
+                    connection.execute(
+                        """UPDATE tasks SET state='queued',current_step=0,attempts=0,
+                        lease_owner=NULL,lease_until=NULL WHERE task_id=?""",
+                        (task.task_id,),
+                    )
+                finally:
+                    connection.close()
 
     def test_backup_rejects_inconsistent_task_lease_state(self):
         cases = (
@@ -163,7 +180,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 connection = self.store._connect()
                 try:
                     connection.execute(
-                        "UPDATE tasks SET state='queued',lease_owner=NULL,lease_until=NULL WHERE task_id=?",
+                        "UPDATE tasks SET state='queued',attempts=0,lease_owner=NULL,lease_until=NULL WHERE task_id=?",
                         (task.task_id,),
                     )
                 finally:
