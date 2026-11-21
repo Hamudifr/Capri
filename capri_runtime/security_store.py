@@ -14,6 +14,7 @@ import threading
 import tempfile
 from datetime import datetime
 
+from .atomic_publish import publish_no_replace
 from .tools import ApprovalGrant, ApprovalStore, AuditEvent, AuditSink, ToolValidationError
 
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -296,10 +297,9 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
             finally:
                 os.close(backup_fd)
 
-            # link() publishes without replacing a destination created in a race.
-            os.link(temporary_path, absolute, follow_symlinks=False)
+            # Publish atomically without replacing a destination created in a race.
+            publish_no_replace(temporary_path, absolute)
             published = True
-            os.unlink(temporary_path)
             if os.name == "posix":
                 directory_fd = os.open(parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
                 try:
