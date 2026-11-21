@@ -76,6 +76,41 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         backup_path = os.path.join(self.temp.name, "running-task-backup.sqlite3")
         self.assertEqual(self.store.backup_to(backup_path), backup_path)
 
+    def test_backup_rejects_inconsistent_attempt_and_step_lifecycle(self):
+        cases = (
+            ("queued_nonzero_attempts", "queued", 0, 1),
+            ("retry_wait_zero_attempts", "retry_wait", 0, 0),
+            ("running_attempts_over_max", "running", 0, 3),
+            ("succeeded_before_plan_end", "succeeded", 0, 0),
+            ("succeeded_nonzero_attempts", "succeeded", len(PLAN), 1),
+            ("failed_zero_attempts", "failed", 0, 0),
+            ("cancelled_attempts_over_max", "cancelled", 0, 3),
+            ("queued_after_plan_end", "queued", len(PLAN), 0),
+        )
+        for suffix, state, index, attempts in cases:
+            with self.subTest(case=suffix):
+                task = self.store.create(PLAN, now=NOW)
+                lease_owner = "backup-worker" if state == "running" else None
+                lease_until = (
+                    (NOW + timedelta(seconds=30)).isoformat()
+                    if state == "running" else None
+                )
+                connection = self.store._connect()
+                try:
+                    connection.execute(
+                        """UPDATE tasks SET state=?,current_step=?,attempts=?,
+                        lease_owner=?,lease_until=? WHERE task_id=?""",
+                        (state, index, attempts, lease_owner, lease_until, task.task_id),
+                    )
+                finally:
+                    connection.close()
+                backup_path = os.path.join(self.temp.name, f"{suffix}.sqlite3")
+                with self.assertRaisesRegex(
+                    TaskValidationError, "backup contains invalid task lifecycle progress"
+                ):
+                    self.store.backup_to(backup_path)
+                self.assertFalse(os.path.exists(backup_path))
+
     def test_backup_rejects_inconsistent_task_lease_state(self):
         cases = (
             ("running_missing_owner", "running", None, (NOW + timedelta(seconds=30)).isoformat()),
