@@ -125,9 +125,13 @@ def parse_claim(raw: str, expected_job_id: str) -> dict[str, Any]:
         raise BridgeError("Claim timestamps must be integer Unix timestamps")
     if claim["lease_expires_at"] <= claim["claimed_at"]:
         raise BridgeError("Claim lease must expire after it is created")
-    if claim["status"] not in {"active", "abandoned"}:
+    if not isinstance(claim["status"], str) or claim["status"] not in {"active", "abandoned"}:
         raise BridgeError("Claim status is invalid")
     return claim
+
+
+def claim_is_live(claim: dict[str, Any], now: int) -> bool:
+    return claim["status"] == "active" and claim["lease_expires_at"] > now
 
 
 def claim_branch(job_id: str) -> str:
@@ -162,7 +166,7 @@ def write_claim(
         try:
             destination = worktree / "bridge_claim.json"
             destination.write_text(
-                json.dumps(claim, indent=2, sort_keys=True) + "\\n",
+                json.dumps(claim, indent=2, sort_keys=True) + "\n",
                 encoding="utf-8",
             )
             git("add", "bridge_claim.json", cwd=worktree)
@@ -190,7 +194,7 @@ def claim_job(job_id: str) -> tuple[bool, dict[str, Any] | None]:
     current_ref, current = read_claim(job_id)
     if current and current["status"] == "abandoned":
         return False, current
-    if current and current["lease_expires_at"] > now:
+    if current and claim_is_live(current, now):
         return False, current
 
     if current is None:
@@ -229,9 +233,8 @@ def owns_live_claim(job_id: str, owner_id: str) -> bool:
     _, current = read_claim(job_id)
     return bool(
         current
-        and current["status"] == "active"
         and current["owner_id"] == owner_id
-        and current["lease_expires_at"] > int(time.time())
+        and claim_is_live(current, int(time.time()))
     )
 
 
