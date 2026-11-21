@@ -1,0 +1,18 @@
+{
+  "finished_at": "2026-11-21T12:21:11.378507+00:00",
+  "schema_version": 1,
+  "started_at": "2026-11-21T12:21:11.314811+00:00",
+  "status": "passed",
+  "steps": [
+    {
+      "command_id": "doctor",
+      "duration_seconds": 0.064,
+      "exit_code": 0,
+      "output_tail": "[PASS] Python version: Python 3.11 or newer is required\n[PASS] Repository structure: required files present\n[PASS] CI workflow readable: workflow file is readable\n[PASS] CI actions pinned: all external actions use full commit SHAs\n[PASS] CI permissions: contents: read is explicitly scoped\n[PASS] Recovery CI coverage: push and pull_request explicitly include main and the recovery branch\n\nCapri Doctor: 6/6 checks passed\nOperational health: healthy (7/7 components healthy)\n",
+      "step": 1,
+      "timed_out": false
+    }
+  ],
+  "target_commit": "b0588f4a353163117b32b735b2385e94b84d3590",
+  "task": "doctor"
+}
