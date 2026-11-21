@@ -247,9 +247,32 @@ def process_once() -> bool:
             job = parse_job(raw)
         except BridgeError as exc:
             print(f"Rejected inbox entry {path}: {exc}")
+            if path.startswith(QUEUE_PREFIX):
+                queued_id = path[len(QUEUE_PREFIX):-5]
+                rejection = {
+                    "schema_version": 1,
+                    "task": "invalid",
+                    "status": "rejected",
+                    "reason": str(exc),
+                    "finished_at": utc_now(),
+                    "steps": [],
+                }
+                publish_result(queued_id, rejection)
+                did_work = True
             continue
         if path.startswith(QUEUE_PREFIX) and path != f"jobs/{job['job_id']}.json":
             print(f"Rejected inbox entry {path}: filename does not match job_id")
+            rejection = {
+                "schema_version": 1,
+                "target_commit": job["target_commit"],
+                "task": job["task"],
+                "status": "rejected",
+                "reason": "Queue filename does not match manifest job_id.",
+                "finished_at": utc_now(),
+                "steps": [],
+            }
+            publish_result(path[len(QUEUE_PREFIX):-5], rejection)
+            did_work = True
             continue
         if result_exists(job["job_id"]):
             continue
