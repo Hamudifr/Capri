@@ -5,6 +5,9 @@ import stat
 import tempfile
 from dataclasses import replace
 import unittest
+from unittest import mock
+
+import capri_runtime.sqlite_backup as sqlite_backup_module
 from datetime import datetime, timedelta, timezone
 
 from capri_runtime.memory import (
@@ -63,6 +66,15 @@ class SQLiteMemoryStoreTests(unittest.TestCase):
             restored.events(corrected.memory_id),
             self.store.events(corrected.memory_id),
         )
+
+    def test_backup_uses_exclusive_private_fallback_without_hard_link(self):
+        backup_path = os.path.join(self.temp.name, "fallback.sqlite3")
+        with mock.patch.object(sqlite_backup_module.os, "link", None, create=True):
+            self.assertEqual(self.store.backup_to(backup_path), backup_path)
+        self.assertEqual(stat.S_IMODE(os.stat(backup_path).st_mode), 0o600)
+        restored = SQLiteMemoryStore(backup_path)
+        self.assertEqual(restored.integrity_check(), "ok")
+        self.assertEqual(restored.export_json(), self.store.export_json())
 
     def test_backup_refuses_existing_symlink_and_public_directory(self):
         existing = os.path.join(self.temp.name, "existing.sqlite3")
