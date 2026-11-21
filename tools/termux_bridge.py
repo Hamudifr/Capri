@@ -201,7 +201,6 @@ def process_once() -> bool:
     fetch_branches()
     raw = remote_file(f"refs/remotes/origin/{INBOX_BRANCH}", JOB_PATH)
     if raw is None:
-        print("Bridge inbox is empty.")
         return False
     try:
         job = parse_job(raw)
@@ -209,7 +208,6 @@ def process_once() -> bool:
         print(f"Rejected inbox job: {exc}")
         return False
     if result_exists(job["job_id"]):
-        print(f"Job {job['job_id']} already has a result.")
         return False
 
     local_commit = git("rev-parse", "HEAD").stdout.strip()
@@ -234,11 +232,13 @@ def process_once() -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run Capri's fixed, allowlisted Termux validation jobs.")
-    parser.add_argument("--watch", action="store_true", help="poll the private GitHub inbox continuously")
-    parser.add_argument("--interval", type=int, default=20, help="poll interval in seconds (10-300)")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--once", action="store_true", help="check the inbox once and exit (default)")
+    mode.add_argument("--watch", action="store_true", help="poll the private GitHub inbox continuously")
+    parser.add_argument("--interval", type=int, default=5, help="poll interval in seconds (3-300; default: 5)")
     args = parser.parse_args()
-    if not 10 <= args.interval <= 300:
-        parser.error("--interval must be between 10 and 300 seconds")
+    if not 3 <= args.interval <= 300:
+        parser.error("--interval must be between 3 and 300 seconds")
     remote = git("remote", "get-url", "origin").stdout.strip().lower()
     if "github.com/hamudifr/capri" not in remote and "github.com:hamudifr/capri" not in remote:
         raise BridgeError("origin must point to the private Hamudifr/Capri repository")
