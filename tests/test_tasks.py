@@ -1158,6 +1158,74 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         self.assertEqual(claim.task_id, task.task_id)
 
 
+    def test_corrupt_attempt_metadata_fails_closed_before_capability_filter(self):
+        cases = (
+            ("queued", -1),
+            ("queued", 1),
+            ("queued", 0.5),
+            ("queued", "not-an-integer"),
+            ("retry_wait", 0),
+            ("retry_wait", 2),
+            ("running", 0),
+            ("running", 3),
+            ("running", 1.5),
+        )
+        handler_calls = []
+        engine = TaskEngine(
+            self.store,
+            {},
+            "capable-worker",
+            principal_handlers={
+                "prepare": lambda data, key, principal: handler_calls.append(principal)
+                or {"ok": True}
+            },
+        )
+
+        for offset, (state, attempts) in enumerate(cases):
+            with self.subTest(state=state, attempts=attempts):
+                task = self.store.create_for_principal(
+                    "alice",
+                    [{"tool": "unsupported", "input": {}, "max_attempts": 2}],
+                    now=NOW + timedelta(seconds=offset),
+                )
+                events_before = self.store.events(task.task_id)
+                connection = self.store._connect()
+                try:
+                    lease_owner = "expired-worker" if state == "running" else None
+                    lease_until = (
+                        (NOW - timedelta(seconds=1)).isoformat()
+                        if state == "running"
+                        else None
+                    )
+                    connection.execute(
+                        "UPDATE tasks SET state=?,attempts=?,lease_owner=?,lease_until=?,available_at=? WHERE task_id=?",
+                        (state, attempts, lease_owner, lease_until, NOW.isoformat(), task.task_id),
+                    )
+                finally:
+                    connection.close()
+
+                with self.assertRaisesRegex(
+                    TaskValidationError, "persisted task attempts are corrupt"
+                ):
+                    engine.run_once(now=NOW + timedelta(seconds=20))
+
+                connection = self.store._connect()
+                try:
+                    row = connection.execute(
+                        "SELECT state,attempts,lease_owner,lease_until FROM tasks WHERE task_id=?",
+                        (task.task_id,),
+                    ).fetchone()
+                    connection.execute(
+                        "UPDATE tasks SET state='queued',attempts=0,lease_owner=NULL,lease_until=NULL WHERE task_id=?",
+                        (task.task_id,),
+                    )
+                finally:
+                    connection.close()
+                self.assertEqual(row, (state, attempts, lease_owner, lease_until))
+                self.assertEqual(self.store.events(task.task_id), events_before)
+                self.assertEqual(handler_calls, [])
+
+
     def test_corrupt_principal_plan_fails_closed_before_claiming_later_work(self):
         corrupt = self.store.create_for_principal(
             "corrupt-owner",
