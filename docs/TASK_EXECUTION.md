@@ -82,6 +82,12 @@ Cancellation is cooperative. Queued/retry-wait tasks cancel immediately. A runni
 - Immutable task ownership protects task lookup and cancellation through the scoped APIs, but it does not by itself establish resource-level authorization or complete tenant isolation. Principal handlers must perform resource ACL checks.
 - The store protects local file paths and permissions, but does not provide remote multi-tenant isolation, encrypted storage, backup/restore automation, retention/compaction, or authenticated event signatures.
 
+## Backup snapshot integrity
+
+Before producing a SQLite backup, the task store validates the snapshot's task records and ownership metadata. Lease state must agree with task state: a `running` task must have a non-empty executor owner and a valid timezone-aware lease expiry; every non-running task must have both lease fields set to NULL. A snapshot that violates these invariants is rejected rather than copied as a backup. An expired but structurally valid running lease may still be backed up; normal lease recovery can reclaim it after restore.
+
+This validation checks the task-store snapshot's semantic consistency. It is not a substitute for protecting backup files, retaining independent copies, or testing restore procedures.
+
 ## Validation
 
 `tests/test_tasks.py` covers persistent state, idempotent creation, principal-scoped task isolation, immutable owner rows, principal-aware worker dispatch, backup/restore of ownership, plan validation, concurrent claims, lease recovery, stale-worker rejection, tampered-claim rejection across renewal/completion/failure transitions, bounded retries, step checkpointing, handler failure suppression, cancellation, event persistence, symlink rejection, and directory privacy. The repository quality workflow runs the full suite on Python 3.11, 3.12, and 3.13.
