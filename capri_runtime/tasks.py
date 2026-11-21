@@ -918,10 +918,11 @@ class SQLiteTaskStore:
             elif row[12] is not None or row[13] is not None:
                 raise TaskValidationError("backup contains lease data for a non-running task")
             try:
-                plan = json.loads(row[11])
-            except (TypeError, ValueError, RecursionError):
+                # Backups must satisfy the same canonical persisted-plan contract
+                # as normal recovery, not merely contain equivalent valid JSON.
+                plan = _decode_persisted_plan(row[11])
+            except TaskValidationError:
                 raise TaskValidationError("backup contains a malformed task plan") from None
-            _validate_plan(plan)
             task_plan_lengths[row[0]] = len(plan)
             task_step_max_attempts[row[0]] = [step["max_attempts"] for step in plan]
             index, attempts, state = row[5], row[6], row[2]
