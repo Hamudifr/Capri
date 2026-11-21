@@ -94,6 +94,7 @@ class SQLiteSecurityStoreTests(unittest.TestCase):
         store = SQLiteSecurityStore(self.path)
         destination_dir = os.path.join(self.temp.name, "public")
         os.mkdir(destination_dir, 0o755)
+        os.chmod(destination_dir, 0o755)
         with self.assertRaises(ToolValidationError):
             store.backup_to(os.path.join(destination_dir, "backup.sqlite3"))
 
@@ -187,6 +188,10 @@ class SQLiteSecurityStoreTests(unittest.TestCase):
             os.chmod(self.temp.name, 0o700)
 
     @unittest.skipUnless(os.name == "posix", "POSIX hard-link semantics are required")
+    @unittest.skipUnless(
+        os.name == "posix" and callable(getattr(os, "link", None)),
+        "hard links are unavailable on this platform",
+    )
     def test_database_hard_link_alias_is_rejected(self):
         SQLiteSecurityStore(self.path)
         alias = os.path.join(self.temp.name, "alias.sqlite3")
