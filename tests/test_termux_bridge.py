@@ -461,5 +461,90 @@ class TermuxBridgeGitConcurrencyIntegrationTests(unittest.TestCase):
             self.assertEqual(winning_claim["job_id"], job_id)
 
 
+
+class TermuxBridgeTargetWorktreeTests(unittest.TestCase):
+    def test_validation_runs_in_exact_remote_commit_without_moving_worker_checkout(self):
+        import tools.termux_bridge as bridge
+
+        with tempfile.TemporaryDirectory(prefix="capri-target-worktree-") as temporary:
+            root = Path(temporary)
+            bare = root / "origin.git"
+            seed = root / "seed"
+            worker = root / "worker"
+
+            subprocess.run(
+                ["git", "init", "--bare", str(bare)],
+                check=True, capture_output=True, text=True,
+            )
+            subprocess.run(
+                ["git", "init", str(seed)],
+                check=True, capture_output=True, text=True,
+            )
+            subprocess.run(
+                ["git", "checkout", "-b", "worker"],
+                cwd=seed, check=True, capture_output=True, text=True,
+            )
+            subprocess.run(["git", "config", "user.name", "Capri Test"], cwd=seed, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "capri-test@example.invalid"],
+                cwd=seed, check=True,
+            )
+            (seed / "worker.txt").write_text("worker checkout\\n", encoding="utf-8")
+            subprocess.run(["git", "add", "worker.txt"], cwd=seed, check=True, capture_output=True, text=True)
+            subprocess.run(["git", "commit", "-m", "worker base"], cwd=seed, check=True, capture_output=True, text=True)
+            subprocess.run(["git", "remote", "add", "origin", str(bare)], cwd=seed, check=True)
+            subprocess.run(["git", "push", "origin", "worker"], cwd=seed, check=True, capture_output=True, text=True)
+
+            subprocess.run(
+                ["git", "checkout", "--orphan", "candidate"],
+                cwd=seed, check=True, capture_output=True, text=True,
+            )
+            subprocess.run(
+                ["git", "rm", "-rf", "."],
+                cwd=seed, check=False, capture_output=True, text=True,
+            )
+            (seed / "candidate.txt").write_text("exact candidate commit\\n", encoding="utf-8")
+            subprocess.run(["git", "add", "candidate.txt"], cwd=seed, check=True, capture_output=True, text=True)
+            subprocess.run(["git", "commit", "-m", "candidate commit"], cwd=seed, check=True, capture_output=True, text=True)
+            subprocess.run(["git", "push", "origin", "candidate"], cwd=seed, check=True, capture_output=True, text=True)
+            target_commit = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=seed,
+                check=True, capture_output=True, text=True,
+            ).stdout.strip()
+
+            subprocess.run(
+                ["git", "--git-dir", str(bare), "symbolic-ref", "HEAD", "refs/heads/worker"],
+                check=True, capture_output=True, text=True,
+            )
+            subprocess.run(
+                ["git", "clone", "--branch", "worker", str(bare), str(worker)],
+                check=True, capture_output=True, text=True,
+            )
+            worker_head = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=worker,
+                check=True, capture_output=True, text=True,
+            ).stdout.strip()
+            self.assertNotEqual(worker_head, target_commit)
+
+            probe = [
+                sys.executable, "-c",
+                "from pathlib import Path; print(Path('candidate.txt').read_text(), end='')",
+            ]
+            with patch.object(bridge, "ROOT", worker), patch.dict(
+                bridge.TASKS, {"target_probe": [probe]}
+            ):
+                result = bridge.execute_target_task("target_probe", target_commit)
+
+            self.assertEqual(result["status"], "passed")
+            self.assertEqual(result["target_commit"], target_commit)
+            self.assertIn("exact candidate commit", result["steps"][0]["output_tail"])
+            after_head = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=worker,
+                check=True, capture_output=True, text=True,
+            ).stdout.strip()
+            self.assertEqual(after_head, worker_head)
+            self.assertFalse((worker / "candidate.txt").exists())
+
+
 if __name__ == "__main__":
     unittest.main()
