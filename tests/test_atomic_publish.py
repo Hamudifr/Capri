@@ -38,7 +38,7 @@ class AtomicPublishTests(unittest.TestCase):
     def test_renameat2_publication_and_collision_preservation(self):
         if atomic_publish._load_renameat2() is None:
             self.skipTest("libc renameat2 is unavailable")
-        with patch.object(atomic_publish.os, "link", None):
+        with patch.object(atomic_publish.os, "link", None, create=True):
             self.assertEqual(
                 atomic_publish.publish_no_replace(self.source, self.destination),
                 "renameat2",
@@ -57,7 +57,7 @@ class AtomicPublishTests(unittest.TestCase):
                 self.assertEqual(stream.read(), b"original")
 
     def test_missing_primitives_fail_closed(self):
-        with patch.object(atomic_publish.os, "link", None), patch.object(
+        with patch.object(atomic_publish.os, "link", None, create=True), patch.object(
             atomic_publish, "_load_renameat2", return_value=None
         ):
             with self.assertRaises(OSError) as caught:
