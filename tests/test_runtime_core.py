@@ -730,6 +730,27 @@ class DoctorTests(unittest.TestCase):
 
 
 class LedgerPathSafetyTests(unittest.TestCase):
+    def test_android_style_root_open_denial_uses_checked_path_fallback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "runs.jsonl"
+            real_open = os.open
+
+            def deny_root_open(target, flags, *args, **kwargs):
+                if (
+                    os.fspath(target) == os.path.abspath(os.sep)
+                    and kwargs.get("dir_fd") is None
+                ):
+                    raise PermissionError("simulated app-sandbox root restriction")
+                return real_open(target, flags, *args, **kwargs)
+
+            with mock.patch.object(
+                ledger_module.os, "open", side_effect=deny_root_open
+            ):
+                HashChainLedger(path).append(passing("sandbox-path-fallback"))
+
+            self.assertTrue(HashChainLedger(path).verify()["valid"])
+            self.assertEqual(HashChainLedger(path).verify()["records"], 1)
+
     def test_final_symlink_is_rejected_without_changing_target(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "target.jsonl"
