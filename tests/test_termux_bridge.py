@@ -17,6 +17,12 @@ class TermuxBridgeManifestTests(unittest.TestCase):
         parsed = parse_job(json.dumps(self.valid_manifest()))
         self.assertEqual(parsed["task"], "full_validation")
 
+    def test_boolean_schema_version_is_rejected(self):
+        manifest = self.valid_manifest()
+        manifest["schema_version"] = True
+        with self.assertRaises(BridgeError):
+            parse_job(json.dumps(manifest))
+
     def test_unknown_fields_are_rejected(self):
         manifest = self.valid_manifest()
         manifest["command"] = "rm -rf ~"
