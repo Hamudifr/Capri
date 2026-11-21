@@ -22,10 +22,22 @@ class AtomicPublishTests(unittest.TestCase):
     def test_hard_link_publication_is_no_replace(self):
         if not callable(getattr(os, "link", None)):
             self.skipTest("Python os.link is unavailable")
-        self.assertEqual(
-            atomic_publish.publish_no_replace(self.source, self.destination),
-            "hard-link",
-        )
+        try:
+            method = atomic_publish.publish_no_replace(self.source, self.destination)
+        except OSError as exc:
+            unsupported = {
+                errno.ENOTSUP,
+                errno.ENOSYS,
+                getattr(errno, "EOPNOTSUPP", errno.ENOTSUP),
+            }
+            if exc.errno in unsupported:
+                self.assertTrue(os.path.exists(self.source))
+                self.assertFalse(os.path.exists(self.destination))
+                self.skipTest(
+                    f"filesystem does not support hard-link publication: errno={exc.errno}"
+                )
+            raise
+        self.assertEqual(method, "hard-link")
         self.assertTrue(os.path.exists(self.source))
         os.unlink(self.source)
         self.assertFalse(os.path.exists(self.source))
@@ -49,11 +61,26 @@ class AtomicPublishTests(unittest.TestCase):
     def test_renameat2_publication_and_collision_preservation(self):
         if atomic_publish._load_renameat2() is None:
             self.skipTest("libc renameat2 is unavailable")
-        with patch.object(atomic_publish.os, "link", None, create=True):
-            self.assertEqual(
-                atomic_publish.publish_no_replace(self.source, self.destination),
-                "renameat2",
-            )
+        try:
+            with patch.object(atomic_publish.os, "link", None, create=True):
+                method = atomic_publish.publish_no_replace(
+                    self.source, self.destination
+                )
+        except OSError as exc:
+            unsupported = {
+                errno.ENOTSUP,
+                errno.ENOSYS,
+                getattr(errno, "EOPNOTSUPP", errno.ENOTSUP),
+            }
+            if exc.errno in unsupported:
+                self.assertTrue(os.path.exists(self.source))
+                self.assertFalse(os.path.exists(self.destination))
+                self.skipTest(
+                    f"filesystem does not support renameat2(RENAME_NOREPLACE): "
+                    f"errno={exc.errno}"
+                )
+            raise
+        self.assertEqual(method, "renameat2")
             self.assertFalse(os.path.exists(self.source))
             with open(self.destination, "rb") as stream:
                 self.assertEqual(stream.read(), b"original")
