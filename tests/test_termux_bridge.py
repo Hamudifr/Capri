@@ -517,9 +517,29 @@ class TermuxBridgeTargetWorktreeTests(unittest.TestCase):
                 check=True, capture_output=True, text=True,
             )
             subprocess.run(
-                ["git", "clone", "--branch", "worker", str(bare), str(worker)],
+                ["git", "init", str(worker)],
                 check=True, capture_output=True, text=True,
             )
+            subprocess.run(
+                ["git", "remote", "add", "origin", str(bare)],
+                cwd=worker, check=True, capture_output=True, text=True,
+            )
+            subprocess.run(
+                [
+                    "git", "fetch", "--quiet", "origin",
+                    "refs/heads/worker:refs/remotes/origin/worker",
+                ],
+                cwd=worker, check=True, capture_output=True, text=True,
+            )
+            subprocess.run(
+                ["git", "checkout", "-b", "worker", "--track", "origin/worker"],
+                cwd=worker, check=True, capture_output=True, text=True,
+            )
+            absent = subprocess.run(
+                ["git", "cat-file", "-e", f"{target_commit}^{{commit}}"],
+                cwd=worker, check=False, capture_output=True, text=True,
+            )
+            self.assertNotEqual(absent.returncode, 0)
             worker_head = subprocess.run(
                 ["git", "rev-parse", "HEAD"], cwd=worker,
                 check=True, capture_output=True, text=True,
