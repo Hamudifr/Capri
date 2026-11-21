@@ -76,6 +76,35 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         backup_path = os.path.join(self.temp.name, "running-task-backup.sqlite3")
         self.assertEqual(self.store.backup_to(backup_path), backup_path)
 
+    def test_backup_accepts_valid_retry_and_terminal_lifecycle_states(self):
+        scenarios = ("retry_wait", "failed", "cancelled_queued",
+                     "cancelled_retry_wait", "cancelled_running",
+                     "cancelled_after_finish")
+        for scenario in scenarios:
+            with self.subTest(state=scenario):
+                path = os.path.join(self.temp.name, f"{scenario}.sqlite3")
+                store = SQLiteTaskStore(path)
+                task = store.create(PLAN, now=NOW)
+                if scenario == "cancelled_queued":
+                    store.request_cancel(task.task_id, now=NOW + timedelta(seconds=1))
+                else:
+                    claim = store.claim_next("backup-worker", now=NOW)
+                    if scenario == "retry_wait":
+                        store.fail_step(claim, retry_delay_seconds=0, now=NOW + timedelta(seconds=1))
+                    elif scenario == "failed":
+                        store.fail_step(claim, retryable=False, now=NOW + timedelta(seconds=1))
+                    elif scenario == "cancelled_retry_wait":
+                        store.fail_step(claim, retry_delay_seconds=0, now=NOW + timedelta(seconds=1))
+                        store.request_cancel(task.task_id, now=NOW + timedelta(seconds=2))
+                    elif scenario == "cancelled_running":
+                        store.request_cancel(task.task_id, now=NOW + timedelta(seconds=1))
+                        store.fail_step(claim, now=NOW + timedelta(seconds=2))
+                    else:
+                        store.request_cancel(task.task_id, now=NOW + timedelta(seconds=1))
+                        store.finish_step(claim, {"done": True}, now=NOW + timedelta(seconds=2))
+                backup_path = os.path.join(self.temp.name, f"{scenario}-backup.sqlite3")
+                self.assertEqual(store.backup_to(backup_path), backup_path)
+
     def test_backup_rejects_corrupt_event_attempt_bounds(self):
         cases = (
             ("event_attempt_over_step_limit", 0, 3),
