@@ -431,6 +431,31 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         with self.assertRaises(TaskConflictError):
             self.store.finish_step(old, {"ok": True}, now=NOW + timedelta(seconds=7))
 
+    def test_stale_claim_rejected_when_same_executor_reclaims_lease(self):
+        task = self.store.create(PLAN, now=NOW)
+        old = self.store.claim_next("worker", lease_seconds=5, now=NOW)
+        current = self.store.claim_next(
+            "worker", lease_seconds=30, now=NOW + timedelta(seconds=6)
+        )
+        self.assertEqual(current.task_id, task.task_id)
+        self.assertEqual(current.executor_id, old.executor_id)
+        self.assertEqual(current.attempt, old.attempt + 1)
+
+        record_before = self.store.get(task.task_id)
+        events_before = self.store.events(task.task_id)
+        with self.assertRaises(TaskConflictError):
+            self.store.finish_step(
+                old, {"stale": True}, now=NOW + timedelta(seconds=7)
+            )
+        self.assertEqual(self.store.get(task.task_id), record_before)
+        self.assertEqual(self.store.events(task.task_id), events_before)
+
+        finished = self.store.finish_step(
+            current, {"current": True}, now=NOW + timedelta(seconds=8)
+        )
+        self.assertEqual(finished.state, "succeeded")
+        self.assertEqual(finished.result, ({"current": True},))
+
     def test_retry_backoff_and_attempt_limit(self):
         task = self.store.create(PLAN, now=NOW)
         claim = self.store.claim_next("worker", now=NOW, principal_tools=frozenset({"prepare"}))
