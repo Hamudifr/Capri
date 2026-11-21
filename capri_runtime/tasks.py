@@ -144,6 +144,30 @@ def _decode_persisted_plan(value: Any) -> list[dict[str, Any]]:
         raise TaskValidationError("persisted task plan is corrupt") from None
 
 
+def _validate_persisted_attempts(
+    state: Any,
+    attempts: Any,
+    max_attempts: int | None,
+    *,
+    completed: bool = False,
+) -> None:
+    """Reject attempt counters inconsistent with the persisted task lifecycle."""
+    if type(attempts) is not int:
+        raise TaskValidationError("persisted task attempts are corrupt")
+    if completed:
+        valid = attempts == 0
+    elif state == "queued":
+        valid = attempts == 0
+    elif state == "retry_wait":
+        valid = max_attempts is not None and 1 <= attempts < max_attempts
+    elif state == "running":
+        valid = max_attempts is not None and 1 <= attempts <= max_attempts
+    else:
+        valid = False
+    if not valid:
+        raise TaskValidationError("persisted task attempts are corrupt")
+
+
 @dataclass(frozen=True, slots=True)
 class TaskRecord:
     task_id: str
@@ -514,11 +538,13 @@ class SQLiteTaskStore:
                         return 1
                     if step_index == len(plan):
                         return 1
-                    if (
-                        state == "running"
-                        and type(attempts) is int
-                        and attempts >= plan[step_index]["max_attempts"]
-                    ):
+                    try:
+                        _validate_persisted_attempts(
+                            state, attempts, plan[step_index]["max_attempts"]
+                        )
+                    except TaskValidationError:
+                        return 1
+                    if state == "running" and attempts == plan[step_index]["max_attempts"]:
                         return 1
                     return int(plan[step_index]["tool"] in principal_tools)
 
@@ -560,12 +586,19 @@ class SQLiteTaskStore:
                     if type(index) is not int or index < 0 or index > len(plan):
                         raise TaskValidationError("persisted task progress is corrupt")
                     if index == len(plan):
+                        _validate_persisted_attempts(
+                            state, attempts, None, completed=True
+                        )
                         connection.execute(
                             "UPDATE tasks SET state='succeeded',updated_at=?,lease_owner=NULL,lease_until=NULL WHERE task_id=?",
                             (stamp, task_id),
                         )
                         continue
-                    if state == "running" and attempts >= plan[index]["max_attempts"]:
+                    step = plan[index]
+                    _validate_persisted_attempts(
+                        state, attempts, step["max_attempts"]
+                    )
+                    if state == "running" and attempts == step["max_attempts"]:
                         connection.execute(
                             "UPDATE tasks SET state='failed',error_code='lease_expired',updated_at=?,lease_owner=NULL,lease_until=NULL WHERE task_id=?",
                             (stamp, task_id),
