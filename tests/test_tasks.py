@@ -1160,15 +1160,16 @@ class SQLiteTaskStoreTests(unittest.TestCase):
 
     def test_corrupt_attempt_metadata_fails_closed_before_capability_filter(self):
         cases = (
-            ("queued", -1),
-            ("queued", 1),
-            ("queued", 0.5),
-            ("queued", "not-an-integer"),
-            ("retry_wait", 0),
-            ("retry_wait", 2),
-            ("running", 0),
-            ("running", 3),
-            ("running", 1.5),
+            ("queued", -1, 0),
+            ("queued", 1, 0),
+            ("queued", 0.5, 0),
+            ("queued", "not-an-integer", 0),
+            ("retry_wait", 0, 0),
+            ("retry_wait", 2, 0),
+            ("running", 0, 0),
+            ("running", 3, 0),
+            ("running", 1.5, 0),
+            ("queued", 1, 1),
         )
         handler_calls = []
         engine = TaskEngine(
@@ -1181,7 +1182,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             },
         )
 
-        for offset, (state, attempts) in enumerate(cases):
+        for offset, (state, attempts, current_step) in enumerate(cases):
             with self.subTest(state=state, attempts=attempts):
                 task = self.store.create_for_principal(
                     "alice",
@@ -1198,8 +1199,8 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                         else None
                     )
                     connection.execute(
-                        "UPDATE tasks SET state=?,attempts=?,lease_owner=?,lease_until=?,available_at=? WHERE task_id=?",
-                        (state, attempts, lease_owner, lease_until, NOW.isoformat(), task.task_id),
+                        "UPDATE tasks SET state=?,attempts=?,current_step=?,lease_owner=?,lease_until=?,available_at=? WHERE task_id=?",
+                        (state, attempts, current_step, lease_owner, lease_until, NOW.isoformat(), task.task_id),
                     )
                 finally:
                     connection.close()
@@ -1216,7 +1217,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                         (task.task_id,),
                     ).fetchone()
                     connection.execute(
-                        "UPDATE tasks SET state='queued',attempts=0,lease_owner=NULL,lease_until=NULL WHERE task_id=?",
+                        "UPDATE tasks SET state='queued',attempts=0,current_step=0,lease_owner=NULL,lease_until=NULL WHERE task_id=?",
                         (task.task_id,),
                     )
                 finally:
