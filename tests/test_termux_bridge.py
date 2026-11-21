@@ -1,5 +1,9 @@
 import json
+import os
+from pathlib import Path
 import subprocess
+import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -260,3 +264,95 @@ class TermuxBridgeManifestTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TermuxBridgeGitConcurrencyIntegrationTests(unittest.TestCase):
+    def test_two_independent_checkouts_cannot_create_the_same_claim_branch(self):
+        """Exercise the real Git ref race with two separate worker checkouts."""
+        branch = "capri-termux-claim-0123456789abcdef0123456789abcdef"
+        inbox = "capri-termux-bridge-inbox"
+        job_id = "0123456789abcdef0123456789abcdef"
+        project_root = Path(__file__).resolve().parents[1]
+
+        with tempfile.TemporaryDirectory(prefix="capri-claim-race-") as temporary:
+            root = Path(temporary)
+            bare = root / "origin.git"
+            seed = root / "seed"
+            subprocess.run(["git", "init", "--bare", str(bare)], check=True, capture_output=True, text=True)
+            subprocess.run(["git", "init", str(seed)], check=True, capture_output=True, text=True)
+            subprocess.run(["git", "checkout", "-b", inbox], cwd=seed, check=True, capture_output=True, text=True)
+            subprocess.run(["git", "config", "user.name", "Capri Test"], cwd=seed, check=True)
+            subprocess.run(["git", "config", "user.email", "capri-test@example.invalid"], cwd=seed, check=True)
+            (seed / "README.md").write_text("claim race fixture\n", encoding="utf-8")
+            subprocess.run(["git", "add", "README.md"], cwd=seed, check=True, capture_output=True, text=True)
+            subprocess.run(["git", "commit", "-m", "seed inbox"], cwd=seed, check=True, capture_output=True, text=True)
+            subprocess.run(["git", "remote", "add", "origin", str(bare)], cwd=seed, check=True)
+            subprocess.run(["git", "push", "origin", inbox], cwd=seed, check=True, capture_output=True, text=True)
+            subprocess.run(
+                ["git", "--git-dir", str(bare), "symbolic-ref", "HEAD", f"refs/heads/{inbox}"],
+                check=True, capture_output=True, text=True,
+            )
+
+            checkouts = [root / "worker-a", root / "worker-b"]
+            for checkout in checkouts:
+                subprocess.run(["git", "clone", str(bare), str(checkout)], check=True, capture_output=True, text=True)
+                subprocess.run(
+                    ["git", "fetch", "origin", f"+refs/heads/{inbox}:refs/remotes/origin/{inbox}"],
+                    cwd=checkout, check=True, capture_output=True, text=True,
+                )
+
+            worker_script = (
+                "import json, sys; from pathlib import Path; "
+                "import tools.termux_bridge as bridge; "
+                "bridge.ROOT = Path(sys.argv[1]); "
+                "bridge.write_claim(sys.argv[2], json.loads(sys.argv[3]), sys.argv[4])"
+            )
+            claims = []
+            for owner in (
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            ):
+                claims.append({
+                    "schema_version": 1,
+                    "job_id": job_id,
+                    "owner_id": owner,
+                    "attempt": 1,
+                    "claimed_at": 100,
+                    "lease_expires_at": 3700,
+                    "status": "active",
+                })
+
+            environment = os.environ.copy()
+            existing_pythonpath = environment.get("PYTHONPATH", "")
+            environment["PYTHONPATH"] = str(project_root) + (
+                os.pathsep + existing_pythonpath if existing_pythonpath else ""
+            )
+            workers = [
+                subprocess.Popen(
+                    [
+                        sys.executable, "-c", worker_script, str(checkout),
+                        job_id, json.dumps(claim), f"refs/remotes/origin/{inbox}",
+                    ],
+                    cwd=project_root,
+                    env=environment,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                for checkout, claim in zip(checkouts, claims)
+            ]
+            outcomes = [worker.communicate(timeout=30) for worker in workers]
+            return_codes = [worker.returncode for worker in workers]
+
+            self.assertEqual(
+                return_codes.count(0), 1,
+                msg=f"Expected exactly one claim winner; codes={return_codes}, output={outcomes}",
+            )
+            self.assertEqual(return_codes.count(0), 1)
+            stored = subprocess.run(
+                ["git", "--git-dir", str(bare), "show", f"refs/heads/{branch}:bridge_claim.json"],
+                check=True, capture_output=True, text=True,
+            )
+            winning_claim = json.loads(stored.stdout)
+            self.assertIn(winning_claim["owner_id"], {claim["owner_id"] for claim in claims})
+            self.assertEqual(winning_claim["job_id"], job_id)
