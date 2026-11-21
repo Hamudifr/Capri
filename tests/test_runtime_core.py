@@ -1032,7 +1032,7 @@ class LedgerPathSafetyTests(unittest.TestCase):
 
 
 
-    @unittest.skipUnless(os.name == "posix", "POSIX hard links and directory fsync are required")
+    @unittest.skipUnless(os.name == "posix" and hasattr(os, "link") and hasattr(Path, "hardlink_to"), "POSIX hard-link and directory-fsync support are required")
     def test_z_hard_link_alias_is_latched_after_first_create_directory_fsync_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
