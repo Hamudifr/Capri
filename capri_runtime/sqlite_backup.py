@@ -158,9 +158,13 @@ def backup_sqlite_database(
                             view = view[written:]
                 finally:
                     os.close(source_fd)
+                # Persist the complete copy while the reservation is still
+                # unreadable. Only then grant owner read access and persist that
+                # metadata change, so a crash cannot expose an unflushed snapshot.
+                os.fsync(destination_fd)
                 if os.name == "posix":
                     os.fchmod(destination_fd, 0o600)
-                os.fsync(destination_fd)
+                    os.fsync(destination_fd)
                 published = True
             finally:
                 os.close(destination_fd)
