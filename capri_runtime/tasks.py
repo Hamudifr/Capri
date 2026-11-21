@@ -922,13 +922,30 @@ class SQLiteTaskStore:
                 raise TaskValidationError("backup contains a malformed task plan") from None
             _validate_plan(plan)
             task_plan_lengths[row[0]] = len(plan)
-            if (
-                isinstance(row[5], bool) or not isinstance(row[5], int)
-                or not 0 <= row[5] <= len(plan)
-                or isinstance(row[6], bool) or not isinstance(row[6], int)
-                or row[6] < 0
-            ):
-                raise TaskValidationError("backup contains invalid task progress")
+            index, attempts, state = row[5], row[6], row[2]
+            if type(index) is not int or type(attempts) is not int:
+                raise TaskValidationError("backup contains invalid task lifecycle progress")
+            if state in {"queued", "retry_wait", "running", "failed"}:
+                if not 0 <= index < len(plan):
+                    raise TaskValidationError("backup contains invalid task lifecycle progress")
+                maximum = plan[index]["max_attempts"]
+                valid_attempts = (
+                    attempts == 0 if state == "queued"
+                    else 1 <= attempts < maximum if state == "retry_wait"
+                    else 1 <= attempts <= maximum if state in {"running", "failed"}
+                    else False
+                )
+            elif state == "succeeded":
+                valid_attempts = index == len(plan) and attempts == 0
+            else:  # cancelled can occur before, during, or after the final step
+                valid_attempts = (
+                    0 <= index <= len(plan)
+                    and 0 <= attempts <= (
+                        plan[index]["max_attempts"] if index < len(plan) else 0
+                    )
+                )
+            if not valid_attempts:
+                raise TaskValidationError("backup contains invalid task lifecycle progress")
         owners = connection.execute(
             "SELECT task_id,principal_id FROM task_owners"
         ).fetchall()
