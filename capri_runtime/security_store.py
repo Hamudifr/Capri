@@ -11,7 +11,6 @@ import re
 import sqlite3
 import stat
 import threading
-import tempfile
 from datetime import datetime
 
 from .sqlite_backup import backup_sqlite_database
