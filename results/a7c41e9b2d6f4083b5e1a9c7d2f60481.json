@@ -1,0 +1,10 @@
+{
+  "finished_at": "2026-11-21T12:41:22.153876+00:00",
+  "local_commit": "dae155650b686d765468aca7b67909a0d258338d",
+  "reason": "Local checkout does not match target_commit; no task was executed.",
+  "schema_version": 1,
+  "status": "rejected",
+  "steps": [],
+  "target_commit": "9ce60022970caa049e3597f5cf29f8422571eb75",
+  "task": "bridge_tests"
+}
