@@ -120,6 +120,71 @@ class TermuxBridgeManifestTests(unittest.TestCase):
         self.assertFalse(claim_is_live(claim, 199))
 
 
+    def test_first_claim_is_created_from_the_inbox_tip(self):
+        from tools.termux_bridge import claim_job
+        inbox_ref = "refs/remotes/origin/capri-termux-bridge-inbox"
+        with patch("tools.termux_bridge.read_claim", return_value=(None, None)), \
+             patch("tools.termux_bridge.write_claim") as write, \
+             patch("tools.termux_bridge.time.time", return_value=1_000):
+            acquired, claim = claim_job(self.valid_manifest()["job_id"])
+        self.assertTrue(acquired)
+        self.assertEqual(claim["attempt"], 1)
+        self.assertEqual(claim["status"], "active")
+        self.assertEqual(claim["lease_expires_at"], 1_000 + 3600)
+        write.assert_called_once_with(self.valid_manifest()["job_id"], claim, inbox_ref)
+
+    def test_live_claim_is_not_stolen(self):
+        from tools.termux_bridge import claim_job
+        current = self.valid_claim()
+        current["lease_expires_at"] = 201
+        with patch("tools.termux_bridge.read_claim", return_value=("claim-ref", current)), \
+             patch("tools.termux_bridge.write_claim") as write, \
+             patch("tools.termux_bridge.time.time", return_value=200):
+            acquired, claim = claim_job(self.valid_manifest()["job_id"])
+        self.assertFalse(acquired)
+        self.assertEqual(claim, current)
+        write.assert_not_called()
+
+    def test_expired_claim_advances_attempt_on_existing_claim_branch(self):
+        from tools.termux_bridge import claim_job
+        job_id = self.valid_manifest()["job_id"]
+        current_ref = "refs/remotes/origin/capri-termux-claim-" + job_id
+        current = self.valid_claim()
+        current["lease_expires_at"] = 200
+        with patch("tools.termux_bridge.read_claim", return_value=(current_ref, current)), \
+             patch("tools.termux_bridge.write_claim") as write, \
+             patch("tools.termux_bridge.time.time", return_value=200):
+            acquired, claim = claim_job(job_id)
+        self.assertTrue(acquired)
+        self.assertEqual(claim["attempt"], 2)
+        self.assertEqual(claim["status"], "active")
+        write.assert_called_once_with(job_id, claim, current_ref)
+
+    def test_expired_final_attempt_becomes_abandoned(self):
+        from tools.termux_bridge import claim_job, MAX_CLAIM_ATTEMPTS
+        job_id = self.valid_manifest()["job_id"]
+        current_ref = "refs/remotes/origin/capri-termux-claim-" + job_id
+        current = self.valid_claim()
+        current["attempt"] = MAX_CLAIM_ATTEMPTS
+        current["lease_expires_at"] = 200
+        with patch("tools.termux_bridge.read_claim", return_value=(current_ref, current)), \
+             patch("tools.termux_bridge.write_claim") as write, \
+             patch("tools.termux_bridge.time.time", return_value=200):
+            acquired, claim = claim_job(job_id)
+        self.assertFalse(acquired)
+        self.assertEqual(claim["attempt"], MAX_CLAIM_ATTEMPTS)
+        self.assertEqual(claim["status"], "abandoned")
+        self.assertEqual(claim["lease_expires_at"], 201)
+        write.assert_called_once_with(job_id, claim, current_ref)
+
+    def test_competing_claim_push_failure_is_never_reported_as_acquired(self):
+        from tools.termux_bridge import claim_job
+        job_id = self.valid_manifest()["job_id"]
+        with patch("tools.termux_bridge.read_claim", return_value=(None, None)), \
+             patch("tools.termux_bridge.write_claim", side_effect=BridgeError("non-fast-forward")):
+            with self.assertRaisesRegex(BridgeError, "non-fast-forward"):
+                claim_job(job_id)
+
     def test_result_push_retry_classifies_concurrency_and_transient_errors(self):
         self.assertTrue(_retryable_result_push_error("rejected non-fast-forward"))
         self.assertTrue(_retryable_result_push_error("Could not resolve host: github.com"))
