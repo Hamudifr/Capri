@@ -608,7 +608,6 @@ class SQLiteTaskStore:
                             (task_id, stamp, index, attempts),
                         )
                         continue
-                    step = plan[index]
                     if (
                         principal_id is not None
                         and step["tool"] not in principal_tools
