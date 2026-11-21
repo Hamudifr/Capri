@@ -1158,6 +1158,68 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         self.assertEqual(claim.task_id, task.task_id)
 
 
+    def test_corrupt_running_attempts_rejected_by_every_claim_transition(self):
+        handler_calls = []
+        engine = TaskEngine(
+            self.store,
+            {"prepare": lambda data, key: handler_calls.append((data, key)) or {"ok": True}},
+            "worker",
+        )
+        transitions = ("validate", "renew", "finish", "fail", "execute")
+
+        for offset, transition in enumerate(transitions):
+            with self.subTest(transition=transition):
+                now = NOW + timedelta(minutes=offset)
+                task = self.store.create(
+                    [{"tool": "prepare", "input": {}, "max_attempts": 2}],
+                    now=now,
+                )
+                claim = self.store.claim_next(
+                    "worker", lease_seconds=60, now=now
+                )
+                self.assertEqual(claim.task_id, task.task_id)
+
+                connection = self.store._connect()
+                try:
+                    connection.execute(
+                        "UPDATE tasks SET attempts=3 WHERE task_id=?",
+                        (task.task_id,),
+                    )
+                finally:
+                    connection.close()
+
+                # Match the corrupt row deliberately. The shared validator must
+                # reject its lifecycle invariant, not merely detect a stale claim.
+                corrupt_claim = replace(claim, attempt=3)
+                record_before = self.store.get(task.task_id)
+                events_before = self.store.events(task.task_id)
+                operations = {
+                    "validate": lambda: self.store.validate_claim(
+                        corrupt_claim, now=now + timedelta(seconds=1)
+                    ),
+                    "renew": lambda: self.store.renew_lease(
+                        corrupt_claim, now=now + timedelta(seconds=1)
+                    ),
+                    "finish": lambda: self.store.finish_step(
+                        corrupt_claim, {"done": True}, now=now + timedelta(seconds=1)
+                    ),
+                    "fail": lambda: self.store.fail_step(
+                        corrupt_claim, now=now + timedelta(seconds=1)
+                    ),
+                    "execute": lambda: engine.execute_claim(
+                        corrupt_claim, now=now + timedelta(seconds=1)
+                    ),
+                }
+                with self.assertRaisesRegex(
+                    TaskValidationError, "persisted task attempts are corrupt"
+                ):
+                    operations[transition]()
+
+                self.assertEqual(self.store.get(task.task_id), record_before)
+                self.assertEqual(self.store.events(task.task_id), events_before)
+                self.assertEqual(handler_calls, [])
+
+
     def test_corrupt_attempt_metadata_fails_closed_before_capability_filter(self):
         cases = (
             ("queued", -1, 0),
