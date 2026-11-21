@@ -908,7 +908,10 @@ class LedgerPathSafetyTests(unittest.TestCase):
             self.assertEqual(HashChainLedger(path).verify()["records"], 1)
 
 
-    @unittest.skipUnless(os.name == "posix", "POSIX hard links are required")
+    @unittest.skipUnless(
+        os.name == "posix" and hasattr(os, "link"),
+        "POSIX hard-link support is required",
+    )
     def test_z_hard_link_alias_is_latched_after_uncertain_append(self):
         self._assert_hard_link_alias_is_latched_after_failure(
             "_fsync_file", OSError("injected file fsync failure")
@@ -999,7 +1002,10 @@ class LedgerPathSafetyTests(unittest.TestCase):
                     for guard_fd in list(ledger_module._UNCERTAIN_INODE_FDS.values()):
                         os.close(guard_fd)
 
-    @unittest.skipUnless(os.name == "posix", "POSIX hard links are required")
+    @unittest.skipUnless(
+        os.name == "posix" and hasattr(os, "link"),
+        "POSIX hard-link support is required",
+    )
     def test_partial_write_failure_latches_hard_link_alias(self):
         def fail_after_partial_write(stream, data):
             stream.write(data[:5])
@@ -1009,7 +1015,10 @@ class LedgerPathSafetyTests(unittest.TestCase):
             "_write_entry", fail_after_partial_write
         )
 
-    @unittest.skipUnless(os.name == "posix", "POSIX hard links are required")
+    @unittest.skipUnless(
+        os.name == "posix" and hasattr(os, "link"),
+        "POSIX hard-link support is required",
+    )
     def test_flush_failure_latches_hard_link_alias(self):
         self._assert_hard_link_alias_is_latched_after_failure(
             "_flush_entry", OSError("injected flush failure")
