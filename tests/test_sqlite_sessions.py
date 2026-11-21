@@ -158,6 +158,7 @@ class SQLiteSessionStoreTests(unittest.TestCase):
     def test_backup_rejects_non_private_destination_directory(self):
         destination_dir = os.path.join(self.temp.name, "public")
         os.mkdir(destination_dir, 0o755)
+        os.chmod(destination_dir, 0o755)
         with self.assertRaises(ValidationError):
             self.store.backup_to(os.path.join(destination_dir, "backup.sqlite3"))
 
