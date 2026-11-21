@@ -32,6 +32,21 @@ class AtomicPublishTests(unittest.TestCase):
         with open(self.destination, "rb") as stream:
             self.assertEqual(stream.read(), b"original")
 
+    def test_hard_link_collision_preserves_both_files(self):
+        if not callable(getattr(os, "link", None)):
+            self.skipTest("Python os.link is unavailable")
+        with open(self.destination, "wb") as stream:
+            stream.write(b"existing")
+        with self.assertRaises(OSError) as caught:
+            atomic_publish.publish_no_replace(self.source, self.destination)
+        self.assertEqual(caught.exception.errno, errno.EEXIST)
+        self.assertTrue(os.path.exists(self.source))
+        self.assertTrue(os.path.exists(self.destination))
+        with open(self.source, "rb") as stream:
+            self.assertEqual(stream.read(), b"original")
+        with open(self.destination, "rb") as stream:
+            self.assertEqual(stream.read(), b"existing")
+
     def test_android_platform_attempts_to_load_renameat2(self):
         fake_libc = Mock()
         fake_renameat2 = Mock()
