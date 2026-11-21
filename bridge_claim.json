@@ -1,0 +1,9 @@
+{
+  "attempt": 1,
+  "claimed_at": 100,
+  "job_id": "0123456789abcdef0123456789abcdef",
+  "lease_expires_at": 3700,
+  "owner_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "schema_version": 1,
+  "status": "active"
+}
