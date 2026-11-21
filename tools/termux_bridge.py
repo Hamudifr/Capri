@@ -302,7 +302,12 @@ def safe_environment() -> dict[str, str]:
     return env
 
 
-def execute_task(task_name: str, target_commit: str) -> dict[str, Any]:
+def execute_task(
+    task_name: str,
+    target_commit: str,
+    *,
+    working_directory: Path | None = None,
+) -> dict[str, Any]:
     steps: list[dict[str, Any]] = []
     overall_ok = True
     started = utc_now()
@@ -310,7 +315,7 @@ def execute_task(task_name: str, target_commit: str) -> dict[str, Any]:
         step_started = time.monotonic()
         try:
             proc = subprocess.run(
-                command, cwd=str(ROOT), env=safe_environment(),
+                command, cwd=str(ROOT if working_directory is None else working_directory), env=safe_environment(),
                 text=True, encoding="utf-8", errors="replace",
                 capture_output=True, timeout=STEP_TIMEOUT, check=False,
             )
@@ -351,6 +356,37 @@ def execute_task(task_name: str, target_commit: str) -> dict[str, Any]:
         "finished_at": utc_now(),
         "steps": steps,
     }
+
+
+def execute_target_task(task_name: str, target_commit: str) -> dict[str, Any]:
+    """Run one fixed task in an isolated worktree at the exact requested commit."""
+    available = git("cat-file", "-e", f"{target_commit}^{{commit}}", check=False)
+    if available.returncode:
+        fetched = git("fetch", "--quiet", "origin", target_commit, check=False)
+        if fetched.returncode:
+            detail = redact((fetched.stderr or fetched.stdout)[-2000:])
+            raise BridgeError(
+                f"Target commit {target_commit} is unavailable from origin: {detail}"
+            )
+
+    with tempfile.TemporaryDirectory(prefix="capri-bridge-target-") as temporary:
+        worktree = Path(temporary) / "target"
+        git("worktree", "add", "--detach", str(worktree), target_commit)
+        try:
+            actual_commit = git("rev-parse", "HEAD", cwd=worktree).stdout.strip()
+            if actual_commit != target_commit:
+                raise BridgeError(
+                    f"Target worktree resolved to {actual_commit}, expected {target_commit}"
+                )
+            print(
+                f"Executing allowlisted task '{task_name}' in detached worktree "
+                f"at {actual_commit}..."
+            )
+            return execute_task(
+                task_name, target_commit, working_directory=worktree
+            )
+        finally:
+            git("worktree", "remove", "--force", str(worktree), check=False)
 
 
 def _retryable_result_push_error(detail: str) -> bool:
@@ -488,21 +524,18 @@ def process_once() -> bool:
                 did_work = True
             continue
 
-        local_commit = git("rev-parse", "HEAD").stdout.strip()
-        if local_commit != job["target_commit"]:
+        try:
+            result = execute_target_task(job["task"], job["target_commit"])
+        except BridgeError as exc:
             result = {
                 "schema_version": 1,
                 "target_commit": job["target_commit"],
-                "local_commit": local_commit,
                 "task": job["task"],
                 "status": "rejected",
-                "reason": "Local checkout does not match target_commit; no task was executed.",
+                "reason": f"Could not prepare exact target worktree; no task was executed: {exc}",
                 "finished_at": utc_now(),
                 "steps": [],
             }
-        else:
-            print(f"Executing allowlisted task '{job['task']}' at {local_commit}...")
-            result = execute_task(job["task"], local_commit)
         if not owns_live_claim(job["job_id"], claim["owner_id"]):
             print(f"Job {job['job_id']}: claim expired or ownership changed; result not published.")
             continue
