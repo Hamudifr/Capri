@@ -369,7 +369,7 @@ class TermuxBridgeGitConcurrencyIntegrationTests(unittest.TestCase):
             subprocess.run(["git", "checkout", "-b", inbox], cwd=seed, check=True, capture_output=True, text=True)
             subprocess.run(["git", "config", "user.name", "Capri Test"], cwd=seed, check=True)
             subprocess.run(["git", "config", "user.email", "capri-test@example.invalid"], cwd=seed, check=True)
-            (seed / "README.md").write_text("claim takeover race fixture\\n", encoding="utf-8")
+            (seed / "README.md").write_text("claim takeover race fixture\n", encoding="utf-8")
             subprocess.run(["git", "add", "README.md"], cwd=seed, check=True, capture_output=True, text=True)
             subprocess.run(["git", "commit", "-m", "seed inbox"], cwd=seed, check=True, capture_output=True, text=True)
             subprocess.run(["git", "remote", "add", "origin", str(bare)], cwd=seed, check=True)
@@ -385,7 +385,7 @@ class TermuxBridgeGitConcurrencyIntegrationTests(unittest.TestCase):
                 "status": "active",
             }
             (seed / "bridge_claim.json").write_text(
-                json.dumps(initial_claim, indent=2, sort_keys=True) + "\\n",
+                json.dumps(initial_claim, indent=2, sort_keys=True) + "\n",
                 encoding="utf-8",
             )
             subprocess.run(["git", "add", "bridge_claim.json"], cwd=seed, check=True, capture_output=True, text=True)
