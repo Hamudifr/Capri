@@ -1,6 +1,7 @@
 """Shared private SQLite online-backup primitive for Capri stores."""
 from __future__ import annotations
 
+import errno
 import os
 import sqlite3
 import stat
@@ -61,6 +62,7 @@ def backup_sqlite_database(
     source = None
     destination = None
     published = False
+    fallback_destination_identity = None
     try:
         with lock:
             source = connect()
@@ -97,9 +99,72 @@ def backup_sqlite_database(
         finally:
             os.close(backup_fd)
 
-        # link() publishes atomically without replacing a destination created in a race.
-        os.link(temporary_path, absolute, follow_symlinks=False)
-        published = True
+        # Prefer an atomic no-replace hard-link publication. Some sandboxed
+        # POSIX builds (including Termux Python) omit os.link entirely. In
+        # that case reserve the destination with O_EXCL while its mode is
+        # 000, copy and fsync the completed snapshot, then make it readable
+        # as a private 0600 file. A crash during fallback leaves an unreadable
+        # reservation rather than exposing a partial database or overwriting
+        # an existing destination.
+        link = getattr(os, "link", None)
+        if callable(link):
+            try:
+                link(temporary_path, absolute, follow_symlinks=False)
+            except (AttributeError, NotImplementedError, TypeError):
+                link = None
+            except OSError as exc:
+                unsupported = {
+                    errno.ENOSYS,
+                    getattr(errno, "EOPNOTSUPP", errno.ENOSYS),
+                    getattr(errno, "ENOTSUP", errno.ENOSYS),
+                }
+                if exc.errno in unsupported:
+                    link = None
+                else:
+                    raise
+
+        if callable(link):
+            published = True
+        else:
+            destination_flags = (
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0)
+            )
+            destination_fd = os.open(
+                absolute, destination_flags, 0 if os.name == "posix" else 0o600
+            )
+            try:
+                destination_info = os.fstat(destination_fd)
+                if not stat.S_ISREG(destination_info.st_mode):
+                    fail("backup destination is not a regular file")
+                if os.name == "posix" and destination_info.st_uid != os.geteuid():
+                    fail("backup destination ownership is invalid")
+                fallback_destination_identity = (
+                    destination_info.st_dev, destination_info.st_ino
+                )
+                source_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                source_fd = os.open(temporary_path, source_flags)
+                try:
+                    while True:
+                        chunk = os.read(source_fd, 1024 * 1024)
+                        if not chunk:
+                            break
+                        view = memoryview(chunk)
+                        while view:
+                            written = os.write(destination_fd, view)
+                            if written <= 0:
+                                raise OSError("backup copy made no forward progress")
+                            view = view[written:]
+                finally:
+                    os.close(source_fd)
+                if os.name == "posix":
+                    os.fchmod(destination_fd, 0o600)
+                os.fsync(destination_fd)
+                published = True
+            finally:
+                os.close(destination_fd)
+
         os.unlink(temporary_path)
         if os.name == "posix":
             directory_fd = os.open(
@@ -123,6 +188,13 @@ def backup_sqlite_database(
                 os.unlink(candidate)
             except FileNotFoundError:
                 pass
+            except OSError:
+                pass
+        if fallback_destination_identity is not None and not published:
+            try:
+                current = os.stat(absolute, follow_symlinks=False)
+                if (current.st_dev, current.st_ino) == fallback_destination_identity:
+                    os.unlink(absolute)
             except OSError:
                 pass
         if published:
