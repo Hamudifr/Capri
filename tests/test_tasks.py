@@ -76,6 +76,30 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         backup_path = os.path.join(self.temp.name, "running-task-backup.sqlite3")
         self.assertEqual(self.store.backup_to(backup_path), backup_path)
 
+    def test_backup_rejects_corrupt_event_attempt_bounds(self):
+        cases = (
+            ("event_attempt_over_step_limit", 0, 3),
+            ("event_step_outside_plan", len(PLAN), 0),
+        )
+        for suffix, step_index, attempt in cases:
+            with self.subTest(case=suffix):
+                task = self.store.create(PLAN, now=NOW)
+                connection = self.store._connect()
+                try:
+                    connection.execute(
+                        """UPDATE task_events SET step_index=?,attempt=?
+                        WHERE task_id=?""",
+                        (step_index, attempt, task.task_id),
+                    )
+                finally:
+                    connection.close()
+                backup_path = os.path.join(self.temp.name, f"{suffix}.sqlite3")
+                with self.assertRaisesRegex(
+                    TaskValidationError, "backup contains invalid task event progress"
+                ):
+                    self.store.backup_to(backup_path)
+                self.assertFalse(os.path.exists(backup_path))
+
     def test_backup_rejects_inconsistent_attempt_and_step_lifecycle(self):
         cases = (
             ("queued_nonzero_attempts", "queued", 0, 1),
