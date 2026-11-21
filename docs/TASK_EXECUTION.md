@@ -33,6 +33,10 @@ engine.run_once()
 
 The parent directory must already exist and be private (0700 or stricter on POSIX). The database is created with private permissions, rejects symlink/hard-link aliases, rechecks path safety on each connection, and uses SQLite WAL with full synchronous commits.
 
+## SQLite backup publication portability
+
+SQLite backup APIs create and validate a standalone temporary snapshot before publication. Publication must be atomic and must never replace an existing destination. Capri uses a hard-link-plus-unlink operation when Python exposes `os.link`. On Linux hosts where that API is absent, it uses libc `renameat2` with `RENAME_NOREPLACE`, which atomically moves the temporary file and rejects destination collisions. If neither primitive is available, backup publication fails closed with an unsupported-operation error. Do not replace this with `os.rename` or another operation that can overwrite a destination. The Linux fallback is covered by collision-preservation tests; platform support still depends on the host libc and filesystem implementing `renameat2(RENAME_NOREPLACE)`.
+
 ## Principal-scoped task ownership
 
 `create_for_principal(principal_id, plan, idempotency_key=...)` atomically creates the task and an immutable owner row in the same SQLite transaction. `get_for_principal()`, `request_cancel_for_principal()`, and `events_for_principal()` hide foreign and legacy-unowned tasks as `TaskNotFoundError`. Existing tasks created with `create()` remain unowned and are not silently assigned to a principal. Principal-scoped idempotency keys are stored as one-way principal-namespaced digests, so different principals can reuse the same client key without colliding or revealing one another's task.
