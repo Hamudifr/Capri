@@ -105,6 +105,26 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 backup_path = os.path.join(self.temp.name, f"{scenario}-backup.sqlite3")
                 self.assertEqual(store.backup_to(backup_path), backup_path)
 
+    def test_backup_rejects_noncanonical_persisted_plan(self):
+        task = self.store.create(PLAN, now=NOW)
+        connection = self.store._connect()
+        try:
+            original = connection.execute(
+                "SELECT plan_json FROM tasks WHERE task_id=?", (task.task_id,)
+            ).fetchone()[0]
+            connection.execute(
+                "UPDATE tasks SET plan_json=? WHERE task_id=?",
+                (" " + original, task.task_id),
+            )
+        finally:
+            connection.close()
+        backup_path = os.path.join(self.temp.name, "noncanonical-plan.sqlite3")
+        with self.assertRaisesRegex(
+            TaskValidationError, "backup contains a malformed task plan"
+        ):
+            self.store.backup_to(backup_path)
+        self.assertFalse(os.path.exists(backup_path))
+
     def test_backup_rejects_result_checkpoint_mismatch(self):
         task = self.store.create(PLAN, now=NOW)
         connection = self.store._connect()
