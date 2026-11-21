@@ -10,6 +10,11 @@ from capri_runtime import (
     SessionClosedError,
     SessionNotFoundError,
     SQLiteSessionStore,
+    SQLiteTaskStore,
+    TaskEngine,
+    TaskNotFoundError,
+    TaskValidationError,
+    TaskWorker,
     ToolExecutionBridge,
     ToolExecutor,
     ToolOrchestrator,
@@ -43,6 +48,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
             os.path.join(self.temp.name, "sessions.sqlite3"),
             max_output_chars=131_072,
         )
+        self.task_store = SQLiteTaskStore(os.path.join(self.temp.name, "tasks.sqlite3"))
         self.adapter = RecordingAdapter()
         bridge = ToolExecutionBridge(
             ToolExecutor(ToolRegistry(), InMemoryAuditSink())
@@ -64,6 +70,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
             self.authority,
             self.store,
             self.orchestrator,
+            task_store=self.task_store,
             **kwargs,
         )
 
@@ -86,6 +93,76 @@ class CapriHostRuntimeTests(unittest.TestCase):
         )
         with self.assertRaises(SessionNotFoundError):
             host.get_session("bob-token", session.session_id)
+
+    def test_task_creation_read_and_cancel_are_bound_to_authenticated_principal(self):
+        worker = TaskWorker(TaskEngine(
+            self.task_store,
+            {},
+            "worker",
+            principal_handlers={"collect": lambda data, key, principal: {"ok": True}},
+        ))
+        host = self.make_host(task_worker=worker)
+        task = host.create_task(
+            "alice-token",
+            [{"tool": "collect", "input": {"scope": "private"}}],
+            idempotency_key="request-1",
+        )
+        self.assertEqual(host.get_task("alice-token", task.task_id), task)
+        with self.assertRaises(TaskNotFoundError):
+            host.get_task("bob-token", task.task_id)
+        with self.assertRaises(TaskNotFoundError):
+            host.cancel_task("bob-token", task.task_id)
+        cancelled = host.cancel_task("alice-token", task.task_id)
+        self.assertEqual(cancelled.state, "cancelled")
+        self.assertEqual(host.get_task("alice-token", task.task_id), cancelled)
+        with self.assertRaises(HostRuntimeError):
+            host.create_task(
+                "alice-token", [{"tool": "not-registered", "input": {}}]
+            )
+
+    def test_task_creation_rejects_hostile_plan_containers_before_inspection(self):
+        class HostileList(list):
+            def __iter__(self):
+                raise AssertionError("host must not iterate a custom list")
+
+        class HostileDict(dict):
+            def get(self, *args, **kwargs):
+                raise AssertionError("host must not inspect a custom dict")
+
+        worker = TaskWorker(TaskEngine(
+            self.task_store,
+            {},
+            "worker",
+            principal_handlers={"collect": lambda data, key, principal: {"ok": True}},
+        ))
+        host = self.make_host(task_worker=worker)
+
+        with self.assertRaises(TaskValidationError):
+            host.create_task(
+                "alice-token",
+                HostileList([{"tool": "collect", "input": {}}]),
+            )
+        with self.assertRaises(TaskValidationError):
+            host.create_task(
+                "alice-token",
+                [HostileDict(tool="collect", input={})],
+            )
+        class HostileString(str):
+            def __hash__(self):
+                raise AssertionError("host must not hash a custom tool string")
+
+        with self.assertRaises(TaskValidationError):
+            host.create_task(
+                "alice-token",
+                [{"tool": HostileString("collect"), "input": {}}],
+            )
+
+    def test_principal_task_creation_requires_a_configured_worker_registry(self):
+        host = self.make_host()
+        with self.assertRaises(HostRuntimeError):
+            host.create_task(
+                "alice-token", [{"tool": "collect", "input": {}}]
+            )
 
     def test_unauthorized_session_is_rejected_before_memory_retrieval(self):
         memory_calls = []

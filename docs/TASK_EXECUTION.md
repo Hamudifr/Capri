@@ -4,7 +4,7 @@
 
 `capri_runtime.tasks` adds a provider-neutral durable task queue and a synchronous worker primitive. It stores a bounded ordered plan, claims work through SQLite leases, checkpoints each completed step, retries failed steps with bounded exponential backoff, supports cancellation between steps, and recovers abandoned work after a lease expires.
 
-It includes an explicit `TaskWorker` polling loop with graceful stop-event support and a concurrent lease-heartbeat thread while a handler runs. Constructing a worker starts no thread; the host must call `run_once()` or `run_forever(stop_event)` and owns process lifecycle, authenticated principal context, scheduling, and handler registration. The stop event is checked between tasks and does not forcibly interrupt an active handler; process supervisors must account for the current handler's completion time. It does not call a model provider, create plans from natural language, or grant tool permissions.
+It includes an explicit `TaskWorker` polling loop with graceful stop-event support and a concurrent lease-heartbeat thread while a handler runs. Constructing a worker starts no thread; the host must call `run_once()` or `run_forever(stop_event)` and owns process lifecycle, authenticated principal context, scheduling, and handler registration. Principal-owned tasks carry the owner ID from the immutable task-owner table into the claim; they execute only through a separately configured `principal_handlers` allowlist. Legacy unowned tasks continue to use the original two-argument `handlers` mapping. The stop event is checked between tasks and does not forcibly interrupt an active handler; process supervisors must account for the current handler's completion time. It does not call a model provider, create plans from natural language, or grant tool permissions.
 
 ## Basic use
 
@@ -32,6 +32,24 @@ engine.run_once()
 ```
 
 The parent directory must already exist and be private (0700 or stricter on POSIX). The database is created with private permissions, rejects symlink/hard-link aliases, rechecks path safety on each connection, and uses SQLite WAL with full synchronous commits.
+
+## Principal-scoped task ownership
+
+`create_for_principal(principal_id, plan, idempotency_key=...)` atomically creates the task and an immutable owner row in the same SQLite transaction. `get_for_principal()`, `request_cancel_for_principal()`, and `events_for_principal()` hide foreign and legacy-unowned tasks as `TaskNotFoundError`. Existing tasks created with `create()` remain unowned and are not silently assigned to a principal. Principal-scoped idempotency keys are stored as one-way principal-namespaced digests, so different principals can reuse the same client key without colliding or revealing one another's task.
+
+The worker claim includes the owner ID from the trusted database row. A principal-owned claim never falls back to a generic legacy handler: it requires a matching trusted `principal_handlers` callback with signature `(input_dict, stable_idempotency_key, principal_id)`. That callback must enforce current resource-level authorization for every external resource it touches. The principal ID is provenance from the local ownership record, not a replacement for a live authentication provider or resource ACL check. Legacy unowned tasks continue to use `handlers` with signature `(input_dict, stable_idempotency_key)`.
+
+The worker capability allowlist controls handler dispatch, not store-maintenance transitions. Any worker may process an eligible cancel-requested task as `cancelled`, mark an expired running task `failed` when its attempt budget is exhausted, or finalize a completed plan; these transitions do not invoke a handler. Before recording a cancellation event, the store still validates the active step index and state-specific attempt count, so cancellation cannot turn corrupt progress metadata into a terminal record. Ordinary principal-owned work with an unsupported tool, and expired leases that still have attempts remaining, remain untouched for a compatible principal-aware worker. Malformed persisted plans are surfaced as integrity errors rather than hidden by the capability filter.
+
+A `TaskClaim` is a transport value, not an authority source. Before dispatch, `TaskEngine` validates the claim against the authoritative SQLite task row and persisted plan: principal owner, executor, active lease and expiry, step index, attempt, idempotency key, tool name, and exact input must all match. The database's current lease and expiry are authoritative; the claim's lease timestamp is only a snapshot because a host heartbeat may extend the persisted lease while a handler is running. The store repeats full claim validation inside the same write transaction for lease renewal, successful completion, and failure transitions, preventing a forged claim from changing task state or extending a lease between a separate validation and write. A forged, stale, expired, or altered claim is rejected before the requested transition. This prevents callers from changing a principal-owned claim into a legacy claim or substituting a different registered tool/input. It does not make trusted in-process handler code a sandbox; handlers still require resource-level authorization and idempotent side effects.
+
+
+
+## Persisted-plan integrity failure
+
+A malformed persisted plan is a store-integrity error, not a retryable step failure. This includes invalid JSON, a non-canonical stored representation, or a JSON value that no longer satisfies the normalized task-plan schema. `SQLiteTaskStore.claim_next()` raises `TaskValidationError` and aborts the current claim transaction; it does not mark the row failed or silently skip it. The principal-worker capability filter deliberately includes malformed plans so a structurally invalid plan cannot disappear merely because its current tool name is unsupported. Later candidates in that poll are not claimed. A corrupt row can therefore block later work in queue order. This is an intentional fail-closed tradeoff: preserve task-store integrity rather than execute later work from a queue containing an unreadable or malformed record.
+
+The host should stop the worker, preserve the original database and backups, inspect a copy or restore from a verified backup, and restart only after the integrity fault is resolved. Do not edit the live database or bypass the corrupt row.
 
 ## State machine
 
@@ -63,8 +81,20 @@ Cancellation is cooperative. Queued/retry-wait tasks cancel immediately. A runni
 - Handler names must exist in the host's injected allowlist. This module never imports code dynamically or runs shell/network/filesystem commands.
 - Injected handlers are trusted host code and run with the process's privileges; this module is not a sandbox.
 - Model-proposed actions must still pass through `ToolExecutor`, host authentication/authorization, and any required user approval. Do not register a raw unrestricted handler merely because a task plan names it.
+- Immutable task ownership protects task lookup and cancellation through the scoped APIs, but it does not by itself establish resource-level authorization or complete tenant isolation. Principal handlers must perform resource ACL checks.
 - The store protects local file paths and permissions, but does not provide remote multi-tenant isolation, encrypted storage, backup/restore automation, retention/compaction, or authenticated event signatures.
+
+## Backup snapshot integrity
+
+Before producing a SQLite backup, the task store validates the snapshot's task records and ownership metadata, including the same canonical persisted-plan format required by normal recovery and consistency between task state and cancellation metadata. Lease state must agree with task state: a `running` task must have a non-empty executor owner and a valid timezone-aware lease expiry; every non-running task must have both lease fields set to NULL. A snapshot that violates these invariants is rejected rather than copied as a backup. An expired but structurally valid running lease may still be backed up; normal lease recovery can reclaim it after restore.
+
+This validation checks the task-store snapshot's semantic consistency. It is not a substitute for protecting backup files, retaining independent copies, or testing restore procedures.
 
 ## Validation
 
-`tests/test_tasks.py` covers persistent state, idempotent creation, plan validation, concurrent claims, lease recovery, stale-worker rejection, bounded retries, step checkpointing, handler failure suppression, missing handlers, cancellation, event persistence, symlink rejection, and directory privacy. The repository quality workflow runs the full suite on Python 3.11, 3.12, and 3.13.
+`tests/test_tasks.py` covers persistent state, idempotent creation, principal-scoped task isolation, immutable owner rows, principal-aware worker dispatch, backup/restore of ownership, plan and persisted attempt-count validation, concurrent claims, lease recovery, stale-worker rejection, tampered-claim rejection across renewal/completion/failure transitions, bounded retries, step checkpointing, handler failure suppression, cancellation, event persistence, symlink rejection, and directory privacy. The repository quality workflow runs the full suite on Python 3.11, 3.12, and 3.13.
+
+
+## Persisted attempt-count integrity
+
+The attempt counter is scoped to the current step. A queued task must have zero attempts; a retry-wait task must have at least one attempt but remain below that step's maximum; a running task must have an attempt between one and the maximum. A task whose plan is complete must have a zero current-step attempt count. Any other persisted value is treated as corruption and fails closed before a handler is dispatched. An expired running task exactly at its maximum is finalized as `lease_expired`; a counter above the maximum is corruption, not exhaustion. The shared authoritative claim validator enforces the same running-attempt invariant for claim validation, lease renewal, step completion, step failure, and engine dispatch, so a caller cannot bypass the limit by presenting a claim that matches a corrupted database row. Backup validation also checks state-specific step and attempt bounds before publishing a snapshot: queued, retry-wait, running, failed, succeeded, and cancelled records each have distinct valid progress shapes. Historical event step indices and attempt counts are checked against the corresponding plan step, including required nonzero attempts for running, retry-wait, failed, and succeeded events. The completed-results list must also align exactly with the current-step checkpoint. Corrupt snapshots are rejected before a backup file is published.
