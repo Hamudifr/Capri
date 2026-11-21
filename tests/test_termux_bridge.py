@@ -1,7 +1,12 @@
 import json
+import subprocess
 import unittest
+from unittest.mock import patch
 
-from tools.termux_bridge import BridgeError, claim_is_live, parse_claim, parse_job, parse_queue_paths, redact
+from tools.termux_bridge import (
+    BridgeError, _retryable_result_push_error, claim_is_live, parse_claim,
+    parse_job, parse_queue_paths, publish_result, redact,
+)
 
 
 class TermuxBridgeManifestTests(unittest.TestCase):
@@ -113,6 +118,74 @@ class TermuxBridgeManifestTests(unittest.TestCase):
         self.assertFalse(claim_is_live(claim, 200))
         claim["status"] = "abandoned"
         self.assertFalse(claim_is_live(claim, 199))
+
+
+    def test_result_push_retry_classifies_concurrency_and_transient_errors(self):
+        self.assertTrue(_retryable_result_push_error("rejected non-fast-forward"))
+        self.assertTrue(_retryable_result_push_error("Could not resolve host: github.com"))
+        self.assertFalse(_retryable_result_push_error("protected branch hook declined"))
+
+    def test_result_publish_rebuilds_commit_after_non_fast_forward_race(self):
+        pushes = []
+
+        def fake_git(*args, **kwargs):
+            if args and args[0] == "push":
+                pushes.append(args)
+                if len(pushes) == 1:
+                    return subprocess.CompletedProcess(args, 1, "", "rejected non-fast-forward")
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        with (
+            patch("tools.termux_bridge.git", side_effect=fake_git),
+            patch("tools.termux_bridge.fetch_branches"),
+            patch("tools.termux_bridge.result_exists", side_effect=[False, False, False, True]),
+            patch("tools.termux_bridge.time.sleep"),
+        ):
+            publish_result(
+                "0123456789abcdef0123456789abcdef",
+                {"schema_version": 1, "status": "passed"},
+            )
+
+        self.assertEqual(len(pushes), 2)
+
+    def test_result_publish_accepts_result_written_by_racing_worker(self):
+        pushes = []
+
+        def fake_git(*args, **kwargs):
+            if args and args[0] == "push":
+                pushes.append(args)
+                return subprocess.CompletedProcess(args, 1, "", "rejected non-fast-forward")
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        with (
+            patch("tools.termux_bridge.git", side_effect=fake_git),
+            patch("tools.termux_bridge.fetch_branches"),
+            patch("tools.termux_bridge.result_exists", side_effect=[False, True]),
+            patch("tools.termux_bridge.time.sleep"),
+        ):
+            publish_result(
+                "0123456789abcdef0123456789abcdef",
+                {"schema_version": 1, "status": "passed"},
+            )
+
+        self.assertEqual(len(pushes), 1)
+
+    def test_result_publish_fails_fast_for_non_retryable_push_error(self):
+        def fake_git(*args, **kwargs):
+            if args and args[0] == "push":
+                return subprocess.CompletedProcess(args, 1, "", "protected branch hook declined")
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        with (
+            patch("tools.termux_bridge.git", side_effect=fake_git),
+            patch("tools.termux_bridge.fetch_branches"),
+            patch("tools.termux_bridge.result_exists", side_effect=[False, False]),
+        ):
+            with self.assertRaises(BridgeError):
+                publish_result(
+                    "0123456789abcdef0123456789abcdef",
+                    {"schema_version": 1, "status": "passed"},
+                )
 
     def test_secret_like_values_are_redacted(self):
         token = "ghp_" + ("A" * 32)
