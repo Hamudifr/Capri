@@ -898,7 +898,7 @@ class SQLiteTaskStore:
         task_plan_lengths = {}
         task_step_max_attempts = {}
         for row in rows:
-            self._record(row[:11])
+            record = self._record(row[:11])
             _text(row[0], "task_id", 64)
             if row[1] is not None:
                 _text(row[1], "idempotency_key", 128)
@@ -925,7 +925,10 @@ class SQLiteTaskStore:
             task_plan_lengths[row[0]] = len(plan)
             task_step_max_attempts[row[0]] = [step["max_attempts"] for step in plan]
             index, attempts, state = row[5], row[6], row[2]
-            if type(index) is not int or type(attempts) is not int:
+            if (
+                type(index) is not int or type(attempts) is not int
+                or len(record.result) != index
+            ):
                 raise TaskValidationError("backup contains invalid task lifecycle progress")
             if state in {"queued", "retry_wait", "running", "failed"}:
                 if not 0 <= index < len(plan):
