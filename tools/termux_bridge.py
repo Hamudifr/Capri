@@ -348,26 +348,69 @@ def execute_task(task_name: str, target_commit: str) -> dict[str, Any]:
     }
 
 
+def _retryable_result_push_error(detail: str) -> bool:
+    """Identify push failures that can be repaired by refreshing the result branch."""
+    lowered = detail.lower()
+    return any(marker in lowered for marker in (
+        "non-fast-forward", "fetch first", "failed to push some refs",
+        "remote rejected", "connection reset", "connection timed out",
+        "could not resolve host", "failed to connect", "remote end hung up",
+    ))
+
+
 def publish_result(job_id: str, result: dict[str, Any]) -> None:
-    fetch_branches()
-    if result_exists(job_id):
-        return
-    with tempfile.TemporaryDirectory(prefix="capri-termux-bridge-") as temporary:
-        worktree = Path(temporary) / "results"
-        git("worktree", "add", "--detach", str(worktree), f"refs/remotes/origin/{RESULTS_BRANCH}")
-        try:
-            destination = worktree / "results" / f"{job_id}.json"
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-            git("add", f"results/{job_id}.json", cwd=worktree)
-            git(
-                "-c", "user.name=Capri Termux Bridge",
-                "-c", "user.email=capri-termux-bridge@users.noreply.github.com",
-                "commit", "-m", f"bridge: report {job_id}", cwd=worktree,
+    # Different workers can finish different jobs concurrently. A push based on
+    # the same results-branch tip will make one worker lose the race; rebuild its
+    # result commit on the latest tip instead of losing the completed job.
+    max_push_attempts = 5
+    for attempt in range(max_push_attempts):
+        fetch_branches()
+        if result_exists(job_id):
+            return
+        with tempfile.TemporaryDirectory(prefix="capri-termux-bridge-") as temporary:
+            worktree = Path(temporary) / "results"
+            git("worktree", "add", "--detach", str(worktree), f"refs/remotes/origin/{RESULTS_BRANCH}")
+            try:
+                destination = worktree / "results" / f"{job_id}.json"
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_text(
+                    json.dumps(result, indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+                git("add", f"results/{job_id}.json", cwd=worktree)
+                git(
+                    "-c", "user.name=Capri Termux Bridge",
+                    "-c", "user.email=capri-termux-bridge@users.noreply.github.com",
+                    "commit", "-m", f"bridge: report {job_id}", cwd=worktree,
+                )
+                pushed = git(
+                    "push", "origin", f"HEAD:refs/heads/{RESULTS_BRANCH}",
+                    cwd=worktree, check=False,
+                )
+            finally:
+                git("worktree", "remove", "--force", str(worktree), check=False)
+
+        if pushed.returncode == 0:
+            fetch_branches()
+            if result_exists(job_id):
+                return
+            raise BridgeError(
+                f"Result push for {job_id} reported success but read-back did not find the result."
             )
-            git("push", "origin", f"HEAD:refs/heads/{RESULTS_BRANCH}", cwd=worktree)
-        finally:
-            git("worktree", "remove", "--force", str(worktree), check=False)
+
+        detail = redact((pushed.stderr or pushed.stdout)[-2000:])
+        # Another worker may have published this exact job while our push raced.
+        fetch_branches()
+        if result_exists(job_id):
+            return
+        if not _retryable_result_push_error(detail):
+            raise BridgeError(f"Could not publish result for {job_id}: {detail}")
+        if attempt + 1 == max_push_attempts:
+            raise BridgeError(
+                f"Could not publish result for {job_id} after {max_push_attempts} "
+                f"concurrent/transient push attempts: {detail}"
+            )
+        time.sleep(min(0.25 * (2 ** attempt), 2.0))
 
 
 def process_once() -> bool:
