@@ -88,103 +88,103 @@ def _supports_secure_dirfd_walk() -> bool:
 
 
 def _open_parent_directory(path: Path, *, create: bool) -> int:
-    """Open every parent component without following symlinks where supported."""
+    """Open parent components through a trusted anchor and pinned dirfds.
+
+    If the filesystem root cannot be opened in an app sandbox, only a path
+    beneath the OS-provided home directory may use that home directory as its
+    trust anchor. Every descendant is then opened relative to the pinned
+    descriptor with O_NOFOLLOW. No path-based lstat fallback is permitted.
+    """
     absolute = _absolute_path(path)
-    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+    if not _supports_secure_dirfd_walk():
+        raise LedgerIntegrityError(
+            "secure directory-descriptor traversal is unavailable"
+        )
 
-    if _supports_secure_dirfd_walk():
-        current_fd: int | None = None
+    directory_flags = (
+        os.O_RDONLY
+        | os.O_DIRECTORY
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    anchor_flags = directory_flags | os.O_NOFOLLOW
+    components = absolute.parts[1:]
+
+    try:
+        current_fd = os.open(absolute.anchor, anchor_flags)
+    except PermissionError as root_error:
+        home = _absolute_path(Path.home())
+        if home == Path(home.anchor):
+            raise LedgerIntegrityError(
+                "trusted home directory is not a usable ledger anchor"
+            ) from root_error
         try:
-            try:
-                current_fd = os.open(absolute.anchor, directory_flags)
-            except PermissionError:
-                # Some app sandboxes (notably Android/Termux) deny opening the
-                # filesystem root even when the requested descendant is
-                # accessible. Fall back to the checked lstat walk below. That
-                # path rejects observed symlinks but cannot exclude a concurrent
-                # ancestor swap, matching the documented weaker fallback.
-                current_fd = None
-            else:
-                for component in absolute.parts[1:]:
-                    flags = directory_flags | os.O_NOFOLLOW
-                    created_child = False
-                    try:
-                        child_fd = os.open(component, flags, dir_fd=current_fd)
-                    except FileNotFoundError:
-                        if not create:
-                            raise
-                        try:
-                            os.mkdir(component, 0o700, dir_fd=current_fd)
-                            created_child = True
-                        except FileExistsError:
-                            pass
-                        try:
-                            child_fd = os.open(component, flags, dir_fd=current_fd)
-                        except OSError as exc:
-                            raise LedgerIntegrityError(
-                                "ledger parent path contains a symlink or is not a safe directory"
-                            ) from exc
-                    except OSError as exc:
-                        raise LedgerIntegrityError(
-                            "ledger parent path contains a symlink or is not a safe directory"
-                        ) from exc
-
-                    try:
-                        if not stat.S_ISDIR(os.fstat(child_fd).st_mode):
-                            raise LedgerIntegrityError("ledger parent path is not a directory")
-                        if created_child:
-                            # Persist both the new directory's metadata and its name
-                            # in the parent before relying on it for ledger creation.
-                            os.fsync(child_fd)
-                            os.fsync(current_fd)
-                    except BaseException:
-                        _close_fd(child_fd)
-                        raise
-                    previous_fd = current_fd
-                    current_fd = child_fd
-                    _close_fd(previous_fd)
-
-                result = current_fd
-                current_fd = None
-                return result
-        finally:
-            _close_fd(current_fd)
-
-    # Fallback for platforms without atomic dir_fd/O_NOFOLLOW traversal. lstat
-    # rejects observed symlinks, but a concurrent path swap cannot be excluded.
-    current = Path(absolute.anchor)
-    for component in absolute.parts[1:]:
-        current = current / component
-        created_child = False
+            relative = absolute.relative_to(home)
+        except ValueError as exc:
+            raise LedgerIntegrityError(
+                "ledger parent is outside the trusted home anchor and filesystem root is inaccessible"
+            ) from root_error
         try:
-            info = current.lstat()
-        except FileNotFoundError:
-            if not create:
-                raise
+            current_fd = os.open(home, anchor_flags)
+        except OSError as exc:
+            raise LedgerIntegrityError(
+                "trusted home directory could not be securely opened"
+            ) from exc
+        components = relative.parts
+    except OSError as exc:
+        raise LedgerIntegrityError(
+            "filesystem root could not be securely opened"
+        ) from exc
+
+    try:
+        for component in components:
+            flags = directory_flags | os.O_NOFOLLOW
+            created_child = False
             try:
-                current.mkdir(mode=0o700)
-                created_child = True
-            except FileExistsError:
-                pass
-            info = current.lstat()
-        if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
-            raise LedgerIntegrityError("ledger parent path must contain only real directories")
-        if created_child and os.name == "posix":
-            child_fd = os.open(current, directory_flags)
-            parent_fd = os.open(current.parent, directory_flags)
+                child_fd = os.open(component, flags, dir_fd=current_fd)
+            except FileNotFoundError:
+                if not create:
+                    raise
+                try:
+                    os.mkdir(component, 0o700, dir_fd=current_fd)
+                    created_child = True
+                except FileExistsError:
+                    pass
+                except OSError as exc:
+                    raise LedgerIntegrityError(
+                        "ledger parent directory could not be created securely"
+                    ) from exc
+                try:
+                    child_fd = os.open(component, flags, dir_fd=current_fd)
+                except OSError as exc:
+                    raise LedgerIntegrityError(
+                        "ledger parent path contains a symlink or is not a safe directory"
+                    ) from exc
+            except OSError as exc:
+                raise LedgerIntegrityError(
+                    "ledger parent path contains a symlink or is not a safe directory"
+                ) from exc
+
             try:
-                os.fsync(child_fd)
-                os.fsync(parent_fd)
-            finally:
+                if not stat.S_ISDIR(os.fstat(child_fd).st_mode):
+                    raise LedgerIntegrityError(
+                        "ledger parent path is not a directory"
+                    )
+                if created_child:
+                    os.fsync(child_fd)
+                    os.fsync(current_fd)
+            except BaseException:
                 _close_fd(child_fd)
-                _close_fd(parent_fd)
+                raise
 
-    descriptor = os.open(current, directory_flags)
-    if not stat.S_ISDIR(os.fstat(descriptor).st_mode):
-        _close_fd(descriptor)
-        raise LedgerIntegrityError("ledger parent path is not a directory")
-    return descriptor
+            previous_fd = current_fd
+            current_fd = child_fd
+            _close_fd(previous_fd)
 
+        result = current_fd
+        current_fd = None
+        return result
+    finally:
+        _close_fd(current_fd)
 
 def _open_ledger_file(
     path: Path, parent_fd: int, *, create: bool, writable: bool
