@@ -261,9 +261,11 @@ def acquire_worker_lock() -> int:
 
 
 
-def git(*args: str, cwd: Path = ROOT, check: bool = True) -> subprocess.CompletedProcess[str]:
+def git(*args: str, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
+    # Resolve ROOT at call time so tests and isolated worker checkouts can override it.
+    working_directory = ROOT if cwd is None else cwd
     proc = subprocess.run(
-        ["git", *args], cwd=str(cwd), text=True, encoding="utf-8",
+        ["git", *args], cwd=str(working_directory), text=True, encoding="utf-8",
         errors="replace", capture_output=True, check=False,
     )
     if check and proc.returncode:
