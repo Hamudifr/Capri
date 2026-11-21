@@ -497,24 +497,37 @@ class SQLiteTaskStore:
         with self._lock:
             connection = self._connect()
             try:
-                if principal_tools:
-                    def principal_task_candidate(plan_json: Any, step_index: Any) -> int:
-                        try:
-                            plan = _decode_persisted_plan(plan_json)
-                        except TaskValidationError:
-                            return 1
-                        if type(step_index) is not int or not 0 <= step_index <= len(plan):
-                            return 1
-                        if step_index == len(plan):
-                            return 1
-                        return int(plan[step_index]["tool"] in principal_tools)
+                def principal_task_candidate(
+                    plan_json: Any,
+                    step_index: Any,
+                    state: Any,
+                    attempts: Any,
+                    cancel_requested: Any,
+                ) -> int:
+                    try:
+                        plan = _decode_persisted_plan(plan_json)
+                    except TaskValidationError:
+                        return 1
+                    if type(step_index) is not int or not 0 <= step_index <= len(plan):
+                        return 1
+                    if cancel_requested:
+                        return 1
+                    if step_index == len(plan):
+                        return 1
+                    if (
+                        state == "running"
+                        and type(attempts) is int
+                        and attempts >= plan[step_index]["max_attempts"]
+                    ):
+                        return 1
+                    return int(plan[step_index]["tool"] in principal_tools)
 
-                    connection.create_function(
-                        "capri_principal_task_candidate",
-                        2,
-                        principal_task_candidate,
-                        deterministic=True,
-                    )
+                connection.create_function(
+                    "capri_principal_task_candidate",
+                    5,
+                    principal_task_candidate,
+                    deterministic=True,
+                )
                 connection.execute("BEGIN IMMEDIATE")
                 query = """SELECT tasks.task_id,tasks.state,tasks.plan_json,tasks.current_step,
                     tasks.attempts,tasks.cancel_requested,task_owners.principal_id
@@ -524,13 +537,12 @@ class SQLiteTaskStore:
                     (tasks.state='running' AND tasks.lease_until<=?)
                     )"""
                 params = [stamp, stamp]
-                if not principal_tools:
-                    query += " AND task_owners.principal_id IS NULL"
-                else:
-                    query += (
-                        " AND (task_owners.principal_id IS NULL"
-                        " OR capri_principal_task_candidate(tasks.plan_json,tasks.current_step)=1)"
-                    )
+                query += (
+                    " AND (task_owners.principal_id IS NULL"
+                    " OR capri_principal_task_candidate("
+                    "tasks.plan_json,tasks.current_step,tasks.state,tasks.attempts,"
+                    "tasks.cancel_requested)=1)"
+                )
                 query += " ORDER BY tasks.created_at,tasks.task_id LIMIT 32"
                 rows = connection.execute(query, params).fetchall()
                 for task_id, state, plan_json, index, attempts, cancel, principal_id in rows:
