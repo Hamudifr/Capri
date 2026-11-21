@@ -100,8 +100,10 @@ def backup_sqlite_database(
             os.close(backup_fd)
 
         # Publish atomically without replacing a destination created in a race.
-        publish_no_replace(temporary_path, absolute)
+        publication_method = publish_no_replace(temporary_path, absolute)
         published = True
+        if publication_method == "hard-link":
+            os.unlink(temporary_path)
         if os.name == "posix":
             directory_fd = os.open(
                 parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
