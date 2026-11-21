@@ -222,8 +222,11 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 try:
                     connection.execute(
                         """UPDATE tasks SET state=?,current_step=?,attempts=?,
-                        lease_owner=?,lease_until=? WHERE task_id=?""",
-                        (state, index, attempts, lease_owner, lease_until, task.task_id),
+                        cancel_requested=?,lease_owner=?,lease_until=? WHERE task_id=?""",
+                        (
+                            state, index, attempts, int(state == "cancelled"),
+                            lease_owner, lease_until, task.task_id,
+                        ),
                     )
                 finally:
                     connection.close()
@@ -237,7 +240,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 try:
                     connection.execute(
                         """UPDATE tasks SET state='queued',current_step=0,attempts=0,
-                        lease_owner=NULL,lease_until=NULL WHERE task_id=?""",
+                        cancel_requested=0,lease_owner=NULL,lease_until=NULL WHERE task_id=?""",
                         (task.task_id,),
                     )
                 finally:
@@ -292,6 +295,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         if os.name == "posix":
             public_dir = os.path.join(self.temp.name, "public")
             os.mkdir(public_dir, 0o755)
+            os.chmod(public_dir, 0o755)
             with self.assertRaises(TaskValidationError):
                 self.store.backup_to(os.path.join(public_dir, "backup.sqlite3"))
 
@@ -391,6 +395,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 self.assertEqual(
                     calls[-1], ("principal", "alice", {"value": "original"})
                 )
+                calls.clear()
 
     def test_claim_input_is_snapshotted_before_validation_and_dispatch(self):
         calls = []
@@ -599,7 +604,10 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             self.store.finish_step(old, {"ok": True}, now=NOW + timedelta(seconds=7))
 
     def test_stale_claim_rejected_when_same_executor_reclaims_lease(self):
-        task = self.store.create(PLAN, now=NOW)
+        task = self.store.create(
+            [{"tool": "prepare", "input": {"value": "one"}, "max_attempts": 2}],
+            now=NOW,
+        )
         old = self.store.claim_next("worker", lease_seconds=5, now=NOW)
         current = self.store.claim_next(
             "worker", lease_seconds=30, now=NOW + timedelta(seconds=6)
@@ -1385,6 +1393,17 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 self.assertEqual(self.store.get(task.task_id), record_before)
                 self.assertEqual(self.store.events(task.task_id), events_before)
                 self.assertEqual(handler_calls, [])
+                # Reset this intentionally corrupt lease so the next transition
+                # is tested against its own task, not an earlier expired claim.
+                connection = self.store._connect()
+                try:
+                    connection.execute(
+                        """UPDATE tasks SET state='queued',attempts=0,
+                        lease_owner=NULL,lease_until=NULL WHERE task_id=?""",
+                        (task.task_id,),
+                    )
+                finally:
+                    connection.close()
 
 
     def test_corrupt_attempt_metadata_fails_closed_before_capability_filter(self):
