@@ -574,6 +574,14 @@ class SQLiteTaskStore:
                 for task_id, state, plan_json, index, attempts, cancel, principal_id in rows:
                     plan = _decode_persisted_plan(plan_json)
                     if cancel:
+                        # Cancellation is maintenance, not permission to accept corrupt
+                        # lifecycle metadata. Validate the active step before recording
+                        # a terminal event so the cancellation path cannot bless bad data.
+                        if type(index) is not int or not 0 <= index < len(plan):
+                            raise TaskValidationError("persisted task progress is corrupt")
+                        _validate_persisted_attempts(
+                            state, attempts, plan[index]["max_attempts"]
+                        )
                         connection.execute(
                             "UPDATE tasks SET state='cancelled',updated_at=?,lease_owner=NULL,lease_until=NULL WHERE task_id=?",
                             (stamp, task_id),
