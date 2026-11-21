@@ -907,6 +907,11 @@ class SQLiteTaskStore:
                 _parse_time(timestamp)
             if row[8] not in (0, 1):
                 raise TaskValidationError("backup contains invalid cancellation state")
+            if (
+                (row[2] == "cancelled" and row[8] != 1)
+                or (row[8] == 1 and row[2] not in {"running", "cancelled"})
+            ):
+                raise TaskValidationError("backup contains inconsistent cancellation state")
             if row[10] is not None:
                 _text(row[10], "task error_code", 64)
             if row[2] not in allowed_states:
