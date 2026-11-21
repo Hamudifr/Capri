@@ -25,6 +25,8 @@ class AtomicPublishTests(unittest.TestCase):
             atomic_publish.publish_no_replace(self.source, self.destination),
             "hard-link",
         )
+        self.assertTrue(os.path.exists(self.source))
+        os.unlink(self.source)
         self.assertFalse(os.path.exists(self.source))
         with open(self.destination, "rb") as stream:
             self.assertEqual(stream.read(), b"original")
