@@ -433,5 +433,21 @@ class LearningStoreTests(unittest.TestCase):
         self.assertEqual(manifest["row_count"], 0)
 
 
+    def test_export_registry_enforces_consent_and_export_foreign_keys(self):
+        with self.store._connection() as connection:
+            enabled = connection.execute("PRAGMA foreign_keys").fetchone()[0]
+            references = connection.execute(
+                "PRAGMA foreign_key_list(learning_export_consents)"
+            ).fetchall()
+        self.assertEqual(enabled, 1)
+        self.assertEqual(
+            {(row["table"], row["from"], row["to"]) for row in references},
+            {
+                ("learning_exports", "export_id", "export_id"),
+                ("learning_consents", "consent_id", "consent_id"),
+            },
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
