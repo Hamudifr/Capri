@@ -39,6 +39,26 @@ not a self-modifying hosted model and not an automatic training service.
 - Files remain plaintext. Private permissions are not encryption, secure
   deletion, backup protection, or a substitute for host-level storage controls.
 
+## Consent provenance and revocation
+
+- Each admitted example must reference an active `LearningConsent` record with
+  the single supported scope `curated_training_examples`, a policy version,
+  a bounded evidence reference, and a timezone-aware grant timestamp.
+- Consent records deliberately omit subject names, email addresses, account
+  identifiers, raw consent text, and other personal identifiers. The host owns
+  the consent interaction and must create the record only after an explicit
+  user action; this library does not present a consent UI.
+- Exported JSONL includes the consent ID and policy version so downstream
+  artifacts retain a traceable authorization reference.
+- Revocation is transactional: the consent is marked revoked and all source
+  examples bound to it are deleted from the local learning database. New
+  admissions and future exports exclude revoked consent.
+- Revocation cannot recall files already exported outside this store. Until a
+  dataset manifest/export registry is implemented, downstream holders must
+  invalidate and delete any prior artifact carrying the revoked consent ID.
+- This is application-level deletion, not a guarantee of forensic secure
+  erasure from filesystem blocks, snapshots, backups, or external copies.
+
 ## Non-goals and safety
 
 - This does not alter GPT-6 or any hosted model's weights.
@@ -72,9 +92,10 @@ not a self-modifying hosted model and not an automatic training service.
 ## Current limitations
 
 The module is not yet wired into the task engine or runtime. There is no
-automatic event capture, consent UI, PII scanner, consent provenance/revocation/
-delete workflow, dataset signing/version manager, trainer, adapter registry, or
-model-serving integration. The consent and privacy-review booleans are
-per-example attestations, not a revocable consent ledger. These capabilities
+automatic event capture, consent UI, PII scanner, dataset signing/version
+manager, trainer, adapter registry, or model-serving integration. The consent
+and privacy-review booleans remain per-example attestations; the new consent
+ledger adds provenance and revocation but does not itself authenticate the
+person granting consent or recall previously exported files. These capabilities
 must be implemented as separate, reviewed steps. The Android phone environment
 is not assumed to be capable of training a 20B-class model.
