@@ -13,6 +13,8 @@ import re
 import sqlite3
 import stat
 import tempfile
+import uuid
+import zipfile
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -188,6 +190,31 @@ class LearningStore:
                 )
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS learning_exports (
+                    export_id TEXT PRIMARY KEY,
+                    bundle_sha256 TEXT NOT NULL,
+                    manifest_json TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK (status IN
+                        ('publishing', 'active', 'invalidated', 'failed')),
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS learning_export_consents (
+                    export_id TEXT NOT NULL REFERENCES learning_exports(export_id),
+                    consent_id TEXT NOT NULL,
+                    PRIMARY KEY (export_id, consent_id)
+                )
+                """
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_learning_export_consent "
+                "ON learning_export_consents(consent_id)"
+            )
             # Migrate databases created before consent provenance was introduced.
             columns = {
                 row["name"] for row in connection.execute(
@@ -300,6 +327,15 @@ class LearningStore:
             connection.execute(
                 "UPDATE learning_consents SET revoked_at=? WHERE consent_id=? AND revoked_at IS NULL",
                 (revoked.isoformat(), consent_id),
+            )
+            connection.execute(
+                """
+                UPDATE learning_exports SET status='invalidated'
+                WHERE export_id IN (
+                    SELECT export_id FROM learning_export_consents WHERE consent_id=?
+                ) AND status IN ('publishing', 'active')
+                """,
+                (consent_id,),
             )
             cursor = connection.execute(
                 "DELETE FROM learning_examples WHERE consent_id=?", (consent_id,)
@@ -476,3 +512,180 @@ class LearningStore:
                 "SELECT outcome, COUNT(*) AS n FROM learning_examples GROUP BY outcome"
             ).fetchall()
         return {row["outcome"]: row["n"] for row in rows}
+
+
+    def export_bundle(
+        self,
+        destination: str | Path,
+        *,
+        minimum_quality: float = 0.9,
+        allowed_capabilities: Iterable[str] | None = None,
+    ) -> dict[str, object]:
+        """Publish a content-hashed ZIP bundle and register its consent dependencies.
+
+        The registry is authoritative for revocation status. A bundle is usable
+        only while verify_export reports valid; copying the ZIP does not copy
+        this registry or make revocation checks portable.
+        """
+        target = Path(destination)
+        _require_private_directory(target.parent)
+        export_id = str(uuid.uuid4())
+        dataset_path = target.parent / f".{target.name}.{export_id}.jsonl"
+        descriptor, archive_name = tempfile.mkstemp(
+            prefix=f".{target.name}.{export_id}.", suffix=".tmp", dir=target.parent
+        )
+        os.close(descriptor)
+        registered = False
+        published = False
+        try:
+            counts = self.export_jsonl(
+                dataset_path,
+                minimum_quality=minimum_quality,
+                allowed_capabilities=allowed_capabilities,
+            )
+            dataset_bytes = dataset_path.read_bytes()
+            dataset_sha256 = hashlib.sha256(dataset_bytes).hexdigest()
+            rows = [
+                json.loads(line)
+                for line in dataset_bytes.decode("utf-8").splitlines()
+                if line
+            ]
+            consent_ids = sorted({row["consent_id"] for row in rows})
+            policy_versions = sorted({row["consent_policy_version"] for row in rows})
+            created_at = datetime.now().astimezone().isoformat()
+            manifest = {
+                "manifest_version": 1,
+                "export_id": export_id,
+                "created_at": created_at,
+                "dataset_file": "dataset.jsonl",
+                "dataset_sha256": dataset_sha256,
+                "row_count": len(rows),
+                "split_counts": {key: counts[key] for key in ("train", "validation", "test")},
+                "consent_ids": consent_ids,
+                "consent_policy_versions": policy_versions,
+            }
+            manifest_bytes = (
+                json.dumps(manifest, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+                + "\\n"
+            ).encode("utf-8")
+            with zipfile.ZipFile(archive_name, "w", compression=zipfile.ZIP_STORED) as archive:
+                archive.writestr("dataset.jsonl", dataset_bytes)
+                archive.writestr("manifest.json", manifest_bytes)
+            with open(archive_name, "rb") as stream:
+                bundle_sha256 = hashlib.sha256(stream.read()).hexdigest()
+
+            # Reserve the registry row only if every referenced consent is still active.
+            with self._connection() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                if consent_ids:
+                    placeholders = ",".join("?" for _ in consent_ids)
+                    active = {
+                        row["consent_id"] for row in connection.execute(
+                            f"""SELECT consent_id FROM learning_consents
+                                WHERE consent_id IN ({placeholders})
+                                  AND scope='curated_training_examples'
+                                  AND revoked_at IS NULL""",
+                            consent_ids,
+                        ).fetchall()
+                    }
+                    if active != set(consent_ids):
+                        raise LearningDataError("consent changed during bundle creation; export aborted")
+                connection.execute(
+                    """INSERT INTO learning_exports
+                    (export_id, bundle_sha256, manifest_json, status, created_at)
+                    VALUES (?, ?, ?, 'publishing', ?)""",
+                    (export_id, bundle_sha256, manifest_bytes.decode("utf-8"), created_at),
+                )
+                connection.executemany(
+                    "INSERT INTO learning_export_consents(export_id, consent_id) VALUES (?, ?)",
+                    [(export_id, consent_id) for consent_id in consent_ids],
+                )
+            registered = True
+
+            # Same-directory hard-link publication is atomic and never overwrites.
+            os.link(archive_name, target)
+            published = True
+            os.unlink(archive_name)
+            _fsync_directory(target.parent)
+            with self._connection() as connection:
+                cursor = connection.execute(
+                    "UPDATE learning_exports SET status='active' "
+                    "WHERE export_id=? AND status='publishing'",
+                    (export_id,),
+                )
+                status = connection.execute(
+                    "SELECT status FROM learning_exports WHERE export_id=?",
+                    (export_id,),
+                ).fetchone()["status"]
+            return {
+                "export_id": export_id,
+                "bundle_sha256": bundle_sha256,
+                "status": status,
+                "path": str(target),
+                "row_count": len(rows),
+                "split_counts": manifest["split_counts"],
+            }
+        except Exception:
+            if registered and not published:
+                with self._connection() as connection:
+                    connection.execute(
+                        "UPDATE learning_exports SET status='failed' "
+                        "WHERE export_id=? AND status='publishing'",
+                        (export_id,),
+                    )
+            raise
+        finally:
+            for temporary in (dataset_path, Path(archive_name)):
+                try:
+                    temporary.unlink()
+                except FileNotFoundError:
+                    pass
+
+    def get_export_status(self, export_id: str) -> dict[str, str] | None:
+        """Return the local registry status for a known export, or None."""
+        if not isinstance(export_id, str) or not re.fullmatch(
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+            export_id,
+        ):
+            raise LearningDataError("export_id must be a UUID")
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT export_id, bundle_sha256, status, created_at "
+                "FROM learning_exports WHERE export_id=?",
+                (export_id,),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def verify_export(self, export_id: str, bundle_path: str | Path) -> dict[str, object]:
+        """Verify registry state, archive hash, manifest identity, and dataset hash."""
+        record = self.get_export_status(export_id)
+        if record is None:
+            return {"valid": False, "reason": "unregistered"}
+        path = Path(bundle_path)
+        try:
+            _require_private_directory(path.parent)
+            if path.is_symlink() or not path.is_file():
+                return {"valid": False, "reason": "missing_or_unsafe_bundle", "status": record["status"]}
+            bundle_bytes = path.read_bytes()
+            actual_bundle_hash = hashlib.sha256(bundle_bytes).hexdigest()
+            if actual_bundle_hash != record["bundle_sha256"]:
+                return {"valid": False, "reason": "bundle_hash_mismatch", "status": record["status"]}
+            with zipfile.ZipFile(path, "r") as archive:
+                if set(archive.namelist()) != {"dataset.jsonl", "manifest.json"}:
+                    return {"valid": False, "reason": "unexpected_bundle_members", "status": record["status"]}
+                manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+                dataset = archive.read("dataset.jsonl")
+            if manifest.get("export_id") != export_id:
+                return {"valid": False, "reason": "manifest_identity_mismatch", "status": record["status"]}
+            if hashlib.sha256(dataset).hexdigest() != manifest.get("dataset_sha256"):
+                return {"valid": False, "reason": "dataset_hash_mismatch", "status": record["status"]}
+        except (OSError, ValueError, zipfile.BadZipFile, KeyError, UnicodeDecodeError):
+            return {"valid": False, "reason": "unreadable_bundle", "status": record["status"]}
+        valid = record["status"] == "active"
+        return {
+            "valid": valid,
+            "reason": "ok" if valid else record["status"],
+            "status": record["status"],
+            "bundle_sha256": actual_bundle_hash,
+            "row_count": manifest.get("row_count"),
+        }
