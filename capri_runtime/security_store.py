@@ -229,6 +229,82 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
             finally:
                 connection.close()
 
+    @staticmethod
+    def _validate_backup_snapshot(connection: sqlite3.Connection) -> None:
+        """Reject persisted rows that violate the invariants enforced on writes.
+
+        Audit timestamps intentionally remain bounded opaque text for backward
+        compatibility. Approval timestamps are parsed because replay safety depends
+        on their ordering and timezone awareness.
+        """
+        audit_rows = connection.execute(
+            """SELECT event_id, timestamp, principal_id, tool_name,
+            argument_digest, status, error_code FROM audit_events"""
+        ).fetchall()
+        for row in audit_rows:
+            event_id, timestamp, principal_id, tool_name, digest, status, error_code = row
+            text_fields = (
+                (event_id, 64), (timestamp, 64), (principal_id, 256),
+                (tool_name, 64), (status, 64),
+            )
+            if any(
+                not isinstance(value, str) or not value or len(value) > limit
+                or any(0xD800 <= ord(ch) <= 0xDFFF for ch in value)
+                for value, limit in text_fields
+            ):
+                raise ToolValidationError(
+                    "security-store backup contains invalid audit metadata"
+                )
+            if not isinstance(digest, str) or not _DIGEST_RE.fullmatch(digest):
+                raise ToolValidationError(
+                    "security-store backup contains an invalid audit digest"
+                )
+            if error_code is not None and (
+                not isinstance(error_code, str) or len(error_code) > 128
+                or any(0xD800 <= ord(ch) <= 0xDFFF for ch in error_code)
+            ):
+                raise ToolValidationError(
+                    "security-store backup contains an invalid audit error code"
+                )
+
+        approval_rows = connection.execute(
+            """SELECT grant_id, principal_id, tool_name, argument_digest,
+            expires_at, consumed_at FROM consumed_approvals"""
+        ).fetchall()
+        for row in approval_rows:
+            grant_id, principal_id, tool_name, digest, expires_at, consumed_at = row
+            text_fields = (
+                (grant_id, 128), (principal_id, 256), (tool_name, 64),
+                (digest, 64), (expires_at, 64), (consumed_at, 64),
+            )
+            if any(
+                not isinstance(value, str) or not value or len(value) > limit
+                or any(0xD800 <= ord(ch) <= 0xDFFF for ch in value)
+                for value, limit in text_fields
+            ):
+                raise ToolValidationError(
+                    "security-store backup contains invalid approval metadata"
+                )
+            if not _NAME_RE.fullmatch(tool_name) or not _DIGEST_RE.fullmatch(digest):
+                raise ToolValidationError(
+                    "security-store backup contains invalid approval identity or digest"
+                )
+            try:
+                expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+                consumed = datetime.fromisoformat(consumed_at.replace("Z", "+00:00"))
+            except ValueError:
+                raise ToolValidationError(
+                    "security-store backup contains invalid approval timestamps"
+                ) from None
+            if (
+                expiry.tzinfo is None or expiry.utcoffset() is None
+                or consumed.tzinfo is None or consumed.utcoffset() is None
+                or consumed >= expiry
+            ):
+                raise ToolValidationError(
+                    "security-store backup contains inconsistent approval timestamps"
+                )
+
     def backup_to(self, destination_path: str) -> str:
         """Create a consistent, private, standalone SQLite backup atomically.
 
@@ -274,8 +350,14 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
                 destination.execute("PRAGMA synchronous=FULL")
                 source.backup(destination)
                 check = destination.execute("PRAGMA integrity_check").fetchone()
-                if not check or check[0] != "ok":
-                    raise ToolValidationError("SQLite backup integrity check failed")
+                foreign_key_errors = destination.execute(
+                    "PRAGMA foreign_key_check"
+                ).fetchall()
+                if not check or check[0] != "ok" or foreign_key_errors:
+                    raise ToolValidationError(
+                        "SQLite backup integrity or foreign-key check failed"
+                    )
+                self._validate_backup_snapshot(destination)
                 destination.close()
                 destination = None
                 source.close()
