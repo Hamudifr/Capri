@@ -139,7 +139,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
         verified = []
         def verify(actor, task_id, decision_id, outcome, evidence_ref, payload):
             verified.append((actor, task_id, decision_id, outcome, evidence_ref, payload))
-            return (
+            valid = (
                 actor == "alice"
                 and task_id == task.task_id
                 and evidence_ref == "evidence://verified/task-1"
@@ -147,6 +147,9 @@ class CapriHostRuntimeTests(unittest.TestCase):
                 and payload["outcome"] == outcome
                 and payload["result"] == {"ok": True}
             )
+            # A verifier must not be able to mutate the checkpoint snapshot.
+            payload["result"]["ok"] = False
+            return valid
 
         def uncertain(data, key, principal):
             raise RuntimeError("uncertain")
