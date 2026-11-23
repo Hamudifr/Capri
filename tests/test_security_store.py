@@ -62,6 +62,11 @@ class SQLiteSecurityStoreTests(unittest.TestCase):
             "a" * 64, "succeeded", None,
         )
         store.write(event)
+        opaque_event = AuditEvent(
+            "backup-opaque-event", "opaque-bounded-time", "principal-1", "search",
+            "b" * 64, "succeeded", "",
+        )
+        store.write(opaque_event)
         grant = self.grant("backup-grant")
         self.assertTrue(store.consume(grant, self.now))
         backup_path = os.path.join(self.temp.name, "backup.sqlite3")
@@ -72,6 +77,7 @@ class SQLiteSecurityStoreTests(unittest.TestCase):
         restored = SQLiteSecurityStore(backup_path)
         self.assertEqual(restored.integrity_check(), "ok")
         self.assertIn(event, restored.events())
+        self.assertIn(opaque_event, restored.events())
         self.assertFalse(restored.consume(grant, self.now))
 
     def test_backup_rejects_malformed_audit_row_before_publication(self):
@@ -145,6 +151,43 @@ class SQLiteSecurityStoreTests(unittest.TestCase):
         with self.assertRaises(ToolValidationError):
             store.backup_to(destination)
         self.assertFalse(os.path.exists(destination))
+
+    def test_backup_rejects_invalid_approval_replay_invariants(self):
+        valid_expiry = (self.now + timedelta(minutes=5)).isoformat()
+        valid_consumed = self.now.isoformat()
+        invalid_rows = (
+            ("bad-tool", "not-a-digest", valid_expiry, valid_consumed),
+            ("delete_item", "a" * 64, "2026-11-06T12:05:00", valid_consumed),
+            ("delete_item", "a" * 64, valid_expiry, "2026-11-06T12:00:00"),
+            ("delete_item", "a" * 64, self.now.isoformat(), valid_consumed),
+            ("delete_item", "a" * 64, valid_consumed, valid_consumed),
+        )
+        for index, (tool_name, digest, expires_at, consumed_at) in enumerate(invalid_rows):
+            with self.subTest(index=index):
+                case_dir = os.path.join(self.temp.name, f"case-{index}")
+                os.mkdir(case_dir, 0o700)
+                database_path = os.path.join(case_dir, "security.sqlite3")
+                store = SQLiteSecurityStore(database_path)
+                connection = sqlite3.connect(database_path)
+                try:
+                    connection.execute(
+                        """INSERT INTO consumed_approvals
+                        (grant_id, principal_id, tool_name, argument_digest, expires_at, consumed_at)
+                        VALUES (?, ?, ?, ?, ?, ?)""",
+                        ("grant", "principal-1", tool_name, digest, expires_at, consumed_at),
+                    )
+                    connection.commit()
+                finally:
+                    connection.close()
+
+                destination = os.path.join(case_dir, "backup.sqlite3")
+                with self.assertRaises(ToolValidationError):
+                    store.backup_to(destination)
+                self.assertFalse(os.path.exists(destination))
+                self.assertFalse(any(
+                    name.startswith(".capri-security-backup-")
+                    for name in os.listdir(case_dir)
+                ))
 
     def test_backup_refuses_existing_symlink_and_live_database_destinations(self):
         store = SQLiteSecurityStore(self.path)
