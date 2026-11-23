@@ -191,6 +191,11 @@ class CapriHostRuntimeTests(unittest.TestCase):
         self.assertEqual(resolved.state, "succeeded")
         self.assertEqual(resolved.result, ({"ok": True},))
         self.assertEqual(verified[-1][0], "alice")
+        replayed = host.reconcile_task(
+            "alice-token", task.task_id, "decision-1", "succeeded",
+            "evidence://verified/task-1", {"ok": True},
+        )
+        self.assertEqual(replayed, resolved)
 
     def test_reconciliation_rejects_noncanonical_results_before_evidence_check(self):
         permissions = {"alice": {"task.reconcile.owned"}}
