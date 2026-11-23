@@ -1250,7 +1250,9 @@ class TaskEngine:
     resource authorization, and make side effects idempotent with the key.
     Model-proposed tool calls must still pass through ToolExecutor and host policy.
     Handlers may raise RetryableTaskError only when failure is known to precede
-    every external side effect; all other exceptions enter reconciliation_required.
+    every external side effect. ToolCancelledError is terminal only when ToolExecutor
+    confirms cancellation before handler start; uncertain cancellation and all other
+    post-dispatch exceptions enter reconciliation_required.
     Expired worker leases are quarantined because the side-effect outcome is unknown.
     """
 
