@@ -62,7 +62,8 @@ not a self-modifying hosted model and not an automatic training service.
   dataset, the bundle's stable export ID, row/split counts, and the contributing
   consent IDs and policy versions.
 - Each bundle is registered in the same local SQLite store before publication.
-  The registry tracks `publishing`, `active`, `invalidated`, or `failed` state;
+  SQLite foreign-key enforcement binds each registry dependency to an existing
+  export and consent record. The registry tracks `publishing`, `active`, `invalidated`, or `failed` state;
   publication uses a same-directory no-overwrite hard link. A crash or uncertain
   publication remains non-active and therefore fails closed.
 - Revoking any contributing consent transactionally marks every registered
