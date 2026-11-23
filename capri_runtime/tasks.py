@@ -18,6 +18,7 @@ from typing import Any, Callable, Mapping
 from uuid import uuid4
 
 from .sqlite_backup import backup_sqlite_database
+from .tools import ToolCancelledError
 
 
 class TaskError(Exception):
@@ -1332,6 +1333,15 @@ class TaskEngine:
         try:
             result = invoke()
             _json(result, label="handler result")
+        except ToolCancelledError as error:
+            if not error.outcome_uncertain:
+                # ToolExecutor confirms cancellation happened before handler start.
+                return self.store.fail_step(
+                    claim, "handler_cancelled_before_start", now=now, retryable=False
+                )
+            return self.store.require_reconciliation(
+                claim, "handler_outcome_uncertain", now=now
+            )
         except RetryableTaskError:
             # The handler explicitly guarantees that it failed before any
             # external side effect, so bounded retry is safe to consider.
