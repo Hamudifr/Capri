@@ -148,6 +148,9 @@ class CapriHostRuntimeTests(unittest.TestCase):
                 and payload["result"] == {"ok": True}
             )
 
+        def uncertain(data, key, principal):
+            raise RuntimeError("uncertain")
+
         worker = TaskWorker(TaskEngine(
             self.task_store,
             {},
@@ -200,9 +203,12 @@ class CapriHostRuntimeTests(unittest.TestCase):
             verified.append(args)
             return True
 
+        def uncertain(data, key, principal):
+            raise RuntimeError("uncertain")
+
         worker = TaskWorker(TaskEngine(
             self.task_store, {}, "worker",
-            principal_handlers={"collect": lambda data, key, principal: (_ for _ in ()).throw(RuntimeError("uncertain"))},
+            principal_handlers={"collect": uncertain},
         ))
         host = self.make_host(
             authority=authority,
