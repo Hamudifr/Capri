@@ -38,6 +38,7 @@ The SQLite session store's `max_output_chars` must be at least the greater of th
 4. Optionally, a memory resolver with signature `(principal_id, session_id, user_text) -> UntrustedMemoryContext | None`. It must enforce principal-scoped memory access. The resolver runs only after authentication, session ownership, and input validation succeed.
 5. Optionally, a `SQLiteTaskStore` for authenticated task creation/read/cancellation.
 6. Optionally, a `TaskWorker`. The host explicitly runs it through `run_task_worker(stop_event)` under its own process supervisor. If both are supplied, they must point to the same database.
+7. Optionally, a trusted `task_reconciliation_verifier` callback. It receives the authenticated principal ID, task ID, decision ID, outcome, evidence reference, and a detached JSON snapshot of the proposed decision. It must independently verify that the evidence supports the exact decision and that the actor is authorized to resolve it. Return the literal boolean `True` only after verification; exceptions and all other return values fail closed. The host exposes `reconcile_task(credential, ...)`, which requires the explicit `task.reconcile.owned` permission and checks immutable task ownership before invoking the verifier. Do not expose the lower-level store API to untrusted clients.
 
 Example:
 
@@ -83,6 +84,7 @@ The host-runtime tests cover:
 - Denial before memory retrieval or model invocation.
 - Ownership-scoped durable lease and commit paths.
 - Principal-scoped task creation, retrieval, and cancellation; cross-principal task access is denied.
+- Task reconciliation requires a live authenticated owner, the dedicated permission, a trusted evidence verifier, and a task already in `reconciliation_required`.
 - Closed-session behavior, invalid inputs, and redacted memory resolver errors.
 
 These tests establish application-level session and task ownership boundaries, not complete tenant isolation. Before external multi-user deployment, add authentication integration tests, principal-handler resource ACL tests, memory-provider ACL tests, rate limiting, per-principal provider budgets, approval UX, structured observability, encrypted backup storage, retention and restore drills, and deployment hardening.
