@@ -362,5 +362,76 @@ class LearningStoreTests(unittest.TestCase):
         self.assertEqual(sum(counts[s] for s in ("train", "validation", "test")), 0)
 
 
+    def test_bundle_manifest_hash_and_registry_verification(self):
+        self.store.record(example())
+        output = self.root / "bundle.zip"
+        result = self.store.export_bundle(output)
+        self.assertEqual(result["status"], "active")
+        self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o600)
+        status = self.store.get_export_status(result["export_id"])
+        self.assertEqual(status["status"], "active")
+        verified = self.store.verify_export(result["export_id"], output)
+        self.assertTrue(verified["valid"])
+        self.assertEqual(verified["row_count"], 1)
+        import zipfile
+        with zipfile.ZipFile(output) as archive:
+            manifest = json.loads(archive.read("manifest.json"))
+            dataset = archive.read("dataset.jsonl")
+        self.assertEqual(manifest["consent_ids"], ["consent-001"])
+        self.assertEqual(manifest["consent_policy_versions"], ["learning-consent-v1"])
+        self.assertEqual(
+            __import__("hashlib").sha256(dataset).hexdigest(),
+            manifest["dataset_sha256"],
+        )
+
+    def test_bundle_is_invalidated_when_any_source_consent_is_revoked(self):
+        self.store.record(example())
+        output = self.root / "revocable.zip"
+        result = self.store.export_bundle(output)
+        self.assertTrue(self.store.verify_export(result["export_id"], output)["valid"])
+        self.store.revoke_consent("consent-001", "2026-11-23T12:00:00+00:00")
+        status = self.store.get_export_status(result["export_id"])
+        self.assertEqual(status["status"], "invalidated")
+        verification = self.store.verify_export(result["export_id"], output)
+        self.assertFalse(verification["valid"])
+        self.assertEqual(verification["reason"], "invalidated")
+
+    def test_bundle_detects_tampering_and_unknown_registry_entries(self):
+        self.store.record(example())
+        output = self.root / "tampered.zip"
+        result = self.store.export_bundle(output)
+        output.write_bytes(output.read_bytes() + b"tamper")
+        self.assertEqual(
+            self.store.verify_export(result["export_id"], output)["reason"],
+            "bundle_hash_mismatch",
+        )
+        self.assertEqual(
+            self.store.verify_export("00000000-0000-4000-8000-000000000000", output)["reason"],
+            "unregistered",
+        )
+
+    def test_bundle_never_overwrites_existing_destination(self):
+        self.store.record(example())
+        output = self.root / "existing.zip"
+        output.write_bytes(b"preserve")
+        with self.assertRaises(FileExistsError):
+            self.store.export_bundle(output)
+        self.assertEqual(output.read_bytes(), b"preserve")
+        with self.store._connection() as connection:
+            count = connection.execute("SELECT COUNT(*) FROM learning_exports").fetchone()[0]
+        self.assertEqual(count, 0)
+
+    def test_bundle_with_no_eligible_rows_has_empty_consent_dependencies(self):
+        self.store.record(example(outcome="verified_failure"))
+        output = self.root / "empty.zip"
+        result = self.store.export_bundle(output)
+        self.assertTrue(self.store.verify_export(result["export_id"], output)["valid"])
+        import zipfile
+        with zipfile.ZipFile(output) as archive:
+            manifest = json.loads(archive.read("manifest.json"))
+        self.assertEqual(manifest["consent_ids"], [])
+        self.assertEqual(manifest["row_count"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()
