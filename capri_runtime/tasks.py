@@ -569,7 +569,8 @@ class SQLiteTaskStore:
                         )
                     except TaskValidationError:
                         return 1
-                    if state == "running" and attempts == plan[step_index]["max_attempts"]:
+                    if state == "running":
+                        # Expired leases are maintenance candidates, not executable work.
                         return 1
                     return int(plan[step_index]["tool"] in principal_tools)
 
