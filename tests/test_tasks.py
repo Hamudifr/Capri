@@ -17,6 +17,7 @@ from capri_runtime.tasks import (
     TaskIdempotencyConflict,
     TaskNotFoundError,
     TaskValidationError,
+    RetryableTaskError,
     TaskWorker,
 )
 
@@ -685,6 +686,52 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         self.assertEqual(result.error_code, "handler_failed")
         self.assertNotIn("must not leak", str(result))
 
+    def test_uncertain_handler_exception_is_terminal_and_never_replayed(self):
+        effects = []
+
+        def side_effect_then_fail(_data, _key):
+            effects.append("external-action")
+            raise RuntimeError("response lost after action")
+
+        engine = TaskEngine(
+            self.store,
+            {"prepare": side_effect_then_fail},
+            "worker",
+        )
+        task = self.store.create(
+            [{"tool": "prepare", "input": {}, "max_attempts": 5}],
+            now=NOW,
+        )
+
+        first = engine.run_once(now=NOW)
+        second = engine.run_once(now=NOW + timedelta(seconds=60))
+
+        self.assertEqual(first.task_id, task.task_id)
+        self.assertEqual(first.state, "failed")
+        self.assertEqual(first.error_code, "handler_failed")
+        self.assertIsNone(second)
+        self.assertEqual(effects, ["external-action"])
+
+    def test_invalid_result_after_handler_execution_is_terminal(self):
+        calls = []
+
+        def invalid_result(_data, _key):
+            calls.append("called")
+            return {"not-json": {1, 2, 3}}
+
+        engine = TaskEngine(self.store, {"prepare": invalid_result}, "worker")
+        task = self.store.create(
+            [{"tool": "prepare", "input": {}, "max_attempts": 5}],
+            now=NOW,
+        )
+
+        result = engine.run_once(now=NOW)
+        self.assertEqual(result.task_id, task.task_id)
+        self.assertEqual(result.state, "failed")
+        self.assertEqual(result.error_code, "handler_failed")
+        self.assertIsNone(engine.run_once(now=NOW + timedelta(seconds=60)))
+        self.assertEqual(calls, ["called"])
+
     def test_missing_handler_fails_without_retry(self):
         engine = TaskEngine(self.store, {}, "worker")
         self.store.create([{"tool": "missing", "input": {}, "max_attempts": 5}], now=NOW)
@@ -740,7 +787,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         def sometimes_fails(_data, _key):
             attempts["count"] += 1
             if attempts["count"] == 1:
-                raise RuntimeError("private failure")
+                raise RetryableTaskError("known pre-effect failure")
             return {"ok": True}
         engine = TaskEngine(self.store, {"prepare": sometimes_fails}, "worker")
         self.store.create([{"tool": "prepare", "input": {}, "max_attempts": 2}], now=NOW)

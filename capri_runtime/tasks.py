@@ -40,6 +40,15 @@ class TaskIdempotencyConflict(TaskError):
     """An idempotency key was reused for a different task definition."""
 
 
+class RetryableTaskError(TaskError):
+    """A handler failure known to have occurred before any external side effect.
+
+    Trusted handlers may raise this only when they can guarantee that no
+    externally visible action occurred. Every other handler exception is
+    treated as an uncertain outcome and is not automatically retried.
+    """
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -1035,6 +1044,8 @@ class TaskEngine:
     legacy map. Both handler classes must be trusted host code, enforce current
     resource authorization, and make side effects idempotent with the key.
     Model-proposed tool calls must still pass through ToolExecutor and host policy.
+    Handlers may raise RetryableTaskError only when failure is known to precede
+    every external side effect; all other exceptions fail without auto-retry.
     """
 
     def __init__(
@@ -1116,8 +1127,18 @@ class TaskEngine:
         try:
             result = invoke()
             _json(result, label="handler result")
+        except RetryableTaskError:
+            # The handler explicitly guarantees that it failed before any
+            # external side effect, so bounded retry is safe to consider.
+            return self.store.fail_step(
+                claim, "handler_failed", now=now, retryable=True
+            )
         except Exception:
-            return self.store.fail_step(claim, "handler_failed", now=now)
+            # Unknown exceptions and invalid results may follow a completed
+            # external action. Never automatically repeat an uncertain effect.
+            return self.store.fail_step(
+                claim, "handler_failed", now=now, retryable=False
+            )
         return self.store.finish_step(claim, result, now=now)
 
     def run_once(self, now: datetime | None = None) -> TaskRecord | None:

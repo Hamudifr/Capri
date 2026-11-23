@@ -68,13 +68,15 @@ Claims and state transitions use `BEGIN IMMEDIATE`, so concurrent workers cannot
 
 ## Delivery and idempotency semantics
 
-Execution is **bounded and may be repeated; it is not exactly once**. A process can crash after claiming a step but before invoking its handler, or after a side effect but before persisting the result. Depending on the crash point and remaining attempt budget, a handler may run zero, one, or multiple times. After lease expiry, another worker may retry the same step. Each step therefore receives the stable idempotency key `<task_id>:<step_index>`; handlers that perform side effects must enforce that key at the side-effect boundary. Do not blindly retry a non-idempotent handler.
+Execution is **bounded and may be repeated; it is not exactly once**. A process can crash after claiming a step but before invoking its handler, or after a side effect but before persisting the result. Depending on the crash point and remaining attempt budget, a handler may run zero, one, or multiple times. After lease expiry, another worker may reclaim the same step. Each step therefore receives the stable idempotency key `<task_id>:<step_index>`; handlers that perform side effects must enforce that key at the side-effect boundary.
+
+The engine distinguishes known pre-effect failures from uncertain outcomes. A trusted handler may raise the public `RetryableTaskError` only when it can guarantee that no external side effect occurred; this opts the step into the existing bounded retry/backoff policy. Any other handler exception, and any invalid/oversized/non-JSON result returned after handler invocation, is recorded as terminal `failed` with the redacted `handler_failed` code. It is deliberately not retried automatically because the external action may already have happened. This conservative terminal state avoids blind duplicate execution but does not yet provide an operator reconciliation workflow. Hosts must surface the failed task for inspection and use the stable idempotency key when deciding whether a separately authorized recovery is safe.
 
 Leases are bounded to 5–3600 seconds. The store exposes `renew_lease()` so a host-managed heartbeat can extend a live claim. Renewal must occur before expiry and fails closed after expiry or ownership change. The lower-level `TaskEngine.run_once()` helper does not start a heartbeat thread; hosts using it directly must arrange renewal themselves. `TaskWorker` handles heartbeats while its handler is running. Neither API can forcibly interrupt a running handler. If a handler outlives its lease without renewal, a second worker may reclaim it; stable idempotency is mandatory.
 
 ## Retry and cancellation
 
-Each step may set `max_attempts` from 1 to 10 (default 3). Retry delay uses bounded exponential backoff, capped at one hour. Error details are deliberately suppressed; only a short error code is stored.
+Each step may set `max_attempts` from 1 to 10 (default 3). Retry delay uses bounded exponential backoff, capped at one hour. Only an explicit `RetryableTaskError` from trusted handler code opts into automatic retry, and only when no external side effect occurred. Other exceptions and invalid handler results fail terminally to avoid blind replay. Error details are deliberately suppressed; only a short error code is stored.
 
 Cancellation is cooperative. Queued/retry-wait tasks cancel immediately. A running handler is not killed; its current step may finish and be checkpointed, then the task becomes cancelled without starting another step. Hosts should expose this behavior honestly in UI.
 
@@ -96,7 +98,7 @@ This validation checks the task-store snapshot's semantic consistency. It is not
 
 ## Validation
 
-`tests/test_tasks.py` covers persistent state, idempotent creation, principal-scoped task isolation, immutable owner rows, principal-aware worker dispatch, backup/restore of ownership, plan and persisted attempt-count validation, concurrent claims, lease recovery, stale-worker rejection, tampered-claim rejection across renewal/completion/failure transitions, bounded retries, step checkpointing, handler failure suppression, cancellation, event persistence, symlink rejection, and directory privacy. The repository quality workflow runs the full suite on Python 3.11, 3.12, and 3.13.
+`tests/test_tasks.py` covers persistent state, idempotent creation, principal-scoped task isolation, immutable owner rows, principal-aware worker dispatch, backup/restore of ownership, plan and persisted attempt-count validation, concurrent claims, lease recovery, stale-worker rejection, tampered-claim rejection across renewal/completion/failure transitions, explicit pre-effect retry opt-in, terminal handling of uncertain handler exceptions and invalid results, side-effect non-replay, cancellation, event persistence, symlink rejection, and directory privacy. The repository quality workflow runs the full suite on Python 3.11, 3.12, and 3.13.
 
 
 ## Persisted attempt-count integrity

@@ -75,6 +75,7 @@ from .tasks import (
     TaskNotFoundError,
     TaskRecord,
     TaskValidationError,
+    RetryableTaskError,
     TaskWorker,
 )
 
@@ -148,6 +149,7 @@ __all__ = [
     "TaskNotFoundError",
     "TaskRecord",
     "TaskValidationError",
+    "RetryableTaskError",
     "TaskWorker",
     "ToolBridgeValidationError",
     "ToolCallOutcome",
