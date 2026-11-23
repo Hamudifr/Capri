@@ -246,8 +246,18 @@ class CapriHostRuntime:
             raise HostRuntimeError("no task store is configured")
         if self._task_reconciliation_verifier is None:
             raise HostRuntimeError("no trusted task evidence verifier is configured")
-        if outcome not in {"succeeded", "failed", "unresolved"}:
+        for value, limit, label in (
+            (task_id, 64, "task_id"),
+            (decision_id, 128, "decision_id"),
+            (evidence_ref, 512, "evidence_ref"),
+        ):
+            if (type(value) is not str or not value or len(value) > limit
+                    or any(0xD800 <= ord(character) <= 0xDFFF for character in value)):
+                raise HostRuntimeError(f"task reconciliation {label} is invalid")
+        if type(outcome) is not str or outcome not in {"succeeded", "failed", "unresolved"}:
             raise HostRuntimeError("unsupported task reconciliation outcome")
+        if outcome != "succeeded" and result is not None:
+            raise HostRuntimeError("only a succeeded reconciliation may include a result")
         try:
             payload = {
                 "task_id": task_id,
