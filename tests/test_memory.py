@@ -186,7 +186,7 @@ class SQLiteMemoryStoreTests(unittest.TestCase):
                 db.execute("UPDATE memories SET updated_at=? WHERE memory_id=?",
                            ("2026-01-01T00:00:00+00:00", older.memory_id))
                 db.execute("UPDATE memories SET updated_at=? WHERE memory_id=?",
-                           ("2026-11-06T00:00:00+00:00", newer.memory_id))
+                           ("2026-06-01T02:00:00+02:00", newer.memory_id))
                 db.execute("UPDATE memories SET updated_at=? WHERE memory_id=?",
                            ("2026-11-06T00:00:00+00:00", other_scope.memory_id))
             finally:
