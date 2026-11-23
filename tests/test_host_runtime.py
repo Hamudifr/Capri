@@ -182,6 +182,50 @@ class CapriHostRuntimeTests(unittest.TestCase):
         self.assertEqual(resolved.result, ({"ok": True},))
         self.assertEqual(verified[-1][0], "alice")
 
+    def test_reconciliation_rejects_noncanonical_results_before_evidence_check(self):
+        permissions = {"alice": {"task.reconcile.owned"}}
+        authority = HostAuthorityResolver(
+            authenticate=lambda credential: "alice" if credential == "alice-token" else None,
+            permissions_for=lambda principal_id: permissions[principal_id],
+        )
+        verified = []
+        def verify(*args):
+            verified.append(args)
+            return True
+
+        worker = TaskWorker(TaskEngine(
+            self.task_store, {}, "worker",
+            principal_handlers={"collect": lambda data, key, principal: (_ for _ in ()).throw(RuntimeError("uncertain"))},
+        ))
+        host = self.make_host(
+            authority=authority,
+            task_worker=worker,
+            task_reconciliation_verifier=verify,
+        )
+        task = host.create_task("alice-token", [{"tool": "collect", "input": {}}])
+        worker.run_once()
+
+        with self.assertRaises(HostRuntimeError):
+            host.reconcile_task(
+                "alice-token", task.task_id, "decision-int-key", "succeeded",
+                "evidence://verified", {1: "noncanonical"},
+            )
+        nested = {"value": None}
+        cursor = nested
+        for _ in range(18):
+            cursor["value"] = {"value": None}
+            cursor = cursor["value"]
+        with self.assertRaises(HostRuntimeError):
+            host.reconcile_task(
+                "alice-token", task.task_id, "decision-deep", "succeeded",
+                "evidence://verified", nested,
+            )
+        self.assertEqual(verified, [])
+        self.assertEqual(
+            host.get_task("alice-token", task.task_id).state,
+            "reconciliation_required",
+        )
+
     def test_reconciliation_is_unavailable_without_explicit_permission_or_verifier(self):
         worker = TaskWorker(TaskEngine(
             self.task_store, {}, "worker",
