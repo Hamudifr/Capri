@@ -8,7 +8,8 @@ The current memory subsystem has two provider paths: `SQLiteMemoryStore` for pri
 
 The local SQLite store supports:
 - create and retrieve records with source, confidence, scope, type, explicit non-sensitive classification, tags, retention, timestamps, and expiry metadata;
-- deterministic token-AND search with bounded offset pagination and exact provenance fields;
+- deterministic token-AND search with bounded offset pagination, exact provenance,
+  optional exact-scope filtering, and a timezone-aware `updated_after` cutoff;
 - corrections as new records linked to the prior record, which is archived rather than silently overwritten;
 - controlled tags from the project's six-tag vocabulary;
 - explicit archive and physical content deletion (with a minimal ID-only deletion event);
@@ -38,13 +39,20 @@ The local SQLite store supports:
 ## Example
 
 ```python
+from datetime import datetime, timezone
+
 from capri_runtime import (
     SQLiteMemoryStore,
     build_untrusted_memory_context,
 )
 
 store = SQLiteMemoryStore("/private/capri/memory.sqlite3")
-memory_context = build_untrusted_memory_context(store, "tool permission boundaries")
+memory_context = build_untrusted_memory_context(
+    store,
+    "tool permission boundaries",
+    scope="Capri System",
+    updated_after=datetime(2026, 1, 1, tzinfo=timezone.utc),
+)
 # Pass memory_context separately to ToolOrchestrator.run(..., memory_context=memory_context).
 record = store.create(
     title="Tool trust boundary",
