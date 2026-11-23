@@ -24,6 +24,30 @@ class HostRuntimeError(Exception):
     """A trusted host composition or memory-resolution operation failed."""
 
 
+def _assert_reconciliation_json(value: Any, depth: int = 0) -> None:
+    """Mirror the task store's strict JSON-value contract before callbacks."""
+    if depth > 16:
+        raise ValueError("JSON nesting exceeds 16 levels")
+    if value is None or type(value) in (bool, int, float):
+        return
+    if type(value) is str:
+        if any(0xD800 <= ord(character) <= 0xDFFF for character in value):
+            raise ValueError("JSON strings must contain Unicode scalar values")
+        return
+    if type(value) is list:
+        for child in value:
+            _assert_reconciliation_json(child, depth + 1)
+        return
+    if type(value) is dict:
+        for key, child in value.items():
+            if type(key) is not str:
+                raise ValueError("JSON object keys must be strings")
+            _assert_reconciliation_json(key, depth + 1)
+            _assert_reconciliation_json(child, depth + 1)
+        return
+    raise ValueError("value contains a non-JSON type")
+
+
 class PrincipalBoundSessionStore(SessionStore):
     """SessionStore facade that binds every operation to one principal.
 
@@ -264,7 +288,10 @@ class CapriHostRuntime:
             raise HostRuntimeError("unsupported task reconciliation outcome")
         if outcome != "succeeded" and result is not None:
             raise HostRuntimeError("only a succeeded reconciliation may include a result")
+        if outcome == "succeeded" and result is not None and type(result) not in (dict, list):
+            raise HostRuntimeError("reconciliation result must be a JSON object or array")
         try:
+            _assert_reconciliation_json(result)
             payload = {
                 "task_id": task_id,
                 "decision_id": decision_id,
