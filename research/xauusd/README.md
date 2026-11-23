@@ -119,3 +119,14 @@ Optional dependencies (not part of Capri's zero-dependency runtime):
 
 No trained checkpoint is included. This prototype does not support real-money
 use.
+
+
+## Training entry point
+
+train.py accepts a prepared CSV with UTC timestamps, close, and numeric
+point-in-time feature columns. It creates chronological 70/15/15 partitions,
+purges forecast-horizon overlap, fits normalization on training history only,
+uses early stopping on validation loss, and evaluates the final holdout once.
+It saves the model, feature order, scaling parameters, horizons and split
+metadata. This is classification validation, not a cost-aware trading
+backtest; the final holdout must remain untouched during further tuning.
