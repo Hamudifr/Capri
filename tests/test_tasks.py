@@ -676,14 +676,14 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         self.assertEqual(second.result, ({"prepared": True}, {"finished": "two"}))
         self.assertEqual(calls[0][1], f"{task.task_id}:0")
 
-    def test_handler_failure_is_suppressed_and_terminal_after_attempt_limit(self):
+    def test_unknown_handler_failure_is_suppressed_and_terminal(self):
         def broken(_data, _key):
             raise RuntimeError("must not leak")
         engine = TaskEngine(self.store, {"prepare": broken}, "worker")
         task = self.store.create([{"tool": "prepare", "input": {}, "max_attempts": 1}], now=NOW)
         result = engine.run_once(now=NOW)
         self.assertEqual(result.state, "failed")
-        self.assertEqual(result.error_code, "handler_failed")
+        self.assertEqual(result.error_code, "handler_outcome_uncertain")
         self.assertNotIn("must not leak", str(result))
 
     def test_uncertain_handler_exception_is_terminal_and_never_replayed(self):
@@ -708,7 +708,11 @@ class SQLiteTaskStoreTests(unittest.TestCase):
 
         self.assertEqual(first.task_id, task.task_id)
         self.assertEqual(first.state, "failed")
-        self.assertEqual(first.error_code, "handler_failed")
+        self.assertEqual(first.error_code, "handler_outcome_uncertain")
+        self.assertEqual(
+            self.store.events(task.task_id)[-1]["error_code"],
+            "handler_outcome_uncertain",
+        )
         self.assertIsNone(second)
         self.assertEqual(effects, ["external-action"])
 
@@ -728,7 +732,11 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         result = engine.run_once(now=NOW)
         self.assertEqual(result.task_id, task.task_id)
         self.assertEqual(result.state, "failed")
-        self.assertEqual(result.error_code, "handler_failed")
+        self.assertEqual(result.error_code, "handler_outcome_uncertain")
+        self.assertEqual(
+            self.store.events(task.task_id)[-1]["error_code"],
+            "handler_outcome_uncertain",
+        )
         self.assertIsNone(engine.run_once(now=NOW + timedelta(seconds=60)))
         self.assertEqual(calls, ["called"])
 

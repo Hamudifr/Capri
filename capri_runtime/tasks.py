@@ -1137,7 +1137,7 @@ class TaskEngine:
             # Unknown exceptions and invalid results may follow a completed
             # external action. Never automatically repeat an uncertain effect.
             return self.store.fail_step(
-                claim, "handler_failed", now=now, retryable=False
+                claim, "handler_outcome_uncertain", now=now, retryable=False
             )
         return self.store.finish_step(claim, result, now=now)
 
