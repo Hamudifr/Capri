@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import stat
 import tempfile
@@ -19,6 +20,17 @@ from typing import Iterable, Literal
 
 Outcome = Literal["verified_success", "verified_failure", "unverified"]
 Split = Literal["train", "validation", "test"]
+
+
+@dataclass(frozen=True)
+class LearningConsent:
+    """A bounded, revocable authorization for one narrowly defined learning use."""
+
+    consent_id: str
+    scope: str
+    policy_version: str
+    evidence_ref: str
+    granted_at: str
 
 
 @dataclass(frozen=True)
@@ -36,6 +48,7 @@ class LearningExample:
     sensitive: bool = False
     source: str = "capri_task"
     schema_version: int = 1
+    consent_id: str = ""
 
 
 class LearningDataError(ValueError):
@@ -157,12 +170,39 @@ class LearningStore:
                     source TEXT NOT NULL,
                     schema_version INTEGER NOT NULL,
                     content_hash TEXT NOT NULL,
+                    consent_id TEXT NOT NULL,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 """
             )
             connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS learning_consents (
+                    consent_id TEXT PRIMARY KEY,
+                    scope TEXT NOT NULL,
+                    policy_version TEXT NOT NULL,
+                    evidence_ref TEXT NOT NULL,
+                    granted_at TEXT NOT NULL,
+                    revoked_at TEXT
+                )
+                """
+            )
+            # Migrate databases created before consent provenance was introduced.
+            columns = {
+                row["name"] for row in connection.execute(
+                    "PRAGMA table_info(learning_examples)"
+                ).fetchall()
+            }
+            if "consent_id" not in columns:
+                connection.execute(
+                    "ALTER TABLE learning_examples "
+                    "ADD COLUMN consent_id TEXT NOT NULL DEFAULT ''"
+                )
+            connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_learning_task ON learning_examples(task_id)"
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_learning_consent ON learning_examples(consent_id)"
             )
 
     def _connect(self) -> sqlite3.Connection:
@@ -180,7 +220,100 @@ class LearningStore:
             connection.close()
 
     @staticmethod
+    def _validate_consent(consent: LearningConsent) -> None:
+        if type(consent) is not LearningConsent:
+            raise LearningDataError("a LearningConsent record is required")
+        fields = (
+            (consent.consent_id, 128, "consent_id"),
+            (consent.scope, 64, "consent scope"),
+            (consent.policy_version, 64, "consent policy_version"),
+            (consent.evidence_ref, 256, "consent evidence_ref"),
+            (consent.granted_at, 64, "consent granted_at"),
+        )
+        for value, limit, label in fields:
+            if (
+                not isinstance(value, str) or not value or len(value) > limit
+                or any(0xD800 <= ord(ch) <= 0xDFFF for ch in value)
+            ):
+                raise LearningDataError(f"{label} must be bounded valid text")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", consent.consent_id):
+            raise LearningDataError("consent_id must be a bounded identifier")
+        if consent.scope != "curated_training_examples":
+            raise LearningDataError("unsupported learning-consent scope")
+        try:
+            granted = datetime.fromisoformat(consent.granted_at.replace("Z", "+00:00"))
+        except ValueError:
+            raise LearningDataError("consent granted_at must be an ISO timestamp") from None
+        if granted.tzinfo is None or granted.utcoffset() is None:
+            raise LearningDataError("consent granted_at must include a timezone")
+
+    def record_consent(self, consent: LearningConsent) -> None:
+        """Persist a narrow consent record without storing subject identity or raw consent text."""
+        self._validate_consent(consent)
+        with self._connection() as connection:
+            connection.execute(
+                """INSERT INTO learning_consents
+                (consent_id, scope, policy_version, evidence_ref, granted_at, revoked_at)
+                VALUES (?, ?, ?, ?, ?, NULL)""",
+                (
+                    consent.consent_id, consent.scope, consent.policy_version,
+                    consent.evidence_ref, consent.granted_at,
+                ),
+            )
+
+    def revoke_consent(self, consent_id: str, revoked_at: str) -> int:
+        """Revoke a consent and delete its source examples in one SQLite transaction.
+
+        Previously exported files cannot be recalled by this local store; their
+        consent_id provenance lets downstream holders identify affected artifacts.
+        """
+        if (
+            not isinstance(consent_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", consent_id)
+        ):
+            raise LearningDataError("consent_id must be a bounded identifier")
+        if not isinstance(revoked_at, str) or not revoked_at or len(revoked_at) > 64:
+            raise LearningDataError("revoked_at must be a bounded ISO timestamp")
+        try:
+            revoked = datetime.fromisoformat(revoked_at.replace("Z", "+00:00"))
+        except ValueError:
+            raise LearningDataError("revoked_at must be an ISO timestamp") from None
+        if revoked.tzinfo is None or revoked.utcoffset() is None:
+            raise LearningDataError("revoked_at must include a timezone")
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT granted_at, revoked_at FROM learning_consents WHERE consent_id=?",
+                (consent_id,),
+            ).fetchone()
+            if row is None:
+                raise LearningDataError("learning consent was not found")
+            if row["revoked_at"] is not None:
+                return 0
+            try:
+                granted = datetime.fromisoformat(row["granted_at"].replace("Z", "+00:00"))
+            except (AttributeError, TypeError, ValueError):
+                raise LearningDataError("stored learning consent timestamp is invalid") from None
+            if granted.tzinfo is None or granted.utcoffset() is None or revoked < granted:
+                raise LearningDataError("revocation must be timezone-aware and not precede consent")
+            connection.execute(
+                "UPDATE learning_consents SET revoked_at=? WHERE consent_id=? AND revoked_at IS NULL",
+                (revoked.isoformat(), consent_id),
+            )
+            cursor = connection.execute(
+                "DELETE FROM learning_examples WHERE consent_id=?", (consent_id,)
+            )
+            return cursor.rowcount
+
+    @staticmethod
     def _validate(example: LearningExample) -> None:
+        if type(example) is not LearningExample:
+            raise LearningDataError("a LearningExample record is required")
+        if (
+            not isinstance(example.consent_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", example.consent_id)
+        ):
+            raise LearningDataError("an explicit consent_id is required")
         if type(example.schema_version) is not int or example.schema_version != 1:
             raise LearningDataError("unsupported schema_version")
         for name in ("example_id", "task_id", "capability", "prompt",
@@ -211,13 +344,21 @@ class LearningStore:
         )
         content_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
         with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            consent = connection.execute(
+                """SELECT scope FROM learning_consents
+                WHERE consent_id=? AND revoked_at IS NULL""",
+                (example.consent_id,),
+            ).fetchone()
+            if consent is None or consent["scope"] != "curated_training_examples":
+                raise LearningDataError("an active matching learning consent is required")
             connection.execute(
                 """
                 INSERT INTO learning_examples (
                     example_id, task_id, capability, prompt, completion, outcome,
                     evidence_ref, quality_score, consent, privacy_reviewed,
-                    sensitive, source, schema_version, content_hash
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    sensitive, source, schema_version, content_hash, consent_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     example.example_id, example.task_id, example.capability,
@@ -225,7 +366,7 @@ class LearningStore:
                     example.evidence_ref, float(example.quality_score),
                     int(example.consent), int(example.privacy_reviewed),
                     int(example.sensitive), example.source, example.schema_version,
-                    content_hash,
+                    content_hash, example.consent_id,
                 ),
             )
 
@@ -257,11 +398,18 @@ class LearningStore:
         with self._connection() as connection:
             rows = connection.execute(
                 """
-                SELECT * FROM learning_examples
-                WHERE outcome = 'verified_success'
-                  AND consent = 1 AND privacy_reviewed = 1 AND sensitive = 0
-                  AND quality_score >= ?
-                ORDER BY created_at, example_id
+                SELECT learning_examples.*, learning_consents.policy_version
+                FROM learning_examples
+                JOIN learning_consents
+                  ON learning_consents.consent_id = learning_examples.consent_id
+                WHERE learning_examples.outcome = 'verified_success'
+                  AND learning_examples.consent = 1
+                  AND learning_examples.privacy_reviewed = 1
+                  AND learning_examples.sensitive = 0
+                  AND learning_examples.quality_score >= ?
+                  AND learning_consents.scope = 'curated_training_examples'
+                  AND learning_consents.revoked_at IS NULL
+                ORDER BY learning_examples.created_at, learning_examples.example_id
                 """,
                 (minimum_quality,),
             ).fetchall()
@@ -295,6 +443,8 @@ class LearningStore:
                         "completion": row["completion"],
                         "evidence_ref": row["evidence_ref"],
                         "quality_score": row["quality_score"],
+                        "consent_id": row["consent_id"],
+                        "consent_policy_version": row["policy_version"],
                         "split": split,
                     }
                     stream.write(json.dumps(payload, ensure_ascii=False) + "\n")
