@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import stat
+import sqlite3
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -72,6 +73,79 @@ class SQLiteSecurityStoreTests(unittest.TestCase):
         self.assertEqual(restored.integrity_check(), "ok")
         self.assertIn(event, restored.events())
         self.assertFalse(restored.consume(grant, self.now))
+
+    def test_backup_rejects_malformed_audit_row_before_publication(self):
+        store = SQLiteSecurityStore(self.path)
+        store.write(AuditEvent(
+            "corrupt-audit", "opaque-bounded-time", "principal-1", "search",
+            "a" * 64, "succeeded", "",
+        ))
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute(
+                "UPDATE audit_events SET argument_digest=? WHERE event_id=?",
+                ("not-a-digest", "corrupt-audit"),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        destination = os.path.join(self.temp.name, "rejected-audit.sqlite3")
+        with self.assertRaises(ToolValidationError):
+            store.backup_to(destination)
+        self.assertFalse(os.path.exists(destination))
+        self.assertFalse(any(
+            name.startswith(".capri-security-backup-")
+            for name in os.listdir(self.temp.name)
+        ))
+
+    def test_backup_rejects_malformed_consumed_approval_before_publication(self):
+        store = SQLiteSecurityStore(self.path)
+        grant = self.grant("corrupt-approval")
+        self.assertTrue(store.consume(grant, self.now))
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute(
+                "UPDATE consumed_approvals SET consumed_at=? WHERE grant_id=?",
+                ("not-a-timestamp", grant.grant_id),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        destination = os.path.join(self.temp.name, "rejected-approval.sqlite3")
+        with self.assertRaises(ToolValidationError):
+            store.backup_to(destination)
+        self.assertFalse(os.path.exists(destination))
+        self.assertFalse(any(
+            name.startswith(".capri-security-backup-")
+            for name in os.listdir(self.temp.name)
+        ))
+
+    def test_backup_rejects_colliding_malformed_replay_row(self):
+        store = SQLiteSecurityStore(self.path)
+        grant = self.grant("collision")
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute(
+                """INSERT INTO consumed_approvals
+                (grant_id, principal_id, tool_name, argument_digest, expires_at, consumed_at)
+                VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    grant.grant_id, grant.principal_id, grant.tool_name,
+                    grant.argument_digest, grant.expires_at, "not-a-timestamp",
+                ),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        # INSERT OR IGNORE hides the malformed colliding row from this return value.
+        self.assertFalse(store.consume(grant, self.now))
+        destination = os.path.join(self.temp.name, "rejected-collision.sqlite3")
+        with self.assertRaises(ToolValidationError):
+            store.backup_to(destination)
+        self.assertFalse(os.path.exists(destination))
 
     def test_backup_refuses_existing_symlink_and_live_database_destinations(self):
         store = SQLiteSecurityStore(self.path)
