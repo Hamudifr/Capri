@@ -384,6 +384,34 @@ class LearningStoreTests(unittest.TestCase):
             manifest["dataset_sha256"],
         )
 
+    def test_bundle_file_is_fsynced_before_atomic_publication(self):
+        self.store.record(example())
+        output = self.root / "durable-bundle.zip"
+        real_fsync = os.fsync
+        real_link = os.link
+        regular_file_fsync_sizes = []
+
+        def tracked_fsync(descriptor):
+            info = os.fstat(descriptor)
+            if stat.S_ISREG(info.st_mode):
+                regular_file_fsync_sizes.append(info.st_size)
+            return real_fsync(descriptor)
+
+        def tracked_link(source, destination, *args, **kwargs):
+            if Path(destination) == output:
+                # One regular-file fsync belongs to the JSONL staging file.
+                # The second must be the completed ZIP archive, before publish.
+                self.assertGreaterEqual(len(regular_file_fsync_sizes), 2)
+            return real_link(source, destination, *args, **kwargs)
+
+        with patch("capri_core.learning.os.fsync", side_effect=tracked_fsync), \\
+             patch("capri_core.learning.os.link", side_effect=tracked_link):
+            result = self.store.export_bundle(output)
+
+        self.assertEqual(result["status"], "active")
+        self.assertGreaterEqual(len(regular_file_fsync_sizes), 2)
+        self.assertTrue(self.store.verify_export(result["export_id"], output)["valid"])
+
     def test_bundle_is_invalidated_when_any_source_consent_is_revoked(self):
         self.store.record(example())
         output = self.root / "revocable.zip"
