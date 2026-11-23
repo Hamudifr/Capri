@@ -246,6 +246,12 @@ class CapriHostRuntime:
             raise HostRuntimeError("no task store is configured")
         if self._task_reconciliation_verifier is None:
             raise HostRuntimeError("no trusted task evidence verifier is configured")
+        # Check immutable task ownership before invoking any host evidence
+        # callback. The store repeats ownership/state checks transactionally
+        # when it records the decision.
+        current = self._task_store.get_for_principal(task_id, context.principal_id)
+        if current.state != "reconciliation_required":
+            raise HostRuntimeError("task does not require reconciliation")
         for value, limit, label in (
             (task_id, 64, "task_id"),
             (decision_id, 128, "decision_id"),
