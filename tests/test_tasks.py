@@ -585,65 +585,37 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         self.assertEqual(len(winners), 1)
         self.assertEqual(winners[0].task_id, task.task_id)
 
-    def test_expired_lease_recovers_with_stable_idempotency_key(self):
+    def test_expired_lease_is_quarantined_instead_of_reclaimed(self):
         task = self.store.create(PLAN, now=NOW)
         first = self.store.claim_next("worker-a", lease_seconds=5, now=NOW)
         self.assertEqual(first.idempotency_key, f"{task.task_id}:0")
-        second = self.store.claim_next(
+        self.assertIsNone(self.store.claim_next(
             "worker-b", lease_seconds=5, now=NOW + timedelta(seconds=6)
-        )
-        self.assertEqual(second.idempotency_key, first.idempotency_key)
-        self.assertEqual(second.attempt, 2)
+        ))
+        record = self.store.get(task.task_id)
+        self.assertEqual(record.state, "reconciliation_required")
+        self.assertEqual(record.error_code, "lease_expired_outcome_uncertain")
+        self.assertEqual(self.store.events(task.task_id)[-1]["state"], "reconciliation_required")
 
-    def test_stale_worker_cannot_commit_after_lease_reclaimed(self):
-        self.store.create(PLAN, now=NOW)
+    def test_stale_worker_cannot_commit_after_expired_lease_is_quarantined(self):
+        task = self.store.create(PLAN, now=NOW)
         old = self.store.claim_next("worker-a", lease_seconds=5, now=NOW)
-        self.store.claim_next("worker-b", lease_seconds=5, now=NOW + timedelta(seconds=6))
+        self.assertIsNone(self.store.claim_next(
+            "worker-b", lease_seconds=5, now=NOW + timedelta(seconds=6)
+        ))
         with self.assertRaises(TaskConflictError):
             self.store.finish_step(old, {"ok": True}, now=NOW + timedelta(seconds=7))
+        self.assertEqual(self.store.get(task.task_id).state, "reconciliation_required")
 
-    def test_stale_claim_rejected_when_same_executor_reclaims_lease(self):
+    def test_expired_lease_with_same_executor_is_not_reclaimed(self):
         task = self.store.create(PLAN, now=NOW)
         old = self.store.claim_next("worker", lease_seconds=5, now=NOW)
-        current = self.store.claim_next(
+        self.assertIsNone(self.store.claim_next(
             "worker", lease_seconds=30, now=NOW + timedelta(seconds=6)
-        )
-        self.assertEqual(current.task_id, task.task_id)
-        self.assertEqual(current.executor_id, old.executor_id)
-        self.assertEqual(current.attempt, old.attempt + 1)
-
-        record_before = self.store.get(task.task_id)
-        events_before = self.store.events(task.task_id)
-        handler_calls = []
-        engine = TaskEngine(
-            self.store,
-            {"prepare": lambda data, key: handler_calls.append((data, key)) or {"ok": True}},
-            "worker",
-        )
-        stale_transitions = (
-            lambda: self.store.validate_claim(old, now=NOW + timedelta(seconds=7)),
-            lambda: self.store.renew_lease(old, now=NOW + timedelta(seconds=7)),
-            lambda: self.store.finish_step(
-                old, {"stale": True}, now=NOW + timedelta(seconds=7)
-            ),
-            lambda: self.store.fail_step(old, now=NOW + timedelta(seconds=7)),
-            lambda: engine.execute_claim(old, now=NOW + timedelta(seconds=7)),
-        )
-        for transition in stale_transitions:
-            with self.assertRaises(TaskConflictError):
-                transition()
-            self.assertEqual(self.store.get(task.task_id), record_before)
-            self.assertEqual(self.store.events(task.task_id), events_before)
-        self.assertEqual(handler_calls, [])
-
-        finished = self.store.finish_step(
-            current, {"current": True}, now=NOW + timedelta(seconds=8)
-        )
-        # PLAN has two steps; finishing the reclaimed first step must queue
-        # the second step rather than mark the whole task succeeded.
-        self.assertEqual(finished.state, "queued")
-        self.assertEqual(finished.current_step, 1)
-        self.assertEqual(finished.result, ({"current": True},))
+        ))
+        self.assertEqual(self.store.get(task.task_id).state, "reconciliation_required")
+        with self.assertRaises(TaskConflictError):
+            self.store.finish_step(old, {"stale": True}, now=NOW + timedelta(seconds=7))
 
     def test_retry_backoff_and_attempt_limit(self):
         task = self.store.create(PLAN, now=NOW)
@@ -682,7 +654,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         engine = TaskEngine(self.store, {"prepare": broken}, "worker")
         task = self.store.create([{"tool": "prepare", "input": {}, "max_attempts": 1}], now=NOW)
         result = engine.run_once(now=NOW)
-        self.assertEqual(result.state, "failed")
+        self.assertEqual(result.state, "reconciliation_required")
         self.assertEqual(result.error_code, "handler_outcome_uncertain")
         self.assertNotIn("must not leak", str(result))
 
@@ -707,7 +679,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         second = engine.run_once(now=NOW + timedelta(seconds=60))
 
         self.assertEqual(first.task_id, task.task_id)
-        self.assertEqual(first.state, "failed")
+        self.assertEqual(first.state, "reconciliation_required")
         self.assertEqual(first.error_code, "handler_outcome_uncertain")
         self.assertEqual(
             self.store.events(task.task_id)[-1]["error_code"],
@@ -731,7 +703,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
 
         result = engine.run_once(now=NOW)
         self.assertEqual(result.task_id, task.task_id)
-        self.assertEqual(result.state, "failed")
+        self.assertEqual(result.state, "reconciliation_required")
         self.assertEqual(result.error_code, "handler_outcome_uncertain")
         self.assertEqual(
             self.store.events(task.task_id)[-1]["error_code"],
