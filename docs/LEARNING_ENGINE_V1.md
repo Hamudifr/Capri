@@ -57,9 +57,20 @@ not a self-modifying hosted model and not an automatic training service.
   without a verifiable consent record remain stored for review but are excluded
   from future exports; they must be explicitly re-admitted under a new consent
   record rather than inheriting the old boolean attestation.
-- Revocation cannot recall files already exported outside this store. Until a
-  dataset manifest/export registry is implemented, downstream holders must
-  invalidate and delete any prior artifact carrying the revoked consent ID.
+- Revocation cannot recall files already exported outside this store.
+  New ZIP bundles contain a versioned manifest, a SHA-256 hash of the JSONL
+  dataset, the bundle's stable export ID, row/split counts, and the contributing
+  consent IDs and policy versions.
+- Each bundle is registered in the same local SQLite store before publication.
+  The registry tracks `publishing`, `active`, `invalidated`, or `failed` state;
+  publication uses a same-directory no-overwrite hard link. A crash or uncertain
+  publication remains non-active and therefore fails closed.
+- Revoking any contributing consent transactionally marks every registered
+  dependent bundle invalidated. `verify_export()` checks registry state,
+  bundle hash, manifest identity, and dataset hash. Downstream consumers must
+  call this verifier against the authoritative store before use; a copied ZIP
+  alone cannot carry or enforce revocation, and an unavailable registry means
+  the bundle must not be treated as verified.
 - This is application-level deletion, not a guarantee of forensic secure
   erasure from filesystem blocks, snapshots, backups, or external copies.
 
