@@ -529,6 +529,8 @@ class LearningStore:
         """
         target = Path(destination)
         _require_private_directory(target.parent)
+        if target.exists() or target.is_symlink():
+            raise FileExistsError(target)
         export_id = str(uuid.uuid4())
         dataset_path = target.parent / f".{target.name}.{export_id}.jsonl"
         descriptor, archive_name = tempfile.mkstemp(
