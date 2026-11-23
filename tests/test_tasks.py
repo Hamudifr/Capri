@@ -1302,7 +1302,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         self.assertEqual(result.state, "succeeded")
         self.assertEqual([call[2] for call in principal_calls], ["alice"])
 
-    def test_legacy_engine_does_not_reclaim_expired_principal_lease(self):
+    def test_legacy_worker_quarantines_expired_principal_lease_without_execution(self):
         task = self.store.create_for_principal(
             "alice",
             [{"tool": "prepare", "input": {"value": "private"}, "max_attempts": 2}],
@@ -1315,7 +1315,6 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             principal_tools=frozenset({"prepare"}),
         )
         self.assertEqual(original.task_id, task.task_id)
-        before_events = self.store.events(task.task_id)
 
         legacy_engine = TaskEngine(
             self.store,
@@ -1323,19 +1322,9 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             "legacy-worker",
         )
         self.assertIsNone(legacy_engine.run_once(now=NOW + timedelta(seconds=6)))
-        connection = self.store._connect()
-        try:
-            state_after_legacy_poll = connection.execute(
-                "SELECT state,attempts,lease_owner,lease_until FROM tasks WHERE task_id=?",
-                (task.task_id,),
-            ).fetchone()
-        finally:
-            connection.close()
-        self.assertEqual(
-            state_after_legacy_poll,
-            ("running", 1, "principal-worker", original.lease_until),
-        )
-        self.assertEqual(self.store.events(task.task_id), before_events)
+        record = self.store.get_for_principal(task.task_id, "alice")
+        self.assertEqual(record.state, "reconciliation_required")
+        self.assertEqual(record.error_code, "lease_expired_outcome_uncertain")
 
         principal_engine = TaskEngine(
             self.store,
@@ -1343,8 +1332,11 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             "principal-worker-2",
             principal_handlers={"prepare": lambda data, key, principal: {"principal": principal}},
         )
-        result = principal_engine.run_once(now=NOW + timedelta(seconds=6))
-        self.assertEqual(result.state, "succeeded")
+        self.assertIsNone(principal_engine.run_once(now=NOW + timedelta(seconds=7)))
+        self.assertEqual(
+            self.store.get_for_principal(task.task_id, "alice").state,
+            "reconciliation_required",
+        )
 
     def test_unsupported_worker_processes_cancelled_principal_task_without_handler(self):
         task = self.store.create_for_principal(
