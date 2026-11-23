@@ -22,7 +22,7 @@ bool useYield = input.bool(false, "Use nominal US 10Y yield filter (not real yie
 string yieldSymbol = input.symbol("TVC:US10Y", "US 10Y yield symbol", group=GROUP_FILTER)
 
 string GROUP_SIGNAL = "Signal controls"
-int minScore = input.int(3, "Minimum absolute score", minval=1, maxval=4, group=GROUP_SIGNAL)
+int minScore = input.int(2, "Minimum absolute score", minval=1, maxval=4, group=GROUP_SIGNAL)
 bool showLevels = input.bool(true, "Show prior confirmed swing levels", group=GROUP_SIGNAL)
 int pivotLen = input.int(5, "Swing confirmation bars", minval=2, group=GROUP_SIGNAL)
 
