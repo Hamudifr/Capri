@@ -39,6 +39,44 @@ class LearningStoreTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def test_migrates_legacy_learning_database_for_consent_provenance(self):
+        legacy_path = self.root / "legacy-learning.sqlite3"
+        connection = sqlite3.connect(legacy_path)
+        try:
+            connection.execute(
+                """CREATE TABLE learning_examples (
+                    example_id TEXT PRIMARY KEY, task_id TEXT NOT NULL,
+                    capability TEXT NOT NULL, prompt TEXT NOT NULL,
+                    completion TEXT NOT NULL, outcome TEXT NOT NULL,
+                    evidence_ref TEXT NOT NULL, quality_score REAL NOT NULL,
+                    consent INTEGER NOT NULL, privacy_reviewed INTEGER NOT NULL,
+                    sensitive INTEGER NOT NULL, source TEXT NOT NULL,
+                    schema_version INTEGER NOT NULL, content_hash TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )"""
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        os.chmod(legacy_path, 0o600)
+
+        migrated = LearningStore(legacy_path)
+        connection = sqlite3.connect(legacy_path)
+        try:
+            columns = {
+                row[1] for row in connection.execute(
+                    "PRAGMA table_info(learning_examples)"
+                ).fetchall()
+            }
+            consent_table = connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='learning_consents'"
+            ).fetchone()
+        finally:
+            connection.close()
+        self.assertIn("consent_id", columns)
+        self.assertIsNotNone(consent_table)
+        self.assertEqual(migrated.counts(), {})
+
     def test_rejects_example_without_active_consent_record(self):
         with self.assertRaises(LearningDataError):
             self.store.record(example(consent_id="unknown-consent"))
