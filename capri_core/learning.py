@@ -619,7 +619,7 @@ class LearningStore:
             os.unlink(archive_name)
             _fsync_directory(target.parent)
             with self._connection() as connection:
-                cursor = connection.execute(
+                connection.execute(
                     "UPDATE learning_exports SET status='active' "
                     "WHERE export_id=? AND status='publishing'",
                     (export_id,),
@@ -633,7 +633,7 @@ class LearningStore:
                 "bundle_sha256": bundle_sha256,
                 "status": status,
                 "path": str(target),
-                "row_count": len(rows),
+                "row_count": row_count,
                 "split_counts": manifest["split_counts"],
             }
         except Exception:
