@@ -19,12 +19,12 @@ def make_direction_labels(
     Invalid rows receive -1 and must be excluded from loss/evaluation.
     """
     prices = np.asarray(close, dtype=np.float64)
+    if not horizons or any(not isinstance(h, int) or h <= 0 for h in horizons):
+        raise ValueError("horizons must contain positive integer bar counts")
     if prices.ndim != 1 or prices.size < lookback + max(horizons) + 2:
         raise ValueError("close must be 1-D and long enough for lookback/horizons")
     if not np.isfinite(prices).all() or np.any(prices <= 0):
         raise ValueError("close prices must be finite and positive")
-    if not horizons or any(h <= 0 for h in horizons):
-        raise ValueError("horizons must contain positive bar counts")
     if lookback < 2 or volatility_multiplier < 0 or minimum_return < 0:
         raise ValueError("invalid threshold configuration")
     returns = np.full(prices.size, np.nan, dtype=np.float64)
