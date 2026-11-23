@@ -1,8 +1,8 @@
 import hashlib
 import json
 import os
-import stat
 import sqlite3
+import stat
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -156,7 +156,8 @@ class SQLiteSecurityStoreTests(unittest.TestCase):
         valid_expiry = (self.now + timedelta(minutes=5)).isoformat()
         valid_consumed = self.now.isoformat()
         invalid_rows = (
-            ("bad-tool", "not-a-digest", valid_expiry, valid_consumed),
+            ("BadTool", "a" * 64, valid_expiry, valid_consumed),
+            ("delete_item", "not-a-digest", valid_expiry, valid_consumed),
             ("delete_item", "a" * 64, "2026-11-06T12:05:00", valid_consumed),
             ("delete_item", "a" * 64, valid_expiry, "2026-11-06T12:00:00"),
             ("delete_item", "a" * 64, self.now.isoformat(), valid_consumed),
@@ -188,6 +189,7 @@ class SQLiteSecurityStoreTests(unittest.TestCase):
                     name.startswith(".capri-security-backup-")
                     for name in os.listdir(case_dir)
                 ))
+
     def test_backup_refuses_existing_symlink_and_live_database_destinations(self):
         store = SQLiteSecurityStore(self.path)
         with self.assertRaises(ToolValidationError):
