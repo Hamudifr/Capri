@@ -52,5 +52,18 @@ class PineScoreCapacityTests(unittest.TestCase):
         )
 
 
+    def test_rule_based_indicator_does_not_brand_itself_as_ai(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "research" / "xauusd" / "Gold_Intelligence_v1.pine").read_text(encoding="utf-8")
+
+        shorttitle = re.search(r'shorttitle\s*=\s*"([^"]+)"', source)
+        self.assertIsNotNone(shorttitle, "indicator must declare a short title")
+        self.assertNotIn(
+            "AI",
+            shorttitle.group(1).upper(),
+            "a rule-based score with no trained model must not be branded as AI",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
