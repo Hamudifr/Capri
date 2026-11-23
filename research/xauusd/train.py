@@ -137,6 +137,13 @@ def main():
     train_idx, validation_idx, test_idx, train_cut = chronological_endpoints(
         len(frame), args.sequence_length, horizons
     )
+    # The label builder intentionally marks early rows invalid until its
+    # trailing-volatility window exists. Never pass its -1 sentinel to loss.
+    train_idx = train_idx[valid[train_idx].all(axis=1)]
+    validation_idx = validation_idx[valid[validation_idx].all(axis=1)]
+    test_idx = test_idx[valid[test_idx].all(axis=1)]
+    if min(len(train_idx), len(validation_idx), len(test_idx)) == 0:
+        raise ValueError("not enough fully labelled samples after purging")
     # Fit normalization only on the raw training period and freeze it thereafter.
     fit_end = int(train_idx[-1]) + 1
     mean = raw_features[:fit_end].mean(axis=0)
