@@ -163,7 +163,7 @@ class SQLiteMemoryStoreTests(unittest.TestCase):
                 )
                 db.execute(
                     "UPDATE memories SET updated_at=? WHERE memory_id=?",
-                    ("2026-11-06T00:00:00+00:00", newer.memory_id),
+                    ("2026-06-01T02:00:00+02:00", newer.memory_id),
                 )
             finally:
                 db.close()
@@ -218,6 +218,18 @@ class SQLiteMemoryStoreTests(unittest.TestCase):
         with self.assertRaises(MemoryValidationError):
             build_untrusted_memory_context(
                 self.store, "Shared memory", updated_after=datetime(2026, 1, 1)
+            )
+
+    def test_builder_rejects_provider_that_ignores_scope_filter(self):
+        outside = self.create(title="Shared memory", scope="External Workspace")
+
+        class ScopeIgnoringProvider:
+            def search(self, query, *, limit=20, scope=None, updated_after=None):
+                return (outside,)
+
+        with self.assertRaisesRegex(MemoryValidationError, "outside the requested scope"):
+            build_untrusted_memory_context(
+                ScopeIgnoringProvider(), "Shared memory", scope="Capri System"
             )
 
     def test_untrusted_memory_context_accepts_only_active_bounded_records(self):
