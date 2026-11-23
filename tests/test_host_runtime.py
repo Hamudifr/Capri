@@ -136,7 +136,10 @@ class CapriHostRuntimeTests(unittest.TestCase):
         verified = []
         def verify(actor, task_id, decision_id, outcome, evidence_ref, payload):
             verified.append((actor, task_id, decision_id, outcome, evidence_ref, payload))
-            return evidence_ref == "evidence://verified/task-1"
+            return (actor == "alice" and task_id == task.task_id
+                    and evidence_ref == "evidence://verified/task-1"
+                    and payload["decision_id"] == decision_id
+                    and payload["outcome"] == outcome)
 
         worker = TaskWorker(TaskEngine(
             self.task_store,
