@@ -66,8 +66,9 @@ class CapriHostRuntimeTests(unittest.TestCase):
         self.temp.cleanup()
 
     def make_host(self, **kwargs):
+        authority = kwargs.pop("authority", self.authority)
         return CapriHostRuntime(
-            self.authority,
+            authority,
             self.store,
             self.orchestrator,
             task_store=self.task_store,
@@ -118,6 +119,84 @@ class CapriHostRuntimeTests(unittest.TestCase):
         with self.assertRaises(HostRuntimeError):
             host.create_task(
                 "alice-token", [{"tool": "not-registered", "input": {}}]
+            )
+
+    def test_reconciliation_requires_permission_and_trusted_evidence(self):
+        permissions = {
+            "alice": {"task.reconcile.owned"},
+            "bob": {"task.reconcile.owned"},
+        }
+        authority = HostAuthorityResolver(
+            authenticate=lambda credential: {
+                "alice-token": "alice",
+                "bob-token": "bob",
+            }.get(credential),
+            permissions_for=lambda principal_id: permissions[principal_id],
+        )
+        verified = []
+        def verify(actor, task_id, decision_id, outcome, evidence_ref, payload):
+            verified.append((actor, task_id, decision_id, outcome, evidence_ref, payload))
+            return evidence_ref == "evidence://verified/task-1"
+
+        worker = TaskWorker(TaskEngine(
+            self.task_store,
+            {},
+            "worker",
+            principal_handlers={"collect": lambda data, key, principal: (_ for _ in ()).throw(RuntimeError("uncertain"))},
+        ))
+        host = self.make_host(
+            authority=authority,
+            task_worker=worker,
+            task_reconciliation_verifier=verify,
+        )
+        task = host.create_task(
+            "alice-token", [{"tool": "collect", "input": {}}]
+        )
+        worker.run_once()
+        quarantined = host.get_task("alice-token", task.task_id)
+        self.assertEqual(quarantined.state, "reconciliation_required")
+
+        with self.assertRaises(TaskNotFoundError):
+            host.reconcile_task(
+                "bob-token", task.task_id, "decision-1", "succeeded",
+                "evidence://verified/task-1", {"ok": True},
+            )
+        self.assertEqual(verified, [])
+
+        with self.assertRaises(HostRuntimeError):
+            host.reconcile_task(
+                "alice-token", task.task_id, "decision-1", "succeeded",
+                "evidence://unverified", {"ok": True},
+            )
+        self.assertEqual(len(verified), 1)
+        self.assertEqual(host.get_task("alice-token", task.task_id).state, "reconciliation_required")
+
+        resolved = host.reconcile_task(
+            "alice-token", task.task_id, "decision-1", "succeeded",
+            "evidence://verified/task-1", {"ok": True},
+        )
+        self.assertEqual(resolved.state, "succeeded")
+        self.assertEqual(resolved.result, ({"ok": True},))
+        self.assertEqual(verified[-1][0], "alice")
+
+    def test_reconciliation_is_unavailable_without_explicit_permission_or_verifier(self):
+        worker = TaskWorker(TaskEngine(
+            self.task_store, {}, "worker",
+            principal_handlers={"collect": lambda data, key, principal: {"ok": True}},
+        ))
+        host = self.make_host(task_worker=worker)
+        with self.assertRaises(HostRuntimeError):
+            host.reconcile_task(
+                "alice-token", "task-id", "decision-1", "failed", "evidence://x"
+            )
+        authority = HostAuthorityResolver(
+            authenticate=lambda credential: "alice" if credential == "alice-token" else None,
+            permissions_for=lambda principal_id: {"task.reconcile.owned"},
+        )
+        host_without_verifier = self.make_host(authority=authority, task_worker=worker)
+        with self.assertRaises(HostRuntimeError):
+            host_without_verifier.reconcile_task(
+                "alice-token", "task-id", "decision-1", "failed", "evidence://x"
             )
 
     def test_task_creation_rejects_hostile_plan_containers_before_inspection(self):
