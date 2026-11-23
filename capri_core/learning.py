@@ -545,15 +545,21 @@ class LearningStore:
                 minimum_quality=minimum_quality,
                 allowed_capabilities=allowed_capabilities,
             )
-            dataset_bytes = dataset_path.read_bytes()
-            dataset_sha256 = hashlib.sha256(dataset_bytes).hexdigest()
-            rows = [
-                json.loads(line)
-                for line in dataset_bytes.decode("utf-8").splitlines()
-                if line
-            ]
-            consent_ids = sorted({row["consent_id"] for row in rows})
-            policy_versions = sorted({row["consent_policy_version"] for row in rows})
+            dataset_digest = hashlib.sha256()
+            consent_ids_set: set[str] = set()
+            policy_versions_set: set[str] = set()
+            row_count = 0
+            with dataset_path.open("rb") as stream:
+                for line in stream:
+                    dataset_digest.update(line)
+                    if line.strip():
+                        row = json.loads(line.decode("utf-8"))
+                        consent_ids_set.add(row["consent_id"])
+                        policy_versions_set.add(row["consent_policy_version"])
+                        row_count += 1
+            dataset_sha256 = dataset_digest.hexdigest()
+            consent_ids = sorted(consent_ids_set)
+            policy_versions = sorted(policy_versions_set)
             created_at = datetime.now().astimezone().isoformat()
             manifest = {
                 "manifest_version": 1,
@@ -561,7 +567,7 @@ class LearningStore:
                 "created_at": created_at,
                 "dataset_file": "dataset.jsonl",
                 "dataset_sha256": dataset_sha256,
-                "row_count": len(rows),
+                "row_count": row_count,
                 "split_counts": {key: counts[key] for key in ("train", "validation", "test")},
                 "consent_ids": consent_ids,
                 "consent_policy_versions": policy_versions,
@@ -571,10 +577,13 @@ class LearningStore:
                 + "\n"
             ).encode("utf-8")
             with zipfile.ZipFile(archive_name, "w", compression=zipfile.ZIP_STORED) as archive:
-                archive.writestr("dataset.jsonl", dataset_bytes)
+                archive.write(dataset_path, "dataset.jsonl")
                 archive.writestr("manifest.json", manifest_bytes)
+            bundle_digest = hashlib.sha256()
             with open(archive_name, "rb") as stream:
-                bundle_sha256 = hashlib.sha256(stream.read()).hexdigest()
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    bundle_digest.update(chunk)
+            bundle_sha256 = bundle_digest.hexdigest()
 
             # Reserve the registry row only if every referenced consent is still active.
             with self._connection() as connection:
@@ -668,18 +677,24 @@ class LearningStore:
             _require_private_directory(path.parent)
             if path.is_symlink() or not path.is_file():
                 return {"valid": False, "reason": "missing_or_unsafe_bundle", "status": record["status"]}
-            bundle_bytes = path.read_bytes()
-            actual_bundle_hash = hashlib.sha256(bundle_bytes).hexdigest()
+            bundle_digest = hashlib.sha256()
+            with path.open("rb") as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    bundle_digest.update(chunk)
+            actual_bundle_hash = bundle_digest.hexdigest()
             if actual_bundle_hash != record["bundle_sha256"]:
                 return {"valid": False, "reason": "bundle_hash_mismatch", "status": record["status"]}
             with zipfile.ZipFile(path, "r") as archive:
                 if set(archive.namelist()) != {"dataset.jsonl", "manifest.json"}:
                     return {"valid": False, "reason": "unexpected_bundle_members", "status": record["status"]}
                 manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
-                dataset = archive.read("dataset.jsonl")
+                dataset_digest = hashlib.sha256()
+                with archive.open("dataset.jsonl", "r") as dataset_stream:
+                    for chunk in iter(lambda: dataset_stream.read(1024 * 1024), b""):
+                        dataset_digest.update(chunk)
             if manifest.get("export_id") != export_id:
                 return {"valid": False, "reason": "manifest_identity_mismatch", "status": record["status"]}
-            if hashlib.sha256(dataset).hexdigest() != manifest.get("dataset_sha256"):
+            if dataset_digest.hexdigest() != manifest.get("dataset_sha256"):
                 return {"valid": False, "reason": "dataset_hash_mismatch", "status": record["status"]}
         except (OSError, ValueError, zipfile.BadZipFile, KeyError, UnicodeDecodeError):
             return {"valid": False, "reason": "unreadable_bundle", "status": record["status"]}
