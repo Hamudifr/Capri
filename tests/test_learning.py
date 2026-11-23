@@ -55,6 +55,15 @@ class LearningStoreTests(unittest.TestCase):
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )"""
             )
+            connection.execute(
+                """INSERT INTO learning_examples
+                (example_id, task_id, capability, prompt, completion, outcome,
+                 evidence_ref, quality_score, consent, privacy_reviewed, sensitive,
+                 source, schema_version, content_hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                ("legacy-001", "legacy-task", "research", "old prompt", "old completion",
+                 "verified_success", "test://legacy/001", 0.99, 1, 1, 0, "capri_task", 1, "a" * 64),
+            )
             connection.commit()
         finally:
             connection.close()
@@ -75,7 +84,11 @@ class LearningStoreTests(unittest.TestCase):
             connection.close()
         self.assertIn("consent_id", columns)
         self.assertIsNotNone(consent_table)
-        self.assertEqual(migrated.counts(), {})
+        self.assertEqual(migrated.counts(), {"verified_success": 1})
+        output = self.root / "legacy-export.jsonl"
+        counts = migrated.export_jsonl(output)
+        self.assertEqual(sum(counts[name] for name in ("train", "validation", "test")), 0)
+        self.assertEqual(output.read_text(), "")
 
     def test_rejects_example_without_active_consent_record(self):
         with self.assertRaises(LearningDataError):
