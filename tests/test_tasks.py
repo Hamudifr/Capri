@@ -732,6 +732,29 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             ["queued", "running", "reconciliation_required", "succeeded"],
         )
 
+    def test_expired_principal_lease_is_quarantined_even_with_cancel_request(self):
+        task = self.store.create_for_principal(
+            "alice",
+            [{"tool": "prepare", "input": {}, "max_attempts": 3}],
+            now=NOW,
+        )
+        claim = self.store.claim_next(
+            "worker", lease_seconds=5, now=NOW,
+            principal_tools=frozenset({"prepare"}),
+        )
+        self.store.request_cancel_for_principal(
+            task.task_id, "alice", now=NOW + timedelta(seconds=1)
+        )
+        self.assertIsNone(self.store.claim_next(
+            "worker-2", lease_seconds=5, now=NOW + timedelta(seconds=6),
+            principal_tools=frozenset({"prepare"}),
+        ))
+        record = self.store.get_for_principal(task.task_id, "alice")
+        self.assertEqual(record.state, "reconciliation_required")
+        self.assertTrue(record.cancel_requested)
+        backup_path = os.path.join(self.temp.name, "cancelled-uncertain-backup.sqlite3")
+        self.assertEqual(self.store.backup_to(backup_path), backup_path)
+
     def test_unresolved_decision_keeps_task_quarantined_until_new_resolution(self):
         task = self.store.create_for_principal(
             "alice",
@@ -810,7 +833,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
 
         result = engine.run_once(now=NOW)
         self.assertEqual(result.task_id, task.task_id)
-        self.assertEqual(result.state, "failed")
+        self.assertEqual(result.state, "reconciliation_required")
         self.assertEqual(result.error_code, "handler_outcome_uncertain")
         self.assertEqual(
             self.store.events(task.task_id)[-1]["error_code"],
