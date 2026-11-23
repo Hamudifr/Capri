@@ -169,7 +169,7 @@ def _validate_persisted_attempts(
         valid = attempts == 0
     elif state == "retry_wait":
         valid = max_attempts is not None and 1 <= attempts < max_attempts
-    elif state == "running":
+    elif state in {"running", "reconciliation_required"}:
         valid = max_attempts is not None and 1 <= attempts <= max_attempts
     else:
         valid = False
@@ -316,6 +316,16 @@ class SQLiteTaskStore:
                 connection.execute("""CREATE TRIGGER IF NOT EXISTS task_owner_immutable_delete
                     BEFORE DELETE ON task_owners
                     BEGIN SELECT RAISE(ABORT, 'task ownership is immutable'); END""")
+                connection.execute("""CREATE TABLE IF NOT EXISTS task_reconciliations (
+                    task_id TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE RESTRICT,
+                    decision_id TEXT NOT NULL,
+                    principal_id TEXT NOT NULL,
+                    outcome TEXT NOT NULL,
+                    request_digest TEXT NOT NULL,
+                    evidence_ref TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY(task_id, decision_id)
+                )""")
                 connection.execute("CREATE INDEX IF NOT EXISTS task_ready_idx ON tasks(state, available_at, created_at)")
                 connection.execute("CREATE INDEX IF NOT EXISTS task_owner_principal_idx ON task_owners(principal_id, task_id)")
             finally:
@@ -481,7 +491,13 @@ class SQLiteTaskStore:
                 if state in {"succeeded", "failed", "cancelled"}:
                     connection.execute("COMMIT")
                     return self.get(task_id)
-                if state in {"queued", "retry_wait"}:
+                if state == "reconciliation_required":
+                    connection.execute(
+                        "UPDATE tasks SET cancel_requested=1,updated_at=? WHERE task_id=?",
+                        (stamp, task_id),
+                    )
+                    new_state = "reconciliation_required"
+                elif state in {"queued", "retry_wait"}:
                     connection.execute(
                         "UPDATE tasks SET state='cancelled',cancel_requested=1,updated_at=?,lease_owner=NULL,lease_until=NULL WHERE task_id=?",
                         (stamp, task_id),
@@ -543,7 +559,7 @@ class SQLiteTaskStore:
                         return 1
                     if type(step_index) is not int or not 0 <= step_index <= len(plan):
                         return 1
-                    if cancel_requested:
+                    if cancel_requested and state != "running":
                         return 1
                     if step_index == len(plan):
                         return 1
@@ -582,6 +598,28 @@ class SQLiteTaskStore:
                 rows = connection.execute(query, params).fetchall()
                 for task_id, state, plan_json, index, attempts, cancel, principal_id in rows:
                     plan = _decode_persisted_plan(plan_json)
+                    # An expired running lease cannot prove whether a handler's
+                    # external side effect happened. Never reclaim it automatically.
+                    if state == "running":
+                        if type(index) is not int or not 0 <= index < len(plan):
+                            raise TaskValidationError("persisted task progress is corrupt")
+                        _validate_persisted_attempts(
+                            state, attempts, plan[index]["max_attempts"]
+                        )
+                        connection.execute(
+                            """UPDATE tasks SET state='reconciliation_required',
+                            error_code='lease_expired_outcome_uncertain',updated_at=?,
+                            lease_owner=NULL,lease_until=NULL WHERE task_id=?""",
+                            (stamp, task_id),
+                        )
+                        connection.execute(
+                            """INSERT INTO task_events(
+                            task_id,timestamp,state,step_index,attempt,error_code
+                            ) VALUES(?,?,'reconciliation_required',?,?,
+                            'lease_expired_outcome_uncertain')""",
+                            (task_id, stamp, index, attempts),
+                        )
+                        continue
                     if cancel:
                         # Cancellation is maintenance, not permission to accept corrupt
                         # lifecycle metadata. Validate the active step before recording
@@ -615,16 +653,6 @@ class SQLiteTaskStore:
                     _validate_persisted_attempts(
                         state, attempts, step["max_attempts"]
                     )
-                    if state == "running" and attempts == step["max_attempts"]:
-                        connection.execute(
-                            "UPDATE tasks SET state='failed',error_code='lease_expired',updated_at=?,lease_owner=NULL,lease_until=NULL WHERE task_id=?",
-                            (stamp, task_id),
-                        )
-                        connection.execute(
-                            "INSERT INTO task_events(task_id,timestamp,state,step_index,attempt,error_code) VALUES(?,?,'failed',?,?,'lease_expired')",
-                            (task_id, stamp, index, attempts),
-                        )
-                        continue
                     if (
                         principal_id is not None
                         and step["tool"] not in principal_tools
@@ -838,6 +866,160 @@ class SQLiteTaskStore:
             finally:
                 connection.close()
 
+    def require_reconciliation(
+        self, claim: TaskClaim, error_code: str = "handler_outcome_uncertain",
+        now: datetime | None = None,
+    ) -> TaskRecord:
+        """Quarantine a started step whose external outcome cannot be proven."""
+        if type(claim) is not TaskClaim:
+            raise TaskValidationError("claim must be a TaskClaim")
+        _text(error_code, "error_code", 64)
+        if not error_code.replace("_", "").isalnum():
+            raise TaskValidationError("error_code must be a simple identifier")
+        stamp = _iso(now or _now())
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    """SELECT tasks.state,tasks.lease_owner,tasks.lease_until,
+                    tasks.current_step,tasks.attempts,tasks.plan_json,
+                    task_owners.principal_id
+                    FROM tasks LEFT JOIN task_owners
+                    ON task_owners.task_id=tasks.task_id WHERE tasks.task_id=?""",
+                    (claim.task_id,),
+                ).fetchone()
+                if not row:
+                    raise TaskNotFoundError("task does not exist")
+                self._assert_claim_matches(claim, row, stamp)
+                connection.execute(
+                    """UPDATE tasks SET state='reconciliation_required',error_code=?,
+                    updated_at=?,lease_owner=NULL,lease_until=NULL WHERE task_id=?""",
+                    (error_code, stamp, claim.task_id),
+                )
+                connection.execute(
+                    """INSERT INTO task_events(
+                    task_id,timestamp,state,step_index,attempt,error_code
+                    ) VALUES(?,?,'reconciliation_required',?,?,?)""",
+                    (claim.task_id, stamp, claim.step_index, claim.attempt, error_code),
+                )
+                connection.execute("COMMIT")
+                return self.get(claim.task_id)
+            except Exception:
+                try:
+                    connection.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+                raise
+            finally:
+                connection.close()
+
+    def reconcile_for_principal(
+        self, task_id: str, principal_id: str, decision_id: str,
+        outcome: str, evidence_ref: str, result: Any = None,
+        now: datetime | None = None,
+    ) -> TaskRecord:
+        """Record an owner-scoped, idempotent resolution of uncertain work."""
+        _text(task_id, "task_id", 64)
+        _text(principal_id, "principal_id", 128)
+        _text(decision_id, "decision_id", 128)
+        _text(evidence_ref, "evidence_ref", 512)
+        if outcome not in {"succeeded", "failed", "unresolved"}:
+            raise TaskValidationError("unsupported reconciliation outcome")
+        if outcome == "succeeded":
+            _, decoded_result = _json(result, label="reconciliation result")
+        else:
+            if result is not None:
+                raise TaskValidationError("only a succeeded decision may include a result")
+            decoded_result = None
+        request_json = _json({
+            "outcome": outcome, "evidence_ref": evidence_ref, "result": decoded_result,
+        }, label="reconciliation decision")[0]
+        digest = hashlib.sha256(request_json.encode("utf-8")).hexdigest()
+        stamp = _iso(now or _now())
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    """SELECT tasks.state,tasks.current_step,tasks.attempts,
+                    tasks.plan_json,tasks.results_json,tasks.cancel_requested,
+                    task_owners.principal_id
+                    FROM tasks LEFT JOIN task_owners
+                    ON task_owners.task_id=tasks.task_id WHERE tasks.task_id=?""",
+                    (task_id,),
+                ).fetchone()
+                if not row or row[6] != principal_id:
+                    raise TaskNotFoundError("task does not exist")
+                existing = connection.execute(
+                    """SELECT principal_id,request_digest FROM task_reconciliations
+                    WHERE task_id=? AND decision_id=?""",
+                    (task_id, decision_id),
+                ).fetchone()
+                if existing:
+                    if existing != (principal_id, digest):
+                        raise TaskIdempotencyConflict(
+                            "reconciliation decision ID was reused with different content"
+                        )
+                    connection.execute("COMMIT")
+                    return self.get(task_id)
+                state, index, attempts, plan_json, results_json, cancel, _owner = row
+                if state != "reconciliation_required":
+                    raise TaskConflictError("task does not require reconciliation")
+                plan = _decode_persisted_plan(plan_json)
+                if type(index) is not int or not 0 <= index < len(plan):
+                    raise TaskValidationError("persisted task progress is corrupt")
+                _validate_persisted_attempts(
+                    "reconciliation_required", attempts, plan[index]["max_attempts"]
+                )
+                connection.execute(
+                    """INSERT INTO task_reconciliations(
+                    task_id,decision_id,principal_id,outcome,request_digest,evidence_ref,created_at
+                    ) VALUES(?,?,?,?,?,?,?)""",
+                    (task_id, decision_id, principal_id, outcome, digest, evidence_ref, stamp),
+                )
+                next_state, next_index, next_attempts = state, index, attempts
+                next_results = json.loads(results_json)
+                error_code = "reconciliation_unresolved"
+                if outcome == "succeeded":
+                    next_results.append(decoded_result)
+                    next_index, next_attempts = index + 1, 0
+                    if cancel:
+                        next_state = "cancelled"
+                    elif next_index == len(plan):
+                        next_state = "succeeded"
+                    else:
+                        next_state = "queued"
+                    error_code = None
+                elif outcome == "failed":
+                    next_state = "cancelled" if cancel else "failed"
+                    error_code = "reconciled_failed"
+                connection.execute(
+                    """UPDATE tasks SET state=?,current_step=?,attempts=?,results_json=?,
+                    error_code=?,updated_at=?,available_at=?,lease_owner=NULL,lease_until=NULL
+                    WHERE task_id=?""",
+                    (next_state, next_index, next_attempts,
+                     json.dumps(next_results, ensure_ascii=False, allow_nan=False,
+                                sort_keys=True, separators=(",", ":")),
+                     error_code, stamp, stamp, task_id),
+                )
+                connection.execute(
+                    """INSERT INTO task_events(
+                    task_id,timestamp,state,step_index,attempt,error_code
+                    ) VALUES(?,?,?,?,?,?)""",
+                    (task_id, stamp, next_state, index, attempts, error_code),
+                )
+                connection.execute("COMMIT")
+                return self.get(task_id)
+            except Exception:
+                try:
+                    connection.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+                raise
+            finally:
+                connection.close()
+
     def fail_step(self, claim: TaskClaim, error_code: str = "handler_failed",
                   retry_delay_seconds: int = 5, now: datetime | None = None,
                   retryable: bool = True) -> TaskRecord:
@@ -905,7 +1087,7 @@ class SQLiteTaskStore:
                 connection.close()
 
     def _validate_backup_snapshot(self, connection: sqlite3.Connection) -> None:
-        allowed_states = {"queued", "running", "retry_wait", "succeeded", "failed", "cancelled"}
+        allowed_states = {"queued", "running", "retry_wait", "reconciliation_required", "succeeded", "failed", "cancelled"}
         rows = connection.execute(
             """SELECT task_id,idempotency_key,state,created_at,updated_at,current_step,
             attempts,available_at,cancel_requested,results_json,error_code,plan_json,
@@ -926,7 +1108,7 @@ class SQLiteTaskStore:
                 raise TaskValidationError("backup contains invalid cancellation state")
             if (
                 (row[2] == "cancelled" and row[8] != 1)
-                or (row[8] == 1 and row[2] not in {"running", "cancelled"})
+                or (row[8] == 1 and row[2] not in {"running", "reconciliation_required", "failed", "cancelled"})
             ):
                 raise TaskValidationError("backup contains inconsistent cancellation state")
             if row[10] is not None:
@@ -953,7 +1135,7 @@ class SQLiteTaskStore:
                 or len(record.result) != index
             ):
                 raise TaskValidationError("backup contains invalid task lifecycle progress")
-            if state in {"queued", "retry_wait", "running", "failed"}:
+            if state in {"queued", "retry_wait", "running", "reconciliation_required", "failed"}:
                 if not 0 <= index < len(plan):
                     raise TaskValidationError("backup contains invalid task lifecycle progress")
                 maximum = plan[index]["max_attempts"]
@@ -961,7 +1143,7 @@ class SQLiteTaskStore:
                     valid_attempts = attempts == 0
                 elif state == "retry_wait":
                     valid_attempts = 1 <= attempts < maximum
-                else:  # running and failed retain the current step's final attempt
+                else:  # running, reconciliation_required and failed retain the active attempt
                     valid_attempts = 1 <= attempts <= maximum
             elif state == "succeeded":
                 valid_attempts = index == len(plan) and attempts == 0
@@ -982,6 +1164,26 @@ class SQLiteTaskStore:
             _text(principal_id, "task owner principal_id", 128)
             if task_id not in task_plan_lengths:
                 raise TaskValidationError("backup contains an owner for a missing task")
+        decisions = connection.execute(
+            """SELECT task_id,decision_id,principal_id,outcome,request_digest,evidence_ref,created_at
+            FROM task_reconciliations"""
+        ).fetchall()
+        for task_id, decision_id, principal_id, outcome, digest, evidence_ref, created_at in decisions:
+            _text(task_id, "reconciliation task_id", 64)
+            _text(decision_id, "reconciliation decision_id", 128)
+            _text(principal_id, "reconciliation principal_id", 128)
+            _text(evidence_ref, "reconciliation evidence_ref", 512)
+            _text(created_at, "reconciliation timestamp", 64)
+            _parse_time(created_at)
+            if outcome not in {"succeeded", "failed", "unresolved"}:
+                raise TaskValidationError("backup contains an unsupported reconciliation outcome")
+            if type(digest) is not str or not re.fullmatch(r"[0-9a-f]{64}", digest):
+                raise TaskValidationError("backup contains an invalid reconciliation digest")
+            owner = connection.execute(
+                "SELECT principal_id FROM task_owners WHERE task_id=?", (task_id,)
+            ).fetchone()
+            if not owner or owner[0] != principal_id or task_id not in task_plan_lengths:
+                raise TaskValidationError("backup contains an invalid reconciliation principal")
         events = connection.execute(
             "SELECT task_id,timestamp,state,step_index,attempt,error_code FROM task_events"
         ).fetchall()
@@ -998,7 +1200,7 @@ class SQLiteTaskStore:
                 or type(attempt) is not int
                 or not 0 <= attempt <= step_limits[step_index]
                 or (
-                    state in {"running", "retry_wait", "failed", "succeeded"}
+                    state in {"running", "retry_wait", "reconciliation_required", "failed", "succeeded"}
                     and attempt < 1
                 )
             ):
@@ -1136,8 +1338,8 @@ class TaskEngine:
         except Exception:
             # Unknown exceptions and invalid results may follow a completed
             # external action. Never automatically repeat an uncertain effect.
-            return self.store.fail_step(
-                claim, "handler_outcome_uncertain", now=now, retryable=False
+            return self.store.require_reconciliation(
+                claim, "handler_outcome_uncertain", now=now
             )
         return self.store.finish_step(claim, result, now=now)
 
