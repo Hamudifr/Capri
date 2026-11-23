@@ -4,10 +4,11 @@ import sqlite3
 import stat
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from capri_core.learning import LearningDataError, LearningExample, LearningStore
+from capri_core.learning import LearningConsent, LearningDataError, LearningExample, LearningStore
 
 
 def example(**overrides):
@@ -16,6 +17,7 @@ def example(**overrides):
         prompt="Use the read-only status tool.", completion="Returned the verified status.",
         outcome="verified_success", evidence_ref="test://evidence/001",
         quality_score=0.98, consent=True, privacy_reviewed=True,
+        consent_id="consent-001",
     )
     values.update(overrides)
     return LearningExample(**values)
@@ -26,9 +28,70 @@ class LearningStoreTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         self.store = LearningStore(self.root / "learning.sqlite3")
+        self.store.record_consent(LearningConsent(
+            consent_id="consent-001",
+            scope="curated_training_examples",
+            policy_version="learning-consent-v1",
+            evidence_ref="test://consent/001",
+            granted_at="2026-11-06T11:00:00+00:00",
+        ))
 
     def tearDown(self):
         self.temp.cleanup()
+
+    def test_rejects_example_without_active_consent_record(self):
+        with self.assertRaises(LearningDataError):
+            self.store.record(example(consent_id="unknown-consent"))
+
+    def test_rejects_invalid_consent_scope_and_naive_grant_time(self):
+        invalid_records = (
+            LearningConsent(
+                "bad-scope", "all_data", "v1", "test://consent/bad",
+                "2026-11-06T11:00:00+00:00",
+            ),
+            LearningConsent(
+                "naive-time", "curated_training_examples", "v1",
+                "test://consent/naive", "2026-11-06T11:00:00",
+            ),
+        )
+        for record in invalid_records:
+            with self.subTest(consent_id=record.consent_id):
+                with self.assertRaises(LearningDataError):
+                    self.store.record_consent(record)
+
+    def test_revocation_deletes_examples_and_blocks_future_export(self):
+        self.store.record(example())
+        removed = self.store.revoke_consent(
+            "consent-001", "2026-11-07T12:00:00+00:00"
+        )
+        self.assertEqual(removed, 1)
+        self.assertEqual(self.store.counts(), {})
+        with self.assertRaises(LearningDataError):
+            self.store.record(example(example_id="after-revocation"))
+        output = self.root / "after-revocation.jsonl"
+        counts = self.store.export_jsonl(output)
+        self.assertEqual(sum(counts[name] for name in ("train", "validation", "test")), 0)
+        self.assertEqual(output.read_text(), "")
+        self.assertEqual(
+            self.store.revoke_consent("consent-001", "2026-11-08T12:00:00+00:00"),
+            0,
+        )
+
+    def test_revocation_cannot_precede_consent_grant(self):
+        self.store.record(example())
+        with self.assertRaises(LearningDataError):
+            self.store.revoke_consent(
+                "consent-001", "2026-11-05T12:00:00+00:00"
+            )
+        self.store.record(example(example_id="still-active"))
+
+    def test_export_includes_consent_provenance(self):
+        self.store.record(example())
+        output = self.root / "consent-provenance.jsonl"
+        self.store.export_jsonl(output)
+        rows = [json.loads(line) for line in output.read_text().splitlines()]
+        self.assertEqual(rows[0]["consent_id"], "consent-001")
+        self.assertEqual(rows[0]["consent_policy_version"], "learning-consent-v1")
 
     def test_rejects_missing_consent(self):
         with self.assertRaises(LearningDataError):
