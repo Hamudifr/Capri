@@ -9,6 +9,8 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Event, Thread
 from datetime import datetime, timedelta, timezone
 
+from capri_runtime.tools import ToolCancelledError
+
 from capri_runtime.tasks import (
     SQLiteTaskStore,
     TaskClaim,
@@ -662,6 +664,33 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         self.assertEqual(result.state, "reconciliation_required")
         self.assertEqual(result.error_code, "handler_outcome_uncertain")
         self.assertNotIn("must not leak", str(result))
+
+    def test_tool_cancellation_before_handler_start_is_not_uncertain(self):
+        def cancelled_before_start(_data, _key):
+            raise ToolCancelledError(outcome_uncertain=False)
+
+        engine = TaskEngine(self.store, {"prepare": cancelled_before_start}, "worker")
+        task = self.store.create(
+            [{"tool": "prepare", "input": {}, "max_attempts": 2}], now=NOW
+        )
+        result = engine.run_once(now=NOW)
+        self.assertEqual(result.task_id, task.task_id)
+        self.assertEqual(result.state, "failed")
+        self.assertEqual(result.error_code, "handler_cancelled_before_start")
+        self.assertIsNone(self.store.claim_next("worker-2", now=NOW + timedelta(seconds=60)))
+
+    def test_tool_cancellation_after_handler_start_requires_reconciliation(self):
+        def cancelled_after_start(_data, _key):
+            raise ToolCancelledError(outcome_uncertain=True)
+
+        engine = TaskEngine(self.store, {"prepare": cancelled_after_start}, "worker")
+        task = self.store.create(
+            [{"tool": "prepare", "input": {}, "max_attempts": 2}], now=NOW
+        )
+        result = engine.run_once(now=NOW)
+        self.assertEqual(result.task_id, task.task_id)
+        self.assertEqual(result.state, "reconciliation_required")
+        self.assertEqual(result.error_code, "handler_outcome_uncertain")
 
     def test_uncertain_handler_exception_is_terminal_and_never_replayed(self):
         effects = []
