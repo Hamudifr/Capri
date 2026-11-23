@@ -97,7 +97,8 @@ not a self-modifying hosted model and not an automatic training service.
    training use.
 3. Review and redact the prompt/completion manually; reject sensitive material.
 4. Record the example with a stable ID and evidence reference.
-5. Export a versioned dataset and record its hash and split counts.
+5. Publish a versioned ZIP bundle with a content-hashed manifest and a
+   local consent-dependency registry; verify registry status before downstream use.
 6. Train only when suitable no-cost compute and a compatible open-weight model
    are actually available.
 7. Evaluate against a frozen, untouched holdout set and adjacent safety cases.
