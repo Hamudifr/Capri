@@ -205,8 +205,8 @@ class LearningStore:
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS learning_export_consents (
-                    export_id TEXT NOT NULL REFERENCES learning_exports(export_id),
-                    consent_id TEXT NOT NULL,
+                    export_id TEXT NOT NULL REFERENCES learning_exports(export_id) ON DELETE CASCADE,
+                    consent_id TEXT NOT NULL REFERENCES learning_consents(consent_id),
                     PRIMARY KEY (export_id, consent_id)
                 )
                 """
@@ -236,6 +236,7 @@ class LearningStore:
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database)
         connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
         return connection
 
     @contextmanager
