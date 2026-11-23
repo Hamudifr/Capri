@@ -1,4 +1,4 @@
-"""Durable, bounded task orchestration with leases and at-least-once recovery.
+"""Durable, bounded task orchestration with leases and explicit uncertainty quarantine.
 
 This module is an orchestration primitive, not a model, sandbox, scheduler daemon,
 or permission system. Hosts inject trusted handlers; model-originated side effects
