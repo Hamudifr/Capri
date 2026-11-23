@@ -537,7 +537,8 @@ class LearningStore:
         descriptor, archive_name = tempfile.mkstemp(
             prefix=f".{target.name}.{export_id}.", suffix=".tmp", dir=target.parent
         )
-        os.close(descriptor)
+        # Keep the original O_RDWR descriptor for the archive inode open so the
+        # completed ZIP can be fsynced before its name is published.
         registered = False
         published = False
         try:
@@ -580,6 +581,9 @@ class LearningStore:
             with zipfile.ZipFile(archive_name, "w", compression=zipfile.ZIP_STORED) as archive:
                 archive.write(dataset_path, "dataset.jsonl")
                 archive.writestr("manifest.json", manifest_bytes)
+            # ZipFile has closed its writer. Flush the complete archive inode to
+            # stable storage before hashing, registering, or publishing its name.
+            os.fsync(descriptor)
             bundle_digest = hashlib.sha256()
             with open(archive_name, "rb") as stream:
                 for chunk in iter(lambda: stream.read(1024 * 1024), b""):
@@ -647,6 +651,8 @@ class LearningStore:
                     )
             raise
         finally:
+            if descriptor >= 0:
+                os.close(descriptor)
             for temporary in (dataset_path, Path(archive_name)):
                 try:
                     temporary.unlink()
