@@ -141,18 +141,37 @@ class LearningStoreTests(unittest.TestCase):
 
 
     def test_creates_private_storage_directories(self):
-        database_dir = self.root / "new-database-dir"
+        database_dir = self.root / "new-database-dir" / "nested"
         LearningStore(database_dir / "learning.sqlite3")
+        self.assertEqual(stat.S_IMODE(database_dir.parent.stat().st_mode), 0o700)
         self.assertEqual(stat.S_IMODE(database_dir.stat().st_mode), 0o700)
 
-        export_dir = self.root / "new-export-dir"
+        export_dir = self.root / "new-export-dir" / "nested"
         self.store.record(example())
         self.store.export_jsonl(export_dir / "dataset.jsonl")
+        self.assertEqual(stat.S_IMODE(export_dir.parent.stat().st_mode), 0o700)
         self.assertEqual(stat.S_IMODE(export_dir.stat().st_mode), 0o700)
 
     def test_database_file_is_owner_only(self):
         mode = stat.S_IMODE((self.root / "learning.sqlite3").stat().st_mode)
         self.assertEqual(mode, 0o600)
+
+    def test_rejects_group_writable_non_sticky_ancestor(self):
+        unsafe_parent = self.root / "unsafe-parent"
+        unsafe_parent.mkdir(mode=0o700)
+        os.chmod(unsafe_parent, 0o770)
+        private_child = unsafe_parent / "private-child"
+        private_child.mkdir(mode=0o700)
+        with self.assertRaises(LearningDataError):
+            LearningStore(private_child / "learning.sqlite3")
+
+    def test_rejects_symlinked_directory_ancestor(self):
+        real_parent = self.root / "real-parent"
+        real_parent.mkdir(mode=0o700)
+        linked_parent = self.root / "linked-parent"
+        linked_parent.symlink_to(real_parent, target_is_directory=True)
+        with self.assertRaises(LearningDataError):
+            LearningStore(linked_parent / "learning.sqlite3")
 
     def test_rejects_non_private_database_directory(self):
         public_dir = self.root / "public-db"

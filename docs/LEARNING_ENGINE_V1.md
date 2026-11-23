@@ -24,8 +24,10 @@ not a self-modifying hosted model and not an automatic training service.
 
 - On POSIX hosts, the store creates its database file with mode `0600` inside an
   owner-only (`0700`) directory. Existing database files must be regular files
-  owned by the current user and must not grant group/other access; symlinks are
-  rejected. Existing destination directories must also be owner-only.
+  owned by the current user with mode `0600`; symlinks are rejected. The target
+  directory must be owner-only, and path ancestors must be owned by root/current
+  user and not group/other writable unless sticky-bit protection applies.
+  Existing destination directories must also be owner-only.
 - Non-POSIX hosts fail closed because this module cannot verify equivalent ACL
   privacy with portable standard-library checks.
 - JSONL export is written to a same-directory temporary file with mode `0600`,

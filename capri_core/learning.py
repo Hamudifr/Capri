@@ -43,22 +43,53 @@ class LearningDataError(ValueError):
 
 
 def _require_private_directory(directory: Path) -> None:
-    """Create/check an owner-only POSIX directory for raw learning data."""
-    try:
-        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    except OSError as exc:
-        raise LearningDataError("unable to create learning-data directory") from exc
+    """Create/check an owner-only POSIX directory without unsafe path ancestors."""
     if os.name != "posix":
         raise LearningDataError("learning-data storage requires verifiable POSIX permissions")
-    try:
-        info = os.lstat(directory)
-    except OSError as exc:
-        raise LearningDataError("unable to inspect learning-data directory") from exc
-    mode = stat.S_IMODE(info.st_mode)
-    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
-        raise LearningDataError("learning-data directory must be an owned, real directory")
-    if mode & 0o077 or mode & 0o700 != 0o700:
-        raise LearningDataError("learning-data directory must grant access only to its owner")
+    absolute = Path(os.path.abspath(directory))
+    if os.path.realpath(absolute) != str(absolute):
+        raise LearningDataError("learning-data directory path must not contain symlinks")
+
+    missing: list[Path] = []
+    current = absolute
+    while True:
+        try:
+            info = os.lstat(current)
+        except FileNotFoundError:
+            missing.append(current)
+            if current.parent == current:
+                raise LearningDataError("unable to locate a safe parent directory")
+            current = current.parent
+            continue
+        except OSError as exc:
+            raise LearningDataError("unable to inspect learning-data directory path") from exc
+        if not stat.S_ISDIR(info.st_mode):
+            raise LearningDataError("learning-data directory path contains a symlink or non-directory")
+        break
+
+    owner = os.geteuid()
+    for ancestor in (current, *current.parents):
+        info = os.lstat(ancestor)
+        mode = stat.S_IMODE(info.st_mode)
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid not in (0, owner):
+            raise LearningDataError("learning-data path ancestors must be owned by root or the current user")
+        if mode & 0o022 and not mode & stat.S_ISVTX:
+            raise LearningDataError("learning-data path ancestor is group/other writable without sticky protection")
+
+    for path in reversed(missing):
+        try:
+            path.mkdir(mode=0o700)
+        except FileExistsError:
+            pass
+        except OSError as exc:
+            raise LearningDataError("unable to create private learning-data directory") from exc
+        info = os.lstat(path)
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != owner or stat.S_IMODE(info.st_mode) != 0o700:
+            raise LearningDataError("new learning-data directories must be owned and mode 0700")
+
+    info = os.lstat(absolute)
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != owner or stat.S_IMODE(info.st_mode) != 0o700:
+        raise LearningDataError("learning-data directory must be owned by the current user with mode 0700")
 
 
 def _ensure_private_database_file(path: Path) -> None:
