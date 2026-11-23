@@ -53,6 +53,10 @@ not a self-modifying hosted model and not an automatic training service.
 - Revocation is transactional: the consent is marked revoked and all source
   examples bound to it are deleted from the local learning database. New
   admissions and future exports exclude revoked consent.
+- Existing databases are migrated by adding a consent reference. Legacy examples
+  without a verifiable consent record remain stored for review but are excluded
+  from future exports; they must be explicitly re-admitted under a new consent
+  record rather than inheriting the old boolean attestation.
 - Revocation cannot recall files already exported outside this store. Until a
   dataset manifest/export registry is implemented, downstream holders must
   invalidate and delete any prior artifact carrying the revoked consent ID.
