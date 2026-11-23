@@ -1,5 +1,5 @@
 //@version=6
-indicator("Capri Gold Intelligence v1", shorttitle="Capri Gold AI v1", overlay=true, max_labels_count=200)
+indicator("Capri Gold Intelligence v1", shorttitle="Capri Gold Research", overlay=true, max_labels_count=200)
 
 // Research prototype only. No neural-network training, broker execution, or profitability claim.
 // Designed for XAUUSD charts. Signals are hypotheses for manual review, not trade instructions.
