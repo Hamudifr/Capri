@@ -566,7 +566,7 @@ class LearningStore:
             }
             manifest_bytes = (
                 json.dumps(manifest, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-                + "\\n"
+                + "\n"
             ).encode("utf-8")
             with zipfile.ZipFile(archive_name, "w", compression=zipfile.ZIP_STORED) as archive:
                 archive.writestr("dataset.jsonl", dataset_bytes)
