@@ -498,17 +498,21 @@ class SQLiteMemoryStore:
                     """SELECT * FROM memories
                        WHERE status IN ('active','review')
                          AND (expires_at IS NULL OR expires_at > ?)
-                         AND (? IS NULL OR scope = ?)
-                         AND (? IS NULL OR updated_at >= ?)""",
-                    (now, scope, scope, cutoff, cutoff),
+                         AND (? IS NULL OR scope = ?)""",
+                    (now, scope, scope),
                 ).fetchall()
                 ranked = []
                 for row in rows:
+                    record = self._record(row)
+                    if cutoff is not None:
+                        updated = _validate_expiry(record.updated_at)
+                        if updated is None or updated < cutoff:
+                            continue
                     haystack = (row["title"] + "\n" + row["content"] + "\n" + row["scope"] + "\n" + row["tags"]).casefold()
                     matched = sum(term in haystack for term in terms)
                     if matched == len(terms):
                         exact = int(row["title"].casefold() == query.casefold())
-                        ranked.append((exact, matched, row["updated_at"], self._record(row)))
+                        ranked.append((exact, matched, row["updated_at"], record))
                 ranked.sort(key=lambda item: (-item[0], -item[1], -datetime.fromisoformat(item[2]).timestamp(), item[3].memory_id))
                 return tuple(item[3] for item in ranked[offset:offset + limit])
             finally:
