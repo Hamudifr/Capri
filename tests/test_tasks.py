@@ -740,6 +740,30 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         self.assertIsNone(engine.run_once(now=NOW + timedelta(seconds=60)))
         self.assertEqual(calls, ["called"])
 
+    def test_oversized_result_after_handler_execution_is_terminal(self):
+        calls = []
+
+        def oversized_result(_data, _key):
+            calls.append("called")
+            return {"payload": "x" * 65_536}
+
+        engine = TaskEngine(self.store, {"prepare": oversized_result}, "worker")
+        task = self.store.create(
+            [{"tool": "prepare", "input": {}, "max_attempts": 5}],
+            now=NOW,
+        )
+
+        result = engine.run_once(now=NOW)
+        self.assertEqual(result.task_id, task.task_id)
+        self.assertEqual(result.state, "failed")
+        self.assertEqual(result.error_code, "handler_outcome_uncertain")
+        self.assertEqual(
+            self.store.events(task.task_id)[-1]["error_code"],
+            "handler_outcome_uncertain",
+        )
+        self.assertIsNone(engine.run_once(now=NOW + timedelta(seconds=60)))
+        self.assertEqual(calls, ["called"])
+
     def test_missing_handler_fails_without_retry(self):
         engine = TaskEngine(self.store, {}, "worker")
         self.store.create([{"tool": "missing", "input": {}, "max_attempts": 5}], now=NOW)
