@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
+import stat
+import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,12 +42,72 @@ class LearningDataError(ValueError):
     """Raised when an example fails the learning-data admission contract."""
 
 
+def _require_private_directory(directory: Path) -> None:
+    """Create/check an owner-only POSIX directory for raw learning data."""
+    try:
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    except OSError as exc:
+        raise LearningDataError("unable to create learning-data directory") from exc
+    if os.name != "posix":
+        raise LearningDataError("learning-data storage requires verifiable POSIX permissions")
+    try:
+        info = os.lstat(directory)
+    except OSError as exc:
+        raise LearningDataError("unable to inspect learning-data directory") from exc
+    mode = stat.S_IMODE(info.st_mode)
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
+        raise LearningDataError("learning-data directory must be an owned, real directory")
+    if mode & 0o077 or mode & 0o700 != 0o700:
+        raise LearningDataError("learning-data directory must grant access only to its owner")
+
+
+def _ensure_private_database_file(path: Path) -> None:
+    """Create a 0600 database or reject unsafe existing files and symlinks."""
+    flags = os.O_RDWR | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    created = False
+    descriptor = -1
+    try:
+        try:
+            descriptor = os.open(path, flags | os.O_CREAT | os.O_EXCL, 0o600)
+            created = True
+        except FileExistsError:
+            descriptor = os.open(path, flags)
+        info = os.fstat(descriptor)
+        mode = stat.S_IMODE(info.st_mode)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid():
+            raise LearningDataError("learning database must be an owned regular file")
+        if created:
+            os.fchmod(descriptor, 0o600)
+        elif mode & 0o077 or mode & 0o600 != 0o600:
+            raise LearningDataError("existing learning database must be owner-only (0600)")
+    except OSError as exc:
+        if created:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        raise LearningDataError("unable to create or inspect learning database securely") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _fsync_directory(directory: Path) -> None:
+    descriptor = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 class LearningStore:
     """Local SQLite journal; raw content is stored only after explicit gates."""
 
     def __init__(self, database: str | Path) -> None:
-        self.database = str(database)
-        Path(self.database).parent.mkdir(parents=True, exist_ok=True)
+        path = Path(database)
+        _require_private_directory(path.parent)
+        _ensure_private_database_file(path)
+        self.database = str(path)
         with self._connection() as connection:
             connection.execute(
                 """
@@ -175,29 +238,54 @@ class LearningStore:
         seen_hashes: set[str] = set()
         counts = {"train": 0, "validation": 0, "test": 0, "excluded_duplicate": 0}
         target = Path(destination)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with target.open("w", encoding="utf-8", newline="\n") as stream:
-            for row in rows:
-                if allowed is not None and row["capability"] not in allowed:
-                    continue
-                if row["content_hash"] in seen_hashes:
-                    counts["excluded_duplicate"] += 1
-                    continue
-                seen_hashes.add(row["content_hash"])
-                split = self._split(row["task_id"])
-                payload = {
-                    "schema_version": 1,
-                    "example_id": row["example_id"],
-                    "task_id": row["task_id"],
-                    "capability": row["capability"],
-                    "prompt": row["prompt"],
-                    "completion": row["completion"],
-                    "evidence_ref": row["evidence_ref"],
-                    "quality_score": row["quality_score"],
-                    "split": split,
-                }
-                stream.write(json.dumps(payload, ensure_ascii=False) + "\n")
-                counts[split] += 1
+        _require_private_directory(target.parent)
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{target.name}.", suffix=".tmp", dir=target.parent
+        )
+        try:
+            os.fchmod(descriptor, 0o600)
+            stream = os.fdopen(descriptor, "w", encoding="utf-8", newline="\n")
+            descriptor = -1
+            with stream:
+                for row in rows:
+                    if allowed is not None and row["capability"] not in allowed:
+                        continue
+                    if row["content_hash"] in seen_hashes:
+                        counts["excluded_duplicate"] += 1
+                        continue
+                    seen_hashes.add(row["content_hash"])
+                    split = self._split(row["task_id"])
+                    payload = {
+                        "schema_version": 1,
+                        "example_id": row["example_id"],
+                        "task_id": row["task_id"],
+                        "capability": row["capability"],
+                        "prompt": row["prompt"],
+                        "completion": row["completion"],
+                        "evidence_ref": row["evidence_ref"],
+                        "quality_score": row["quality_score"],
+                        "split": split,
+                    }
+                    stream.write(json.dumps(payload, ensure_ascii=False) + "\n")
+                    counts[split] += 1
+                stream.flush()
+                os.fsync(stream.fileno())
+            # Hard-link publication is atomic and refuses to replace any existing path.
+            os.link(temporary_name, target)
+            os.unlink(temporary_name)
+            try:
+                _fsync_directory(target.parent)
+            except OSError as exc:
+                raise OSError(
+                    f"dataset was published at {target}, but directory durability is uncertain"
+                ) from exc
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+            try:
+                os.unlink(temporary_name)
+            except FileNotFoundError:
+                pass
         return counts
 
     def counts(self) -> dict[str, int]:

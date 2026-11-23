@@ -20,6 +20,23 @@ not a self-modifying hosted model and not an automatic training service.
   validation, and test splits so examples from one task cannot cross partitions.
 - Exported examples retain evidence references and stable identifiers.
 
+## Private storage and export
+
+- On POSIX hosts, the store creates its database file with mode `0600` inside an
+  owner-only (`0700`) directory. Existing database files must be regular files
+  owned by the current user and must not grant group/other access; symlinks are
+  rejected. Existing destination directories must also be owner-only.
+- Non-POSIX hosts fail closed because this module cannot verify equivalent ACL
+  privacy with portable standard-library checks.
+- JSONL export is written to a same-directory temporary file with mode `0600`,
+  flushed and file-synced, then atomically published with a hard link that
+  refuses to replace an existing file or follow an existing destination symlink.
+  The containing directory is synced after publication. Unsupported hard-link
+  or directory-sync behavior fails visibly; if directory sync fails after the
+  link, the complete file may exist but its durability is uncertain.
+- Files remain plaintext. Private permissions are not encryption, secure
+  deletion, backup protection, or a substitute for host-level storage controls.
+
 ## Non-goals and safety
 
 - This does not alter GPT-6 or any hosted model's weights.
@@ -53,7 +70,9 @@ not a self-modifying hosted model and not an automatic training service.
 ## Current limitations
 
 The module is not yet wired into the task engine or runtime. There is no
-automatic event capture, consent UI, PII scanner, dataset signing/version
-manager, trainer, adapter registry, or model-serving integration. These must
-be implemented as separate, reviewed steps. The Android phone environment is
-not assumed to be capable of training a 20B-class model.
+automatic event capture, consent UI, PII scanner, consent provenance/revocation/
+delete workflow, dataset signing/version manager, trainer, adapter registry, or
+model-serving integration. The consent and privacy-review booleans are
+per-example attestations, not a revocable consent ledger. These capabilities
+must be implemented as separate, reviewed steps. The Android phone environment
+is not assumed to be capable of training a 20B-class model.
