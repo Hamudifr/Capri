@@ -210,7 +210,8 @@ class SQLiteTaskStore:
 
     The parent directory must already exist and be private. Task inputs/results
     are persisted as bounded JSON; callers must not put secrets or sensitive
-    personal data in them. Execution is at-least-once after lease expiry.
+    personal data in them. Expired running leases are quarantined for explicit
+    reconciliation; they are never automatically reclaimed.
     """
 
     def __init__(self, path: str) -> None:
@@ -925,7 +926,7 @@ class SQLiteTaskStore:
         _text(principal_id, "principal_id", 128)
         _text(decision_id, "decision_id", 128)
         _text(evidence_ref, "evidence_ref", 512)
-        if outcome not in {"succeeded", "failed", "unresolved"}:
+        if type(outcome) is not str or outcome not in {"succeeded", "failed", "unresolved"}:
             raise TaskValidationError("unsupported reconciliation outcome")
         if outcome == "succeeded":
             _, decoded_result = _json(result, label="reconciliation result")
@@ -1248,7 +1249,8 @@ class TaskEngine:
     resource authorization, and make side effects idempotent with the key.
     Model-proposed tool calls must still pass through ToolExecutor and host policy.
     Handlers may raise RetryableTaskError only when failure is known to precede
-    every external side effect; all other exceptions fail without auto-retry.
+    every external side effect; all other exceptions enter reconciliation_required.
+    Expired worker leases are quarantined because the side-effect outcome is unknown.
     """
 
     def __init__(
