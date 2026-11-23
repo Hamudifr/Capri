@@ -404,9 +404,9 @@ class LearningStoreTests(unittest.TestCase):
                 self.assertGreaterEqual(len(regular_file_fsync_sizes), 2)
             return real_link(source, destination, *args, **kwargs)
 
-        with patch("capri_core.learning.os.fsync", side_effect=tracked_fsync), \\
-             patch("capri_core.learning.os.link", side_effect=tracked_link):
-            result = self.store.export_bundle(output)
+        with patch("capri_core.learning.os.fsync", side_effect=tracked_fsync):
+            with patch("capri_core.learning.os.link", side_effect=tracked_link):
+                result = self.store.export_bundle(output)
 
         self.assertEqual(result["status"], "active")
         self.assertGreaterEqual(len(regular_file_fsync_sizes), 2)
