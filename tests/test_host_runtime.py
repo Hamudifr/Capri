@@ -96,6 +96,9 @@ class CapriHostRuntimeTests(unittest.TestCase):
             host.get_session("bob-token", session.session_id)
 
     def test_task_creation_read_and_cancel_are_bound_to_authenticated_principal(self):
+        def uncertain(data, key, principal):
+            raise RuntimeError("uncertain")
+
         worker = TaskWorker(TaskEngine(
             self.task_store,
             {},
@@ -136,16 +139,20 @@ class CapriHostRuntimeTests(unittest.TestCase):
         verified = []
         def verify(actor, task_id, decision_id, outcome, evidence_ref, payload):
             verified.append((actor, task_id, decision_id, outcome, evidence_ref, payload))
-            return (actor == "alice" and task_id == task.task_id
-                    and evidence_ref == "evidence://verified/task-1"
-                    and payload["decision_id"] == decision_id
-                    and payload["outcome"] == outcome)
+            return (
+                actor == "alice"
+                and task_id == task.task_id
+                and evidence_ref == "evidence://verified/task-1"
+                and payload["decision_id"] == decision_id
+                and payload["outcome"] == outcome
+                and payload["result"] == {"ok": True}
+            )
 
         worker = TaskWorker(TaskEngine(
             self.task_store,
             {},
             "worker",
-            principal_handlers={"collect": lambda data, key, principal: (_ for _ in ()).throw(RuntimeError("uncertain"))},
+            principal_handlers={"collect": uncertain},
         ))
         host = self.make_host(
             authority=authority,
@@ -231,11 +238,16 @@ class CapriHostRuntimeTests(unittest.TestCase):
             self.task_store, {}, "worker",
             principal_handlers={"collect": lambda data, key, principal: {"ok": True}},
         ))
-        host = self.make_host(task_worker=worker)
+        denied_calls = []
+        host = self.make_host(
+            task_worker=worker,
+            task_reconciliation_verifier=lambda *args: denied_calls.append(args) or True,
+        )
         with self.assertRaises(HostRuntimeError):
             host.reconcile_task(
                 "alice-token", "task-id", "decision-1", "failed", "evidence://x"
             )
+        self.assertEqual(denied_calls, [])
         authority = HostAuthorityResolver(
             authenticate=lambda credential: "alice" if credential == "alice-token" else None,
             permissions_for=lambda principal_id: {"task.reconcile.owned"},
