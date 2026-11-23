@@ -78,8 +78,8 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         self.assertEqual(self.store.backup_to(backup_path), backup_path)
 
     def test_backup_accepts_valid_retry_and_terminal_lifecycle_states(self):
-        scenarios = ("retry_wait", "failed", "cancelled_queued",
-                     "cancelled_retry_wait", "cancelled_running",
+        scenarios = ("retry_wait", "failed", "reconciliation_required",
+                     "cancelled_queued", "cancelled_retry_wait", "cancelled_running",
                      "cancelled_after_finish")
         for scenario in scenarios:
             with self.subTest(state=scenario):
@@ -94,6 +94,11 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                         store.fail_step(claim, retry_delay_seconds=0, now=NOW + timedelta(seconds=1))
                     elif scenario == "failed":
                         store.fail_step(claim, retryable=False, now=NOW + timedelta(seconds=1))
+                    elif scenario == "reconciliation_required":
+                        store.claim_next(
+                            "recovery-worker", lease_seconds=5,
+                            now=NOW + timedelta(seconds=6),
+                        )
                     elif scenario == "cancelled_retry_wait":
                         store.fail_step(claim, retry_delay_seconds=0, now=NOW + timedelta(seconds=1))
                         store.request_cancel(task.task_id, now=NOW + timedelta(seconds=2))
@@ -687,6 +692,84 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         )
         self.assertIsNone(second)
         self.assertEqual(effects, ["external-action"])
+
+    def test_principal_reconciliation_is_scoped_and_idempotent(self):
+        task = self.store.create_for_principal(
+            "alice",
+            [{"tool": "prepare", "input": {}, "max_attempts": 3}],
+            now=NOW,
+        )
+        claim = self.store.claim_next(
+            "worker", now=NOW, principal_tools=frozenset({"prepare"})
+        )
+        uncertain = self.store.require_reconciliation(
+            claim, now=NOW + timedelta(seconds=1)
+        )
+        self.assertEqual(uncertain.state, "reconciliation_required")
+        with self.assertRaises(TaskNotFoundError):
+            self.store.reconcile_for_principal(
+                task.task_id, "bob", "decision-1", "succeeded",
+                "audit://verified/1", {"confirmed": True}, NOW + timedelta(seconds=2),
+            )
+        resolved = self.store.reconcile_for_principal(
+            task.task_id, "alice", "decision-1", "succeeded",
+            "audit://verified/1", {"confirmed": True}, NOW + timedelta(seconds=2),
+        )
+        self.assertEqual(resolved.state, "succeeded")
+        self.assertEqual(resolved.result, ({"confirmed": True},))
+        replay = self.store.reconcile_for_principal(
+            task.task_id, "alice", "decision-1", "succeeded",
+            "audit://verified/1", {"confirmed": True}, NOW + timedelta(seconds=3),
+        )
+        self.assertEqual(replay, resolved)
+        with self.assertRaises(TaskIdempotencyConflict):
+            self.store.reconcile_for_principal(
+                task.task_id, "alice", "decision-1", "failed",
+                "audit://verified/1", now=NOW + timedelta(seconds=4),
+            )
+        self.assertEqual(
+            [event["state"] for event in self.store.events(task.task_id)],
+            ["queued", "running", "reconciliation_required", "succeeded"],
+        )
+
+    def test_unresolved_decision_keeps_task_quarantined_until_new_resolution(self):
+        task = self.store.create_for_principal(
+            "alice",
+            [{"tool": "prepare", "input": {}, "max_attempts": 2}],
+            now=NOW,
+        )
+        claim = self.store.claim_next(
+            "worker", now=NOW, principal_tools=frozenset({"prepare"})
+        )
+        self.store.require_reconciliation(claim, now=NOW + timedelta(seconds=1))
+        unresolved = self.store.reconcile_for_principal(
+            task.task_id, "alice", "decision-unresolved", "unresolved",
+            "audit://insufficient-evidence", now=NOW + timedelta(seconds=2),
+        )
+        self.assertEqual(unresolved.state, "reconciliation_required")
+        self.assertIsNone(self.store.claim_next(
+            "worker-2", now=NOW + timedelta(seconds=60),
+            principal_tools=frozenset({"prepare"}),
+        ))
+        resolved = self.store.reconcile_for_principal(
+            task.task_id, "alice", "decision-success", "succeeded",
+            "audit://confirmed-completion", {"confirmed": True},
+            NOW + timedelta(seconds=61),
+        )
+        self.assertEqual(resolved.state, "succeeded")
+        backup_path = os.path.join(self.temp.name, "reconciled-task-backup.sqlite3")
+        self.assertEqual(self.store.backup_to(backup_path), backup_path)
+        restored = SQLiteTaskStore(backup_path)
+        self.assertEqual(restored.integrity_check(), "ok")
+        self.assertEqual(restored.get(task.task_id), resolved)
+        self.assertEqual(
+            restored.reconcile_for_principal(
+                task.task_id, "alice", "decision-success", "succeeded",
+                "audit://confirmed-completion", {"confirmed": True},
+                NOW + timedelta(seconds=62),
+            ),
+            resolved,
+        )
 
     def test_invalid_result_after_handler_execution_is_terminal(self):
         calls = []
