@@ -348,7 +348,7 @@ class DoctorTests(unittest.TestCase):
         workflow.write_text(
             "on:\n"
             "  push:\n"
-            '    branches: ["main", "recovery/non-x5-foundation"]\n'
+            '    branches: ["main"]\n'
             "  pull_request:\n"
             '    branches: ["main", "recovery/non-x5-foundation"]\n'
             "permissions:\n"
@@ -371,7 +371,37 @@ class DoctorTests(unittest.TestCase):
                 code = cli_main(["doctor", "--root", str(root)])
             self.assertEqual(code, 0, output.getvalue())
             self.assertIn("Capri Doctor:", output.getvalue())
-            self.assertIn("Recovery CI coverage: push and pull_request", output.getvalue())
+            self.assertIn("Recovery CI coverage: push includes main", output.getvalue())
+
+    def test_doctor_accepts_main_push_and_recovery_pull_request_coverage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_repository(root)
+            workflow = root / ".github/workflows/quality.yml"
+            content = workflow.read_text(encoding="utf-8")
+            self.assertIn('branches: ["main"]', content)
+            self.assertIn('branches: ["main", "recovery/non-x5-foundation"]', content)
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["doctor", "--root", str(root)])
+            self.assertEqual(code, 0, output.getvalue())
+
+    def test_doctor_fails_when_recovery_pull_request_coverage_is_missing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_repository(root)
+            workflow = root / ".github/workflows/quality.yml"
+            content = workflow.read_text(encoding="utf-8")
+            content = content.replace(
+                'branches: ["main", "recovery/non-x5-foundation"]',
+                'branches: ["main"]',
+            )
+            workflow.write_text(content, encoding="utf-8")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["doctor", "--root", str(root)])
+            self.assertEqual(code, 1)
+            self.assertIn("[FAIL] Recovery CI coverage", output.getvalue())
 
     def test_doctor_json_report_has_stable_schema_and_exit_code(self):
         with tempfile.TemporaryDirectory() as directory:
