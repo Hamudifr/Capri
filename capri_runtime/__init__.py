@@ -33,6 +33,7 @@ from .tools import (
     ToolBoundaryError,
     ToolExecutionError,
     ToolCancelledError,
+    ToolResultValidationError,
     ToolExecutor,
     ToolNotFoundError,
     ToolRegistry,
@@ -53,16 +54,14 @@ from .orchestration import (
     SessionTurnCoordinator,
     ToolModelAdapter,
     MemoryAwareToolModelAdapter,
-    KnowledgeAwareToolModelAdapter,
     ToolOrchestrationError,
     ToolOrchestrator,
 )
 from .host import HostToolGateway
 from .host_runtime import CapriHostRuntime, HostRuntimeError
 from .openai_responses import OpenAIResponsesAdapter, OpenAIResponsesAdapterError
-from .knowledge_graph import (GraphNeuron, GraphSynapse, KnowledgeGraphError, KnowledgeGraphProvider, InMemoryKnowledgeGraphProvider, UntrustedKnowledgeContext, retrieve_knowledge, serialize_untrusted_knowledge_context)
-from .notion_knowledge_graph import NotionKnowledgeGraphProvider, create_notion_knowledge_graph_provider_from_environment
 from .approval import ApprovalChallenge, HostApprovalService, SQLiteApprovalChallengeStore
+from .learning_consent import HostLearningConsentAuthority, LearningConsentAuthorityError
 from .sqlite_sessions import SQLiteSessionStore
 from .security_store import SQLiteSecurityStore
 from .memory import MemoryErrorBase, MemoryNotFoundError, MemoryProvider, MemoryRecord, MemoryValidationError, SQLiteMemoryStore, UntrustedMemoryContext, build_untrusted_memory_context, serialize_untrusted_memory_context
@@ -78,6 +77,7 @@ from .tasks import (
     TaskNotFoundError,
     TaskRecord,
     TaskValidationError,
+    RetryableTaskError,
     TaskWorker,
 )
 
@@ -88,20 +88,9 @@ __all__ = [
     "SessionTurnCoordinator",
     "ToolModelAdapter",
     "MemoryAwareToolModelAdapter",
-    "KnowledgeAwareToolModelAdapter",
     "ToolOrchestrationError",
     "OpenAIResponsesAdapter",
     "OpenAIResponsesAdapterError",
-    "GraphNeuron",
-    "GraphSynapse",
-    "KnowledgeGraphError",
-    "KnowledgeGraphProvider",
-    "InMemoryKnowledgeGraphProvider",
-    "UntrustedKnowledgeContext",
-    "retrieve_knowledge",
-    "serialize_untrusted_knowledge_context",
-    "NotionKnowledgeGraphProvider",
-    "create_notion_knowledge_graph_provider_from_environment",
     "ToolOrchestrator",
     "ApprovalChallenge",
     "ApprovalGrant",
@@ -117,6 +106,8 @@ __all__ = [
     "HostAuthorityError",
     "HostAuthorityResolver",
     "HostApprovalService",
+    "HostLearningConsentAuthority",
+    "LearningConsentAuthorityError",
     "HostToolGateway",
     "CapriHostRuntime",
     "HostRuntimeError",
@@ -162,6 +153,7 @@ __all__ = [
     "TaskNotFoundError",
     "TaskRecord",
     "TaskValidationError",
+    "RetryableTaskError",
     "TaskWorker",
     "ToolBridgeValidationError",
     "ToolCallOutcome",
@@ -171,6 +163,7 @@ __all__ = [
     "ToolBoundaryError",
     "ToolExecutionError",
     "ToolCancelledError",
+    "ToolResultValidationError",
     "ToolExecutor",
     "ToolNotFoundError",
     "ToolRegistry",

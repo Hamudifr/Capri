@@ -21,6 +21,7 @@ from .tools import (
     ToolCancelledError,
     ToolExecutor,
     ToolNotFoundError,
+    ToolResultValidationError,
     ToolValidationError,
     _canonical_json,
     _NAME_RE,
@@ -211,6 +212,11 @@ class ToolExecutionBridge:
             except ToolNotFoundError:
                 outcomes.append(ToolCallOutcome(
                     call_id, name, "tool_not_found", error_code="tool_not_found",
+                ))
+            except ToolResultValidationError:
+                outcomes.append(ToolCallOutcome(
+                    call_id, name, "outcome_uncertain",
+                    error_code="handler_result_rejected", argument_digest=digest,
                 ))
             except ToolValidationError:
                 outcomes.append(ToolCallOutcome(

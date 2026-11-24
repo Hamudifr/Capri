@@ -118,3 +118,16 @@ Session stores enforce a separate `max_tool_chars` budget (default 131,072 chara
 ## Isolated untrusted memory context
 
 The tool orchestrator can optionally receive an immutable `UntrustedMemoryContext`. When present, it requires the adapter's explicit `complete_with_tools_and_memory` method and passes memory as a separate typed argument, never as transcript history. The normal `ExecutionContext` remains a separate trusted host input to tool discovery and execution. Adapters must treat every memory field as untrusted data and place it only in a provider-supported untrusted-data channel; they must not promote retrieved text into system/developer instructions. If an adapter cannot preserve this distinction, it must not accept memory context. This separation prevents memory records from directly mutating host permissions, but it is not a guarantee against model-level prompt injection.
+
+
+## Post-handler result rejection is an uncertain outcome
+
+The executor distinguishes argument validation failures (which occur before a
+handler runs) from result validation failures (which occur after the handler may
+have performed a side effect). A handler result that is non-JSON, malformed, or
+over the configured result byte limit raises `ToolResultValidationError`, a
+backward-compatible subclass of `ToolValidationError`. The bridge maps this
+specific post-handler failure to `outcome_uncertain` with
+`handler_result_rejected`, preserving the argument digest. It must never be
+reported as `invalid_arguments` or blindly retried: the handler may already
+have changed an external resource. The audit trail records `result_rejected`.
