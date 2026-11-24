@@ -212,6 +212,9 @@ def retrieve_knowledge(
         raise KnowledgeGraphError("max_synapses must be between zero and forty")
     if type(include_history) is not bool:
         raise KnowledgeGraphError("include_history must be a boolean")
+    tokens = _tokens(query)
+    if not tokens:
+        return UntrustedKnowledgeContext((), (), query)
     loaded = provider.load_graph()
     if type(loaded) is not tuple or len(loaded) != 2:
         raise KnowledgeGraphError("provider returned an invalid graph snapshot")
@@ -233,7 +236,6 @@ def retrieve_knowledge(
             raise KnowledgeGraphError("provider returned a dangling synapse endpoint")
         if edge.status in _ACTIVE_EDGE_STATES or include_history:
             valid_edges.append(edge)
-    tokens = _tokens(query)
     candidates = [
         n for n in neurons
         if (include_history or n.evidence_state != "Superseded")
