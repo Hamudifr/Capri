@@ -52,7 +52,7 @@ class AtomicPublishTests(unittest.TestCase):
         with patch.object(
             atomic_publish.os,
             "link",
-            side_effect=OSError(errno.EOPNOTSUPP, "hard links unsupported"),
+            side_effect=OSError(getattr(errno, "EOPNOTSUPP", getattr(errno, "ENOTSUP", errno.EINVAL)), "hard links unsupported"),
         ), patch.object(
             atomic_publish, "_load_renameat2", return_value=fake_renameat2
         ):
