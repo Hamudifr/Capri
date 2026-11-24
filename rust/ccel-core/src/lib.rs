@@ -209,9 +209,23 @@ impl Example {
     }
 }
 
+/// A bounded sequence of operations in the CCEL transformation DSL.
+///
+/// Construct programs with [`Program::new`] so the maximum depth invariant
+/// cannot be bypassed through a public struct literal.
+///
+/// External callers cannot initialize the private field directly:
+///
+/// ```compile_fail
+/// use ccel_core::{Operation, Program};
+///
+/// let _ = Program {
+///     operations: vec![Operation::Transpose],
+/// };
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Program {
-    pub operations: Vec<Operation>,
+    operations: Vec<Operation>,
 }
 impl Program {
     pub fn new(operations: Vec<Operation>) -> Result<Self, CcelError> {
@@ -219,6 +233,10 @@ impl Program {
             return Err(CcelError::ProgramTooDeep);
         }
         Ok(Self { operations })
+    }
+    /// Returns the operations in execution order.
+    pub fn operations(&self) -> &[Operation] {
+        &self.operations
     }
     pub fn complexity(&self) -> usize {
         self.operations.len()
@@ -477,6 +495,21 @@ mod tests {
             Err(CcelError::NoConsistentModel)
         );
     }
+    #[test]
+    fn program_operations_are_read_only_and_preserve_order() {
+        let program = Program::new(vec![
+            Operation::RotateClockwise,
+            Operation::FlipHorizontal,
+        ])
+        .unwrap();
+
+        assert_eq!(
+            program.operations(),
+            &[Operation::RotateClockwise, Operation::FlipHorizontal]
+        );
+        assert_eq!(program.complexity(), 2);
+    }
+
     #[test]
     fn limits_are_enforced() {
         let x = g(&[&[1]]);
