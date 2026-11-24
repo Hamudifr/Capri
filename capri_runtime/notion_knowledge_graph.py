@@ -288,6 +288,7 @@ def create_notion_knowledge_graph_provider_from_environment(
     token_env: str = "NOTION_API_TOKEN",
     timeout: float = 10.0,
     opener=None,
+    cache_ttl_seconds: float = 15.0,
 ) -> NotionKnowledgeGraphProvider:
     """Construct an injected-token, read-only graph provider; no write or live LLM call."""
     if type(token_env) is not str or not token_env:
@@ -297,5 +298,8 @@ def create_notion_knowledge_graph_provider_from_environment(
         raise KnowledgeGraphError(f"{token_env} is not configured")
     transport = NotionRESTTransport(token, neuron_data_source_id, timeout=timeout, opener=opener)
     return NotionKnowledgeGraphProvider(
-        transport, neuron_data_source_id, synapse_data_source_id
+        transport,
+        neuron_data_source_id,
+        synapse_data_source_id,
+        cache_ttl_seconds=cache_ttl_seconds,
     )
