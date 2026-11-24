@@ -33,7 +33,13 @@ class LearningStoreTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-        self.store = LearningStore(self.root / "learning.sqlite3")
+        self.store = LearningStore(
+            self.root / "learning.sqlite3",
+            consent_verifier=lambda consent: (
+                consent.evidence_ref.startswith("test://consent/")
+                and consent.policy_version == "learning-consent-v1"
+            ),
+        )
         self.store.record_consent(LearningConsent(
             consent_id="consent-001",
             scope="curated_training_examples",
@@ -100,6 +106,42 @@ class LearningStoreTests(unittest.TestCase):
         with self.assertRaises(LearningDataError):
             self.store.record(example(consent_id="unknown-consent"))
 
+    def test_record_consent_requires_trusted_evidence_verifier(self):
+        store = LearningStore(self.root / "missing-verifier.sqlite3")
+        consent = LearningConsent(
+            "consent-no-verifier", "curated_training_examples", "v1",
+            "test://consent/no-verifier", "2026-11-06T11:00:00+00:00",
+        )
+        with self.assertRaisesRegex(LearningDataError, "trusted consent-evidence verifier"):
+            store.record_consent(consent)
+
+    def test_record_consent_rejects_unauthenticated_evidence(self):
+        store = LearningStore(
+            self.root / "reject-verifier.sqlite3",
+            consent_verifier=lambda consent: False,
+        )
+        consent = LearningConsent(
+            "consent-rejected", "curated_training_examples", "v1",
+            "test://consent/rejected", "2026-11-06T11:00:00+00:00",
+        )
+        with self.assertRaisesRegex(LearningDataError, "not authenticated"):
+            store.record_consent(consent)
+
+    def test_record_consent_fails_closed_when_verifier_raises(self):
+        def broken_verifier(consent):
+            raise RuntimeError("verifier unavailable")
+
+        store = LearningStore(
+            self.root / "broken-verifier.sqlite3",
+            consent_verifier=broken_verifier,
+        )
+        consent = LearningConsent(
+            "consent-error", "curated_training_examples", "v1",
+            "test://consent/error", "2026-11-06T11:00:00+00:00",
+        )
+        with self.assertRaisesRegex(LearningDataError, "verification failed"):
+            store.record_consent(consent)
+
     def test_rejects_invalid_consent_scope_and_naive_grant_time(self):
         invalid_records = (
             LearningConsent(
@@ -149,6 +191,24 @@ class LearningStoreTests(unittest.TestCase):
         rows = [json.loads(line) for line in output.read_text().splitlines()]
         self.assertEqual(rows[0]["consent_id"], "consent-001")
         self.assertEqual(rows[0]["consent_policy_version"], "learning-consent-v1")
+
+    def test_standalone_jsonl_export_is_registered_and_revocable(self):
+        self.store.record(example())
+        output = self.root / "registered.jsonl"
+        result = self.store.export_jsonl(output)
+        self.assertEqual(result["status"], "active")
+        status = self.store.get_export_status(result["export_id"])
+        self.assertEqual(status["export_kind"], "jsonl")
+        self.assertEqual(status["artifact_path"], str(output.absolute()))
+        self.assertEqual(status["status"], "active")
+        self.assertTrue(self.store.verify_export(result["export_id"], output)["valid"])
+
+        self.store.revoke_consent("consent-001", "2026-11-07T12:00:00+00:00")
+        status = self.store.get_export_status(result["export_id"])
+        self.assertEqual(status["status"], "invalidated")
+        verification = self.store.verify_export(result["export_id"], output)
+        self.assertFalse(verification["valid"])
+        self.assertEqual(verification["reason"], "invalidated")
 
     def test_rejects_missing_consent(self):
         with self.assertRaises(LearningDataError):
@@ -356,10 +416,66 @@ class LearningStoreTests(unittest.TestCase):
         self.store.record(example())
         output = self.root / "dataset.jsonl"
         with patch("capri_core.learning._fsync_directory", side_effect=OSError("fsync failed")):
-            with self.assertRaisesRegex(OSError, "published at"):
+            with self.assertRaises(LearningExportOutcomeUncertainError) as raised:
                 self.store.export_jsonl(output)
         rows = [json.loads(line) for line in output.read_text().splitlines()]
         self.assertEqual([row["example_id"] for row in rows], ["ex-001"])
+        self.assertEqual(
+            self.store.get_export_status(raised.exception.export_id)["status"],
+            "publishing",
+        )
+
+    def test_reconcile_recovers_published_jsonl_after_interrupted_activation(self):
+        self.store.record(example())
+        output = self.root / "recoverable.jsonl"
+        with patch(
+            "capri_core.learning._fsync_directory",
+            side_effect=OSError("directory sync interrupted"),
+        ):
+            with self.assertRaises(LearningExportOutcomeUncertainError) as raised:
+                self.store.export_jsonl(output)
+
+        export_id = raised.exception.export_id
+        self.assertEqual(self.store.get_export_status(export_id)["status"], "publishing")
+        recovered = self.store.reconcile_pending_exports()
+        self.assertIn(export_id, recovered["activated"])
+        self.assertTrue(self.store.verify_export(export_id, output)["valid"])
+
+    def test_reconcile_fails_closed_when_pending_jsonl_artifact_is_missing(self):
+        self.store.record(example())
+        output = self.root / "missing-after-crash.jsonl"
+        with patch(
+            "capri_core.learning._fsync_directory",
+            side_effect=OSError("directory sync interrupted"),
+        ):
+            with self.assertRaises(LearningExportOutcomeUncertainError) as raised:
+                self.store.export_jsonl(output)
+        output.unlink()
+
+        recovered = self.store.reconcile_pending_exports()
+        self.assertIn(raised.exception.export_id, recovered["failed"])
+        self.assertEqual(
+            self.store.get_export_status(raised.exception.export_id)["status"],
+            "failed",
+        )
+
+    def test_reconcile_never_reactivates_revoked_pending_jsonl(self):
+        self.store.record(example())
+        output = self.root / "revoked-pending.jsonl"
+        with patch(
+            "capri_core.learning._fsync_directory",
+            side_effect=OSError("directory sync interrupted"),
+        ):
+            with self.assertRaises(LearningExportOutcomeUncertainError) as raised:
+                self.store.export_jsonl(output)
+        self.store.revoke_consent("consent-001", "2026-11-07T12:00:00+00:00")
+
+        recovered = self.store.reconcile_pending_exports()
+        self.assertNotIn(raised.exception.export_id, recovered["activated"])
+        self.assertEqual(
+            self.store.get_export_status(raised.exception.export_id)["status"],
+            "invalidated",
+        )
 
     def test_capability_allowlist(self):
         self.store.record(example(capability="research"))
@@ -477,6 +593,9 @@ class LearningStoreTests(unittest.TestCase):
         self.assertEqual(verification["row_count"], 1)
         self.assertEqual(list(self.root.glob(".uncertain-durable-bundle.zip.*.jsonl")), [])
         self.assertEqual(list(self.root.glob(".uncertain-durable-bundle.zip.*.tmp")), [])
+        recovered = self.store.reconcile_pending_exports()
+        self.assertIn(export_id, recovered["activated"])
+        self.assertTrue(self.store.verify_export(export_id, output)["valid"])
 
     def test_bundle_is_invalidated_when_any_source_consent_is_revoked(self):
         self.store.record(example())
