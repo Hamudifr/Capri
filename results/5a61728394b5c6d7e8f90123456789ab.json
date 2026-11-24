@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "target_commit": "7f1d594e67451a0b92388c0d5ae4de190f432bdb",
+  "task": "bridge_tests",
+  "status": "superseded",
+  "reason": "Superseded before execution by an identical bridge_tests job ordered ahead of the focused regression jobs; no task was executed.",
+  "steps": []
+}
