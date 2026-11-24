@@ -39,7 +39,7 @@ jobs:
           capri --help
           capri doctor --json
       - name: Compile source and tests
-        run: python -m compileall -q capri_core capri_runtime tests
+        run: python -m compileall -q capri_core capri_runtime capri_cognition tests
       - name: Run Capri Doctor
         run: python -m capri_core doctor
       - name: Run non-X5 contract and runtime tests
