@@ -414,6 +414,24 @@ class SQLiteTaskStore:
                 ).fetchall()
                 for task_id, state, plan_json, index, attempts, cancel in rows:
                     plan = json.loads(plan_json)
+                    if state == "running":
+                        # An expired lease cannot prove whether the handler's
+                        # external side effect happened. Never replay it blindly,
+                        # even when a cancellation was also requested.
+                        connection.execute(
+                            """UPDATE tasks SET state='reconciliation_required',
+                            error_code='lease_expired_outcome_uncertain',updated_at=?,
+                            lease_owner=NULL,lease_until=NULL WHERE task_id=?""",
+                            (stamp, task_id),
+                        )
+                        connection.execute(
+                            """INSERT INTO task_events(
+                            task_id,timestamp,state,step_index,attempt,error_code
+                            ) VALUES(?,?,'reconciliation_required',?,?,
+                            'lease_expired_outcome_uncertain')""",
+                            (task_id, stamp, index, attempts),
+                        )
+                        continue
                     if cancel:
                         connection.execute(
                             "UPDATE tasks SET state='cancelled',updated_at=?,lease_owner=NULL,lease_until=NULL WHERE task_id=?",
@@ -428,23 +446,6 @@ class SQLiteTaskStore:
                         connection.execute(
                             "UPDATE tasks SET state='succeeded',updated_at=?,lease_owner=NULL,lease_until=NULL WHERE task_id=?",
                             (stamp, task_id),
-                        )
-                        continue
-                    if state == "running":
-                        # An expired lease cannot prove whether the handler's
-                        # external side effect happened. Never replay it blindly.
-                        connection.execute(
-                            """UPDATE tasks SET state='reconciliation_required',
-                            error_code='lease_expired_outcome_uncertain',updated_at=?,
-                            lease_owner=NULL,lease_until=NULL WHERE task_id=?""",
-                            (stamp, task_id),
-                        )
-                        connection.execute(
-                            """INSERT INTO task_events(
-                            task_id,timestamp,state,step_index,attempt,error_code
-                            ) VALUES(?,?,'reconciliation_required',?,?,
-                            'lease_expired_outcome_uncertain')""",
-                            (task_id, stamp, index, attempts),
                         )
                         continue
                     attempt = attempts + 1
