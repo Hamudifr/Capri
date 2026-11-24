@@ -722,11 +722,18 @@ class LearningStore:
                 return {"valid": False, "reason": "dataset_hash_mismatch", "status": record["status"]}
         except (OSError, ValueError, zipfile.BadZipFile, KeyError, UnicodeDecodeError):
             return {"valid": False, "reason": "unreadable_bundle", "status": record["status"]}
-        valid = record["status"] == "active"
+        # Re-read after filesystem verification so a consent revocation that
+        # commits during ZIP/hash inspection cannot be masked by the earlier
+        # registry snapshot. This final read is the verification linearization point.
+        latest_record = self.get_export_status(export_id)
+        if latest_record is None:
+            return {"valid": False, "reason": "unregistered"}
+        latest_status = latest_record["status"]
+        valid = latest_status == "active"
         return {
             "valid": valid,
-            "reason": "ok" if valid else record["status"],
-            "status": record["status"],
+            "reason": "ok" if valid else latest_status,
+            "status": latest_status,
             "bundle_sha256": actual_bundle_hash,
             "row_count": manifest.get("row_count"),
         }
