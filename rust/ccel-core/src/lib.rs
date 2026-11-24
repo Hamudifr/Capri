@@ -58,7 +58,8 @@ impl std::error::Error for CcelError {}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Grid {
-    rows: Vec<Vec<u8>>,
+    cells: Vec<u8>,
+    height: usize,
     width: usize,
 }
 
@@ -86,14 +87,31 @@ impl Grid {
         if let Some(value) = rows.iter().flatten().find(|&&value| value > 9) {
             return Err(CcelError::CellOutOfRange(*value));
         }
-        Ok(Self { rows, width })
+
+        let height = rows.len();
+        let mut cells = Vec::with_capacity(height * width);
+        for row in &rows {
+            cells.extend_from_slice(row);
+        }
+        Ok(Self {
+            cells,
+            height,
+            width,
+        })
     }
-    pub fn rows(&self) -> &[Vec<u8>] {
-        &self.rows
+
+    pub fn rows(&self) -> impl ExactSizeIterator<Item = &[u8]> {
+        self.cells.chunks(self.width)
     }
+
+    pub fn cells(&self) -> &[u8] {
+        &self.cells
+    }
+
     pub fn height(&self) -> usize {
-        self.rows.len()
+        self.height
     }
+
     pub fn width(&self) -> usize {
         self.width
     }
@@ -118,50 +136,57 @@ pub const OPERATIONS: [Operation; 5] = [
 
 impl Operation {
     pub fn apply(self, grid: &Grid) -> Grid {
-        let h = grid.height();
-        let w = grid.width();
+        let h = grid.height;
+        let w = grid.width;
         let (out_h, out_w) = match self {
             Self::RotateClockwise | Self::RotateCounterClockwise | Self::Transpose => (w, h),
             Self::FlipHorizontal | Self::FlipVertical => (h, w),
         };
-        let mut out = vec![vec![0; out_w]; out_h];
+        let mut out = vec![0; out_h * out_w];
+
         match self {
             Self::RotateClockwise => {
                 for r in 0..h {
                     for c in 0..w {
-                        out[c][h - 1 - r] = grid.rows[r][c];
+                        out[c * out_w + (h - 1 - r)] = grid.cells[r * w + c];
                     }
                 }
             }
             Self::RotateCounterClockwise => {
                 for r in 0..h {
                     for c in 0..w {
-                        out[w - 1 - c][r] = grid.rows[r][c];
+                        out[(w - 1 - c) * out_w + r] = grid.cells[r * w + c];
                     }
                 }
             }
             Self::FlipHorizontal => {
                 for r in 0..h {
-                    for c in 0..w {
-                        out[r][w - 1 - c] = grid.rows[r][c];
+                    let source = &grid.cells[r * w..(r + 1) * w];
+                    let destination = &mut out[r * out_w..(r + 1) * out_w];
+                    for (target, value) in destination.iter_mut().zip(source.iter().rev()) {
+                        *target = *value;
                     }
                 }
             }
             Self::FlipVertical => {
                 for r in 0..h {
-                    out[h - 1 - r].clone_from(&grid.rows[r]);
+                    let source = &grid.cells[r * w..(r + 1) * w];
+                    let destination_start = (h - 1 - r) * out_w;
+                    out[destination_start..destination_start + w].copy_from_slice(source);
                 }
             }
             Self::Transpose => {
                 for r in 0..h {
                     for c in 0..w {
-                        out[c][r] = grid.rows[r][c];
+                        out[c * out_w + r] = grid.cells[r * w + c];
                     }
                 }
             }
         }
+
         Grid {
-            rows: out,
+            cells: out,
+            height: out_h,
             width: out_w,
         }
     }
