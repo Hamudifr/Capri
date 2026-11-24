@@ -327,7 +327,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
     def test_task_owner_rows_are_immutable_and_legacy_tasks_stay_unowned(self):
         owned = self.store.create_for_principal("alice", PLAN, now=NOW)
         legacy = self.store.create(PLAN, now=NOW)
-        connection = self.store._connect()
+        connection = sqlite3.connect(self.store.path)
         try:
             with self.assertRaises(sqlite3.IntegrityError):
                 connection.execute(
@@ -338,6 +338,11 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 connection.execute(
                     "DELETE FROM task_owners WHERE task_id=?",
                     (owned.task_id,),
+                )
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    "INSERT OR REPLACE INTO task_owners(task_id,principal_id) VALUES(?,?)",
+                    (owned.task_id, "bob"),
                 )
         finally:
             connection.close()
