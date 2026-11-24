@@ -577,29 +577,29 @@ class LearningStore:
             allowed_capabilities=allowed_capabilities,
         )
         export_id = str(uuid.uuid4())
-        created_at = datetime.now().astimezone().isoformat()
-        artifact_digest = hashlib.sha256()
-        with staged_path.open("rb") as stream:
-            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-                artifact_digest.update(chunk)
-        artifact_sha256 = artifact_digest.hexdigest()
-        manifest = {
-            "manifest_version": 1,
-            "export_id": export_id,
-            "artifact_kind": "jsonl",
-            "created_at": created_at,
-            "artifact_sha256": artifact_sha256,
-            "row_count": row_count,
-            "split_counts": {key: counts[key] for key in ("train", "validation", "test")},
-            "consent_ids": consent_ids,
-            "consent_policy_versions": policy_versions,
-        }
-        manifest_json = json.dumps(
-            manifest, sort_keys=True, ensure_ascii=False, separators=(",", ":")
-        )
         registered = False
         published = False
         try:
+            created_at = datetime.now().astimezone().isoformat()
+            artifact_digest = hashlib.sha256()
+            with staged_path.open("rb") as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    artifact_digest.update(chunk)
+            artifact_sha256 = artifact_digest.hexdigest()
+            manifest = {
+                "manifest_version": 1,
+                "export_id": export_id,
+                "artifact_kind": "jsonl",
+                "created_at": created_at,
+                "artifact_sha256": artifact_sha256,
+                "row_count": row_count,
+                "split_counts": {key: counts[key] for key in ("train", "validation", "test")},
+                "consent_ids": consent_ids,
+                "consent_policy_versions": policy_versions,
+            }
+            manifest_json = json.dumps(
+                manifest, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+            )
             with self._connection() as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 if consent_ids:
@@ -878,7 +878,12 @@ class LearningStore:
                     digest.update(chunk)
             actual_hash = digest.hexdigest()
             if actual_hash != record["bundle_sha256"]:
-                return {"valid": False, "reason": "artifact_hash_mismatch"}
+                reason = (
+                    "artifact_hash_mismatch"
+                    if record["export_kind"] == "jsonl"
+                    else "bundle_hash_mismatch"
+                )
+                return {"valid": False, "reason": reason}
             stored_manifest = json.loads(record["manifest_json"])
             if not isinstance(stored_manifest, dict):
                 return {"valid": False, "reason": "invalid_manifest"}
