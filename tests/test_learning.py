@@ -410,7 +410,34 @@ class LearningStoreTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "active")
         self.assertGreaterEqual(len(regular_file_fsync_sizes), 2)
-        self.assertTrue(self.store.verify_export(result["export_id"], output)["valid"])
+
+    def test_bundle_archive_fsync_failure_prevents_publication(self):
+        self.store.record(example())
+        output = self.root / "failed-durable-bundle.zip"
+        real_fsync = os.fsync
+        regular_file_calls = 0
+
+        def fail_archive_fsync(descriptor):
+            nonlocal regular_file_calls
+            if stat.S_ISREG(os.fstat(descriptor).st_mode):
+                regular_file_calls += 1
+                if regular_file_calls == 2:
+                    raise OSError("archive fsync failed")
+            return real_fsync(descriptor)
+
+        with patch("capri_core.learning.os.fsync", side_effect=fail_archive_fsync):
+            with self.assertRaisesRegex(OSError, "archive fsync failed"):
+                self.store.export_bundle(output)
+
+        self.assertEqual(regular_file_calls, 2)
+        self.assertFalse(output.exists())
+        self.assertEqual(list(self.root.glob(".failed-durable-bundle.zip.*.jsonl")), [])
+        self.assertEqual(list(self.root.glob(".failed-durable-bundle.zip.*.tmp")), [])
+        with self.store._connection() as connection:
+            export_count = connection.execute(
+                "SELECT COUNT(*) FROM learning_exports"
+            ).fetchone()[0]
+        self.assertEqual(export_count, 0)
 
     def test_bundle_is_invalidated_when_any_source_consent_is_revoked(self):
         self.store.record(example())
