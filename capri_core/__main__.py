@@ -241,21 +241,22 @@ def run_doctor(root: Path, json_output: bool = False) -> int:
                 "contents: read is explicitly scoped"
                 if least_privilege else "expected explicit contents: read permission",
             ))
-            required_branches = {"main", "recovery/non-x5-foundation"}
+            required_push_branches = {"main"}
+            required_pull_request_branches = {"main", "recovery/non-x5-foundation"}
             push_branches = _workflow_event_branches(workflow, "push")
             pull_request_branches = _workflow_event_branches(workflow, "pull_request")
             triggers_verified = (
                 push_branches is not None
                 and pull_request_branches is not None
-                and required_branches.issubset(push_branches)
-                and required_branches.issubset(pull_request_branches)
+                and required_push_branches.issubset(push_branches)
+                and required_pull_request_branches.issubset(pull_request_branches)
             )
             checks.append((
                 "Recovery CI coverage",
                 triggers_verified,
-                "push and pull_request explicitly include main and the recovery branch"
+                "push includes main; pull_request includes main and the recovery branch"
                 if triggers_verified else
-                "could not verify required branches under both top-level events; unsupported or missing filters fail closed",
+                "could not verify main push coverage and main/recovery pull_request coverage; unsupported or missing filters fail closed",
             ))
     else:
         checks.append(("CI workflow readable", False, "workflow file is missing"))
