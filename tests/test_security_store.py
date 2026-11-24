@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import sqlite3
 import stat
 import tempfile
 import unittest
@@ -209,6 +210,66 @@ class SQLiteSecurityStoreTests(unittest.TestCase):
         missing = os.path.join(self.temp.name, "missing", "security.sqlite3")
         with self.assertRaises(ToolValidationError):
             SQLiteSecurityStore(missing)
+
+
+    def test_backup_rejects_semantically_invalid_audit_rows(self):
+        store = SQLiteSecurityStore(self.path)
+        store.write(AuditEvent(
+            "corrupt-audit", self.now.isoformat(), "principal-1", "search",
+            "a" * 64, "succeeded", None,
+        ))
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute(
+                "UPDATE audit_events SET argument_digest = ? WHERE event_id = ?",
+                ("not-a-sha256-digest", "corrupt-audit"),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        destination = os.path.join(self.temp.name, "invalid-audit-backup.sqlite3")
+        with self.assertRaises(ToolValidationError):
+            store.backup_to(destination)
+        self.assertFalse(os.path.lexists(destination))
+
+    def test_backup_rejects_semantically_invalid_approval_replay_rows(self):
+        store = SQLiteSecurityStore(self.path)
+        grant = self.grant("corrupt-approval")
+        self.assertTrue(store.consume(grant, self.now))
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute(
+                "UPDATE consumed_approvals SET tool_name = ? WHERE grant_id = ?",
+                ("Invalid Tool Name", "corrupt-approval"),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        destination = os.path.join(self.temp.name, "invalid-approval-backup.sqlite3")
+        with self.assertRaises(ToolValidationError):
+            store.backup_to(destination)
+        self.assertFalse(os.path.lexists(destination))
+
+    def test_backup_rejects_approval_expiry_before_consumption(self):
+        store = SQLiteSecurityStore(self.path)
+        grant = self.grant("expired-order")
+        self.assertTrue(store.consume(grant, self.now))
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute(
+                "UPDATE consumed_approvals SET expires_at = ? WHERE grant_id = ?",
+                ((self.now - timedelta(seconds=1)).isoformat(), "expired-order"),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        destination = os.path.join(self.temp.name, "invalid-expiry-backup.sqlite3")
+        with self.assertRaises(ToolValidationError):
+            store.backup_to(destination)
+        self.assertFalse(os.path.lexists(destination))
 
 
 if __name__ == "__main__":
