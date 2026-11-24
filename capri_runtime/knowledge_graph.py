@@ -237,7 +237,8 @@ def retrieve_knowledge(
     ]
     candidates.sort(key=lambda n: (
         -_score(tokens, n), -_EVIDENCE_RANK[n.evidence_state],
-        -float(n.confidence), n.title.casefold(), n.neuron_id,
+        -float(n.confidence), 0 if n.source else 1,
+        -_freshness(n.updated_at), n.title.casefold(), n.neuron_id,
     ))
     if not candidates:
         return UntrustedKnowledgeContext((), (), query)
