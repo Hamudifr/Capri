@@ -150,11 +150,12 @@ def _synapse(raw: object) -> GraphSynapse:
 
 
 class NotionKnowledgeGraphProvider:
-    """Load a consistent bounded graph snapshot from two Notion data sources.
+    """Load a bounded graph snapshot from two sequential Notion data-source reads.
 
-    The transport is injected. This adapter never writes to Notion, and it fails
-    closed on malformed relations, missing fields, duplicate IDs, or pagination
-    beyond the configured maximum.
+    Notion does not provide a transaction spanning these data sources, so the
+    result is not an atomic cross-database snapshot. The transport is injected.
+    This adapter never writes to Notion and fails closed on malformed relations,
+    missing fields, duplicate IDs, or pagination beyond the configured maximum.
     """
     def __init__(
         self,
