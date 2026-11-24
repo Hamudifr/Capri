@@ -52,9 +52,10 @@ Search is bounded by depth and candidate count. Inputs are limited to 30x30 grid
 - Rust CI on exact branch head: rustfmt check, Clippy with warnings denied, 13 unit tests, release build, and matched benchmark all passed.
 - Python CI on exact branch head: Python 3.15.2, package installation, CLI, Capri Doctor, and all 493 existing tests passed.
 - Matched synthetic task: learn a 20x20 grid clockwise rotation using the five-operation DSL, depth limit 1, 10,000 synthesis rounds, 100 warmups, median of 5 samples, same Ubuntu x86_64 runner.
-- Rust release: 10.34789 ms per 10,000 rounds = 966,380.59 operations/second.
-- Python 3.15.2 reference: 0.841468 s per 10,000 rounds = 11,884.00 operations/second.
-- Observed ratio: about 81.3x faster for this specific microbenchmark. Flat-buffer Rust also measured about 5.26x faster than the earlier nested-Vec Rust implementation on the same task.
+- Final exact-head Rust release: 13.336804 ms per 10,000 rounds = 749,804.83 operations/second.
+- Final exact-head Python 3.15.2 reference: 0.965877 s per 10,000 rounds = 10,353.29 operations/second.
+- Observed ratio: about 72.4x faster for this specific microbenchmark. An earlier exact same-task run measured 81.3x; run-to-run variation shows why the ratio must not be generalized.
+- The first nested-Vec Rust version measured 183,717 ops/s; the flat-buffer version measured 749,805 ops/s in a later run, an indicative ~4.1x difference across separate CI runs, not a controlled paired A/B. The flat layout remains the better design hypothesis, but paired profiling is still needed.
 - These are microbenchmark results, not a general system speedup claim. They do not measure end-to-end agent reasoning, large-scale memory pressure, multi-core scaling, or generalization.
 
-CI run IDs: Rust #11 (45459282260); Python #797 (45459282207). PR #143 remains draft and unmerged.
+Final exact-head CI: Rust #12 (45459486553); Python #798 (45459486842). PR #143 remains draft and unmerged.
