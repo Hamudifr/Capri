@@ -13,6 +13,7 @@ from capri_runtime.tasks import (
     TaskEngine,
     TaskIdempotencyConflict,
     TaskValidationError,
+    RetryableTaskError,
     TaskWorker,
 )
 
@@ -110,22 +111,65 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         self.assertEqual(len(winners), 1)
         self.assertEqual(winners[0].task_id, task.task_id)
 
-    def test_expired_lease_recovers_with_stable_idempotency_key(self):
+    def test_expired_lease_is_quarantined_instead_of_replayed(self):
         task = self.store.create(PLAN, now=NOW)
         first = self.store.claim_next("worker-a", lease_seconds=5, now=NOW)
         self.assertEqual(first.idempotency_key, f"{task.task_id}:0")
-        second = self.store.claim_next(
+        self.assertIsNone(self.store.claim_next(
             "worker-b", lease_seconds=5, now=NOW + timedelta(seconds=6)
-        )
-        self.assertEqual(second.idempotency_key, first.idempotency_key)
-        self.assertEqual(second.attempt, 2)
+        ))
+        record = self.store.get(task.task_id)
+        self.assertEqual(record.state, "reconciliation_required")
+        self.assertEqual(record.error_code, "lease_expired_outcome_uncertain")
 
-    def test_stale_worker_cannot_commit_after_lease_reclaimed(self):
-        self.store.create(PLAN, now=NOW)
+    def test_expired_lease_with_cancel_request_remains_uncertain(self):
+        task = self.store.create(PLAN, now=NOW)
+        self.store.claim_next("worker-a", lease_seconds=5, now=NOW)
+        self.store.request_cancel(task.task_id, now=NOW + timedelta(seconds=1))
+        self.assertIsNone(self.store.claim_next(
+            "worker-b", lease_seconds=5, now=NOW + timedelta(seconds=6)
+        ))
+        record = self.store.get(task.task_id)
+        self.assertEqual(record.state, "reconciliation_required")
+        self.assertTrue(record.cancel_requested)
+
+    def test_stale_worker_cannot_commit_after_lease_expiry_quarantine(self):
+        task = self.store.create(PLAN, now=NOW)
         old = self.store.claim_next("worker-a", lease_seconds=5, now=NOW)
-        self.store.claim_next("worker-b", lease_seconds=5, now=NOW + timedelta(seconds=6))
+        self.assertIsNone(self.store.claim_next("worker-b", lease_seconds=5, now=NOW + timedelta(seconds=6)))
         with self.assertRaises(TaskConflictError):
             self.store.finish_step(old, {"ok": True}, now=NOW + timedelta(seconds=7))
+        self.assertEqual(self.store.get(task.task_id).state, "reconciliation_required")
+
+    def test_renewed_lease_can_be_quarantined_by_original_claim(self):
+        task = self.store.create(PLAN, now=NOW)
+        claim = self.store.claim_next("worker-a", lease_seconds=5, now=NOW)
+        renewed = self.store.renew_lease(
+            claim, lease_seconds=10, now=NOW + timedelta(seconds=1)
+        )
+        self.assertNotEqual(renewed.lease_until, claim.lease_until)
+        result = self.store.require_reconciliation(
+            claim, now=NOW + timedelta(seconds=2)
+        )
+        self.assertEqual(result.task_id, task.task_id)
+        self.assertEqual(result.state, "reconciliation_required")
+        self.assertEqual(result.error_code, "handler_outcome_uncertain")
+
+    def test_stale_claim_cannot_quarantine_a_later_retry_attempt(self):
+        task = self.store.create(
+            [{"tool": "prepare", "input": {}, "max_attempts": 2}], now=NOW
+        )
+        old_claim = self.store.claim_next("worker", now=NOW)
+        self.store.fail_step(old_claim, now=NOW, retryable=True)
+        current_claim = self.store.claim_next(
+            "worker", now=NOW + timedelta(seconds=5)
+        )
+        self.assertEqual(current_claim.attempt, 2)
+        with self.assertRaises(TaskConflictError):
+            self.store.require_reconciliation(
+                old_claim, now=NOW + timedelta(seconds=6)
+            )
+        self.assertEqual(self.store.get(task.task_id).state, "running")
 
     def test_retry_backoff_and_attempt_limit(self):
         task = self.store.create(PLAN, now=NOW)
@@ -158,15 +202,99 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         self.assertEqual(second.result, ({"prepared": True}, {"finished": "two"}))
         self.assertEqual(calls[0][1], f"{task.task_id}:0")
 
-    def test_handler_failure_is_suppressed_and_terminal_after_attempt_limit(self):
+    def test_uncertain_handler_exception_is_quarantined_and_never_replayed(self):
+        calls = []
         def broken(_data, _key):
+            calls.append("side_effect")
             raise RuntimeError("must not leak")
         engine = TaskEngine(self.store, {"prepare": broken}, "worker")
-        task = self.store.create([{"tool": "prepare", "input": {}, "max_attempts": 1}], now=NOW)
+        task = self.store.create([{"tool": "prepare", "input": {}, "max_attempts": 3}], now=NOW)
+        result = engine.run_once(now=NOW)
+        self.assertEqual(result.state, "reconciliation_required")
+        self.assertEqual(result.error_code, "handler_outcome_uncertain")
+        self.assertNotIn("must not leak", str(result))
+        self.assertEqual(calls, ["side_effect"])
+        self.assertIsNone(engine.run_once(now=NOW + timedelta(hours=1)))
+        self.assertEqual(calls, ["side_effect"])
+
+    def test_invalid_handler_result_is_quarantined_after_side_effect(self):
+        calls = []
+        engine = TaskEngine(
+            self.store,
+            {"prepare": lambda data, key: calls.append("side_effect") or object()},
+            "worker",
+        )
+        task = self.store.create([{"tool": "prepare", "input": {}, "max_attempts": 3}], now=NOW)
+        result = engine.run_once(now=NOW)
+        self.assertEqual(result.state, "reconciliation_required")
+        self.assertEqual(result.error_code, "handler_result_invalid")
+        self.assertEqual(calls, ["side_effect"])
+        self.assertIsNone(engine.run_once(now=NOW + timedelta(hours=1)))
+
+    def test_explicit_retryable_error_retries_only_declared_pre_side_effect_failure(self):
+        calls = []
+        def handler(_data, _key):
+            calls.append("attempt")
+            if len(calls) == 1:
+                raise RetryableTaskError("safe pre-side-effect failure")
+            return {"ok": True}
+        engine = TaskEngine(self.store, {"prepare": handler}, "worker")
+        task = self.store.create([{"tool": "prepare", "input": {}, "max_attempts": 2}], now=NOW)
+        first = engine.run_once(now=NOW)
+        self.assertEqual(first.state, "retry_wait")
+        second = engine.run_once(now=NOW + timedelta(seconds=5))
+        self.assertEqual(second.state, "succeeded")
+        self.assertEqual(calls, ["attempt", "attempt"])
+
+    def test_uncertain_cancellation_requires_reconciliation(self):
+        from capri_runtime.tools import ToolCancelledError
+        engine = TaskEngine(
+            self.store,
+            {"prepare": lambda data, key: (_ for _ in ()).throw(ToolCancelledError(outcome_uncertain=True))},
+            "worker",
+        )
+        self.store.create([{"tool": "prepare", "input": {}, "max_attempts": 3}], now=NOW)
+        result = engine.run_once(now=NOW)
+        self.assertEqual(result.state, "reconciliation_required")
+        self.assertEqual(result.error_code, "handler_outcome_uncertain")
+
+    def test_cancellation_before_handler_start_is_not_quarantined(self):
+        from capri_runtime.tools import ToolCancelledError
+        engine = TaskEngine(
+            self.store,
+            {"prepare": lambda data, key: (_ for _ in ()).throw(ToolCancelledError(outcome_uncertain=False))},
+            "worker",
+        )
+        self.store.create([{"tool": "prepare", "input": {}, "max_attempts": 3}], now=NOW)
         result = engine.run_once(now=NOW)
         self.assertEqual(result.state, "failed")
-        self.assertEqual(result.error_code, "handler_failed")
-        self.assertNotIn("must not leak", str(result))
+        self.assertEqual(result.error_code, "handler_cancelled_before_start")
+
+    def test_cancel_request_preserves_uncertain_state(self):
+        engine = TaskEngine(
+            self.store,
+            {"prepare": lambda data, key: (_ for _ in ()).throw(RuntimeError("uncertain"))},
+            "worker",
+        )
+        task = self.store.create([{"tool": "prepare", "input": {}, "max_attempts": 3}], now=NOW)
+        result = engine.run_once(now=NOW)
+        self.assertEqual(result.state, "reconciliation_required")
+        cancelled = self.store.request_cancel(task.task_id, now=NOW + timedelta(seconds=1))
+        self.assertEqual(cancelled.state, "reconciliation_required")
+        self.assertTrue(cancelled.cancel_requested)
+
+    def test_reconciliation_state_is_valid_in_private_backup(self):
+        engine = TaskEngine(
+            self.store,
+            {"prepare": lambda data, key: (_ for _ in ()).throw(RuntimeError("uncertain"))},
+            "worker",
+        )
+        self.store.create([{"tool": "prepare", "input": {}, "max_attempts": 3}], now=NOW)
+        result = engine.run_once(now=NOW)
+        self.assertEqual(result.state, "reconciliation_required")
+        backup = os.path.join(self.temp.name, "quarantine-backup.sqlite3")
+        self.store.backup_to(backup)
+        self.assertTrue(os.path.exists(backup))
 
     def test_missing_handler_fails_without_retry(self):
         engine = TaskEngine(self.store, {}, "worker")
@@ -223,7 +351,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         def sometimes_fails(_data, _key):
             attempts["count"] += 1
             if attempts["count"] == 1:
-                raise RuntimeError("private failure")
+                raise RetryableTaskError("safe pre-side-effect failure")
             return {"ok": True}
         engine = TaskEngine(self.store, {"prepare": sometimes_fails}, "worker")
         self.store.create([{"tool": "prepare", "input": {}, "max_attempts": 2}], now=NOW)
