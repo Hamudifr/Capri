@@ -2,9 +2,9 @@
 
 ## Rust-first implementation
 
-The canonical CCEL computational core is being migrated to Rust for predictable performance, memory safety and future parallel search. The crate is rust/ccel-core, uses the standard library only, and follows the latest stable toolchain through rust-toolchain.toml. Python remains available for Capri orchestration and integrations, not as the canonical CCEL search engine.
+The canonical CCEL computational core is implemented in Rust on the isolated experiment branch for predictable performance, memory safety and future parallel search. The crate is rust/ccel-core, uses the standard library only, and follows the latest stable toolchain through rust-toolchain.toml. Python remains available for Capri orchestration and integrations, not as the canonical CCEL search engine. Python CI selects 3.x to follow the latest stable release; the package floor is 3.15.
 
-No speedup is claimed until the Rust core is compiled, tested, benchmarked against the previous Python prototype on identical tasks, and profiled. Rust is not itself an intelligence breakthrough.
+A same-runner synthetic microbenchmark has now measured Rust against a Python reference. It demonstrates a speed advantage on that specific task only, not a general system-wide speedup. Rust is not itself an intelligence breakthrough.
 
 ## Purpose and current scope
 
