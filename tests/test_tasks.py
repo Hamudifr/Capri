@@ -1771,5 +1771,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         self.store.backup_to(backup)
         self.assertTrue(os.path.exists(backup))
 
+
+
 if __name__ == "__main__":
     unittest.main()
