@@ -61,23 +61,33 @@ not a self-modifying hosted model and not an automatic training service.
   New ZIP bundles contain a versioned manifest, a SHA-256 hash of the JSONL
   dataset, the bundle's stable export ID, row/split counts, and the contributing
   consent IDs and policy versions.
-- Each bundle is registered in the same local SQLite store before publication.
-  SQLite foreign-key enforcement binds each registry dependency to an existing
-  export and consent record. The registry tracks `publishing`, `active`, `invalidated`, or `failed` state;
-  publication uses a same-directory no-overwrite hard link. A crash or uncertain
-  publication remains non-active and therefore fails closed. If the file is
-  published but final registry activation cannot be confirmed, the API raises
-  `LearningExportOutcomeUncertainError` with `export_id` and `path`; callers
-  can use `get_export_status()` and `verify_export()` to reconcile without
-  blindly repeating the export.
+- Both standalone `export_jsonl()` artifacts and ZIP bundles are registered in
+  the same local SQLite store before publication. The registry records artifact
+  kind, final path, staging path, SHA-256, manifest metadata and every contributing
+  consent ID. SQLite foreign-key enforcement binds each dependency to an existing
+  export and consent record. Publication uses a same-directory no-overwrite hard
+  link. The registry tracks `publishing`, `active`, `invalidated`, or `failed`.
+- A crash or uncertain publication remains non-active and therefore fails
+  closed. `reconcile_pending_exports()` verifies the exact published artifact,
+  re-fsyncs its directory, rechecks consent dependencies inside a write
+  transaction, and activates only a still-publishing artifact whose bytes and
+  provenance match the registry. Missing, corrupt, legacy pathless or otherwise
+  unverifiable pending artifacts become failed; revoked dependencies remain
+  invalidated. Stale private staging files are cleaned only when their path
+  matches the recorded artifact sibling. Recovery is idempotent.
+- If an artifact is published but final registry activation cannot be confirmed,
+  the API raises `LearningExportOutcomeUncertainError` with `export_id` and
+  `path`; callers must inspect `get_export_status()`, run
+  `reconcile_pending_exports()`, and call `verify_export()` before reuse.
 - Revoking any contributing consent transactionally marks every registered
-  dependent bundle invalidated. `verify_export()` checks registry state,
-  bundle hash, manifest identity, and dataset hash, then re-reads registry status
-  after file verification so a revocation committed during inspection is observed.
-  That final status read is the verification linearization point. Downstream consumers must
-  call this verifier against the authoritative store before use; a copied ZIP
-  alone cannot carry or enforce revocation, and an unavailable registry means
-  the bundle must not be treated as verified.
+  dependent JSONL or ZIP artifact invalidated. `verify_export()` checks the
+  artifact hash, JSONL/ZIP structure, manifest identity, dataset hash and exact
+  consent dependencies, then re-reads registry status after file verification
+  so a concurrent revocation is observed. That final status read is the
+  verification linearization point. Downstream consumers must call this verifier
+  against the authoritative store before use; a copied file alone cannot carry
+  or enforce revocation, and an unavailable registry means the artifact must
+  not be treated as verified.
 - This is application-level deletion, not a guarantee of forensic secure
   erasure from filesystem blocks, snapshots, backups, or external copies.
 
@@ -115,10 +125,41 @@ not a self-modifying hosted model and not an automatic training service.
 ## Current limitations
 
 The module is not yet wired into the task engine or runtime. There is no
-automatic event capture, consent UI, PII scanner, dataset signing/version
-manager, trainer, adapter registry, or model-serving integration. The consent
-and privacy-review booleans remain per-example attestations; the new consent
-ledger adds provenance and revocation but does not itself authenticate the
-person granting consent or recall previously exported files. These capabilities
-must be implemented as separate, reviewed steps. The Android phone environment
-is not assumed to be capable of training a 20B-class model.
+automatic event capture, consent UI, production consent-evidence verifier,
+PII scanner, dataset signing/version manager, trainer, adapter registry, or
+model-serving integration. `record_consent()` now fails closed unless the
+trusted host application injects a `consent_verifier` at `LearningStore`
+construction; false results or verifier exceptions reject the grant. The
+`evidence_ref` string is only a locator, never proof by itself. The injected
+verifier must authenticate a real affirmative grant from a trusted consent
+capture system. The library does not identify the human or independently
+prove that consent was obtained. The `privacy_reviewed` flag remains an
+operator attestation, not an automated PII detector. Revocation invalidates
+registered local artifacts but cannot recall copies already distributed outside
+the store. These capabilities require a reviewed host integration. The Android
+phone environment is not assumed to be capable of training a 20B-class model.
+
+## Export lifecycle and consent evidence hardening — 2026-11-24
+
+- Standalone JSONL export is no longer an untracked side path. It now creates a
+  registry record before publishing, records the exact contributing consent
+  dependencies and artifact hash, and returns an `export_id`. Revoking any
+  contributing consent marks the JSONL export invalidated just like a ZIP bundle.
+  The artifact remains on disk; consumers must call `verify_export()` against
+  the authoritative local registry before use.
+- Both JSONL and ZIP exports persist their final destination and staging paths.
+  `reconcile_pending_exports()` handles interrupted `publishing` rows:
+  verify the artifact and manifest, fsync the directory, remove a matching
+  private staging sibling, and activate only after rechecking consent state in
+  a SQLite write transaction. Missing or corrupt artifacts fail closed. Legacy
+  pending rows without a recorded destination cannot be recovered and are marked
+  failed. Revoked artifacts remain invalidated.
+- Consent recording now requires a trusted verifier injected by the host
+  application. The default is deny. A caller-supplied evidence reference is
+  not accepted as authentication. The host verifier must validate an actual
+  signed or otherwise authenticated consent grant from its trusted capture
+  workflow. No production consent capture/verifier integration exists yet, so
+  no real user consent can currently be recorded through the default store.
+- No real user data was used. These changes do not recall copies already
+  distributed outside the local store and do not authorize training or
+  deployment.
