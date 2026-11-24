@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import math
 import os
+import threading
+import time
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Protocol
@@ -184,6 +186,7 @@ class NotionKnowledgeGraphProvider:
         page_size: int = 100,
         max_neurons: int = 1000,
         max_synapses: int = 5000,
+        cache_ttl_seconds: float = 15.0,
     ) -> None:
         if not callable(getattr(transport, "query_data_source", None)):
             raise KnowledgeGraphError("transport must implement query_data_source()")
@@ -198,9 +201,20 @@ class NotionKnowledgeGraphProvider:
             raise KnowledgeGraphError("max_neurons must be between one and one thousand")
         if type(max_synapses) is not int or not 1 <= max_synapses <= 5000:
             raise KnowledgeGraphError("max_synapses must be between one and five thousand")
+        if (
+            isinstance(cache_ttl_seconds, bool)
+            or not isinstance(cache_ttl_seconds, (int, float))
+            or not math.isfinite(cache_ttl_seconds)
+            or not 0 <= cache_ttl_seconds <= 300
+        ):
+            raise KnowledgeGraphError("cache_ttl_seconds must be between zero and 300")
         self.page_size = page_size
         self.max_neurons = max_neurons
         self.max_synapses = max_synapses
+        self.cache_ttl_seconds = float(cache_ttl_seconds)
+        self._cache_lock = threading.Lock()
+        self._cached_graph = None
+        self._cache_expires_at = 0.0
 
     def _load(self, data_source_id: str, maximum: int, parser):
         records = []
@@ -231,17 +245,40 @@ class NotionKnowledgeGraphProvider:
         return tuple(records)
 
     def load_graph(self) -> tuple[tuple[GraphNeuron, ...], tuple[GraphSynapse, ...]]:
-        neurons = self._load(self.neuron_data_source_id, self.max_neurons, _neuron)
-        synapses = self._load(self.synapse_data_source_id, self.max_synapses, _synapse)
-        neuron_ids = {item.neuron_id for item in neurons}
-        if len(neuron_ids) != len(neurons):
-            raise KnowledgeGraphError("Notion Neurons contains duplicate page IDs")
-        synapse_ids = {item.synapse_id for item in synapses}
-        if len(synapse_ids) != len(synapses):
-            raise KnowledgeGraphError("Notion Synapses contains duplicate page IDs")
-        if any(edge.from_neuron_id not in neuron_ids or edge.to_neuron_id not in neuron_ids for edge in synapses):
-            raise KnowledgeGraphError("Notion Synapses contains a dangling endpoint")
-        return neurons, synapses
+        """Return a bounded snapshot, using a short host-process cache when enabled."""
+        with self._cache_lock:
+            if (
+                self._cached_graph is not None
+                and self.cache_ttl_seconds > 0
+                and time.monotonic() < self._cache_expires_at
+            ):
+                return self._cached_graph
+
+            neurons = self._load(self.neuron_data_source_id, self.max_neurons, _neuron)
+            synapses = self._load(self.synapse_data_source_id, self.max_synapses, _synapse)
+            neuron_ids = {item.neuron_id for item in neurons}
+            if len(neuron_ids) != len(neurons):
+                raise KnowledgeGraphError("Notion Neurons contains duplicate page IDs")
+            synapse_ids = {item.synapse_id for item in synapses}
+            if len(synapse_ids) != len(synapses):
+                raise KnowledgeGraphError("Notion Synapses contains duplicate page IDs")
+            if any(
+                edge.from_neuron_id not in neuron_ids or edge.to_neuron_id not in neuron_ids
+                for edge in synapses
+            ):
+                raise KnowledgeGraphError("Notion Synapses contains a dangling endpoint")
+
+            snapshot = (neurons, synapses)
+            if self.cache_ttl_seconds > 0:
+                self._cached_graph = snapshot
+                self._cache_expires_at = time.monotonic() + self.cache_ttl_seconds
+            return snapshot
+
+    def invalidate_cache(self) -> None:
+        """Force the next retrieval to read both Notion data sources again."""
+        with self._cache_lock:
+            self._cached_graph = None
+            self._cache_expires_at = 0.0
 
 
 def create_notion_knowledge_graph_provider_from_environment(
