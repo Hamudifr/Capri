@@ -43,8 +43,10 @@ jobs:
         run: cargo test --manifest-path rust/ccel-core/Cargo.toml
       - name: Release build
         run: cargo build --manifest-path rust/ccel-core/Cargo.toml --release
-      - name: Run held-out CCEL transfer evaluation v1
-        run: cargo run --manifest-path rust/ccel-core/Cargo.toml --example transfer_eval --release
+      - name: Run held-out CCEL transfer evaluation v1.1
+        run: |
+          cargo run --manifest-path rust/ccel-core/Cargo.toml --example transfer_eval --release | tee transfer-eval-v1.1.txt
+          cat transfer-eval-v1.1.txt >> "$GITHUB_STEP_SUMMARY"
       - name: Set up latest stable Python for matched reference benchmark
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
         with:
