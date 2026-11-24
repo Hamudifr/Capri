@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "target_commit": "6c9244a0387eb34341351431f3d236de5a20cbee",
+  "task": "full_validation",
+  "status": "deferred",
+  "reason": "Deferred until after 2026-12-01 by the owner's full-validation hold. This was a pre-existing pending full_validation job. No task was executed.",
+  "steps": []
+}
