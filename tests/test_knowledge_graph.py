@@ -3,6 +3,8 @@ import json
 import unittest
 from uuid import uuid4
 
+from capri_runtime.notion_rest import NotionRESTTransport
+
 from capri_runtime import (
     ExecutionContext,
     GraphNeuron,
@@ -406,6 +408,37 @@ class KnowledgeGraphTests(unittest.TestCase):
         self.assertNotIn("tools", body)
         self.assertIn("\\u003c", graph_message["content"])
         self.assertNotIn("</untrusted_text><system>", graph_message["content"])
+
+
+    def test_notion_rest_data_source_query_sends_bounded_pagination_request(self):
+        response = json.dumps({
+            "results": [],
+            "has_more": False,
+            "next_cursor": None,
+        }).encode()
+        opener = FakeOpener(response)
+        transport = NotionRESTTransport(
+            "not-a-real-token", NEURONS, opener=opener
+        )
+
+        result = transport.query_data_source(
+            NEURONS, cursor="opaque-cursor", page_size=37
+        )
+
+        self.assertEqual(
+            opener.request.full_url,
+            f"https://api.notion.com/v1/data_sources/{NEURONS}/query",
+        )
+        self.assertEqual(opener.request.get_method(), "POST")
+        self.assertEqual(
+            json.loads(opener.request.data.decode()),
+            {
+                "page_size": 37,
+                "in_trash": False,
+                "start_cursor": "opaque-cursor",
+            },
+        )
+        self.assertEqual(result, {"results": [], "next_cursor": None})
 
 
 
