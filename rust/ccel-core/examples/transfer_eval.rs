@@ -230,6 +230,7 @@ fn score(kind: ExpectedKind, expected: Option<&Grid>, outputs: Option<&[Grid]>) 
 }
 
 fn main() {
+    // v1.1 deliberately records the cross-depth ambiguity limitation instead of hiding it.
     const DATASET: &str = "CCEL-TRANSFER-v1.1";
     const MAX_DEPTH: usize = 3;
     let cases = dataset_v1();
