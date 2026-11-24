@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "job_id": "f9a0b1c2d3e456789abcdef012345678",
+  "target_commit": "c1e0a0e462f2e5f481dd3f26dfcf92330bcf701d",
+  "task": "full_validation"
+}
