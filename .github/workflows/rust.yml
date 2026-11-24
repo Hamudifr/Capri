@@ -39,8 +39,8 @@ jobs:
           git diff --check
       - name: Lint
         run: cargo clippy --manifest-path rust/ccel-core/Cargo.toml --all-targets -- -D warnings
-      - name: Test
-        run: cargo test --manifest-path rust/ccel-core/Cargo.toml --lib
+      - name: Unit and documentation tests
+        run: cargo test --manifest-path rust/ccel-core/Cargo.toml
       - name: Release build
         run: cargo build --manifest-path rust/ccel-core/Cargo.toml --release
       - name: Set up latest stable Python for matched reference benchmark
