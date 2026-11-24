@@ -33,19 +33,10 @@ jobs:
           rustc --version
           cargo --version
           rustc -vV
-      - name: Format source with current stable rustfmt
+      - name: Verify rustfmt formatting
         run: |
-          cargo fmt --manifest-path rust/ccel-core/Cargo.toml --all
           cargo fmt --manifest-path rust/ccel-core/Cargo.toml --all -- --check
           git diff --check
-      - name: Export rustfmt-normalized source for repository sync
-        run: |
-          echo "BEGIN_FORMATTED_LIB_RS"
-          cat rust/ccel-core/src/lib.rs
-          echo "END_FORMATTED_LIB_RS"
-          echo "BEGIN_FORMATTED_BENCH_RS"
-          cat rust/ccel-core/benches/ccel.rs
-          echo "END_FORMATTED_BENCH_RS"
       - name: Lint
         run: cargo clippy --manifest-path rust/ccel-core/Cargo.toml --all-targets -- -D warnings
       - name: Test
