@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "target_commit": "3dddc7fedc34339f7c3935ccb965892a485382ca",
+  "task": "full_validation",
+  "status": "deferred",
+  "reason": "Deferred until after 2026-12-01 by the owner's full-validation hold; focused approval-binding regression tasks will run instead. No task was executed.",
+  "steps": []
+}
