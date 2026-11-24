@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from capri_core import learning as learning_module
 from capri_core.learning import LearningConsent, LearningDataError, LearningExample, LearningStore
 
 
@@ -443,7 +444,7 @@ class LearningStoreTests(unittest.TestCase):
     def test_bundle_directory_fsync_failure_keeps_published_bundle_nonactive(self):
         self.store.record(example())
         output = self.root / "uncertain-durable-bundle.zip"
-        real_sync = _fsync_directory
+        real_sync = learning_module._fsync_directory
         sync_calls = 0
 
         def fail_bundle_directory_sync(directory):
