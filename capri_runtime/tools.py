@@ -498,6 +498,12 @@ class HostAuthorityResolver:
         """Attach approvals for one trusted operation without re-authenticating."""
         if not isinstance(context, ExecutionContext):
             raise HostAuthorityError("a trusted execution context is required")
+        if (not isinstance(context.principal_id, str) or not context.principal_id.strip()
+                or len(context.principal_id) > 256 or _contains_surrogate(context.principal_id)
+                or not isinstance(context.permissions, frozenset)
+                or any(not isinstance(item, str) or not item or len(item) > 128
+                       or _contains_surrogate(item) for item in context.permissions)):
+            raise HostAuthorityError("trusted execution context is invalid")
         if not isinstance(operation_id, str) or not _OPERATION_RE.fullmatch(operation_id):
             raise HostAuthorityError("host operation identity is invalid")
         if context.operation_id is not None and context.operation_id != operation_id:
