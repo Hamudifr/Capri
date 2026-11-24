@@ -1,0 +1,15 @@
+[package]
+name = "ccel-core"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.100"
+description = "Deterministic bounded program synthesis and active probe selection for CCEL"
+license = "MIT"
+
+[lib]
+name = "ccel_core"
+path = "src/lib.rs"
+
+[[bench]]
+name = "ccel"
+harness = false

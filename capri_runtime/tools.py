@@ -26,6 +26,10 @@ class ToolValidationError(ToolBoundaryError):
     """Tool name, schema, arguments, or result is invalid."""
 
 
+class ToolResultValidationError(ToolValidationError):
+    """A handler ran, but its result could not be safely accepted."""
+
+
 class ToolNotFoundError(ToolBoundaryError):
     """The requested tool is not registered."""
 
@@ -810,6 +814,6 @@ class ToolExecutor:
             _assert_json_object_keys(json.loads(result_json))
         except ToolValidationError:
             self._audit(context.principal_id, spec.name, digest, "result_rejected", "invalid_or_oversized_result")
-            raise
+            raise ToolResultValidationError("tool handler result was rejected") from None
         self._audit(context.principal_id, spec.name, digest, "succeeded")
         return json.loads(result_json)

@@ -197,6 +197,51 @@ class ToolExecutionBridgeTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertNotIn("private audit detail", repr(outcome))
 
+
+    def test_invalid_handler_result_is_reported_uncertain_after_side_effect(self):
+        calls = []
+        registry = ToolRegistry()
+        registry.register(
+            ToolSpec("mutate", "tools:mutate", SCHEMA),
+            lambda args: calls.append(args) or {"not_json": object()},
+        )
+        audit = InMemoryAuditSink()
+        bridge = ToolExecutionBridge(ToolExecutor(registry, audit))
+        outcome = bridge.execute_batch(
+            [ToolCallRequest("mutate-1", "mutate", {"query": "commit"})],
+            ExecutionContext("host-user", frozenset({"tools:mutate"})),
+        )[0]
+        self.assertEqual(outcome.status, "outcome_uncertain")
+        self.assertEqual(outcome.error_code, "handler_result_rejected")
+        self.assertEqual(outcome.argument_digest, digest({"query": "commit"}))
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(
+            [event.status for event in audit.events()],
+            ["started", "result_rejected"],
+        )
+
+    def test_oversized_handler_result_is_reported_uncertain_after_side_effect(self):
+        calls = []
+        registry = ToolRegistry()
+        registry.register(
+            ToolSpec("mutate", "tools:mutate", SCHEMA),
+            lambda args: calls.append(args) or {"value": "x" * 100},
+        )
+        audit = InMemoryAuditSink()
+        executor = ToolExecutor(registry, audit, max_result_bytes=32)
+        bridge = ToolExecutionBridge(executor)
+        outcome = bridge.execute_batch(
+            [ToolCallRequest("mutate-2", "mutate", {"query": "commit"})],
+            ExecutionContext("host-user", frozenset({"tools:mutate"})),
+        )[0]
+        self.assertEqual(outcome.status, "outcome_uncertain")
+        self.assertEqual(outcome.error_code, "handler_result_rejected")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(
+            [event.status for event in audit.events()],
+            ["started", "result_rejected"],
+        )
+
     def test_non_string_json_keys_are_rejected_before_execution(self):
         with self.assertRaises(ToolBridgeValidationError):
             self.bridge.execute_batch(

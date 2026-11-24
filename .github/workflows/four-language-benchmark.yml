@@ -1,0 +1,42 @@
+name: Four-language performance benchmark
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "benchmarks/four-language/**"
+      - ".github/workflows/four-language-benchmark.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: four-language-benchmark-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    name: C vs C++ vs Rust vs Python
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - name: Install latest stable Rust
+        run: |
+          rustup update stable
+          rustup default stable
+      - name: Install latest stable Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: "3.x"
+      - name: Record machine and toolchain
+        run: |
+          uname -a
+          lscpu
+          cc --version
+          c++ --version
+          rustc --version
+          python --version
+      - name: Compile and benchmark all four implementations
+        run: python benchmarks/four-language/run.py
