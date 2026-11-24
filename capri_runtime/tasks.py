@@ -901,6 +901,7 @@ class SQLiteTaskStore:
     def fail_step(self, claim: TaskClaim, error_code: str = "handler_failed",
                   retry_delay_seconds: int = 5, now: datetime | None = None,
                   retryable: bool = False) -> TaskRecord:
+        """Record failure; retry only when the caller proves no side effect occurred."""
         if type(claim) is not TaskClaim:
             raise TaskValidationError("claim must be a TaskClaim")
         _text(error_code, "error_code", 64)
