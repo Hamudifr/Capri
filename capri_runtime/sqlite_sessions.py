@@ -17,6 +17,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
+from .atomic_publish import publish_no_replace
 from .runtime import (
     Message,
     Session,
@@ -833,10 +834,11 @@ class SQLiteSessionStore(SessionStore):
             finally:
                 os.close(backup_fd)
 
-            # link() publishes without replacing a destination created in a race.
-            os.link(temporary_path, absolute, follow_symlinks=False)
+            # Publish atomically without replacing a destination created in a race.
+            publication_method = publish_no_replace(temporary_path, absolute)
             published = True
-            os.unlink(temporary_path)
+            if publication_method == "hard-link":
+                os.unlink(temporary_path)
             if os.name == "posix":
                 directory_fd = os.open(parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
                 try:
