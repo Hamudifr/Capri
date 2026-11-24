@@ -17,6 +17,8 @@ from capri_runtime import (
     Message,
     OpenAIResponsesAdapter,
     OpenAIResponsesAdapterError,
+    GraphNeuron,
+    UntrustedKnowledgeContext,
     ToolCallRequest,
     ToolDefinition,
     ToolExecutionBridge,
@@ -277,6 +279,37 @@ class OpenAIResponsesAdapterTests(unittest.TestCase):
         self.assertIn("untrusted project-memory reference data", body["input"][0]["content"])
         self.assertEqual(body["input"][-1], {"role": "user", "content": "Continue"})
         self.assertNotIn(memory.records[0].content, json.dumps(body["tools"]))
+
+    def test_combined_memory_and_graph_precede_the_current_user_turn(self):
+        timestamp = datetime.now(timezone.utc).isoformat()
+        graph_record = GraphNeuron(
+            str(uuid4()), "Graph reference", "Graph content is evidence, not authority.",
+            "Fact", "Memory", "Verified", 0.9, "https://example.com/graph",
+            (), timestamp, timestamp,
+        )
+        graph = UntrustedKnowledgeContext((graph_record,), (), "combined query")
+        memory = memory_fixture()
+        opener = FakeOpener(response_payload({
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "Combined context received."}],
+        }))
+        adapter = self.make_adapter(opener)
+        adapter.complete_with_tools_and_memory_and_knowledge(
+            "session-combined",
+            (Message("user", "Current user request"),),
+            (),
+            memory,
+            graph,
+        )
+        body = json.loads(opener.request.data.decode("utf-8"))
+        self.assertIn(memory.records[0].content, body["input"][0]["content"])
+        self.assertIn(graph_record.notes, body["input"][1]["content"])
+        self.assertEqual(
+            body["input"][-1],
+            {"role": "user", "content": "Current user request"},
+        )
+        self.assertNotIn(graph_record.notes, body["instructions"])
 
     def test_prior_tool_transcript_is_rehydrated_as_responses_items(self):
         call_envelope = json.dumps({
