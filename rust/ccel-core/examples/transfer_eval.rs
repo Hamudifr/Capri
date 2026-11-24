@@ -358,13 +358,31 @@ fn main() {
         current_total >= 10,
         "current synthesizer regressed below the pre-registered v1.1 pilot floor"
     );
-    assert_eq!(current_unique, 8, "supported unique-task score changed unexpectedly");
-    assert_eq!(current_reject, 1, "out-of-DSL rejection behavior changed unexpectedly");
-    assert!(current_ambiguous >= 1, "same-depth ambiguity preservation regressed");
-    assert_eq!(single_total, 9, "single-operation baseline changed unexpectedly");
-    assert_eq!(single_unique, 6, "single-operation unique baseline changed unexpectedly");
+    assert_eq!(
+        current_unique, 8,
+        "supported unique-task score changed unexpectedly"
+    );
+    assert_eq!(
+        current_reject, 1,
+        "out-of-DSL rejection behavior changed unexpectedly"
+    );
+    assert!(
+        current_ambiguous >= 1,
+        "same-depth ambiguity preservation regressed"
+    );
+    assert_eq!(
+        single_total, 9,
+        "single-operation baseline changed unexpectedly"
+    );
+    assert_eq!(
+        single_unique, 6,
+        "single-operation unique baseline changed unexpectedly"
+    );
     assert_eq!(identity_total, 1, "identity baseline changed unexpectedly");
-    assert_eq!(identity_unique, 0, "identity unique baseline changed unexpectedly");
+    assert_eq!(
+        identity_unique, 0,
+        "identity unique baseline changed unexpectedly"
+    );
     assert!(
         all_programs_valid,
         "synthesizer returned a program inconsistent with its demonstrations"
