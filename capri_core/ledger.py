@@ -95,49 +95,58 @@ def _open_parent_directory(path: Path, *, create: bool) -> int:
     if _supports_secure_dirfd_walk():
         current_fd: int | None = None
         try:
-            current_fd = os.open(absolute.anchor, directory_flags)
-            for component in absolute.parts[1:]:
-                flags = directory_flags | os.O_NOFOLLOW
-                created_child = False
-                try:
-                    child_fd = os.open(component, flags, dir_fd=current_fd)
-                except FileNotFoundError:
-                    if not create:
-                        raise
-                    try:
-                        os.mkdir(component, 0o700, dir_fd=current_fd)
-                        created_child = True
-                    except FileExistsError:
-                        pass
+            try:
+                current_fd = os.open(absolute.anchor, directory_flags)
+            except PermissionError:
+                # Some app sandboxes (notably Android/Termux) deny opening the
+                # filesystem root even when the requested descendant is
+                # accessible. Fall back to the checked lstat walk below. That
+                # path rejects observed symlinks but cannot exclude a concurrent
+                # ancestor swap, matching the documented weaker fallback.
+                current_fd = None
+            else:
+                for component in absolute.parts[1:]:
+                    flags = directory_flags | os.O_NOFOLLOW
+                    created_child = False
                     try:
                         child_fd = os.open(component, flags, dir_fd=current_fd)
+                    except FileNotFoundError:
+                        if not create:
+                            raise
+                        try:
+                            os.mkdir(component, 0o700, dir_fd=current_fd)
+                            created_child = True
+                        except FileExistsError:
+                            pass
+                        try:
+                            child_fd = os.open(component, flags, dir_fd=current_fd)
+                        except OSError as exc:
+                            raise LedgerIntegrityError(
+                                "ledger parent path contains a symlink or is not a safe directory"
+                            ) from exc
                     except OSError as exc:
                         raise LedgerIntegrityError(
                             "ledger parent path contains a symlink or is not a safe directory"
                         ) from exc
-                except OSError as exc:
-                    raise LedgerIntegrityError(
-                        "ledger parent path contains a symlink or is not a safe directory"
-                    ) from exc
 
-                try:
-                    if not stat.S_ISDIR(os.fstat(child_fd).st_mode):
-                        raise LedgerIntegrityError("ledger parent path is not a directory")
-                    if created_child:
-                        # Persist both the new directory's metadata and its name
-                        # in the parent before relying on it for ledger creation.
-                        os.fsync(child_fd)
-                        os.fsync(current_fd)
-                except BaseException:
-                    _close_fd(child_fd)
-                    raise
-                previous_fd = current_fd
-                current_fd = child_fd
-                _close_fd(previous_fd)
+                    try:
+                        if not stat.S_ISDIR(os.fstat(child_fd).st_mode):
+                            raise LedgerIntegrityError("ledger parent path is not a directory")
+                        if created_child:
+                            # Persist both the new directory's metadata and its name
+                            # in the parent before relying on it for ledger creation.
+                            os.fsync(child_fd)
+                            os.fsync(current_fd)
+                    except BaseException:
+                        _close_fd(child_fd)
+                        raise
+                    previous_fd = current_fd
+                    current_fd = child_fd
+                    _close_fd(previous_fd)
 
-            result = current_fd
-            current_fd = None
-            return result
+                result = current_fd
+                current_fd = None
+                return result
         finally:
             _close_fd(current_fd)
 
