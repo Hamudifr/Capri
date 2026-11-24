@@ -245,10 +245,12 @@ class SignedApprovalTests(unittest.TestCase):
             )
 
 
-if __name__ == "__main__":
-    unittest.main()
         with self.assertRaises(ToolValidationError):
             self.authority.issue(
                 "alice", "delete_record", argument_digest(self.arguments),
                 ttl_seconds=120, operation_id="invalid operation id",
             )
+
+
+if __name__ == "__main__":
+    unittest.main()
