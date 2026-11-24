@@ -119,7 +119,7 @@ class SQLiteSessionStore(SessionStore):
             raise ValidationError("database ownership, link count, or permissions changed")
         connection = sqlite3.connect(self.path, timeout=5.0, isolation_level=None)
         connection.execute("PRAGMA foreign_keys=ON")
-            connection.execute("PRAGMA recursive_triggers=ON")
+        connection.execute("PRAGMA recursive_triggers=ON")
         connection.execute("PRAGMA trusted_schema=OFF")
         connection.execute("PRAGMA synchronous=FULL")
         return connection
