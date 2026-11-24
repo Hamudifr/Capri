@@ -204,6 +204,8 @@ class NotionKnowledgeGraphProvider:
             next_cursor = page.get("next_cursor")
             if next_cursor is None:
                 break
+            if not page["results"]:
+                raise KnowledgeGraphError("Notion graph pagination advanced without returning records")
             if type(next_cursor) is not str or not next_cursor or next_cursor in seen_cursors:
                 raise KnowledgeGraphError("Notion graph pagination cursor is invalid or repeated")
             seen_cursors.add(next_cursor)
