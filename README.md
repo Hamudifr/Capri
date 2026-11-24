@@ -26,7 +26,7 @@ Capri is a research and execution-assistance project. This repository contains p
 - `docs/LEDGER_OPERATIONS.md` — backup verification, integrity-incident response, and controlled recovery runbook.
 - `docs/LEDGER_SCALING_DECISION.md` — proposed transactional storage migration, explicitly not implemented.
 - `capri_core/` — immutable evaluation records, fail-closed validation, and hash-chained append-only ledger.
-- `capri_runtime/` — provider-neutral sessions, authenticated principal-owned SQLite sessions, private session backups, permissioned tool execution, optional OpenAI Responses API adapter, durable task execution, and bounded SQLite/Notion memory.
+- `capri_runtime/` — provider-neutral sessions, authenticated principal-owned SQLite sessions, private session backups, permissioned tool execution, optional OpenAI Responses API adapter, durable task execution, and bounded SQLite/Notion memory, and evidence-aware Notion knowledge-graph retrieval.
 - `pyproject.toml` — minimal Python 3.11+ package metadata; no runtime dependencies are declared.
 - `docs/TOOL_EXECUTION.md` — trust model, schema subset, approvals, audit behavior, and limitations for tool execution.
 - `docs/OPENAI_RESPONSES_ADAPTER.md` — optional concrete OpenAI Responses API adapter, safe configuration, cost boundary, and offline validation.
