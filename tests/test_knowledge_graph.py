@@ -174,6 +174,19 @@ class KnowledgeGraphTests(unittest.TestCase):
         with self.assertRaises(KnowledgeGraphError):
             retrieve_knowledge("known node", InMemoryKnowledgeGraphProvider((left,), (dangling,)))
 
+    def test_contradiction_pair_is_not_partially_emitted_at_node_cap(self):
+        current = neuron("Verified graph engine", notes="graph engine")
+        stale = neuron("Stale graph engine", notes="graph engine", state="Superseded")
+        conflict = edge(current, stale, "Contradicts")
+        context = retrieve_knowledge(
+            "graph engine",
+            InMemoryKnowledgeGraphProvider((current, stale), (conflict,)),
+            max_neurons=1,
+        )
+        self.assertEqual(len(context.neurons), 1)
+        self.assertEqual(context.synapses, ())
+        self.assertTrue(context.truncated)
+
     def test_context_caps_are_enforced(self):
         with self.assertRaises(KnowledgeGraphError):
             UntrustedKnowledgeContext(tuple(neuron(f"Node {i}") for i in range(21)), (), "nodes")
