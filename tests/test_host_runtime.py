@@ -10,6 +10,11 @@ from capri_runtime import (
     SessionClosedError,
     SessionNotFoundError,
     SQLiteSessionStore,
+    SQLiteTaskStore,
+    TaskEngine,
+    TaskNotFoundError,
+    TaskValidationError,
+    TaskWorker,
     ToolExecutionBridge,
     ToolExecutor,
     ToolOrchestrator,
@@ -43,6 +48,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
             os.path.join(self.temp.name, "sessions.sqlite3"),
             max_output_chars=131_072,
         )
+        self.task_store = SQLiteTaskStore(os.path.join(self.temp.name, "tasks.sqlite3"))
         self.adapter = RecordingAdapter()
         bridge = ToolExecutionBridge(
             ToolExecutor(ToolRegistry(), InMemoryAuditSink())
@@ -60,10 +66,12 @@ class CapriHostRuntimeTests(unittest.TestCase):
         self.temp.cleanup()
 
     def make_host(self, **kwargs):
+        authority = kwargs.pop("authority", self.authority)
         return CapriHostRuntime(
-            self.authority,
+            authority,
             self.store,
             self.orchestrator,
+            task_store=self.task_store,
             **kwargs,
         )
 
@@ -86,6 +94,227 @@ class CapriHostRuntimeTests(unittest.TestCase):
         )
         with self.assertRaises(SessionNotFoundError):
             host.get_session("bob-token", session.session_id)
+
+    def test_task_creation_read_and_cancel_are_bound_to_authenticated_principal(self):
+        def uncertain(data, key, principal):
+            raise RuntimeError("uncertain")
+
+        worker = TaskWorker(TaskEngine(
+            self.task_store,
+            {},
+            "worker",
+            principal_handlers={"collect": lambda data, key, principal: {"ok": True}},
+        ))
+        host = self.make_host(task_worker=worker)
+        task = host.create_task(
+            "alice-token",
+            [{"tool": "collect", "input": {"scope": "private"}}],
+            idempotency_key="request-1",
+        )
+        self.assertEqual(host.get_task("alice-token", task.task_id), task)
+        with self.assertRaises(TaskNotFoundError):
+            host.get_task("bob-token", task.task_id)
+        with self.assertRaises(TaskNotFoundError):
+            host.cancel_task("bob-token", task.task_id)
+        cancelled = host.cancel_task("alice-token", task.task_id)
+        self.assertEqual(cancelled.state, "cancelled")
+        self.assertEqual(host.get_task("alice-token", task.task_id), cancelled)
+        with self.assertRaises(HostRuntimeError):
+            host.create_task(
+                "alice-token", [{"tool": "not-registered", "input": {}}]
+            )
+
+    def test_reconciliation_requires_permission_and_trusted_evidence(self):
+        permissions = {
+            "alice": {"task.reconcile.owned"},
+            "bob": {"task.reconcile.owned"},
+        }
+        authority = HostAuthorityResolver(
+            authenticate=lambda credential: {
+                "alice-token": "alice",
+                "bob-token": "bob",
+            }.get(credential),
+            permissions_for=lambda principal_id: permissions[principal_id],
+        )
+        verified = []
+        def verify(actor, task_id, decision_id, outcome, evidence_ref, payload):
+            verified.append((actor, task_id, decision_id, outcome, evidence_ref, payload))
+            valid = (
+                actor == "alice"
+                and task_id == task.task_id
+                and evidence_ref == "evidence://verified/task-1"
+                and payload["decision_id"] == decision_id
+                and payload["outcome"] == outcome
+                and payload["result"] == {"ok": True}
+            )
+            # A verifier must not be able to mutate the checkpoint snapshot.
+            payload["result"]["ok"] = False
+            return valid
+
+        def uncertain(data, key, principal):
+            raise RuntimeError("uncertain")
+
+        worker = TaskWorker(TaskEngine(
+            self.task_store,
+            {},
+            "worker",
+            principal_handlers={"collect": uncertain},
+        ))
+        host = self.make_host(
+            authority=authority,
+            task_worker=worker,
+            task_reconciliation_verifier=verify,
+        )
+        task = host.create_task(
+            "alice-token", [{"tool": "collect", "input": {}}]
+        )
+        worker.run_once()
+        quarantined = host.get_task("alice-token", task.task_id)
+        self.assertEqual(quarantined.state, "reconciliation_required")
+
+        with self.assertRaises(TaskNotFoundError):
+            host.reconcile_task(
+                "bob-token", task.task_id, "decision-1", "succeeded",
+                "evidence://verified/task-1", {"ok": True},
+            )
+        self.assertEqual(verified, [])
+
+        with self.assertRaises(HostRuntimeError):
+            host.reconcile_task(
+                "alice-token", task.task_id, "decision-1", "succeeded",
+                "evidence://unverified", {"ok": True},
+            )
+        self.assertEqual(len(verified), 1)
+        self.assertEqual(host.get_task("alice-token", task.task_id).state, "reconciliation_required")
+
+        resolved = host.reconcile_task(
+            "alice-token", task.task_id, "decision-1", "succeeded",
+            "evidence://verified/task-1", {"ok": True},
+        )
+        self.assertEqual(resolved.state, "succeeded")
+        self.assertEqual(resolved.result, ({"ok": True},))
+        self.assertEqual(verified[-1][0], "alice")
+        replayed = host.reconcile_task(
+            "alice-token", task.task_id, "decision-1", "succeeded",
+            "evidence://verified/task-1", {"ok": True},
+        )
+        self.assertEqual(replayed, resolved)
+
+    def test_reconciliation_rejects_noncanonical_results_before_evidence_check(self):
+        permissions = {"alice": {"task.reconcile.owned"}}
+        authority = HostAuthorityResolver(
+            authenticate=lambda credential: "alice" if credential == "alice-token" else None,
+            permissions_for=lambda principal_id: permissions[principal_id],
+        )
+        verified = []
+        def verify(*args):
+            verified.append(args)
+            return True
+
+        def uncertain(data, key, principal):
+            raise RuntimeError("uncertain")
+
+        worker = TaskWorker(TaskEngine(
+            self.task_store, {}, "worker",
+            principal_handlers={"collect": uncertain},
+        ))
+        host = self.make_host(
+            authority=authority,
+            task_worker=worker,
+            task_reconciliation_verifier=verify,
+        )
+        task = host.create_task("alice-token", [{"tool": "collect", "input": {}}])
+        worker.run_once()
+
+        with self.assertRaises(HostRuntimeError):
+            host.reconcile_task(
+                "alice-token", task.task_id, "decision-int-key", "succeeded",
+                "evidence://verified", {1: "noncanonical"},
+            )
+        nested = {"value": None}
+        cursor = nested
+        for _ in range(18):
+            cursor["value"] = {"value": None}
+            cursor = cursor["value"]
+        with self.assertRaises(HostRuntimeError):
+            host.reconcile_task(
+                "alice-token", task.task_id, "decision-deep", "succeeded",
+                "evidence://verified", nested,
+            )
+        self.assertEqual(verified, [])
+        self.assertEqual(
+            host.get_task("alice-token", task.task_id).state,
+            "reconciliation_required",
+        )
+
+    def test_reconciliation_is_unavailable_without_explicit_permission_or_verifier(self):
+        worker = TaskWorker(TaskEngine(
+            self.task_store, {}, "worker",
+            principal_handlers={"collect": lambda data, key, principal: {"ok": True}},
+        ))
+        denied_calls = []
+        host = self.make_host(
+            task_worker=worker,
+            task_reconciliation_verifier=lambda *args: denied_calls.append(args) or True,
+        )
+        with self.assertRaises(HostRuntimeError):
+            host.reconcile_task(
+                "alice-token", "task-id", "decision-1", "failed", "evidence://x"
+            )
+        self.assertEqual(denied_calls, [])
+        authority = HostAuthorityResolver(
+            authenticate=lambda credential: "alice" if credential == "alice-token" else None,
+            permissions_for=lambda principal_id: {"task.reconcile.owned"},
+        )
+        host_without_verifier = self.make_host(authority=authority, task_worker=worker)
+        with self.assertRaises(HostRuntimeError):
+            host_without_verifier.reconcile_task(
+                "alice-token", "task-id", "decision-1", "failed", "evidence://x"
+            )
+
+    def test_task_creation_rejects_hostile_plan_containers_before_inspection(self):
+        class HostileList(list):
+            def __iter__(self):
+                raise AssertionError("host must not iterate a custom list")
+
+        class HostileDict(dict):
+            def get(self, *args, **kwargs):
+                raise AssertionError("host must not inspect a custom dict")
+
+        worker = TaskWorker(TaskEngine(
+            self.task_store,
+            {},
+            "worker",
+            principal_handlers={"collect": lambda data, key, principal: {"ok": True}},
+        ))
+        host = self.make_host(task_worker=worker)
+
+        with self.assertRaises(TaskValidationError):
+            host.create_task(
+                "alice-token",
+                HostileList([{"tool": "collect", "input": {}}]),
+            )
+        with self.assertRaises(TaskValidationError):
+            host.create_task(
+                "alice-token",
+                [HostileDict(tool="collect", input={})],
+            )
+        class HostileString(str):
+            def __hash__(self):
+                raise AssertionError("host must not hash a custom tool string")
+
+        with self.assertRaises(TaskValidationError):
+            host.create_task(
+                "alice-token",
+                [{"tool": HostileString("collect"), "input": {}}],
+            )
+
+    def test_principal_task_creation_requires_a_configured_worker_registry(self):
+        host = self.make_host()
+        with self.assertRaises(HostRuntimeError):
+            host.create_task(
+                "alice-token", [{"tool": "collect", "input": {}}]
+            )
 
     def test_unauthorized_session_is_rejected_before_memory_retrieval(self):
         memory_calls = []
