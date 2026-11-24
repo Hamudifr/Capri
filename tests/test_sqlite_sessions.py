@@ -175,6 +175,12 @@ class SQLiteSessionStoreTests(unittest.TestCase):
                     "DELETE FROM session_owners WHERE session_id = ?",
                     (session.session_id,),
                 )
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    "INSERT OR REPLACE INTO session_owners(session_id, principal_id, created_at) "
+                    "VALUES(?, ?, ?)",
+                    (session.session_id, "principal-bob", session.created_at),
+                )
         finally:
             connection.close()
         self.assertEqual(
