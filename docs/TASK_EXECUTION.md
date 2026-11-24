@@ -59,7 +59,7 @@ Cancellation is cooperative. Queued/retry-wait tasks cancel immediately. A runni
 
 ## Principal-owned task access
 
-`SQLiteTaskStore.create_for_principal(principal_id, plan, idempotency_key=...)` records immutable task ownership and namespaces idempotency keys by principal. The matching `get_for_principal()`, `request_cancel_for_principal()`, and `events_for_principal()` methods reject access from every other principal. Legacy unowned tasks remain separate.
+`SQLiteTaskStore.create_for_principal(principal_id, plan, idempotency_key=...)` records immutable task ownership and namespaces idempotency keys by principal. SQLite triggers reject owner-row updates, deletes, and replacements, including `INSERT OR REPLACE` from raw connections. The matching `get_for_principal()`, `request_cancel_for_principal()`, and `events_for_principal()` methods reject access from every other principal. Legacy unowned tasks remain separate.
 
 `TaskEngine` accepts a separate `principal_handlers` registry. Principal-owned tasks are dispatched only through that registry, with the authenticated principal ID passed to the trusted handler; they never fall back to legacy handlers. `TaskEngine` and `TaskWorker` pass the registry's exact tool-name allowlist to the store. Unsupported queued principal work stays unclaimed, while expired running work is quarantined regardless of which worker encounters it.
 
