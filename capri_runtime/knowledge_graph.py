@@ -261,7 +261,7 @@ def retrieve_knowledge(
         adjacency.setdefault(edge.from_neuron_id, []).append(edge)
         adjacency.setdefault(edge.to_neuron_id, []).append(edge)
     for items in adjacency.values():
-        items.sort(key=lambda e: (e.relationship, e.synapse_id))
+        items.sort(key=lambda e: (-float(e.strength), e.relationship, e.synapse_id))
     while queue:
         current, depth = queue.popleft()
         if depth >= max_hops:
