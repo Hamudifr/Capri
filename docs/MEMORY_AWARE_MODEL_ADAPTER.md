@@ -58,3 +58,17 @@ A concrete provider adapter should include tests for:
 - tests/test_memory_orchestration_boundary.py — hostile-memory tests for structural separation and host authorization.
 
 OpenAIResponsesAdapter now implements the protocol using the official Responses API. Its offline tests exercise request construction, function-call parsing, prior tool-transcript reconstruction, memory separation, malformed provider outputs, and credential/error redaction. No live provider integration or prompt-injection resistance claim is made. See [OPENAI_RESPONSES_ADAPTER.md](OPENAI_RESPONSES_ADAPTER.md).
+
+## Knowledge-graph context extension
+
+The runtime now defines a separate immutable `UntrustedKnowledgeContext` for Neurons/Synapses graph results. It is not coerced into `UntrustedMemoryContext` or `MemoryRecord`.
+
+- `ToolOrchestrator.run(..., knowledge_context=...)` routes graph context through `complete_with_tools_and_knowledge`.
+- When both context types are supplied, the adapter uses `complete_with_tools_and_memory_and_knowledge`.
+- `OpenAIResponsesAdapter` serializes the graph as deterministic, escaped JSON and prepends it as its own data-only user message before the conversation history, keeping the current user request last. The trusted instructions and host-filtered tool definitions remain separate. Its base policy explicitly treats both memory and graph data as untrusted reference context.
+- `CapriHostRuntime` can inject a trusted `knowledge_context_resolver(principal_id, session_id, user_text)`. It is called only after the host authenticates the principal and verifies session ownership.
+- The Notion provider reads the Neurons and Synapses data sources only. The graph retrieval engine is deterministic, bounded and read-only.
+
+The graph envelope preserves evidence state, confidence, source, timestamps, typed edges and contradiction pairs. Superseded entries are excluded from default retrieval except when necessary to display both endpoints of an active contradiction. Historical retrieval is explicit.
+
+These additions do not create a provider-enforced prompt-injection boundary. Graph content remains untrusted. The host remains the only source of identity, policy, permissions, approvals, and tool execution authority. See [KNOWLEDGE_GRAPH_RUNTIME.md](KNOWLEDGE_GRAPH_RUNTIME.md) for provider setup, retrieval semantics, caps, and limitations.

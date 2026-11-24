@@ -412,6 +412,32 @@ class NotionRESTTransport:
             raise NotionTransportError("Notion query returned a cursor without more results")
         return {"results":[self._normalize_page(x) for x in results],"next_cursor":next_cursor}
 
+    def query_data_source(
+        self, data_source_id: str, *, cursor: str | None = None, page_size: int = 100
+    ) -> Mapping[str, object]:
+        """Read one page of a Notion data source without interpreting its schema."""
+        source_id = _validated_page_id(data_source_id)
+        if type(page_size) is not int or not 1 <= page_size <= 100:
+            raise MemoryValidationError("page_size must be between 1 and 100")
+        payload: dict[str, object] = {"page_size": page_size, "in_trash": False}
+        if cursor is not None:
+            if type(cursor) is not str or not cursor:
+                raise MemoryValidationError("Notion cursor must be a non-empty plain opaque string")
+            payload["start_cursor"] = cursor
+        raw = self._request("POST", f"/data_sources/{source_id}/query", payload)
+        results = raw.get("results")
+        has_more = raw.get("has_more")
+        next_cursor = raw.get("next_cursor")
+        if type(results) is not list or any(type(item) is not dict for item in results):
+            raise NotionTransportError("Notion graph query returned malformed results")
+        if type(has_more) is not bool or "next_cursor" not in raw:
+            raise NotionTransportError("Notion graph query omitted pagination metadata")
+        if has_more and (type(next_cursor) is not str or not next_cursor):
+            raise NotionTransportError("Notion graph query omitted its continuation cursor")
+        if not has_more and next_cursor is not None:
+            raise NotionTransportError("Notion graph query returned an unexpected cursor")
+        return {"results": results, "next_cursor": next_cursor}
+
     def update_page(self, page_id: str, properties: Mapping[str,object]) -> Mapping[str,object]:
         page_id = _validated_page_id(page_id)
         encoded = self._encode_properties(properties)
