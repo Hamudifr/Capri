@@ -192,7 +192,11 @@ class NotionKnowledgeGraphProvider:
             page = self.transport.query_data_source(
                 data_source_id, cursor=cursor, page_size=self.page_size
             )
-            if not isinstance(page, Mapping) or type(page.get("results")) is not list:
+            if (
+                not isinstance(page, Mapping)
+                or type(page.get("results")) is not list
+                or "next_cursor" not in page
+            ):
                 raise KnowledgeGraphError("Notion graph transport returned malformed pagination")
             records.extend(parser(raw) for raw in page["results"])
             if len(records) > maximum:
