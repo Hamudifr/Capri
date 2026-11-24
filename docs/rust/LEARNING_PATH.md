@@ -80,7 +80,7 @@ Track each topic as **unseen, studied, practiced, tested, retained, or needs rev
 
 ## Current status
 - Latest-stable toolchain policy and curriculum: recorded.
-- CCEL Rust core: initial code drafted; compile, tests, lint, benchmarks and parity checks pending.
+- CCEL Rust core: compiled and validated on the latest stable toolchain; 13 unit tests, Clippy with warnings denied, rustfmt, release build and same-runner Rust/Python benchmark passed on the exact PR head.
 - Demonstrated mastery: not yet assessed.
 
 
