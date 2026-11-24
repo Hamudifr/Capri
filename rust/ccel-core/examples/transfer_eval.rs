@@ -1,8 +1,12 @@
-use ccel_core::{predict, synthesize, Example, Grid, Operation, Program, MAX_CANDIDATES};
+use ccel_core::{Example, Grid, MAX_CANDIDATES, Operation, Program, predict, synthesize};
 use std::time::Instant;
 
 #[derive(Clone, Copy)]
-enum ExpectedKind { Unique, Ambiguous, Reject }
+enum ExpectedKind {
+    Unique,
+    Ambiguous,
+    Reject,
+}
 
 struct Case {
     name: &'static str,
@@ -70,7 +74,10 @@ fn dataset_v1() -> Vec<Case> {
             family: "single_operation",
             known_solution: "FlipVertical",
             examples: vec![
-                example(&["03", "04", "05", "39", "30"], &["30", "39", "05", "04", "03"]),
+                example(
+                    &["03", "04", "05", "39", "30"],
+                    &["30", "39", "05", "04", "03"],
+                ),
                 example(&["5937", "6161", "0628"], &["0628", "6161", "5937"]),
             ],
             query: grid(&["05005", "28451"]),
@@ -189,7 +196,10 @@ fn one_operation_baseline(examples: &[Example], query: &Grid) -> Option<Vec<Grid
 }
 
 fn identity_baseline(examples: &[Example], query: &Grid) -> Option<Vec<Grid>> {
-    if examples.iter().all(|example| example.source == example.target) {
+    if examples
+        .iter()
+        .all(|example| example.source == example.target)
+    {
         Some(vec![query.clone()])
     } else {
         None
@@ -214,9 +224,18 @@ fn main() {
     const DATASET: &str = "CCEL-TRANSFER-v1";
     const MAX_DEPTH: usize = 3;
     let cases = dataset_v1();
-    let unique_total = cases.iter().filter(|case| matches!(case.kind, ExpectedKind::Unique)).count();
-    let ambiguous_total = cases.iter().filter(|case| matches!(case.kind, ExpectedKind::Ambiguous)).count();
-    let reject_total = cases.iter().filter(|case| matches!(case.kind, ExpectedKind::Reject)).count();
+    let unique_total = cases
+        .iter()
+        .filter(|case| matches!(case.kind, ExpectedKind::Unique))
+        .count();
+    let ambiguous_total = cases
+        .iter()
+        .filter(|case| matches!(case.kind, ExpectedKind::Ambiguous))
+        .count();
+    let reject_total = cases
+        .iter()
+        .filter(|case| matches!(case.kind, ExpectedKind::Reject))
+        .count();
 
     let mut current_total = 0;
     let mut current_unique = 0;
@@ -234,7 +253,9 @@ fn main() {
     let mut identity_unique = 0;
 
     println!("dataset={DATASET} cases={}", cases.len());
-    println!("scoring: unique=exactly one expected output; ambiguous=>1 outputs including expected; reject=no consistent program");
+    println!(
+        "scoring: unique=exactly one expected output; ambiguous=>1 outputs including expected; reject=no consistent program"
+    );
     println!("case\tfamily\tknown_solution\tcurrent\tdepth\tprograms\tpredictions\tone_op\tidentity");
 
     for case in &cases {
@@ -255,7 +276,9 @@ fn main() {
         let (outputs, depth, program_count, valid) = match result {
             Ok(result) => {
                 let valid = result.programs.iter().all(|program| {
-                    examples.iter().all(|example| program.apply(&example.source) == example.target)
+                    examples
+                        .iter()
+                        .all(|example| program.apply(&example.source) == example.target)
                 });
                 let outputs = predict(&result.programs, &case.query)
                     .expect("synthesis returned a non-empty program set");
@@ -299,7 +322,11 @@ fn main() {
     println!(
         "current: {current_total}/{} total; unique={current_unique}/{unique_total}; ambiguity={current_ambiguous}/{ambiguous_total}; rejection={current_reject}/{reject_total}; programs={total_programs}; mean_min_depth={:.2}; elapsed_ms={elapsed_ms:.3}; program_validity={}",
         cases.len(),
-        if depth_cases == 0 { 0.0 } else { total_depth as f64 / depth_cases as f64 },
+        if depth_cases == 0 {
+            0.0
+        } else {
+            total_depth as f64 / depth_cases as f64
+        },
         all_programs_valid,
     );
     println!(
@@ -315,6 +342,13 @@ fn main() {
         cases.len(),
     );
 
-    assert_eq!(current_total, cases.len(), "current synthesizer missed a pre-registered expected outcome");
-    assert!(all_programs_valid, "synthesizer returned a program inconsistent with its demonstrations");
+    assert_eq!(
+        current_total,
+        cases.len(),
+        "current synthesizer missed a pre-registered expected outcome"
+    );
+    assert!(
+        all_programs_valid,
+        "synthesizer returned a program inconsistent with its demonstrations"
+    );
 }
