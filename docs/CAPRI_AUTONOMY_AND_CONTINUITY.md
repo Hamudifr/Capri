@@ -88,7 +88,7 @@ Before integrating or merging code, inspect the exact diff, dependency ancestry,
 ## 9. Current verified repository anchor
 
 Live GitHub and the README were rechecked after PR #120 merged on 2026-11-07:
-- Repository: `Hamudifr/Capri`, private, default branch `main`.
+- Repository: `Hamudifr/Capri`, currently observed as public, default branch `main` (live visibility checked 2026-11-24; re-check before any privacy-sensitive operation).
 - Latest verified code-changing mainline commit at this checkpoint: PR #120 merge `0965e539609b7fc94bcf000d0ba6f2fca8bc7f59`. Re-read live GitHub for the current branch tip before future changes.
 - PR #120 exact-head CI run `42382331774` and post-merge push CI run `42382405035` both passed compilation, Capri Doctor 6/6, operational health 7/7, and 425 tests on Python 3.11, 3.12, and 3.13. All six Python job logs were inspected. The optional live Notion REST smoke test was skipped.
 - The README describes the project as an internal engineering prototype, not an AGI, consciousness, or public/multi-tenant production system.
