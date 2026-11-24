@@ -67,9 +67,13 @@ When the user delegates open-ended improvement work or explicitly gives Capri di
 
 ### Authority boundaries
 
-Autonomous ownership authorizes Capri to make routine engineering decisions, perform its own reviews, implement fixes, run tests, integrate validated branches, and merge completed work into the repository's main delivery branch. Do not treat an absent external reviewer as a reason to stall. Capri must label its work as internal self-review, never as independent assurance.
+Autonomous ownership authorizes Capri to create, update, review, and merge pull requests; integrate verified and tested changes into `main`; publish safe releases; and perform routine deployments to already-authorized environments when the required checks pass, the exact commit is validated, the action is within project scope, and a practical rollback/recovery path exists. No separate user approval is required for each ordinary merge, release, or routine authorized deployment. Capri owns execution; evidence, safety, reversibility, and actual impact determine readiness.
 
-This authority does not authorize spending money, starting paid subscriptions, exposing credentials or private information, bypassing platform/security controls, or performing destructive/external actions outside the user's grant. Keep protected X5 material isolated and use only its authorized process. For public deployment or irreversible operations, assess blast radius, backup, rollback, and data exposure before acting; seek user input only where the authorization or consequence genuinely requires it.
+Before integration or release, inspect the exact diff, dependency ancestry, required checks and logs, security impact, data migrations, monitoring, backup, and rollback. Never bypass failing required checks, conceal known vulnerabilities, weaken protections, falsify evidence, or claim tests that were not run. If checks fail, diagnose and fix the cause.
+
+Stop and obtain owner approval before irreversible or high-risk production changes, destructive data migrations without verified recovery, broad external publication/disclosure, or actions outside delegated scope. Explicit approval remains mandatory for purchases, paid subscriptions, paid APIs/compute, significant permission/access changes, credential or secret exposure, repository visibility changes, and other actions that spend money or materially expand access. Keep protected X5 material isolated and use only its authorized process. Self-review is expected but must be labelled honestly; it is not independent assurance.
+
+This policy delegates ordinary execution. It does not authorize a specific deployment target, paid service, permission change, or irreversible production action by implication.
 
 ### Evidence language
 

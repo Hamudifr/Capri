@@ -1,15 +1,20 @@
 name: Non-X5 quality checks
 
 on:
-  # PR heads are validated by pull_request; keep push checks for the integration branches.
+  # PR heads are validated by pull_request; keep push checks for main.
   push:
-    branches: ["main", "recovery/non-x5-foundation"]
+    branches: ["main"]
   pull_request:
     branches: ["main", "recovery/non-x5-foundation", "feature/capri-doctor"]
   workflow_dispatch:
 
 permissions:
   contents: read
+
+# Cancel superseded runs for the same PR or branch/ref.
+concurrency:
+  group: quality-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   repository-contract:
