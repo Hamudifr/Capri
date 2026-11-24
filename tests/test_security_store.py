@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import sqlite3
 import stat
 import tempfile
 import unittest
@@ -53,6 +54,63 @@ class SQLiteSecurityStoreTests(unittest.TestCase):
             argument_digest(args),
             (self.now + timedelta(minutes=5)).isoformat(),
         )
+
+    def _store_with_approval_challenge(
+        self, *, status="approved", operation_id="session-1:call-1",
+        grant_operation_id="session-1:call-1", created_at=None, expires_at=None,
+        grant_json=None,
+    ):
+        store = SQLiteSecurityStore(self.path)
+        created_at = created_at or self.now.isoformat()
+        expires_at = expires_at or (self.now + timedelta(minutes=5)).isoformat()
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute(
+                """CREATE TABLE approval_challenges (
+                    challenge_id TEXT PRIMARY KEY,
+                    operation_id TEXT NOT NULL UNIQUE,
+                    principal_id TEXT NOT NULL,
+                    tool_name TEXT NOT NULL,
+                    argument_digest TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected','expired')),
+                    approver_id TEXT,
+                    grant_json TEXT,
+                    CHECK(
+                        (status='approved' AND approver_id IS NOT NULL AND grant_json IS NOT NULL)
+                        OR (status!='approved' AND grant_json IS NULL)
+                    )
+                )"""
+            )
+            if grant_json is None and status == "approved":
+                grant = {
+                    "grant_id": "challenge-grant-1",
+                    "principal_id": "principal-1",
+                    "tool_name": "delete_item",
+                    "argument_digest": "a" * 64,
+                    "expires_at": expires_at,
+                    "signature": "b" * 64,
+                    "key_id": "active",
+                }
+                if grant_operation_id is not None:
+                    grant["operation_id"] = grant_operation_id
+                grant_json = json.dumps(grant, sort_keys=True, separators=(",", ":"))
+            connection.execute(
+                """INSERT INTO approval_challenges
+                (challenge_id, operation_id, principal_id, tool_name, argument_digest,
+                 created_at, expires_at, status, approver_id, grant_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    "challenge-1", operation_id, "principal-1", "delete_item",
+                    "a" * 64, created_at, expires_at, status,
+                    "reviewer-1" if status == "approved" else None, grant_json,
+                ),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        return store
 
     def test_backup_is_consistent_private_and_restores_replay_state(self):
         store = SQLiteSecurityStore(self.path)
@@ -186,6 +244,7 @@ class SQLiteSecurityStoreTests(unittest.TestCase):
         finally:
             os.chmod(self.temp.name, 0o700)
 
+    @unittest.skipUnless(os.name == "posix", "POSIX hard-link semantics are required")
     @unittest.skipUnless(
         os.name == "posix" and hasattr(os, "link"),
         "POSIX hard-link support is required",
@@ -212,6 +271,120 @@ class SQLiteSecurityStoreTests(unittest.TestCase):
         missing = os.path.join(self.temp.name, "missing", "security.sqlite3")
         with self.assertRaises(ToolValidationError):
             SQLiteSecurityStore(missing)
+
+
+    def test_backup_rejects_semantically_invalid_audit_rows(self):
+        store = SQLiteSecurityStore(self.path)
+        store.write(AuditEvent(
+            "corrupt-audit", self.now.isoformat(), "principal-1", "search",
+            "a" * 64, "succeeded", None,
+        ))
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute(
+                "UPDATE audit_events SET argument_digest = ? WHERE event_id = ?",
+                ("not-a-sha256-digest", "corrupt-audit"),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        destination = os.path.join(self.temp.name, "invalid-audit-backup.sqlite3")
+        with self.assertRaises(ToolValidationError):
+            store.backup_to(destination)
+        self.assertFalse(os.path.lexists(destination))
+
+    def test_backup_rejects_semantically_invalid_approval_replay_rows(self):
+        store = SQLiteSecurityStore(self.path)
+        grant = self.grant("corrupt-approval")
+        self.assertTrue(store.consume(grant, self.now))
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute(
+                "UPDATE consumed_approvals SET tool_name = ? WHERE grant_id = ?",
+                ("Invalid Tool Name", "corrupt-approval"),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        destination = os.path.join(self.temp.name, "invalid-approval-backup.sqlite3")
+        with self.assertRaises(ToolValidationError):
+            store.backup_to(destination)
+        self.assertFalse(os.path.lexists(destination))
+
+    def test_backup_preserves_valid_operation_bound_approval_challenge(self):
+        store = self._store_with_approval_challenge()
+        destination = os.path.join(self.temp.name, "valid-challenge-backup.sqlite3")
+        store.backup_to(destination)
+        connection = sqlite3.connect(destination)
+        try:
+            row = connection.execute(
+                "SELECT operation_id, status, grant_json FROM approval_challenges"
+            ).fetchone()
+        finally:
+            connection.close()
+        self.assertEqual(row[0], "session-1:call-1")
+        self.assertEqual(row[1], "approved")
+        self.assertEqual(json.loads(row[2])["operation_id"], "session-1:call-1")
+
+    def test_backup_rejects_approval_challenge_grant_for_another_operation(self):
+        store = self._store_with_approval_challenge(
+            grant_operation_id="session-1:call-2"
+        )
+        destination = os.path.join(self.temp.name, "wrong-operation-challenge.sqlite3")
+        with self.assertRaises(ToolValidationError):
+            store.backup_to(destination)
+        self.assertFalse(os.path.lexists(destination))
+
+    def test_backup_rejects_approval_challenge_expiry_before_creation(self):
+        store = self._store_with_approval_challenge(
+            status="pending",
+            expires_at=(self.now - timedelta(seconds=1)).isoformat(),
+        )
+        destination = os.path.join(self.temp.name, "invalid-challenge-time.sqlite3")
+        with self.assertRaises(ToolValidationError):
+            store.backup_to(destination)
+        self.assertFalse(os.path.lexists(destination))
+
+    def test_backup_rejects_malformed_approval_challenge_grant_json(self):
+        store = self._store_with_approval_challenge(grant_json="{not-json")
+        destination = os.path.join(self.temp.name, "invalid-challenge-json.sqlite3")
+        with self.assertRaises(ToolValidationError):
+            store.backup_to(destination)
+        self.assertFalse(os.path.lexists(destination))
+
+    def test_backup_preserves_legacy_challenge_grant_for_migration(self):
+        store = self._store_with_approval_challenge(grant_operation_id=None)
+        destination = os.path.join(self.temp.name, "legacy-challenge-backup.sqlite3")
+        store.backup_to(destination)
+        connection = sqlite3.connect(destination)
+        try:
+            row = connection.execute(
+                "SELECT grant_json FROM approval_challenges WHERE challenge_id='challenge-1'"
+            ).fetchone()
+        finally:
+            connection.close()
+        self.assertNotIn("operation_id", json.loads(row[0]))
+
+    def test_backup_rejects_approval_expiry_before_consumption(self):
+        store = SQLiteSecurityStore(self.path)
+        grant = self.grant("expired-order")
+        self.assertTrue(store.consume(grant, self.now))
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute(
+                "UPDATE consumed_approvals SET expires_at = ? WHERE grant_id = ?",
+                ((self.now - timedelta(seconds=1)).isoformat(), "expired-order"),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        destination = os.path.join(self.temp.name, "invalid-expiry-backup.sqlite3")
+        with self.assertRaises(ToolValidationError):
+            store.backup_to(destination)
+        self.assertFalse(os.path.lexists(destination))
 
 
 if __name__ == "__main__":
