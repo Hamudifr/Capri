@@ -175,6 +175,24 @@ class HostGatewayApprovalIntegrationTests(unittest.TestCase):
             self.assertEqual(len(issued), 2)
             self.assertEqual(issued[1].operation_id, "session-42:call-2")
 
+            duplicate_gateway = HostToolGateway(
+                authority,
+                bridge,
+                approval_service=approval_service,
+                operation_id_resolver=lambda credential, context, item: "session-42:duplicate",
+                on_approval_challenge=issued.append,
+            )
+            with self.assertRaises(HostAuthorityError):
+                duplicate_gateway.execute_batch(
+                    "session-token",
+                    [
+                        ToolCallRequest("call-3", "delete_item", {"item": "target-2"}),
+                        ToolCallRequest("call-4", "delete_item", {"item": "target-3"}),
+                    ],
+                )
+            self.assertEqual(calls, [{"item": "target-1"}])
+            self.assertEqual(len(issued), 2)
+
     def test_approval_integration_requires_all_host_callbacks(self):
         authority = HostAuthorityResolver(lambda credential: "alice", lambda principal: ())
         bridge = ToolExecutionBridge(ToolExecutor(ToolRegistry(), InMemoryAuditSink()))
