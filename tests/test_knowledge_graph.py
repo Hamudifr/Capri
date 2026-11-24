@@ -305,6 +305,26 @@ class KnowledgeGraphTests(unittest.TestCase):
         self.assertEqual(loaded_edges[0].from_neuron_id, left.neuron_id)
         self.assertEqual(len(transport.calls), 3)
 
+    def test_notion_provider_rejects_missing_pagination_cursor(self):
+        class MissingCursorTransport(FakeGraphTransport):
+            def query_data_source(self, data_source_id, *, cursor=None, page_size=100):
+                return {"results": []}
+
+        transport = MissingCursorTransport([], [])
+        provider = NotionKnowledgeGraphProvider(transport, NEURONS, SYNAPSES)
+        with self.assertRaises(KnowledgeGraphError):
+            provider.load_graph()
+
+    def test_empty_token_query_does_not_read_the_graph_provider(self):
+        class NoReadProvider:
+            def load_graph(self):
+                raise AssertionError("provider should not be read for an empty token query")
+
+        context = retrieve_knowledge("I", NoReadProvider())
+        self.assertEqual(context.neurons, ())
+        self.assertEqual(context.synapses, ())
+        self.assertFalse(context.truncated)
+
     def test_notion_provider_rejects_dangling_relations(self):
         left = neuron("Adapter")
         dangling = edge(left, neuron("Not in database"))
