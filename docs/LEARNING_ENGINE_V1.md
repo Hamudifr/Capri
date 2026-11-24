@@ -163,3 +163,59 @@ phone environment is not assumed to be capable of training a 20B-class model.
 - No real user data was used. These changes do not recall copies already
   distributed outside the local store and do not authorize training or
   deployment.
+
+
+## Host-side authenticated consent authority
+
+`capri_runtime.HostLearningConsentAuthority` provides the reusable signing and
+verification primitive for an embedding application. It does not create a UI
+or an identity provider. The host must keep the authority and its key server-side,
+authenticate the request credential, and implement the confirmation callback
+so it returns the literal `True` only after an explicit affirmative action
+bound to that authenticated session and the exact consent scope/policy version.
+The host callback must enforce its normal CSRF/request-integrity and session
+controls. Never wire this callback to a model tool, a client-supplied boolean,
+or an unauthenticated endpoint.
+
+Example host composition:
+
+```python
+from capri_core.learning import LearningStore
+from capri_runtime import HostLearningConsentAuthority
+
+consent_authority = HostLearningConsentAuthority(
+    signing_key=load_host_secret("CAPRI_LEARNING_CONSENT_HMAC_KEY"),
+    authenticate=authenticate_request_credential,
+    confirm_explicit_consent=confirm_server_validated_user_action,
+)
+learning_store = LearningStore(
+    "/private/capri/learning.sqlite3",
+    consent_verifier=consent_authority.verify,
+)
+
+# Call only from the host's authenticated consent-confirmation route,
+# after its UI has obtained an explicit affirmative user action.
+consent = consent_authority.issue(
+    request_credential,
+    consent_id=create_server_side_consent_id(),
+    scope="curated_training_examples",
+    policy_version="learning-consent-v1",
+)
+learning_store.record_consent(consent)
+```
+
+The HMAC covers the consent ID, exact scope, policy version, grant timestamp,
+and a random nonce. Evidence contains no principal ID or raw consent text;
+tampering or use with another signing key fails verification. The LearningStore
+primary key rejects exact-record replay. The signing key must be at least 32
+random bytes, stored outside source control, and backed up/rotated under the
+host's secret-management policy. Key rotation requires retaining the relevant
+verification keys or an explicit migration policy for existing evidence.
+
+**Integration boundary:** this library now supplies the host-side authority
+primitive and tests, but the repository still has no production consent UI,
+identity-provider implementation, HTTP route, CSRF/session middleware, or
+deployed secret management. The callbacks are trusted application code, not
+proof supplied by this package. Do not enable real-data learning until an actual
+host application wires and independently tests those controls. The default
+LearningStore remains fail-closed when no verifier is injected.
