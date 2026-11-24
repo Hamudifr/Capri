@@ -581,14 +581,16 @@ class SQLiteTaskStore:
             try:
                 connection.execute("BEGIN IMMEDIATE")
                 row = connection.execute(
-                    "SELECT state,lease_owner,lease_until,current_step FROM tasks WHERE task_id=?",
+                    "SELECT state,lease_owner,lease_until,current_step,attempts FROM tasks WHERE task_id=?",
                     (claim.task_id,),
                 ).fetchone()
                 if not row:
                     raise TaskNotFoundError("task does not exist")
-                state, owner, until, index = row
-                if state != "running" or owner != claim.executor_id or index != claim.step_index:
-                    raise TaskConflictError("task lease is no longer owned by this executor")
+                state, owner, until, index, attempt = row
+                if (state != "running" or owner != claim.executor_id
+                        or index != claim.step_index or attempt != claim.attempt
+                        or until != claim.lease_until):
+                    raise TaskConflictError("task lease is no longer owned by this claim")
                 if _parse_time(until) <= _parse_time(stamp):
                     raise TaskConflictError("task lease expired before uncertainty was recorded")
                 connection.execute(
