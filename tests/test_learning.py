@@ -102,6 +102,32 @@ class LearningStoreTests(unittest.TestCase):
         self.assertEqual(sum(counts[name] for name in ("train", "validation", "test")), 0)
         self.assertEqual(output.read_text(), "")
 
+    def test_migrates_existing_export_registry_with_recovery_columns(self):
+        database = self.root / "legacy-export-registry.sqlite3"
+        connection = sqlite3.connect(database)
+        try:
+            connection.execute(
+                """CREATE TABLE learning_exports (
+                    export_id TEXT PRIMARY KEY,
+                    bundle_sha256 TEXT NOT NULL,
+                    manifest_json TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK (status IN
+                        ('publishing', 'active', 'invalidated', 'failed')),
+                    created_at TEXT NOT NULL
+                )"""
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        os.chmod(database, 0o600)
+
+        LearningStore(database)
+        with sqlite3.connect(database) as connection:
+            columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(learning_exports)")
+            }
+        self.assertTrue({"export_kind", "artifact_path", "staging_path"}.issubset(columns))
+
     def test_rejects_example_without_active_consent_record(self):
         with self.assertRaises(LearningDataError):
             self.store.record(example(consent_id="unknown-consent"))
@@ -440,6 +466,22 @@ class LearningStoreTests(unittest.TestCase):
         recovered = self.store.reconcile_pending_exports()
         self.assertIn(export_id, recovered["activated"])
         self.assertTrue(self.store.verify_export(export_id, output)["valid"])
+        second_pass = self.store.reconcile_pending_exports()
+        self.assertEqual(second_pass["examined"], 0)
+        self.assertEqual(second_pass["activated"], [])
+
+    def test_reconcile_marks_legacy_pathless_publishing_export_failed(self):
+        export_id = "00000000-0000-4000-8000-000000000123"
+        with self.store._connection() as connection:
+            connection.execute(
+                """INSERT INTO learning_exports
+                (export_id, bundle_sha256, manifest_json, status, created_at)
+                VALUES (?, ?, ?, 'publishing', ?)""",
+                (export_id, "0" * 64, "{}", "2026-11-24T12:00:00+00:00"),
+            )
+        recovered = self.store.reconcile_pending_exports()
+        self.assertIn(export_id, recovered["failed"])
+        self.assertEqual(self.store.get_export_status(export_id)["status"], "failed")
 
     def test_reconcile_fails_closed_when_pending_jsonl_artifact_is_missing(self):
         self.store.record(example())
@@ -596,6 +638,7 @@ class LearningStoreTests(unittest.TestCase):
         recovered = self.store.reconcile_pending_exports()
         self.assertIn(export_id, recovered["activated"])
         self.assertTrue(self.store.verify_export(export_id, output)["valid"])
+        self.assertEqual(self.store.reconcile_pending_exports()["examined"], 0)
 
     def test_bundle_is_invalidated_when_any_source_consent_is_revoked(self):
         self.store.record(example())
