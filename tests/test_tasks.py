@@ -17,6 +17,7 @@ from capri_runtime.tasks import (
     TaskIdempotencyConflict,
     TaskNotFoundError,
     TaskValidationError,
+    RetryableTaskError,
     TaskWorker,
 )
 
@@ -1145,7 +1146,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         self.assertIsNone(principal_engine.run_once(now=NOW + timedelta(seconds=7)))
         self.assertEqual(self.store.get_for_principal(task.task_id, "alice").state, "reconciliation_required")
 
-    def test_unsupported_worker_processes_cancelled_principal_task_without_handler(self):
+    def test_unsupported_worker_quarantines_cancelled_running_principal_task(self):
         task = self.store.create_for_principal(
             "alice",
             [{"tool": "prepare", "input": {"value": "private"}, "max_attempts": 2}],
@@ -1169,9 +1170,13 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         self.assertIsNone(legacy_engine.run_once(now=NOW + timedelta(seconds=6)))
 
         record = self.store.get_for_principal(task.task_id, "alice")
-        self.assertEqual(record.state, "cancelled")
+        self.assertEqual(record.state, "reconciliation_required")
+        self.assertEqual(record.error_code, "handler_outcome_uncertain")
         self.assertEqual(record.attempts, 1)
-        self.assertEqual(self.store.events(task.task_id)[-1]["state"], "cancelled")
+        self.assertEqual(
+            self.store.events(task.task_id)[-1]["state"],
+            "reconciliation_required",
+        )
         self.assertEqual(handler_calls, [])
 
     def test_unsupported_worker_quarantines_expired_principal_lease_without_handler(self):
