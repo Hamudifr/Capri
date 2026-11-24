@@ -47,6 +47,34 @@ class AtomicPublishTests(unittest.TestCase):
         with open(self.destination, "rb") as stream:
             self.assertEqual(stream.read(), b"existing")
 
+    def test_unsupported_hard_link_falls_back_to_renameat2(self):
+        fake_renameat2 = Mock(return_value=0)
+        with patch.object(
+            atomic_publish.os,
+            "link",
+            side_effect=OSError(errno.EOPNOTSUPP, "hard links unsupported"),
+        ), patch.object(
+            atomic_publish, "_load_renameat2", return_value=fake_renameat2
+        ):
+            self.assertEqual(
+                atomic_publish.publish_no_replace(self.source, self.destination),
+                "renameat2",
+            )
+        fake_renameat2.assert_called_once()
+
+    def test_hard_link_collision_does_not_fall_back(self):
+        fake_renameat2 = Mock(return_value=0)
+        with patch.object(
+            atomic_publish.os,
+            "link",
+            side_effect=FileExistsError(errno.EEXIST, "destination exists"),
+        ), patch.object(
+            atomic_publish, "_load_renameat2", return_value=fake_renameat2
+        ):
+            with self.assertRaises(FileExistsError):
+                atomic_publish.publish_no_replace(self.source, self.destination)
+        fake_renameat2.assert_not_called()
+
     def test_android_platform_attempts_to_load_renameat2(self):
         fake_libc = Mock()
         fake_renameat2 = Mock()
