@@ -9,13 +9,15 @@ from typing import Callable
 
 _AT_FDCWD = -100
 _RENAME_NOREPLACE = 1
-_HARD_LINK_FALLBACK_ERRNOS = {
-    errno.EINVAL,
-    errno.ENOSYS,
-    getattr(errno, "ENOTSUP", errno.EOPNOTSUPP),
-    getattr(errno, "EOPNOTSUPP", errno.ENOTSUP),
-    errno.EMLINK,
-}
+_HARD_LINK_FALLBACK_ERRNOS = frozenset(
+    code for code in (
+        getattr(errno, "EINVAL", None),
+        getattr(errno, "ENOSYS", None),
+        getattr(errno, "ENOTSUP", None),
+        getattr(errno, "EOPNOTSUPP", None),
+        getattr(errno, "EMLINK", None),
+    ) if code is not None
+)
 
 
 def _load_renameat2() -> Callable | None:
