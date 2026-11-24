@@ -352,6 +352,24 @@ class KnowledgeGraphTests(unittest.TestCase):
         with self.assertRaises(KnowledgeGraphError):
             provider.load_graph()
 
+    def test_notion_provider_rejects_non_finite_numbers_and_bad_timestamps(self):
+        item = neuron("Strict metadata")
+        malformed_number = notion_neuron(item)
+        malformed_number["properties"]["Confidence"]["number"] = 10 ** 10000
+        provider = NotionKnowledgeGraphProvider(
+            FakeGraphTransport([malformed_number], []), NEURONS, SYNAPSES
+        )
+        with self.assertRaises(KnowledgeGraphError):
+            provider.load_graph()
+
+        malformed_timestamp = notion_neuron(item)
+        malformed_timestamp["last_edited_time"] = "not-a-timestamp"
+        provider = NotionKnowledgeGraphProvider(
+            FakeGraphTransport([malformed_timestamp], []), NEURONS, SYNAPSES
+        )
+        with self.assertRaises(KnowledgeGraphError):
+            provider.load_graph()
+
     def test_notion_provider_rejects_dangling_relations(self):
         left = neuron("Adapter")
         dangling = edge(left, neuron("Not in database"))
