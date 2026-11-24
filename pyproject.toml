@@ -5,10 +5,27 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "capri-agent-runtime"
 version = "0.1.0"
-description = "Provider-neutral Capri runtime, permissioned tool execution, and durable memory primitives"
+description = "Provider-neutral agent runtime with authorized tool orchestration, durable tasks, and bounded context retrieval"
 readme = "README.md"
 requires-python = ">=3.11"
+keywords = ["agent-runtime", "tool-orchestration", "durable-tasks", "sqlite", "knowledge-retrieval"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
 dependencies = []
+
+[project.urls]
+Repository = "https://github.com/Hamudifr/Capri"
+Documentation = "https://github.com/Hamudifr/Capri/tree/main/docs"
+Issues = "https://github.com/Hamudifr/Capri/issues"
 
 [project.scripts]
 capri = "capri_core.__main__:main"

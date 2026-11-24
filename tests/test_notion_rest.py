@@ -299,10 +299,12 @@ class NotionRESTTransportTests(unittest.TestCase):
         err=HTTPError("https://api.notion.com/v1/pages",404,"Not found",{},io.BytesIO(b'{"code":"object_not_found"}'))
         t,_=self.make(error=err)
         with self.assertRaises(MemoryNotFoundError): t.get_page(PAGE_ID)
+        self.assertTrue(err.fp.closed)
         err=HTTPError("https://api.notion.com/v1/pages",429,"Rate limited",{"Retry-After":"3"},io.BytesIO(b'{"code":"rate_limited"}'))
         t,_=self.make(error=err)
         with self.assertRaises(NotionRateLimitError) as caught: t.get_page(PAGE_ID)
         self.assertEqual(caught.exception.retry_after,3.0)
+        self.assertTrue(err.fp.closed)
 
         response = FakeResponse({"code":"rate_limited"}, status=429, headers={"Retry-After":"4.5"})
         opener = FakeOpener(response)
@@ -315,6 +317,7 @@ class NotionRESTTransportTests(unittest.TestCase):
         err=HTTPError("https://api.notion.com/v1/pages",401,"Unauthorized",{},io.BytesIO(b'{"message":"private detail","code":"unauthorized"}'))
         t,_=self.make(error=err)
         with self.assertRaises(NotionTransportError) as caught: t.get_page(PAGE_ID)
+        self.assertTrue(err.fp.closed)
         self.assertNotIn("private detail",str(caught.exception))
         self.assertNotIn("test-secret",str(caught.exception))
 
