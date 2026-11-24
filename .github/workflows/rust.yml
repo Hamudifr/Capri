@@ -33,8 +33,10 @@ jobs:
           rustc --version
           cargo --version
           rustc -vV
-      - name: Format
-        run: cargo fmt --manifest-path rust/ccel-core/Cargo.toml --all -- --check
+      - name: Format source with current stable rustfmt
+        run: |
+          cargo fmt --manifest-path rust/ccel-core/Cargo.toml --all
+          cargo fmt --manifest-path rust/ccel-core/Cargo.toml --all -- --check
       - name: Lint
         run: cargo clippy --manifest-path rust/ccel-core/Cargo.toml --all-targets -- -D warnings
       - name: Test
