@@ -413,8 +413,8 @@ class KnowledgeGraphTests(unittest.TestCase):
     def test_notion_provider_caches_snapshot_until_invalidated(self):
         left = neuron("Cached graph neuron")
         transport = FakeGraphTransport(
-            [[notion_neuron(left)]],
-            [[]],
+            [notion_neuron(left)],
+            [],
         )
         provider = NotionKnowledgeGraphProvider(
             transport, NEURONS, SYNAPSES, cache_ttl_seconds=30
