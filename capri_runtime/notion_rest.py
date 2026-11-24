@@ -299,14 +299,17 @@ class NotionRESTTransport:
                     raise NotionRateLimitError(retry_after)
                 raise NotionTransportError(f"Notion API request failed (HTTP {status}, code {code})")
         except HTTPError as exc:
-            code=self._error_code(exc.read(4096)) or "unknown"
-            if exc.code==404 or code=="object_not_found": raise MemoryNotFoundError("Notion resource not found") from None
-            if exc.code==429:
-                try: retry=float(exc.headers.get("Retry-After")) if exc.headers.get("Retry-After") else None
-                except (TypeError,ValueError): retry=None
-                raise NotionRateLimitError(retry) from None
-            if exc.code in {401,403}: raise NotionTransportError("Notion authorization or sharing permission failed") from None
-            raise NotionTransportError(f"Notion API request failed (HTTP {exc.code}, code {code})") from None
+            try:
+                code=self._error_code(exc.read(4096)) or "unknown"
+                if exc.code==404 or code=="object_not_found": raise MemoryNotFoundError("Notion resource not found") from None
+                if exc.code==429:
+                    try: retry=float(exc.headers.get("Retry-After")) if exc.headers.get("Retry-After") else None
+                    except (TypeError,ValueError): retry=None
+                    raise NotionRateLimitError(retry) from None
+                if exc.code in {401,403}: raise NotionTransportError("Notion authorization or sharing permission failed") from None
+                raise NotionTransportError(f"Notion API request failed (HTTP {exc.code}, code {code})") from None
+            finally:
+                exc.close()
         except URLError: raise NotionTransportError("Notion API connection failed") from None
         except (TimeoutError,OSError): raise NotionTransportError("Notion API transport failed") from None
         try: data=json.loads(raw.decode("utf-8"))
