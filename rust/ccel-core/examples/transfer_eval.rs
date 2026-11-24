@@ -256,7 +256,9 @@ fn main() {
     println!(
         "scoring: unique=exactly one expected output; ambiguous=>1 outputs including expected; reject=no consistent program"
     );
-    println!("case\tfamily\tknown_solution\tcurrent\tdepth\tprograms\tpredictions\tone_op\tidentity");
+    println!(
+        "case\tfamily\tknown_solution\tcurrent\tdepth\tprograms\tpredictions\tone_op\tidentity"
+    );
 
     for case in &cases {
         let one_op = one_operation_baseline(&case.examples, &case.query);
