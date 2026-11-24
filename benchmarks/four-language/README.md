@@ -49,3 +49,25 @@ This one run puts Rust about 5.5% faster than C and 9.1% faster than C++ for thi
 An earlier Rust implementation using direct flat indexing measured 12.566 ms on a separate run. Changing the Rust kernel to borrow row slices reduced its subsequent measured median to 9.169 ms. Treat this as an optimization observation, not a controlled paired A/B experiment.
 
 The result is specific to one CPU-bound, single-threaded cellular-automaton workload. It is not a universal language ranking or a prediction for CCEL's full application performance.
+
+## Independent confirmation run (2026-11-24)
+
+A second exact-head CI run reproduced the same checksum and ordering:
+
+| Language | Run 3 median |
+|---|---:|
+| Rust | 10.165 ms |
+| C | 11.110 ms |
+| C++ | 11.124 ms |
+| Python | 2,470.183 ms |
+
+Across the two independent runner batches, the median of each batch's median time was:
+
+| Language | Median of two batch medians |
+|---|---:|
+| Rust | 9.667 ms |
+| C | 10.409 ms |
+| C++ | 10.562 ms |
+| Python | 2,256.889 ms |
+
+Across these two batches, Rust's measured kernel time was about 7.1% lower than C and 8.5% lower than C++; Python's was about 233x the Rust time. This is still only two CI batches on one runner class, not a broad statistical benchmark.
