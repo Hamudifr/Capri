@@ -1050,22 +1050,36 @@ class LearningStore:
             staging_path = record["staging_path"]
             if not artifact_path:
                 with self._connection() as connection:
-                    connection.execute(
-                        "UPDATE learning_exports SET status='failed', staging_path='' "
-                        "WHERE export_id=? AND status='publishing'",
-                        (export_id,),
-                    )
+                    if staging_path:
+                        connection.execute(
+                            "UPDATE learning_exports SET status='failed' "
+                            "WHERE export_id=? AND status='publishing'",
+                            (export_id,),
+                        )
+                    else:
+                        connection.execute(
+                            "UPDATE learning_exports SET status='failed', staging_path='' "
+                            "WHERE export_id=? AND status='publishing'",
+                            (export_id,),
+                        )
                 result["failed"].append(export_id)
                 continue
             artifact = self._inspect_export_artifact(record, export_id, artifact_path)
             if not artifact["valid"]:
-                self._cleanup_staging_file(staging_path, artifact_path)
+                staging_cleaned = self._cleanup_staging_file(staging_path, artifact_path)
                 with self._connection() as connection:
-                    connection.execute(
-                        "UPDATE learning_exports SET status='failed', staging_path='' "
-                        "WHERE export_id=? AND status='publishing'",
-                        (export_id,),
-                    )
+                    if staging_cleaned:
+                        connection.execute(
+                            "UPDATE learning_exports SET status='failed', staging_path='' "
+                            "WHERE export_id=? AND status='publishing'",
+                            (export_id,),
+                        )
+                    else:
+                        connection.execute(
+                            "UPDATE learning_exports SET status='failed' "
+                            "WHERE export_id=? AND status='publishing'",
+                            (export_id,),
+                        )
                 result["failed"].append(export_id)
                 continue
             try:
