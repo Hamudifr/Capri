@@ -37,6 +37,7 @@ jobs:
         run: |
           cargo fmt --manifest-path rust/ccel-core/Cargo.toml --all
           cargo fmt --manifest-path rust/ccel-core/Cargo.toml --all -- --check
+          git diff --check
       - name: Lint
         run: cargo clippy --manifest-path rust/ccel-core/Cargo.toml --all-targets -- -D warnings
       - name: Test
