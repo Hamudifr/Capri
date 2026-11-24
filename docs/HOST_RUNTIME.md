@@ -2,7 +2,7 @@
 
 ## Scope
 
-`CapriHostRuntime` is a request-scoped composition layer. It wires trusted authentication, durable principal-owned sessions, the existing `ToolOrchestrator`, optional memory retrieval, and an explicitly injected task worker.
+`CapriHostRuntime` is a request-scoped composition layer. It wires trusted authentication, durable principal-owned sessions and tasks, the existing `ToolOrchestrator`, optional memory retrieval, and an explicitly injected task worker.
 
 It is not an HTTP server, daemon, deployment package, authentication provider, or production multi-tenant service. Construction starts no thread and makes no model-provider request.
 
@@ -18,6 +18,12 @@ It is not an HTTP server, daemon, deployment package, authentication provider, o
 
 Owner rows have no public reassignment or deletion API and SQLite triggers reject direct owner updates/deletes. A privileged host with direct database access can still bypass application boundaries; protect the SQLite file and its directory. SQLite transcripts are plaintext, not encrypted at rest.
 
+## Task ownership
+
+When a `SQLiteTaskStore` is configured, `create_task()`, `get_task()`, and `cancel_task()` authenticate the credential through `HostAuthorityResolver` and use the resulting principal ID for owner-scoped task operations. Creation additionally requires a configured `TaskWorker` and rejects any plan step whose tool name is absent from that worker's `principal_handlers` allowlist; a task store alone is sufficient for reading/cancelling existing owned tasks, but not for enqueueing new work. A foreign task and a legacy unowned task both appear as `TaskNotFoundError`. Task ownership is inserted atomically with the task and cannot be reassigned or deleted through normal SQLite operations.
+
+The task worker may share the same task database. Principal-owned claims carry the owner ID and are dispatched only through `TaskEngine(principal_handlers=...)`; the generic legacy handler map is never used for an owned task. Principal-aware handlers must independently enforce resource ACLs. Task ownership is not a substitute for an identity provider, resource authorization, or complete tenant isolation.
+
 `SQLiteSessionStore.backup_to()` creates a consistent private snapshot that includes ownership records and triggers. The backup is also plaintext; see [SQLITE_SESSION_BACKUP.md](SQLITE_SESSION_BACKUP.md). Task, memory, security, and session stores now expose private consistent backup methods; the backups remain plaintext and no scheduler, retention policy, or automated restore workflow is provided. See [SQLITE_STORE_BACKUP.md](SQLITE_STORE_BACKUP.md).
 
 ## Composition
@@ -30,7 +36,8 @@ The SQLite session store's `max_output_chars` must be at least the greater of th
 2. A private `SQLiteSessionStore`.
 3. A configured `ToolOrchestrator`, including the model adapter and `ToolExecutionBridge`.
 4. Optionally, a memory resolver with signature `(principal_id, session_id, user_text) -> UntrustedMemoryContext | None`. It must enforce principal-scoped memory access. The resolver runs only after authentication, session ownership, and input validation succeed.
-5. Optionally, a `TaskWorker`. The host explicitly runs it through `run_task_worker(stop_event)` under its own process supervisor.
+5. Optionally, a `SQLiteTaskStore` for authenticated task creation/read/cancellation.
+6. Optionally, a `TaskWorker`. The host explicitly runs it through `run_task_worker(stop_event)` under its own process supervisor. If both are supplied, they must point to the same database.
 
 Example:
 
@@ -75,6 +82,7 @@ The host-runtime tests cover:
 - Cross-principal denial for reads, turns, and close.
 - Denial before memory retrieval or model invocation.
 - Ownership-scoped durable lease and commit paths.
+- Principal-scoped task creation, retrieval, and cancellation; cross-principal task access is denied.
 - Closed-session behavior, invalid inputs, and redacted memory resolver errors.
 
-These tests establish an application-level session ownership boundary, not complete tenant isolation. Before external multi-user deployment, add authentication integration tests, memory-provider ACL tests, rate limiting, per-principal provider budgets, approval UX, structured observability, encrypted backup storage, task/memory-store backups, retention and restore drills, and deployment hardening.
+These tests establish application-level session and task ownership boundaries, not complete tenant isolation. Before external multi-user deployment, add authentication integration tests, principal-handler resource ACL tests, memory-provider ACL tests, rate limiting, per-principal provider budgets, approval UX, structured observability, encrypted backup storage, retention and restore drills, and deployment hardening.
