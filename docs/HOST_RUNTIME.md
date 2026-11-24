@@ -36,8 +36,9 @@ The SQLite session store's `max_output_chars` must be at least the greater of th
 2. A private `SQLiteSessionStore`.
 3. A configured `ToolOrchestrator`, including the model adapter and `ToolExecutionBridge`.
 4. Optionally, a memory resolver with signature `(principal_id, session_id, user_text) -> UntrustedMemoryContext | None`. It must enforce principal-scoped memory access. The resolver runs only after authentication, session ownership, and input validation succeed.
-5. Optionally, a `SQLiteTaskStore` for authenticated task creation/read/cancellation.
-6. Optionally, a `TaskWorker`. The host explicitly runs it through `run_task_worker(stop_event)` under its own process supervisor. If both are supplied, they must point to the same database.
+5. Optionally, a knowledge-graph resolver with signature `(principal_id, session_id, user_text) -> UntrustedKnowledgeContext | None`. It must enforce principal-scoped graph access and return only bounded, untrusted context. It runs only after authentication, session ownership, and input validation succeed.
+6. Optionally, a `SQLiteTaskStore` for authenticated task creation/read/cancellation.
+7. Optionally, a `TaskWorker`. The host explicitly runs it through `run_task_worker(stop_event)` under its own process supervisor. If both are supplied, they must point to the same database.
 
 Example:
 
