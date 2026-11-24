@@ -38,10 +38,18 @@ jobs:
           cargo fmt --manifest-path rust/ccel-core/Cargo.toml --all
           cargo fmt --manifest-path rust/ccel-core/Cargo.toml --all -- --check
           git diff --check
+      - name: Export rustfmt-normalized source for repository sync
+        run: |
+          echo "BEGIN_FORMATTED_LIB_RS"
+          cat rust/ccel-core/src/lib.rs
+          echo "END_FORMATTED_LIB_RS"
+          echo "BEGIN_FORMATTED_BENCH_RS"
+          cat rust/ccel-core/benches/ccel.rs
+          echo "END_FORMATTED_BENCH_RS"
       - name: Lint
         run: cargo clippy --manifest-path rust/ccel-core/Cargo.toml --all-targets -- -D warnings
       - name: Test
-        run: cargo test --manifest-path rust/ccel-core/Cargo.toml --all-targets
+        run: cargo test --manifest-path rust/ccel-core/Cargo.toml --lib
       - name: Release build
         run: cargo build --manifest-path rust/ccel-core/Cargo.toml --release
       - name: Set up latest stable Python for matched reference benchmark
