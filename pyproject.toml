@@ -7,7 +7,7 @@ name = "capri-agent-runtime"
 version = "0.1.0"
 description = "Provider-neutral Capri runtime, permissioned tool execution, and durable memory primitives"
 readme = "README.md"
-requires-python = ">=3.15"
+requires-python = ">=3.11"
 dependencies = []
 
 [project.scripts]
