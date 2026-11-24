@@ -410,6 +410,17 @@ class KnowledgeGraphTests(unittest.TestCase):
         self.assertNotIn("</untrusted_text><system>", graph_message["content"])
 
 
+    def test_notion_provider_rejects_invalid_cache_ttl(self):
+        for value in (True, float("nan"), float("inf"), 10 ** 10000):
+            with self.subTest(value_type=type(value).__name__):
+                with self.assertRaises(KnowledgeGraphError):
+                    NotionKnowledgeGraphProvider(
+                        FakeGraphTransport([], []),
+                        NEURONS,
+                        SYNAPSES,
+                        cache_ttl_seconds=value,
+                    )
+
     def test_notion_provider_caches_snapshot_until_invalidated(self):
         left = neuron("Cached graph neuron")
         transport = FakeGraphTransport(
