@@ -321,7 +321,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         def sometimes_fails(_data, _key):
             attempts["count"] += 1
             if attempts["count"] == 1:
-                raise RuntimeError("private failure")
+                raise RetryableTaskError("safe pre-side-effect failure")
             return {"ok": True}
         engine = TaskEngine(self.store, {"prepare": sometimes_fails}, "worker")
         self.store.create([{"tool": "prepare", "input": {}, "max_attempts": 2}], now=NOW)
