@@ -8,7 +8,7 @@ Implemented as an offline-capable, read-only retrieval layer. The graph provider
 
 - `GraphNeuron` and `GraphSynapse` are immutable, validated records.
 - `KnowledgeGraphProvider` is the provider-neutral snapshot interface.
-- `NotionKnowledgeGraphProvider` pages through the two configured Notion data sources and rejects malformed properties, duplicate IDs, dangling endpoints, invalid relations, and snapshots above configured limits.
+- `NotionKnowledgeGraphProvider` pages through the two configured Notion data sources and rejects malformed properties, duplicate IDs, dangling endpoints, invalid relations, and snapshots above configured limits. The two reads are sequential, not an atomic cross-database transaction, so concurrent edits can produce a mixed-time snapshot.
 - `retrieve_knowledge()` ranks direct lexical matches by relevance, evidence state, confidence, source availability, and recency, then performs deterministic breadth-first traversal.
 - `UntrustedKnowledgeContext` is an immutable envelope capped at 20 neurons, 40 synapses, and 100 KB serialized.
 - `serialize_untrusted_knowledge_context()` emits deterministic JSON with delimiter-breaking characters escaped.
