@@ -4,7 +4,7 @@
 
 Capri is an experimental, provider-neutral Python runtime with durable state, bounded orchestration, permissioned tool execution, project memory, and optional model-provider integrations. It is designed to make delegated work inspectable and recoverable, not to hide uncertainty behind an autonomous-agent label.
 
-[Repository](https://github.com/Hamudifr/Capri) · [Capability roadmap](docs/CAPABILITY_ROADMAP.md) · [Security review](docs/SECURITY_REVIEW.md) · [Operating model](docs/OPERATING_MODEL.md)
+[Repository](https://github.com/Hamudifr/Capri) · [Capability roadmap](docs/CAPABILITY_ROADMAP.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md) · [Security review](docs/SECURITY_REVIEW.md) · [Operating model](docs/OPERATING_MODEL.md)
 
 [![Python quality](https://github.com/Hamudifr/Capri/actions/workflows/quality.yml/badge.svg)](https://github.com/Hamudifr/Capri/actions/workflows/quality.yml)
 [![Rust quality](https://github.com/Hamudifr/Capri/actions/workflows/rust.yml/badge.svg)](https://github.com/Hamudifr/Capri/actions/workflows/rust.yml)
