@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from .memory import UntrustedMemoryContext
+from .knowledge_graph import UntrustedKnowledgeContext
 from .orchestration import (
     CommittedOrchestration,
     SessionTurnCoordinator,
@@ -113,6 +114,9 @@ class CapriHostRuntime:
         memory_context_resolver: Callable[
             [str, str, str], UntrustedMemoryContext | None
         ] | None = None,
+        knowledge_context_resolver: Callable[
+            [str, str, str], UntrustedKnowledgeContext | None
+        ] | None = None,
         task_worker: TaskWorker | None = None,
     ) -> None:
         if not isinstance(authority, HostAuthorityResolver):
@@ -139,6 +143,8 @@ class CapriHostRuntime:
             raise HostRuntimeError("coordinator must be a SessionTurnCoordinator")
         if memory_context_resolver is not None and not callable(memory_context_resolver):
             raise HostRuntimeError("memory_context_resolver must be callable")
+        if knowledge_context_resolver is not None and not callable(knowledge_context_resolver):
+            raise HostRuntimeError("knowledge_context_resolver must be callable")
         if task_worker is not None and not isinstance(task_worker, TaskWorker):
             raise HostRuntimeError("task_worker must be a TaskWorker")
         self._authority = authority
@@ -146,6 +152,7 @@ class CapriHostRuntime:
         self._orchestrator = orchestrator
         self._coordinator = coordinator
         self._memory_context_resolver = memory_context_resolver
+        self._knowledge_context_resolver = knowledge_context_resolver
         self._task_worker = task_worker
 
     def _context(self, credential: Any) -> ExecutionContext:
@@ -198,6 +205,16 @@ class CapriHostRuntime:
                 raise HostRuntimeError("host memory retrieval failed") from None
             if memory_context is not None and type(memory_context) is not UntrustedMemoryContext:
                 raise HostRuntimeError("host memory resolver returned an invalid context")
+        knowledge_context = None
+        if self._knowledge_context_resolver is not None:
+            try:
+                knowledge_context = self._knowledge_context_resolver(
+                    context.principal_id, session_id, user_text
+                )
+            except Exception:
+                raise HostRuntimeError("host knowledge-graph retrieval failed") from None
+            if knowledge_context is not None and type(knowledge_context) is not UntrustedKnowledgeContext:
+                raise HostRuntimeError("host knowledge resolver returned an invalid context")
         bound_store = PrincipalBoundSessionStore(
             self._session_store, context.principal_id
         )
@@ -208,6 +225,7 @@ class CapriHostRuntime:
             user_text,
             context,
             memory_context=memory_context,
+            knowledge_context=knowledge_context,
         )
 
     def run_task_worker(self, stop_event: Any) -> None:
