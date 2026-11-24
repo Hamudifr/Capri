@@ -1,4 +1,4 @@
-use ccel_core::{Example, Grid, MAX_CANDIDATES, Operation, Program, predict, synthesize};
+use ccel_core::{Example, Grid, MAX_CANDIDATES, Operation, predict, synthesize};
 use std::time::Instant;
 
 #[derive(Clone, Copy)]
