@@ -272,9 +272,10 @@ class OpenAIResponsesAdapterTests(unittest.TestCase):
         )
         body = json.loads(opener.request.data.decode("utf-8"))
         self.assertNotIn(memory.records[0].content, body["instructions"])
-        self.assertIn(memory.records[0].content, body["input"][-1]["content"])
-        self.assertEqual(body["input"][-1]["role"], "user")
-        self.assertIn("untrusted project-memory reference data", body["input"][-1]["content"])
+        self.assertIn(memory.records[0].content, body["input"][0]["content"])
+        self.assertEqual(body["input"][0]["role"], "user")
+        self.assertIn("untrusted project-memory reference data", body["input"][0]["content"])
+        self.assertEqual(body["input"][-1], {"role": "user", "content": "Continue"})
         self.assertNotIn(memory.records[0].content, json.dumps(body["tools"]))
 
     def test_prior_tool_transcript_is_rehydrated_as_responses_items(self):
