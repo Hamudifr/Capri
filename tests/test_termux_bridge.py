@@ -8,8 +8,9 @@ import unittest
 from unittest.mock import patch
 
 from tools.termux_bridge import (
-    BridgeError, TASKS, _retryable_result_push_error, claim_is_live, parse_claim,
-    parse_job, parse_queue_paths, publish_result, redact,
+    BridgeError, FOCUSED_TEST_RUNNER, FOCUSED_TEST_SUITES, TASKS,
+    _retryable_result_push_error, claim_is_live, parse_claim, parse_job,
+    parse_queue_paths, publish_result, redact,
 )
 
 
@@ -28,30 +29,28 @@ class TermuxBridgeManifestTests(unittest.TestCase):
 
     def test_focused_task_names_are_fixed_and_accepted(self):
         expected = {
-            "security_store_tests": "security_store",
-            "approval_binding_tests": "approval_binding",
-            "x7_runtime_tests": "x7_runtime",
+            "security_store_tests": ("test_security_store.py",),
+            "approval_binding_tests": (
+                "test_signed_approvals.py", "test_approval_lifecycle.py",
+                "test_host_authority.py", "test_host_gateway.py", "test_tools.py",
+                "test_tool_bridge.py", "test_resource_authorization.py",
+            ),
+            "x7_runtime_tests": (
+                "test_tasks.py", "test_host_runtime.py", "test_runtime_core.py",
+            ),
         }
-        for task, suite_name in expected.items():
+        self.assertEqual(FOCUSED_TEST_SUITES, expected)
+        for task, patterns in expected.items():
             with self.subTest(task=task):
                 manifest = self.valid_manifest()
                 manifest["task"] = task
                 parsed = parse_job(json.dumps(manifest))
                 self.assertEqual(parsed["task"], task)
-                self.assertEqual(
-                    TASKS[task],
-                    [[sys.executable, "tools/focused_tests.py", suite_name]],
-                )
-
-    def test_focused_test_suites_discover_existing_modules(self):
-        from tools.focused_tests import SUITES, load_suite
-
-        self.assertEqual(
-            set(SUITES), {"security_store", "approval_binding", "x7_runtime"}
-        )
-        for suite_name in SUITES:
-            with self.subTest(suite=suite_name):
-                self.assertGreater(load_suite(suite_name).countTestCases(), 0)
+                command = TASKS[task][0]
+                self.assertEqual(command[:3], [sys.executable, "-c", FOCUSED_TEST_RUNNER])
+                self.assertEqual(command[3], ",".join(patterns))
+                for pattern in patterns:
+                    self.assertRegex(pattern, r"^[a-z0-9_]+\.py$")
 
     def test_boolean_schema_version_is_rejected(self):
         manifest = self.valid_manifest()
