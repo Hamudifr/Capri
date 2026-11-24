@@ -898,6 +898,7 @@ class LearningStore:
                 consent_ids: set[str] = set()
                 policy_versions: set[str] = set()
                 row_count = 0
+                split_counts = {"train": 0, "validation": 0, "test": 0}
                 with path.open("r", encoding="utf-8") as stream:
                     for line in stream:
                         if not line.strip():
@@ -909,11 +910,17 @@ class LearningStore:
                         policy_version = row.get("consent_policy_version")
                         if not isinstance(consent_id, str) or not isinstance(policy_version, str):
                             return {"valid": False, "reason": "missing_consent_provenance"}
+                        split = row.get("split")
+                        if split not in split_counts:
+                            return {"valid": False, "reason": "invalid_split"}
+                        split_counts[split] += 1
                         consent_ids.add(consent_id)
                         policy_versions.add(policy_version)
                         row_count += 1
                 if (
-                    row_count != stored_manifest.get("row_count")
+                    stored_manifest.get("artifact_sha256") != actual_hash
+                    or split_counts != stored_manifest.get("split_counts")
+                    or row_count != stored_manifest.get("row_count")
                     or sorted(consent_ids) != stored_manifest.get("consent_ids")
                     or sorted(policy_versions) != stored_manifest.get("consent_policy_versions")
                     or consent_ids != dependencies
@@ -983,18 +990,54 @@ class LearningStore:
             "status": latest_status,
         }
 
+    @staticmethod
+    def _cleanup_staging_file(staging_path: str, artifact_path: str) -> bool:
+        """Remove only a private staging sibling whose name matches its artifact."""
+        if not staging_path:
+            return True
+        staged = Path(staging_path)
+        artifact = Path(artifact_path) if artifact_path else None
+        if artifact is None or staged.parent != artifact.parent:
+            return False
+        if not staged.name.startswith(f".{artifact.name}.") or staged.is_symlink():
+            return False
+        try:
+            if staged.exists():
+                if not staged.is_file():
+                    return False
+                staged.unlink()
+            _fsync_directory(staged.parent)
+            return True
+        except OSError:
+            return False
+
     def reconcile_pending_exports(self) -> dict[str, object]:
         """Idempotently recover verifiable publishing artifacts; fail closed otherwise."""
         with self._connection() as connection:
+            stale_staging = connection.execute(
+                """SELECT export_id, artifact_path, staging_path
+                   FROM learning_exports
+                   WHERE status IN ('invalidated', 'failed') AND staging_path <> ''"""
+            ).fetchall()
             pending = connection.execute(
                 """SELECT export_id, bundle_sha256, manifest_json, status, created_at,
                           export_kind, artifact_path, staging_path
                    FROM learning_exports WHERE status='publishing'
                    ORDER BY created_at, export_id"""
             ).fetchall()
+        cleaned_staging = 0
+        for stale in stale_staging:
+            if self._cleanup_staging_file(stale["staging_path"], stale["artifact_path"]):
+                with self._connection() as connection:
+                    connection.execute(
+                        "UPDATE learning_exports SET staging_path='' "
+                        "WHERE export_id=? AND status IN ('invalidated', 'failed')",
+                        (stale["export_id"],),
+                    )
+                cleaned_staging += 1
         result: dict[str, object] = {
-            "examined": len(pending), "activated": [], "invalidated": [],
-            "failed": [], "still_pending": [],
+            "examined": len(pending), "cleaned_staging": cleaned_staging,
+            "activated": [], "invalidated": [], "failed": [], "still_pending": [],
         }
         for record in pending:
             export_id = record["export_id"]
@@ -1011,6 +1054,7 @@ class LearningStore:
                 continue
             artifact = self._inspect_export_artifact(record, export_id, artifact_path)
             if not artifact["valid"]:
+                self._cleanup_staging_file(staging_path, artifact_path)
                 with self._connection() as connection:
                     connection.execute(
                         "UPDATE learning_exports SET status='failed', staging_path='' "
@@ -1021,17 +1065,8 @@ class LearningStore:
                 continue
             try:
                 _fsync_directory(Path(artifact_path).parent)
-                if staging_path:
-                    staged = Path(staging_path)
-                    if staged.parent != Path(artifact_path).parent:
-                        raise LearningDataError("staging and artifact paths must share a directory")
-                    if staged.is_symlink():
-                        raise LearningDataError("unsafe staging path")
-                    try:
-                        staged.unlink()
-                    except FileNotFoundError:
-                        pass
-                    _fsync_directory(Path(artifact_path).parent)
+                if staging_path and not self._cleanup_staging_file(staging_path, artifact_path):
+                    raise OSError("unable to safely clean export staging file")
             except OSError:
                 result["still_pending"].append(export_id)
                 continue
@@ -1046,7 +1081,9 @@ class LearningStore:
                 revoked = connection.execute(
                     """SELECT 1 FROM learning_export_consents ec
                        JOIN learning_consents c ON c.consent_id=ec.consent_id
-                       WHERE ec.export_id=? AND c.revoked_at IS NOT NULL LIMIT 1""",
+                       WHERE ec.export_id=?
+                         AND (c.revoked_at IS NOT NULL OR c.scope <> 'curated_training_examples')
+                       LIMIT 1""",
                     (export_id,),
                 ).fetchone()
                 if revoked is not None:
