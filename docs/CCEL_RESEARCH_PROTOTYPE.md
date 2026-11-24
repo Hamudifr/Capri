@@ -52,10 +52,10 @@ Search is bounded by depth and candidate count. Inputs are limited to 30x30 grid
 - Rust CI on exact branch head: rustfmt check, Clippy with warnings denied, 13 unit tests, release build, and matched benchmark all passed.
 - Python CI on exact branch head: Python 3.15.2, package installation, CLI, Capri Doctor, and all 493 existing tests passed.
 - Matched synthetic task: learn a 20x20 grid clockwise rotation using the five-operation DSL, depth limit 1, 10,000 synthesis rounds, 100 warmups, median of 5 samples, same Ubuntu x86_64 runner.
-- Final exact-head Rust release: 13.336804 ms per 10,000 rounds = 749,804.83 operations/second.
-- Final exact-head Python 3.15.2 reference: 0.965877 s per 10,000 rounds = 10,353.29 operations/second.
-- Observed ratio: about 72.4x faster for this specific microbenchmark. An earlier exact same-task run measured 81.3x; run-to-run variation shows why the ratio must not be generalized.
+- Latest exact-head Rust release: 7.097202 ms per 10,000 rounds = 1,409,005.97 operations/second.
+- Latest exact-head Python 3.15.2 reference: 0.549530 s per 10,000 rounds = 18,197.37 operations/second.
+- Observed ratio: about 77.4x faster for this specific microbenchmark. Prior exact-head runs ranged from about 72x to 81x; run-to-run variation shows why the ratio must not be generalized.
 - The first nested-Vec Rust version measured 183,717 ops/s; the flat-buffer version measured 749,805 ops/s in a later run, an indicative ~4.1x difference across separate CI runs, not a controlled paired A/B. The flat layout remains the better design hypothesis, but paired profiling is still needed.
 - These are microbenchmark results, not a general system speedup claim. They do not measure end-to-end agent reasoning, large-scale memory pressure, multi-core scaling, or generalization.
 
-Final exact-head CI: Rust #12 (45459486553); Python #798 (45459486842). PR #143 remains draft and unmerged.
+Latest exact-head CI: Rust #18 (45460103526), 14 tests passed; Python #807 (45460103510), 493 tests passed on Python 3.15.2. PR #143 remains draft and unmerged.
