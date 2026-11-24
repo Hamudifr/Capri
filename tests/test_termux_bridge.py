@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from tools.termux_bridge import (
-    BridgeError, _retryable_result_push_error, claim_is_live, parse_claim,
+    BridgeError, TASKS, _retryable_result_push_error, claim_is_live, parse_claim,
     parse_job, parse_queue_paths, publish_result, redact,
 )
 
@@ -25,6 +25,33 @@ class TermuxBridgeManifestTests(unittest.TestCase):
     def test_valid_fixed_task_manifest_is_accepted(self):
         parsed = parse_job(json.dumps(self.valid_manifest()))
         self.assertEqual(parsed["task"], "full_validation")
+
+    def test_focused_task_names_are_fixed_and_accepted(self):
+        expected = {
+            "security_store_tests": "security_store",
+            "approval_binding_tests": "approval_binding",
+            "x7_runtime_tests": "x7_runtime",
+        }
+        for task, suite_name in expected.items():
+            with self.subTest(task=task):
+                manifest = self.valid_manifest()
+                manifest["task"] = task
+                parsed = parse_job(json.dumps(manifest))
+                self.assertEqual(parsed["task"], task)
+                self.assertEqual(
+                    TASKS[task],
+                    [[sys.executable, "tools/focused_tests.py", suite_name]],
+                )
+
+    def test_focused_test_suites_discover_existing_modules(self):
+        from tools.focused_tests import SUITES, load_suite
+
+        self.assertEqual(
+            set(SUITES), {"security_store", "approval_binding", "x7_runtime"}
+        )
+        for suite_name in SUITES:
+            with self.subTest(suite=suite_name):
+                self.assertGreater(load_suite(suite_name).countTestCases(), 0)
 
     def test_boolean_schema_version_is_rejected(self):
         manifest = self.valid_manifest()
