@@ -141,6 +141,20 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             self.store.finish_step(old, {"ok": True}, now=NOW + timedelta(seconds=7))
         self.assertEqual(self.store.get(task.task_id).state, "reconciliation_required")
 
+    def test_renewed_lease_can_be_quarantined_by_original_claim(self):
+        task = self.store.create(PLAN, now=NOW)
+        claim = self.store.claim_next("worker-a", lease_seconds=5, now=NOW)
+        renewed = self.store.renew_lease(
+            claim, lease_seconds=10, now=NOW + timedelta(seconds=1)
+        )
+        self.assertNotEqual(renewed.lease_until, claim.lease_until)
+        result = self.store.require_reconciliation(
+            claim, now=NOW + timedelta(seconds=2)
+        )
+        self.assertEqual(result.task_id, task.task_id)
+        self.assertEqual(result.state, "reconciliation_required")
+        self.assertEqual(result.error_code, "handler_outcome_uncertain")
+
     def test_stale_claim_cannot_quarantine_a_later_retry_attempt(self):
         task = self.store.create(
             [{"tool": "prepare", "input": {}, "max_attempts": 2}], now=NOW
