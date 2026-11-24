@@ -65,7 +65,8 @@ class SignedApprovalTests(unittest.TestCase):
 
     def test_tampering_principal_tool_digest_or_expiry_invalidates_signature(self):
         grant = self.authority.issue(
-            "alice", "delete_record", argument_digest(self.arguments), ttl_seconds=120
+            "alice", "delete_record", argument_digest(self.arguments),
+            ttl_seconds=120, operation_id="session-1:call-1",
         )
         for tampered in (
             replace(grant, principal_id="bob"),
