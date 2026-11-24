@@ -26,7 +26,7 @@ Implemented as an offline-capable, read-only retrieval layer. The graph provider
 
 ## LLM and host boundary
 
-`ToolOrchestrator.run()` accepts an optional `knowledge_context`. `OpenAIResponsesAdapter` sends it as a separate user-role data message, distinct from conversation history, trusted host instructions, and host-filtered tool definitions. Memory and graph context can be passed together using `complete_with_tools_and_memory_and_knowledge`.
+`ToolOrchestrator.run()` accepts an optional `knowledge_context`. `OpenAIResponsesAdapter` prepends it as a separate user-role data message before conversation history, keeping the current user request last. Trusted host instructions and host-filtered tool definitions remain separate. The base policy explicitly treats both retrieved memory and graph data as untrusted reference context. Memory and graph context can be passed together using `complete_with_tools_and_memory_and_knowledge`.
 
 `CapriHostRuntime` accepts an optional trusted `knowledge_context_resolver(principal_id, session_id, user_text)`. It is invoked only after authentication and session ownership checks. The host resolver owns scope and provider configuration; untrusted callers cannot supply graph records or alter permissions.
 
