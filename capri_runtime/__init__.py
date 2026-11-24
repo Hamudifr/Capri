@@ -59,6 +59,8 @@ from .orchestration import (
 from .host import HostToolGateway
 from .host_runtime import CapriHostRuntime, HostRuntimeError
 from .openai_responses import OpenAIResponsesAdapter, OpenAIResponsesAdapterError
+from .knowledge_graph import (GraphNeuron, GraphSynapse, KnowledgeGraphError, KnowledgeGraphProvider, InMemoryKnowledgeGraphProvider, UntrustedKnowledgeContext, retrieve_knowledge, serialize_untrusted_knowledge_context)
+from .notion_knowledge_graph import NotionKnowledgeGraphProvider, create_notion_knowledge_graph_provider_from_environment
 from .approval import ApprovalChallenge, HostApprovalService, SQLiteApprovalChallengeStore
 from .sqlite_sessions import SQLiteSessionStore
 from .security_store import SQLiteSecurityStore
@@ -85,9 +87,20 @@ __all__ = [
     "SessionTurnCoordinator",
     "ToolModelAdapter",
     "MemoryAwareToolModelAdapter",
+    "KnowledgeAwareToolModelAdapter",
     "ToolOrchestrationError",
     "OpenAIResponsesAdapter",
     "OpenAIResponsesAdapterError",
+    "GraphNeuron",
+    "GraphSynapse",
+    "KnowledgeGraphError",
+    "KnowledgeGraphProvider",
+    "InMemoryKnowledgeGraphProvider",
+    "UntrustedKnowledgeContext",
+    "retrieve_knowledge",
+    "serialize_untrusted_knowledge_context",
+    "NotionKnowledgeGraphProvider",
+    "create_notion_knowledge_graph_provider_from_environment",
     "ToolOrchestrator",
     "ApprovalChallenge",
     "ApprovalGrant",
