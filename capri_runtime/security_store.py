@@ -20,6 +20,58 @@ _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 
 
+def _valid_text(value: object, limit: int) -> bool:
+    return (
+        isinstance(value, str) and 0 < len(value) <= limit
+        and not any(0xD800 <= ord(character) <= 0xDFFF for character in value)
+    )
+
+
+def _aware_timestamp(value: object) -> datetime | None:
+    if not _valid_text(value, 64):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (AttributeError, TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed
+
+
+def _validate_backup_semantics(connection: sqlite3.Connection) -> None:
+    """Reject logically malformed security rows even when SQLite is structurally sound."""
+    audit_rows = connection.execute(
+        """SELECT event_id, timestamp, principal_id, tool_name,
+        argument_digest, status, error_code FROM audit_events"""
+    ).fetchall()
+    for event_id, timestamp, principal_id, tool_name, digest, status, error_code in audit_rows:
+        if not all((
+            _valid_text(event_id, 64), _valid_text(timestamp, 64),
+            _valid_text(principal_id, 256), _valid_text(tool_name, 64),
+            _valid_text(status, 64),
+            isinstance(digest, str) and _DIGEST_RE.fullmatch(digest),
+            error_code is None or _valid_text(error_code, 128),
+        )):
+            raise ToolValidationError("security backup contains an invalid audit event")
+
+    approval_rows = connection.execute(
+        """SELECT grant_id, principal_id, tool_name, argument_digest,
+        expires_at, consumed_at FROM consumed_approvals"""
+    ).fetchall()
+    for grant_id, principal_id, tool_name, digest, expires_at, consumed_at in approval_rows:
+        expiry = _aware_timestamp(expires_at)
+        consumed = _aware_timestamp(consumed_at)
+        if not all((
+            _valid_text(grant_id, 128), _valid_text(principal_id, 256),
+            _valid_text(tool_name, 64) and _NAME_RE.fullmatch(tool_name),
+            isinstance(digest, str) and _DIGEST_RE.fullmatch(digest),
+            expiry is not None, consumed is not None,
+            expiry is not None and consumed is not None and expiry > consumed,
+        )):
+            raise ToolValidationError("security backup contains an invalid approval replay record")
+
+
 class SQLiteSecurityStore(AuditSink, ApprovalStore):
     """Durable, cross-process audit sink and one-use approval replay store.
 
@@ -275,6 +327,7 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
                 check = destination.execute("PRAGMA integrity_check").fetchone()
                 if not check or check[0] != "ok":
                     raise ToolValidationError("SQLite backup integrity check failed")
+                _validate_backup_semantics(destination)
                 destination.close()
                 destination = None
                 source.close()
