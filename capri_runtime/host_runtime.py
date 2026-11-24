@@ -16,7 +16,7 @@ from .orchestration import (
 )
 from .runtime import Message, Session, SessionClosedError, SessionStore
 from .sqlite_sessions import SQLiteSessionStore
-from .tasks import TaskWorker
+from .tasks import SQLiteTaskStore, TaskRecord, TaskWorker
 from .tools import ExecutionContext, HostAuthorityResolver
 
 
@@ -119,6 +119,7 @@ class CapriHostRuntime:
             [str, str, str], UntrustedKnowledgeContext | None
         ] | None = None,
         task_worker: TaskWorker | None = None,
+        task_store: SQLiteTaskStore | None = None,
     ) -> None:
         if not isinstance(authority, HostAuthorityResolver):
             raise HostRuntimeError("a trusted HostAuthorityResolver is required")
@@ -148,6 +149,13 @@ class CapriHostRuntime:
             raise HostRuntimeError("knowledge_context_resolver must be callable")
         if task_worker is not None and not isinstance(task_worker, TaskWorker):
             raise HostRuntimeError("task_worker must be a TaskWorker")
+        if task_store is not None and not isinstance(task_store, SQLiteTaskStore):
+            raise HostRuntimeError("task_store must be a SQLiteTaskStore")
+        if (
+            task_store is not None and task_worker is not None
+            and task_store.path != task_worker.engine.store.path
+        ):
+            raise HostRuntimeError("task_store and task_worker must use the same database")
         self._authority = authority
         self._session_store = session_store
         self._orchestrator = orchestrator
@@ -155,6 +163,10 @@ class CapriHostRuntime:
         self._memory_context_resolver = memory_context_resolver
         self._knowledge_context_resolver = knowledge_context_resolver
         self._task_worker = task_worker
+        self._task_store = (
+            task_store if task_store is not None
+            else (task_worker.engine.store if task_worker is not None else None)
+        )
 
     def _context(self, credential: Any) -> ExecutionContext:
         return self._authority.resolve(credential)
@@ -173,6 +185,45 @@ class CapriHostRuntime:
         """Close only a session owned by the authenticated principal."""
         context = self._context(credential)
         return self._session_store.close_for_principal(session_id, context.principal_id)
+
+    def create_task(
+        self, credential: Any, plan: Any, idempotency_key: str | None = None
+    ) -> TaskRecord:
+        """Create a durable task owned by the authenticated principal.
+
+        Task creation requires a configured worker registry so plans cannot
+        enqueue handler names that are not currently approved for principal work.
+        """
+        context = self._context(credential)
+        if self._task_store is None:
+            raise HostRuntimeError("no task store is configured")
+        if self._task_worker is None:
+            raise HostRuntimeError("principal task creation requires a configured task worker")
+        allowed = self._task_worker.engine.principal_handlers
+        if type(plan) is list:
+            for step in plan:
+                if type(step) is dict and type(step.get("tool")) is str:
+                    if step["tool"] not in allowed:
+                        raise HostRuntimeError("task plan references an unavailable principal handler")
+        return self._task_store.create_for_principal(
+            context.principal_id, plan, idempotency_key=idempotency_key
+        )
+
+    def get_task(self, credential: Any, task_id: str) -> TaskRecord:
+        """Read only a task owned by the authenticated principal."""
+        context = self._context(credential)
+        if self._task_store is None:
+            raise HostRuntimeError("no task store is configured")
+        return self._task_store.get_for_principal(task_id, context.principal_id)
+
+    def cancel_task(self, credential: Any, task_id: str) -> TaskRecord:
+        """Cancel only a task owned by the authenticated principal."""
+        context = self._context(credential)
+        if self._task_store is None:
+            raise HostRuntimeError("no task store is configured")
+        return self._task_store.request_cancel_for_principal(
+            task_id, context.principal_id
+        )
 
     def run_turn(
         self,
