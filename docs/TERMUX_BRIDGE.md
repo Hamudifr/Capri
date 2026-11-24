@@ -4,7 +4,7 @@ The Termux bridge is a narrow GitHub-relayed worker for running fixed Capri vali
 
 ## Queue protocol
 
-New jobs are immutable files on the private `capri-termux-bridge-inbox` branch:
+New jobs are immutable files on the `capri-termux-bridge-inbox` branch. Enqueuing requires repository write access:
 
 `jobs/<32-character-lowercase-hex-job-id>.json`
 
@@ -25,6 +25,9 @@ Create a new file for every job. Do not replace an existing job file. Supported 
 - `memory_tests`: memory test module.
 - `doctor`: Capri Doctor only.
 - `bridge_tests`: focused tests for queue manifests, claim validation, and lease logic.
+- `security_store_tests`: the fixed CAP-167 security-store and backup regression suite.
+- `approval_binding_tests`: the fixed approval-signature, lifecycle, resolver, gateway, executor, bridge and resource-authorization suites.
+- `x7_runtime_tests`: the fixed task-runtime, host-runtime and runtime-core suites.
 
 The worker scans canonical queue paths in sorted order and processes all pending jobs sequentially. Results are immutable per-job files at `results/<job-id>.json` on `capri-termux-bridge-results`. Completed results remain as history; jobs are not deleted. The old `bridge/job.json` location is still read for migration compatibility, but new producers must use the queue path.
 
@@ -39,7 +42,7 @@ The worker scans canonical queue paths in sorted order and processes all pending
 - Validation code and tests from the target commit execute as the Termux operating-system user inside that temporary worktree. The fixed task allowlist prevents manifest-supplied commands, but this is not an OS sandbox; only queue commits from trusted repository writers.
 - The manifest cannot provide a command, arguments, filesystem path, or environment variables. The task allowlist is fixed in code.
 - Subprocesses run without a shell, with a timeout and bounded/redacted output.
-- Inbox authorization derives from write access to the private repository. Manifests are not cryptographically signed.
+- Inbox authorization derives from repository write access. Public repository visibility does not grant write access, but queue manifests and results are publicly readable when the repository is public. Manifests are not cryptographically signed.
 
 ## Running on Termux
 
@@ -59,10 +62,15 @@ git pull --ff-only
 python tools/termux_bridge.py --watch --interval 5
 ```
 
-The bridge uses the existing private GitHub repository and does not require a new cloud service or GitHub Actions workflow.
+The bridge uses the existing GitHub repository and does not require a new cloud service or GitHub Actions workflow. The focused task runner is a separate fixed mapping in `tools/focused_tests.py`; the manifest cannot choose test files or module names.
 
 ## Relationship to the durable task runtime
 
 The Termux bridge currently transports only its fixed validation-task allowlist. It does not deserialize GitHub inbox manifests into `SQLiteTaskStore` plans or execute arbitrary `TaskWorker` handlers. The durable task runtime is a separate host-managed capability: principal-owned work requires authenticated ownership and explicitly injected `principal_handlers` with resource-level authorization. Do not treat repository write access as a task principal or use the bridge to bypass that boundary.
 
 The `bridge_tests` job runs the focused `tests.test_termux_bridge` suite, including manifest validation, claim lifecycle, lease recovery, real two-independent-checkout Git ref races for both initial claim creation and expired-claim takeover against a temporary bare remote, concurrent result-publish retry behavior, and exact-target detached-worktree execution without moving the worker checkout.
+
+
+## Current validation window
+
+Until 2026-12-01, use only the focused regression tasks when the owner has requested focused validation. Defer `full_validation` until the free CI window is rechecked. The three focused task names are fixed in `TASKS`, each maps to one bounded Python invocation, and `tools/focused_tests.py` maps the suite names to fixed test-file patterns. Do not add manifest-supplied commands, paths or patterns.
