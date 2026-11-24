@@ -6,6 +6,7 @@ are not stored. The database is private but not encrypted at rest.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import sqlite3
@@ -19,7 +20,166 @@ from .tools import ApprovalGrant, ApprovalStore, AuditEvent, AuditSink, ToolVali
 
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
+_OPERATION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 
+
+def _valid_text(value: object, limit: int) -> bool:
+    return (
+        isinstance(value, str) and 0 < len(value) <= limit
+        and not any(0xD800 <= ord(character) <= 0xDFFF for character in value)
+    )
+
+
+def _aware_timestamp(value: object) -> datetime | None:
+    if not _valid_text(value, 64):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (AttributeError, TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed
+
+
+def _validate_backup_semantics(connection: sqlite3.Connection) -> None:
+    """Reject logically malformed security rows even when SQLite is structurally sound."""
+    audit_rows = connection.execute(
+        """SELECT event_id, timestamp, principal_id, tool_name,
+        argument_digest, status, error_code FROM audit_events"""
+    ).fetchall()
+    for event_id, timestamp, principal_id, tool_name, digest, status, error_code in audit_rows:
+        if not all((
+            _valid_text(event_id, 64), _valid_text(timestamp, 64),
+            _valid_text(principal_id, 256), _valid_text(tool_name, 64),
+            _valid_text(status, 64),
+            isinstance(digest, str) and _DIGEST_RE.fullmatch(digest),
+            error_code is None or (
+                isinstance(error_code, str) and len(error_code) <= 128
+                and not any(0xD800 <= ord(character) <= 0xDFFF for character in error_code)
+            ),
+        )):
+            raise ToolValidationError("security backup contains an invalid audit event")
+
+    approval_rows = connection.execute(
+        """SELECT grant_id, principal_id, tool_name, argument_digest,
+        expires_at, consumed_at FROM consumed_approvals"""
+    ).fetchall()
+    for grant_id, principal_id, tool_name, digest, expires_at, consumed_at in approval_rows:
+        expiry = _aware_timestamp(expires_at)
+        consumed = _aware_timestamp(consumed_at)
+        if not all((
+            _valid_text(grant_id, 128), _valid_text(principal_id, 256),
+            _valid_text(tool_name, 64) and _NAME_RE.fullmatch(tool_name),
+            isinstance(digest, str) and _DIGEST_RE.fullmatch(digest),
+            expiry is not None, consumed is not None,
+            expiry is not None and consumed is not None and expiry > consumed,
+        )):
+            raise ToolValidationError("security backup contains an invalid approval replay record")
+    _validate_approval_challenges(connection)
+
+
+def _validate_approval_challenges(connection: sqlite3.Connection) -> None:
+    """Validate optional challenge state included in the shared security database."""
+    object_row = connection.execute(
+        "SELECT type FROM sqlite_master WHERE name='approval_challenges'"
+    ).fetchone()
+    if object_row is None:
+        return
+    if object_row[0] != "table":
+        raise ToolValidationError(
+            "security backup contains an invalid approval challenge object"
+        )
+    try:
+        rows = connection.execute(
+            """SELECT challenge_id, operation_id, principal_id, tool_name,
+            argument_digest, created_at, expires_at, status, approver_id, grant_json
+            FROM approval_challenges"""
+        )
+    except sqlite3.Error:
+        raise ToolValidationError(
+            "security backup contains an invalid approval challenge table"
+        ) from None
+
+    challenge_ids: set[str] = set()
+    operation_ids: set[str] = set()
+    grant_ids: set[str] = set()
+    allowed_grant_keys = {
+        "grant_id", "principal_id", "tool_name", "argument_digest",
+        "expires_at", "signature", "key_id", "operation_id",
+    }
+    required_grant_keys = allowed_grant_keys - {"operation_id"}
+
+    for (challenge_id, operation_id, principal_id, tool_name, digest,
+         created_at, expires_at, status, approver_id, grant_json) in rows:
+        created = _aware_timestamp(created_at)
+        expiry = _aware_timestamp(expires_at)
+        if not all((
+            _valid_text(challenge_id, 64),
+            _valid_text(operation_id, 128) and _OPERATION_RE.fullmatch(operation_id),
+            _valid_text(principal_id, 256) and principal_id.strip(),
+            _valid_text(tool_name, 64) and _NAME_RE.fullmatch(tool_name),
+            isinstance(digest, str) and _DIGEST_RE.fullmatch(digest),
+            created is not None, expiry is not None,
+            created is not None and expiry is not None and expiry > created,
+            status in {"pending", "approved", "rejected", "expired"},
+            approver_id is None or (
+                _valid_text(approver_id, 256) and approver_id.strip()
+            ),
+            challenge_id not in challenge_ids,
+            operation_id not in operation_ids,
+        )):
+            raise ToolValidationError(
+                "security backup contains an invalid approval challenge"
+            )
+        challenge_ids.add(challenge_id)
+        operation_ids.add(operation_id)
+
+        if status != "approved":
+            if grant_json is not None:
+                raise ToolValidationError(
+                    "security backup contains a grant on a non-approved challenge"
+                )
+            continue
+
+        if not (_valid_text(approver_id, 256) and approver_id.strip()
+                and _valid_text(grant_json, 2048)):
+            raise ToolValidationError(
+                "security backup contains an incomplete approved challenge"
+            )
+        try:
+            grant = json.loads(grant_json)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            raise ToolValidationError(
+                "security backup contains invalid approval grant JSON"
+            ) from None
+        if not isinstance(grant, dict) or not required_grant_keys.issubset(grant) or set(grant) - allowed_grant_keys:
+            raise ToolValidationError(
+                "security backup contains an invalid approval grant shape"
+            )
+        grant_expiry = _aware_timestamp(grant.get("expires_at"))
+        grant_id = grant.get("grant_id")
+        key_id = grant.get("key_id")
+        if not all((
+            _valid_text(grant_id, 128),
+            grant_id not in grant_ids,
+            grant.get("principal_id") == principal_id,
+            grant.get("tool_name") == tool_name,
+            grant.get("argument_digest") == digest,
+            grant_expiry is not None,
+            created is not None and grant_expiry is not None and grant_expiry > created,
+            isinstance(grant.get("signature"), str)
+                and _DIGEST_RE.fullmatch(grant["signature"]),
+            key_id is None or _valid_text(key_id, 128),
+            "operation_id" not in grant or (
+                _valid_text(grant["operation_id"], 128)
+                and grant["operation_id"] == operation_id
+            ),
+        )):
+            raise ToolValidationError(
+                "security backup contains a mismatched approval grant"
+            )
+        grant_ids.add(grant_id)
 
 class SQLiteSecurityStore(AuditSink, ApprovalStore):
     """Durable, cross-process audit sink and one-use approval replay store.
@@ -276,6 +436,7 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
                 check = destination.execute("PRAGMA integrity_check").fetchone()
                 if not check or check[0] != "ok":
                     raise ToolValidationError("SQLite backup integrity check failed")
+                _validate_backup_semantics(destination)
                 destination.close()
                 destination = None
                 source.close()
