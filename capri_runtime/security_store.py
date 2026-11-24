@@ -80,17 +80,21 @@ def _validate_backup_semantics(connection: sqlite3.Connection) -> None:
 
 def _validate_approval_challenges(connection: sqlite3.Connection) -> None:
     """Validate optional challenge state included in the shared security database."""
-    exists = connection.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='approval_challenges'"
+    object_row = connection.execute(
+        "SELECT type FROM sqlite_master WHERE name='approval_challenges'"
     ).fetchone()
-    if exists is None:
+    if object_row is None:
         return
+    if object_row[0] != "table":
+        raise ToolValidationError(
+            "security backup contains an invalid approval challenge object"
+        )
     try:
         rows = connection.execute(
             """SELECT challenge_id, operation_id, principal_id, tool_name,
             argument_digest, created_at, expires_at, status, approver_id, grant_json
             FROM approval_challenges"""
-        ).fetchall()
+        )
     except sqlite3.Error:
         raise ToolValidationError(
             "security backup contains an invalid approval challenge table"
