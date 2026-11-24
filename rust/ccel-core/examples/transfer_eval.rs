@@ -349,6 +349,10 @@ fn main() {
         cases.len(),
         "current synthesizer missed a pre-registered expected outcome"
     );
+    assert_eq!(single_total, 8, "single-operation baseline changed unexpectedly");
+    assert_eq!(single_unique, 6, "single-operation unique baseline changed unexpectedly");
+    assert_eq!(identity_total, 1, "identity baseline changed unexpectedly");
+    assert_eq!(identity_unique, 0, "identity unique baseline changed unexpectedly");
     assert!(
         all_programs_valid,
         "synthesizer returned a program inconsistent with its demonstrations"
