@@ -141,6 +141,22 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             self.store.finish_step(old, {"ok": True}, now=NOW + timedelta(seconds=7))
         self.assertEqual(self.store.get(task.task_id).state, "reconciliation_required")
 
+    def test_stale_claim_cannot_quarantine_a_later_retry_attempt(self):
+        task = self.store.create(
+            [{"tool": "prepare", "input": {}, "max_attempts": 2}], now=NOW
+        )
+        old_claim = self.store.claim_next("worker", now=NOW)
+        self.store.fail_step(old_claim, now=NOW, retryable=True)
+        current_claim = self.store.claim_next(
+            "worker", now=NOW + timedelta(seconds=5)
+        )
+        self.assertEqual(current_claim.attempt, 2)
+        with self.assertRaises(TaskConflictError):
+            self.store.require_reconciliation(
+                old_claim, now=NOW + timedelta(seconds=6)
+            )
+        self.assertEqual(self.store.get(task.task_id).state, "running")
+
     def test_retry_backoff_and_attempt_limit(self):
         task = self.store.create(PLAN, now=NOW)
         claim = self.store.claim_next("worker", now=NOW)
