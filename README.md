@@ -15,7 +15,7 @@ Capri is an experimental, provider-neutral Python runtime with durable state, bo
 
 - **Bounded orchestration:** structured model/tool rounds with explicit limits on messages, results, and transcript size.
 - **Permissioned execution:** tool proposals pass through trusted host authority, argument validation, optional approvals, and audit recording before handlers run.
-- **Durable state:** SQLite-backed sessions, task plans, worker leases, checkpoints, and security records.
+- **Durable state:** principal-owned SQLite sessions and task plans, worker leases, step checkpoints, and security records. Uncertain task outcomes are quarantined rather than blindly replayed.
 - **Project memory:** bounded local memory, a Notion REST adapter, retention and provenance rules, and a separate untrusted-memory context boundary.
 - **Evidence-aware knowledge graph:** read-only Notion Neurons/Synapses retrieval with deterministic lexical ranking, bounded graph traversal, provenance, contradiction handling, and a short process-local snapshot cache. Retrieved graph content remains untrusted data.
 - **Provider integration:** an optional standard-library OpenAI Responses API adapter. Provider calls are explicit and require host-supplied configuration.

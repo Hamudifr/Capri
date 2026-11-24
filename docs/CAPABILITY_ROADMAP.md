@@ -1,7 +1,7 @@
 # Capri Capability Roadmap — X6 Foundation to X7 and X8
 
 **Status:** Active engineering direction  
-**Last updated:** 2026-11-07  
+**Last updated:** 2026-11-25  
 **Purpose:** Move Capri from a collection of useful runtime components toward a coherent, reliable autonomous operating system for delegated work.
 
 This roadmap defines capability outcomes, not marketing labels. A milestone is complete only when the behavior is implemented, tested, observable, and documented. A larger number does not imply greater intelligence by itself.
@@ -14,13 +14,14 @@ Already present in the repository:
 - Provider-neutral model/tool orchestration with bounded rounds and transcript budgets.
 - Permission-filtered tool discovery and execution through a trusted host boundary.
 - Action-bound approvals, redacted audit events, and durable local approval replay protection.
-- Durable sessions with principal ownership and request-scoped host composition.
-- Persistent task plans, worker leases, checkpoints, bounded retries, cancellation, and lease recovery.
+- Durable sessions and tasks with principal ownership, request-scoped host composition, immutable owner records, and principal-specific handler allowlists.
+- Persistent task plans, worker leases, checkpoints, explicit pre-side-effect retries, cancellation, and `reconciliation_required` quarantine for uncertain outcomes; expired running work is never blindly replayed.
 - Bounded local project memory, a Notion memory adapter, and separate untrusted-memory delivery.
-- Optional OpenAI Responses API adapter with offline tests.
-- Private consistent backups for the four local SQLite stores.
+- Optional read-only Notion knowledge-graph retrieval with deterministic bounded lexical ranking, provenance, contradiction handling, and a short process-local cache; retrieved context remains untrusted.
+- Optional OpenAI Responses API adapter with offline tests and separate memory/knowledge context inputs.
+- Private consistent no-replace backups for the four local SQLite stores; backups remain plaintext and require host-managed protection.
 
-This is a strong component foundation. It is not yet a complete autonomous agent: natural-language goal planning, end-to-end goal ownership, a supervised host service, real identity-provider integration, complete memory ACL enforcement, hard per-principal budgets, and production observability remain incomplete.
+This is a strong component foundation. It is not yet a complete autonomous agent: natural-language goal planning, a durable goal record/coordinator, a supervised host service, real identity-provider integration, complete memory/graph ACL enforcement, hard per-principal budgets, an owner-facing task reconciliation workflow, and production observability remain incomplete.
 
 ## X7 — Autonomous Operations
 
@@ -40,11 +41,11 @@ This is a strong component foundation. It is not yet a complete autonomous agent
    - Estimate time, tool calls, context, and provider usage before execution.
 
 3. **Execution control**
-   - Connect goal plans to the durable task engine.
-   - Maintain a single goal record across multiple tasks and sessions.
+   - Connect goal plans to the durable task engine. Principal-owned task creation, read/cancel access, handler allowlists, and safe task-level retry/quarantine are implemented.
+   - Maintain a single goal record across multiple tasks and sessions; goal-level ownership and coordination remain to be built.
    - Checkpoint after meaningful steps and persist evidence references.
-   - Support pause, resume, cancel, retry, and escalation without duplicating side effects.
-   - Require idempotency at side-effect boundaries; treat uncertain outcomes as uncertain.
+   - Add goal-level pause, resume, cancel, retry, and escalation without duplicating side effects. Task-level cancellation, explicit pre-side-effect retries, and uncertain-outcome quarantine are implemented; there is no owner-facing reconciliation API yet.
+   - Require idempotency at side-effect boundaries; never automatically replay an uncertain outcome.
 
 4. **Policy and resource budgets**
    - Enforce per-principal limits for tool calls, runtime, context, and provider usage.
@@ -121,9 +122,9 @@ This is a strong component foundation. It is not yet a complete autonomous agent
 
 | Order | Work package | Milestone | Exit evidence |
 |---|---|---|---|
-| 1 | Goal/task data model and principal-scoped task ownership | X7 | Migration tests, ownership isolation tests, bounded schema |
-| 2 | Goal planner protocol and deterministic plan validator | X7 | Adversarial planner-output tests; no permission escalation |
-| 3 | Goal coordinator linking planner, task engine, session, and evidence | X7 | End-to-end fake-adapter tests across restart/recovery |
+| 1 | Principal-scoped durable task ownership and safe task recovery | X7 | **Implemented:** immutable owner rows, scoped idempotency/read/cancel/events, handler allowlists, explicit retries, uncertain-outcome quarantine, backup validation, and adversarial tests |
+| 2 | Durable goal record and goal planner protocol | X7 | Typed goal schema, owner binding, constraints/deadline/definition-of-done validation |
+| 3 | Deterministic goal-plan validator and coordinator linking planner, task engine, session, and evidence | X7 | Adversarial planner-output tests; end-to-end fake-adapter tests across restart; no permission escalation |
 | 4 | Execution budget and provider spend guard | X7 | Over-budget rejection before model/tool invocation |
 | 5 | Supervised host service and health lifecycle | X7 | Startup/shutdown, health, worker recovery tests |
 | 6 | Goal acceptance and evidence report | X7 | Read-back verification and partial/uncertain outcome tests |
@@ -144,4 +145,4 @@ This is a strong component foundation. It is not yet a complete autonomous agent
 
 ## Immediate next engineering action
 
-Start with **X7.1: principal-scoped durable goal/task ownership**. The existing task store persists plans and leases but does not yet provide the same principal-bound ownership model already implemented for sessions. Close that gap before allowing model-generated plans to enter durable execution.
+Start with **X7.2: durable goal records and the goal planner protocol**. Principal-scoped task ownership and safe task recovery are now implemented. The next gap is a durable goal contract and coordinator that bind one user outcome to bounded tasks, evidence, deadlines, and acceptance checks without granting model output authority.

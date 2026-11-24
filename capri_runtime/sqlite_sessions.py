@@ -17,6 +17,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
+from .atomic_publish import publish_no_replace
 from .runtime import (
     Message,
     Session,
@@ -118,6 +119,7 @@ class SQLiteSessionStore(SessionStore):
             raise ValidationError("database ownership, link count, or permissions changed")
         connection = sqlite3.connect(self.path, timeout=5.0, isolation_level=None)
         connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute("PRAGMA recursive_triggers=ON")
         connection.execute("PRAGMA trusted_schema=OFF")
         connection.execute("PRAGMA synchronous=FULL")
         return connection
@@ -167,6 +169,16 @@ class SQLiteSessionStore(SessionStore):
                 connection.execute(
                     """CREATE TRIGGER IF NOT EXISTS session_owners_immutable_delete
                     BEFORE DELETE ON session_owners
+                    BEGIN
+                        SELECT RAISE(ABORT, 'session owner is immutable');
+                    END"""
+                )
+                connection.execute(
+                    """CREATE TRIGGER IF NOT EXISTS session_owners_immutable_insert
+                    BEFORE INSERT ON session_owners
+                    WHEN EXISTS (
+                        SELECT 1 FROM session_owners WHERE session_id = NEW.session_id
+                    )
                     BEGIN
                         SELECT RAISE(ABORT, 'session owner is immutable');
                     END"""
@@ -833,10 +845,11 @@ class SQLiteSessionStore(SessionStore):
             finally:
                 os.close(backup_fd)
 
-            # link() publishes without replacing a destination created in a race.
-            os.link(temporary_path, absolute, follow_symlinks=False)
+            # Publish atomically without replacing a destination created in a race.
+            publication_method = publish_no_replace(temporary_path, absolute)
             published = True
-            os.unlink(temporary_path)
+            if publication_method == "hard-link":
+                os.unlink(temporary_path)
             if os.name == "posix":
                 directory_fd = os.open(parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
                 try:
