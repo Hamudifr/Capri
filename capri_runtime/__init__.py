@@ -60,6 +60,7 @@ from .host import HostToolGateway
 from .host_runtime import CapriHostRuntime, HostRuntimeError
 from .openai_responses import OpenAIResponsesAdapter, OpenAIResponsesAdapterError
 from .approval import ApprovalChallenge, HostApprovalService, SQLiteApprovalChallengeStore
+from .learning_consent import HostLearningConsentAuthority, LearningConsentAuthorityError
 from .sqlite_sessions import SQLiteSessionStore
 from .security_store import SQLiteSecurityStore
 from .memory import MemoryErrorBase, MemoryNotFoundError, MemoryProvider, MemoryRecord, MemoryValidationError, SQLiteMemoryStore, UntrustedMemoryContext, build_untrusted_memory_context, serialize_untrusted_memory_context
@@ -103,6 +104,8 @@ __all__ = [
     "HostAuthorityError",
     "HostAuthorityResolver",
     "HostApprovalService",
+    "HostLearningConsentAuthority",
+    "LearningConsentAuthorityError",
     "HostToolGateway",
     "CapriHostRuntime",
     "HostRuntimeError",
