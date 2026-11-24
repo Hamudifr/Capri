@@ -79,7 +79,7 @@ class HostAuthorityResolverTests(unittest.TestCase):
         bad_resolver = HostAuthorityResolver(
             lambda credential: "alice",
             lambda principal: ("records:delete",),
-            lambda principal: (ApprovalGrant(
+            lambda principal, operation_id: (ApprovalGrant(
                 "grant-2", "bob", "delete_record", "a" * 64,
                 (now + timedelta(minutes=1)).isoformat(),
                 operation_id="op-1",
