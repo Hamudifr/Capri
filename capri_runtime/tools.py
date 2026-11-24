@@ -501,6 +501,7 @@ class HostAuthorityResolver:
         if (not isinstance(context.principal_id, str) or not context.principal_id.strip()
                 or len(context.principal_id) > 256 or _contains_surrogate(context.principal_id)
                 or not isinstance(context.permissions, frozenset)
+                or len(context.permissions) > 128
                 or any(not isinstance(item, str) or not item or len(item) > 128
                        or _contains_surrogate(item) for item in context.permissions)):
             raise HostAuthorityError("trusted execution context is invalid")
