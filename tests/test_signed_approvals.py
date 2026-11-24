@@ -204,6 +204,7 @@ class SignedApprovalTests(unittest.TestCase):
         grant = ApprovalGrant(
             "g", "alice", "delete_record", argument_digest(self.arguments),
             "2026-11-06T13:00:00+00:00", "0" * 64, "remote-v1",
+            operation_id="session-1:call-1",
         )
         self.assertFalse(authority.verify(grant))
 
