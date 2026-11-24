@@ -82,11 +82,11 @@ class GraphNeuron:
         object.__setattr__(self, "neuron_id", _uuid(self.neuron_id, "neuron_id"))
         _text(self.title, "title", 200)
         _text(self.notes, "notes", 20_000, empty=True)
-        if self.kind not in {"Fact", "Concept", "Rule", "Skill", "Memory", "Task", "Evidence", "Hypothesis"}:
+        if type(self.kind) is not str or self.kind not in {"Fact", "Concept", "Rule", "Skill", "Memory", "Task", "Evidence", "Hypothesis"}:
             raise KnowledgeGraphError("neuron kind is unsupported")
-        if self.layer not in {"Input", "Validation", "Memory", "Reasoning", "Decision", "Output", "Feedback"}:
+        if type(self.layer) is not str or self.layer not in {"Input", "Validation", "Memory", "Reasoning", "Decision", "Output", "Feedback"}:
             raise KnowledgeGraphError("neuron layer is unsupported")
-        if self.evidence_state not in _EVIDENCE_RANK:
+        if type(self.evidence_state) is not str or self.evidence_state not in _EVIDENCE_RANK:
             raise KnowledgeGraphError("neuron evidence state is unsupported")
         if isinstance(self.confidence, bool) or not isinstance(self.confidence, (int, float)) or not 0 <= self.confidence <= 1:
             raise KnowledgeGraphError("neuron confidence must be between zero and one")
@@ -116,13 +116,13 @@ class GraphSynapse:
         object.__setattr__(self, "from_neuron_id", _uuid(self.from_neuron_id, "from_neuron_id"))
         object.__setattr__(self, "to_neuron_id", _uuid(self.to_neuron_id, "to_neuron_id"))
         _text(self.title, "title", 200)
-        if self.relationship not in _RELATIONSHIPS:
+        if type(self.relationship) is not str or self.relationship not in _RELATIONSHIPS:
             raise KnowledgeGraphError("synapse relationship is unsupported")
         _text(self.rationale, "rationale", 4000, empty=True)
         object.__setattr__(self, "evidence", _source(self.evidence))
         if isinstance(self.strength, bool) or not isinstance(self.strength, (int, float)) or not 0 <= self.strength <= 1:
             raise KnowledgeGraphError("synapse strength must be between zero and one")
-        if self.status not in {"Active", "Proposed", "Rejected", "Superseded"}:
+        if type(self.status) is not str or self.status not in {"Active", "Proposed", "Rejected", "Superseded"}:
             raise KnowledgeGraphError("synapse status is unsupported")
         if self.from_neuron_id == self.to_neuron_id:
             raise KnowledgeGraphError("self-referential synapses are not supported")
@@ -147,6 +147,10 @@ class UntrustedKnowledgeContext:
         if type(self.synapses) is not tuple or len(self.synapses) > 40:
             raise KnowledgeGraphError("knowledge context allows at most 40 synapses")
         _text(self.query, "query", 4000)
+        if any(type(n) is not GraphNeuron for n in self.neurons):
+            raise KnowledgeGraphError("knowledge context contains an invalid neuron record")
+        if any(type(s) is not GraphSynapse for s in self.synapses):
+            raise KnowledgeGraphError("knowledge context contains an invalid synapse record")
         neuron_ids = [n.neuron_id for n in self.neurons]
         if len(neuron_ids) != len(set(neuron_ids)):
             raise KnowledgeGraphError("knowledge context contains duplicate neurons")
