@@ -53,6 +53,7 @@ from .orchestration import (
     SessionTurnCoordinator,
     ToolModelAdapter,
     MemoryAwareToolModelAdapter,
+    KnowledgeAwareToolModelAdapter,
     ToolOrchestrationError,
     ToolOrchestrator,
 )
