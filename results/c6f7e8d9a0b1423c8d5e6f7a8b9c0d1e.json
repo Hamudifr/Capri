@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "target_commit": "d5a3673428a1f61e450f146a27f1eba3a3c8ecfc",
+  "task": "full_validation",
+  "status": "superseded",
+  "reason": "Superseded before execution by expanded CAP-167 challenge-row validation at commit 55cd6d1be8b1ae818df1cae22f0c0dce1d3780da; no task was executed.",
+  "steps": []
+}
