@@ -17,6 +17,7 @@ from typing import Any, Callable, Mapping
 from uuid import uuid4
 
 from .sqlite_backup import backup_sqlite_database
+from .tools import ToolCancelledError
 
 
 class TaskError(Exception):
@@ -37,6 +38,15 @@ class TaskConflictError(TaskError):
 
 class TaskIdempotencyConflict(TaskError):
     """An idempotency key was reused for a different task definition."""
+
+
+class RetryableTaskError(TaskError):
+    """A handler failure known to have happened before any external side effect.
+
+    Trusted handlers may raise this only when they can guarantee that no
+    externally visible action occurred. Every other handler exception is
+    quarantined as an uncertain outcome instead of being retried.
+    """
 
 
 def _now() -> datetime:
@@ -349,7 +359,13 @@ class SQLiteTaskStore:
                 if state in {"succeeded", "failed", "cancelled"}:
                     connection.execute("COMMIT")
                     return self.get(task_id)
-                if state in {"queued", "retry_wait"}:
+                if state == "reconciliation_required":
+                    connection.execute(
+                        "UPDATE tasks SET cancel_requested=1,updated_at=? WHERE task_id=?",
+                        (stamp, task_id),
+                    )
+                    new_state = "reconciliation_required"
+                elif state in {"queued", "retry_wait"}:
                     connection.execute(
                         "UPDATE tasks SET state='cancelled',cancel_requested=1,updated_at=?,lease_owner=NULL,lease_until=NULL WHERE task_id=?",
                         (stamp, task_id),
@@ -414,13 +430,20 @@ class SQLiteTaskStore:
                             (stamp, task_id),
                         )
                         continue
-                    if state == "running" and attempts >= plan[index]["max_attempts"]:
+                    if state == "running":
+                        # An expired lease cannot prove whether the handler's
+                        # external side effect happened. Never replay it blindly.
                         connection.execute(
-                            "UPDATE tasks SET state='failed',error_code='lease_expired',updated_at=?,lease_owner=NULL,lease_until=NULL WHERE task_id=?",
+                            """UPDATE tasks SET state='reconciliation_required',
+                            error_code='lease_expired_outcome_uncertain',updated_at=?,
+                            lease_owner=NULL,lease_until=NULL WHERE task_id=?""",
                             (stamp, task_id),
                         )
                         connection.execute(
-                            "INSERT INTO task_events(task_id,timestamp,state,step_index,attempt,error_code) VALUES(?,?,'failed',?,?,'lease_expired')",
+                            """INSERT INTO task_events(
+                            task_id,timestamp,state,step_index,attempt,error_code
+                            ) VALUES(?,?,'reconciliation_required',?,?,
+                            'lease_expired_outcome_uncertain')""",
                             (task_id, stamp, index, attempts),
                         )
                         continue
@@ -541,6 +564,54 @@ class SQLiteTaskStore:
             finally:
                 connection.close()
 
+    def require_reconciliation(
+        self, claim: TaskClaim, error_code: str = "handler_outcome_uncertain",
+        now: datetime | None = None,
+    ) -> TaskRecord:
+        """Quarantine a started step whose external outcome cannot be proven."""
+        if not isinstance(claim, TaskClaim):
+            raise TaskValidationError("claim must be a TaskClaim")
+        _text(error_code, "error_code", 64)
+        if not error_code.replace("_", "").isalnum():
+            raise TaskValidationError("error_code must be a simple identifier")
+        stamp = _iso(now or _now())
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    "SELECT state,lease_owner,lease_until,current_step FROM tasks WHERE task_id=?",
+                    (claim.task_id,),
+                ).fetchone()
+                if not row:
+                    raise TaskNotFoundError("task does not exist")
+                state, owner, until, index = row
+                if state != "running" or owner != claim.executor_id or index != claim.step_index:
+                    raise TaskConflictError("task lease is no longer owned by this executor")
+                if _parse_time(until) <= _parse_time(stamp):
+                    raise TaskConflictError("task lease expired before uncertainty was recorded")
+                connection.execute(
+                    """UPDATE tasks SET state='reconciliation_required',error_code=?,
+                    updated_at=?,lease_owner=NULL,lease_until=NULL WHERE task_id=?""",
+                    (error_code, stamp, claim.task_id),
+                )
+                connection.execute(
+                    """INSERT INTO task_events(
+                    task_id,timestamp,state,step_index,attempt,error_code
+                    ) VALUES(?,?,'reconciliation_required',?,?,?)""",
+                    (claim.task_id, stamp, claim.step_index, claim.attempt, error_code),
+                )
+                connection.execute("COMMIT")
+                return self.get(claim.task_id)
+            except Exception:
+                try:
+                    connection.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+                raise
+            finally:
+                connection.close()
+
     def fail_step(self, claim: TaskClaim, error_code: str = "handler_failed",
                   retry_delay_seconds: int = 5, now: datetime | None = None,
                   retryable: bool = True) -> TaskRecord:
@@ -605,7 +676,7 @@ class SQLiteTaskStore:
                 connection.close()
 
     def _validate_backup_snapshot(self, connection: sqlite3.Connection) -> None:
-        allowed_states = {"queued", "running", "retry_wait", "succeeded", "failed", "cancelled"}
+        allowed_states = {"queued", "running", "retry_wait", "reconciliation_required", "succeeded", "failed", "cancelled"}
         rows = connection.execute(
             """SELECT task_id,idempotency_key,state,created_at,updated_at,current_step,
             attempts,available_at,cancel_requested,results_json,error_code,plan_json
@@ -725,9 +796,26 @@ class TaskEngine:
             )
         try:
             result = handler(dict(claim.input), claim.idempotency_key)
+        except ToolCancelledError as error:
+            if error.outcome_uncertain:
+                return self.store.require_reconciliation(
+                    claim, "handler_outcome_uncertain", now=now
+                )
+            return self.store.fail_step(
+                claim, "handler_cancelled_before_start", now=now, retryable=False
+            )
+        except RetryableTaskError:
+            return self.store.fail_step(claim, "handler_failed", now=now, retryable=True)
+        except Exception:
+            return self.store.require_reconciliation(
+                claim, "handler_outcome_uncertain", now=now
+            )
+        try:
             _json(result, label="handler result")
         except Exception:
-            return self.store.fail_step(claim, "handler_failed", now=now)
+            return self.store.require_reconciliation(
+                claim, "handler_result_invalid", now=now
+            )
         return self.store.finish_step(claim, result, now=now)
 
     def run_once(self, now: datetime | None = None) -> TaskRecord | None:
