@@ -391,12 +391,10 @@ class HmacApprovalAuthority:
         tool_name: str,
         argument_digest: str,
         *,
+        operation_id: str,
         ttl_seconds: int = 300,
-        operation_id: str | None = None,
     ) -> ApprovalGrant:
-        if operation_id is not None and (
-            not isinstance(operation_id, str) or not _OPERATION_RE.fullmatch(operation_id)
-        ):
+        if not isinstance(operation_id, str) or not _OPERATION_RE.fullmatch(operation_id):
             raise ToolValidationError("approval operation ID is invalid")
         if (not isinstance(principal_id, str) or not principal_id.strip()
                 or len(principal_id) > 256 or _contains_surrogate(principal_id)):
