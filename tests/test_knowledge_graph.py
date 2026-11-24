@@ -231,7 +231,7 @@ class KnowledgeGraphTests(unittest.TestCase):
         self.assertIn("untrusted knowledge-graph reference data", graph_message["content"])
         self.assertNotIn(hostile.notes, graph_message["content"])
         self.assertIn("\\u003c", graph_message["content"])
-        self.assertEqual(body["tools"], [])
+        self.assertNotIn("tools", body)
 
 
 if __name__ == "__main__":
