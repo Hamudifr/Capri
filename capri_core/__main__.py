@@ -311,7 +311,7 @@ def run_doctor(root: Path, json_output: bool = False) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="capri",
-        description="Read-only tools for the Capri non-X5 execution ledger.",
+        description="Read-only tools for the Capri execution ledger.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
     doctor_parser = commands.add_parser("doctor", help="run read-only repository health checks")
