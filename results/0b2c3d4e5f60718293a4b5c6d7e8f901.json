@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "target_commit": "162c3e8bf450c256e702402cd571009a0aebfbe6",
+  "task": "bridge_tests",
+  "status": "superseded",
+  "reason": "Superseded before execution by the final focused-task runner revision at 7f1d594e67451a0b92388c0d5ae4de190f432bdb; no task was executed.",
+  "steps": []
+}
