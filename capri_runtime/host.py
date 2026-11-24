@@ -69,25 +69,57 @@ class HostToolGateway:
         retrying the same operation ID recovers that same challenge.
         """
         context = self._authority.resolve(credential)
+        if self._approval_service is None:
+            return self._bridge.execute_batch(
+                requests,
+                context,
+                cancellation_event=cancellation_event,
+            )
+        if not isinstance(requests, (list, tuple)):
+            return self._bridge.execute_batch(
+                requests,
+                context,
+                cancellation_event=cancellation_event,
+            )
+        request_by_id = {
+            request.call_id: request
+            for request in requests
+            if isinstance(request, ToolCallRequest) and isinstance(request.call_id, str)
+        }
+        operation_ids: dict[str, str] = {}
+        operation_contexts: dict[str, ExecutionContext] = {}
+
+        def resolve_call_context(
+            call_id: str, name: str, arguments: dict[str, Any], base: ExecutionContext
+        ) -> ExecutionContext:
+            request = request_by_id.get(call_id)
+            if request is None:
+                raise HostAuthorityError("approval operation could not be matched to its host request")
+            try:
+                operation_id = self._operation_id_resolver(credential, base, request)
+                operation_context = self._authority.for_operation(base, operation_id)
+            except Exception:
+                raise HostAuthorityError("host operation authority resolution failed") from None
+            operation_ids[call_id] = operation_id
+            operation_contexts[call_id] = operation_context
+            return operation_context
+
         outcomes = self._bridge.execute_batch(
             requests,
             context,
             cancellation_event=cancellation_event,
+            context_resolver=resolve_call_context,
         )
-        if self._approval_service is None:
-            return outcomes
-        request_by_id = {request.call_id: request for request in requests}
         for outcome in outcomes:
             if outcome.status != "approval_required":
                 continue
-            request = request_by_id.get(outcome.call_id)
-            if request is None:
-                raise HostAuthorityError("approval outcome could not be matched to its host request")
-            try:
-                operation_id = self._operation_id_resolver(credential, context, request)
-            except Exception:
-                raise HostAuthorityError("host operation identity resolution failed") from None
-            challenge = self._approval_service.create_challenge(context, outcome, operation_id)
+            operation_id = operation_ids.get(outcome.call_id)
+            operation_context = operation_contexts.get(outcome.call_id)
+            if operation_id is None or operation_context is None:
+                raise HostAuthorityError("approval outcome has no trusted operation identity")
+            challenge = self._approval_service.create_challenge(
+                operation_context, outcome, operation_id
+            )
             try:
                 self._on_approval_challenge(challenge)
             except Exception:
