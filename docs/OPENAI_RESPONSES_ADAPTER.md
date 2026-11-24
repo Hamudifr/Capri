@@ -2,7 +2,7 @@
 
 ## Status
 
-A concrete, synchronous adapter now implements Capri's `MemoryAwareToolModelAdapter` protocol using only Python's standard library. It is an integration component, not a running host process. Construction is network-free; the first call to `complete_with_tools()` or `complete_with_tools_and_memory()` sends a request.
+A concrete, synchronous adapter now implements Capri's `MemoryAwareToolModelAdapter` protocol using only Python's standard library. It is an integration component, not a running host process. Construction is network-free; the first call to `complete_with_tools()`, `complete_with_tools_and_memory()`, `complete_with_tools_and_knowledge()`, or `complete_with_tools_and_memory_and_knowledge()` sends a request.
 
 The adapter targets the official `POST https://api.openai.com/v1/responses` endpoint. Function definitions use the Responses API function-tool shape; provider function calls are converted to untrusted `ToolCallRequest` objects and returned to `ToolOrchestrator`. The adapter never invokes a tool or creates an `ExecutionContext`.
 
@@ -37,7 +37,7 @@ This does not make a network request. API calls can incur separate API charges; 
 - No automatic retries: a timeout or network error is reported generically rather than replaying a request with uncertain provider-side completion.
 - Provider output is parsed strictly. Duplicate JSON keys, malformed arguments, duplicate call IDs, unknown output item types, incomplete responses, and malformed stored tool-call history are rejected.
 - Prior Capri tool-call transcript envelopes are reconstructed as Responses API `function_call` and `function_call_output` items. When a response includes reasoning/continuation items alongside tool calls, the complete provider output sequence is retained in the private Capri session transcript and replayed with tool outputs, as required by the Responses API. This state is bounded by the existing transcript limits; protect the local SQLite database and backups.
-- Retrieved memory is serialized separately from trusted host instructions and sent as a separate user input item. The fixed adapter policy says memory is untrusted reference data. This is a prompt-construction safeguard, not provider-enforced isolation or proof that prompt injection is impossible.
+- Retrieved memory and knowledge-graph context are serialized separately from trusted host instructions and sent as separate user input items before conversation history, keeping the current user request last. The fixed adapter policy treats both as untrusted reference data. This is a prompt-construction safeguard, not provider-enforced isolation or proof that prompt injection is impossible.
 - The provider receives only the tool definitions already filtered by the trusted host context. The returned calls still pass through Capri's permission checks, approval handling, audit persistence, and executor.
 
 ## Validation
