@@ -438,7 +438,7 @@ class KnowledgeGraphTests(unittest.TestCase):
         }).encode()
         opener = FakeOpener(response)
         transport = NotionRESTTransport(
-            "not-a-real-token", NEURONS, opener=opener
+            "not-a-real-token", NEURONS, opener=opener.open
         )
 
         result = transport.query_data_source(
