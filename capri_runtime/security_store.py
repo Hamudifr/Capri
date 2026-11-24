@@ -51,7 +51,10 @@ def _validate_backup_semantics(connection: sqlite3.Connection) -> None:
             _valid_text(principal_id, 256), _valid_text(tool_name, 64),
             _valid_text(status, 64),
             isinstance(digest, str) and _DIGEST_RE.fullmatch(digest),
-            error_code is None or _valid_text(error_code, 128),
+            error_code is None or (
+                isinstance(error_code, str) and len(error_code) <= 128
+                and not any(0xD800 <= ord(character) <= 0xDFFF for character in error_code)
+            ),
         )):
             raise ToolValidationError("security backup contains an invalid audit event")
 
