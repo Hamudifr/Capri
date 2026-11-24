@@ -75,6 +75,7 @@ class HostAuthorityResolverTests(unittest.TestCase):
         )
         context = resolver.resolve("opaque-host-credential", operation_id="op-1")
         self.assertEqual(context.approvals, (grant,))
+        self.assertEqual(context.operation_id, "op-1")
 
         bad_resolver = HostAuthorityResolver(
             lambda credential: "alice",
