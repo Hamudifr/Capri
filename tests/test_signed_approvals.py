@@ -47,12 +47,15 @@ class SignedApprovalTests(unittest.TestCase):
         )
         self.arguments = {"record_id": "record-123"}
 
-    def context_with(self, grant):
-        return ExecutionContext("alice", frozenset({"records:delete"}), (grant,))
+    def context_with(self, grant, operation_id="session-1:call-1"):
+        return ExecutionContext(
+            "alice", frozenset({"records:delete"}), (grant,), operation_id
+        )
 
     def test_signed_grant_is_bound_and_consumed_once(self):
         grant = self.authority.issue(
-            "alice", "delete_record", argument_digest(self.arguments), ttl_seconds=120
+            "alice", "delete_record", argument_digest(self.arguments),
+            ttl_seconds=120, operation_id="session-1:call-1",
         )
         self.assertTrue(self.authority.verify(grant))
         self.assertEqual(self.executor.execute("delete_record", self.arguments, self.context_with(grant)), {"deleted": True})
@@ -69,12 +72,28 @@ class SignedApprovalTests(unittest.TestCase):
             replace(grant, tool_name="other_tool"),
             replace(grant, argument_digest="f" * 64),
             replace(grant, expires_at="2026-11-06T13:00:00+00:00"),
+            replace(grant, operation_id="session-1:call-2"),
         ):
             with self.subTest(tampered=tampered):
                 self.assertFalse(self.authority.verify(tampered))
                 with self.assertRaises(ApprovalRequiredError):
                     self.executor.execute("delete_record", self.arguments, self.context_with(tampered))
         self.assertEqual(self.calls, [])
+
+    def test_same_principal_tool_and_arguments_cannot_cross_operations(self):
+        grant = self.authority.issue(
+            "alice", "delete_record", argument_digest(self.arguments),
+            ttl_seconds=120, operation_id="session-1:call-1",
+        )
+        wrong_context = self.context_with(grant, operation_id="session-1:call-2")
+        with self.assertRaises(ApprovalRequiredError):
+            self.executor.execute("delete_record", self.arguments, wrong_context)
+        self.assertEqual(self.calls, [])
+        self.assertEqual(
+            self.executor.execute("delete_record", self.arguments, self.context_with(grant)),
+            {"deleted": True},
+        )
+        self.assertEqual(self.calls, [self.arguments])
 
     def test_unsigned_legacy_grant_is_rejected_when_signed_mode_is_required(self):
         grant = ApprovalGrant(
