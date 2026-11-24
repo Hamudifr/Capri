@@ -37,7 +37,8 @@ The parent directory must already exist and be private (0700 or stricter on POSI
 
 - `queued`: eligible for a worker claim.
 - `running`: held by one executor until its lease expires.
-- `retry_wait`: failed step is eligible after its backoff deadline.
+- `retry_wait`: a handler explicitly declared a pre-side-effect failure and the step is eligible after its backoff deadline.
+- `reconciliation_required`: a handler may have performed a side effect but its outcome cannot be proven; the task is excluded from automatic claims.
 - `succeeded`: every planned step completed.
 - `failed`: a step exhausted its attempts or its lease expired after the attempt budget was exhausted.
 - `cancelled`: cancellation was requested and the task stopped at a safe step boundary.
@@ -46,9 +47,9 @@ Claims and state transitions use `BEGIN IMMEDIATE`, so concurrent workers cannot
 
 ## Delivery and idempotency semantics
 
-Execution is **bounded and may be repeated; it is not exactly once**. A process can crash after claiming a step but before invoking its handler, or after a side effect but before persisting the result. Depending on the crash point and remaining attempt budget, a handler may run zero, one, or multiple times. After lease expiry, another worker may retry the same step. Each step therefore receives the stable idempotency key `<task_id>:<step_index>`; handlers that perform side effects must enforce that key at the side-effect boundary. Do not blindly retry a non-idempotent handler.
+Execution is **not exactly once**. A process can crash after claiming a step but before invoking its handler, or after a side effect but before persisting the result. An expired running lease is now quarantined as `reconciliation_required`; a second worker does not automatically reclaim it. Unknown handler exceptions and invalid/oversized results are also quarantined because a side effect may already have occurred. Only a trusted handler that can prove it failed before any external side effect may raise `RetryableTaskError` to request a bounded retry. Each step receives the stable idempotency key `<task_id>:<step_index>`; handlers that perform side effects must enforce that key at the side-effect boundary.
 
-Leases are bounded to 5–3600 seconds. The store exposes `renew_lease()` so a host-managed heartbeat can extend a live claim. Renewal must occur before expiry and fails closed after expiry or ownership change. The lower-level `TaskEngine.run_once()` helper does not start a heartbeat thread; hosts using it directly must arrange renewal themselves. `TaskWorker` handles heartbeats while its handler is running. Neither API can forcibly interrupt a running handler. If a handler outlives its lease without renewal, a second worker may reclaim it; stable idempotency is mandatory.
+Leases are bounded to 5–3600 seconds. The store exposes `renew_lease()` so a host-managed heartbeat can extend a live claim. Renewal must occur before expiry and fails closed after expiry or ownership change. The lower-level `TaskEngine.run_once()` helper does not start a heartbeat thread; hosts using it directly must arrange renewal themselves. `TaskWorker` handles heartbeats while its handler is running. Neither API can forcibly interrupt a running handler. If a handler outlives its lease without renewal, the expired running task is quarantined as `reconciliation_required`; another worker must not automatically reclaim or replay it. Establish the external outcome through reconciliation before any manual replay. Stable idempotency keys remain mandatory at side-effect boundaries.
 
 ## Retry and cancellation
 
@@ -68,3 +69,25 @@ Cancellation is cooperative. Queued/retry-wait tasks cancel immediately. A runni
 ## Validation
 
 `tests/test_tasks.py` covers persistent state, idempotent creation, plan validation, concurrent claims, lease recovery, stale-worker rejection, bounded retries, step checkpointing, handler failure suppression, missing handlers, cancellation, event persistence, symlink rejection, and directory privacy. The repository quality workflow runs the full suite on Python 3.11, 3.12, and 3.13.
+
+
+## Uncertain handler outcomes and reconciliation quarantine
+
+A task handler may perform an external side effect and then raise, return an
+invalid/oversized result, or lose its worker process before the result is
+checkpointed. These cases are not safe automatic retries. The engine now moves
+such tasks to `reconciliation_required`, clears the lease, records an event,
+and excludes the task from future claims. An expired running lease is treated
+the same way because the store cannot prove whether the handler ran.
+
+Only trusted handlers may raise `RetryableTaskError`, and only when they can
+guarantee failure occurred before any external side effect. That explicit signal
+retains bounded retry behavior. A `ToolCancelledError` marked
+`outcome_uncertain=False` is terminal without quarantine; uncertain
+cancellation is quarantined.
+
+The current release adds the durable quarantine state but does not yet provide
+an owner-facing reconciliation decision API. Hosts must inspect and resolve
+quarantined tasks out of band; never reset them to queued/retry_wait or replay
+them without independently establishing the external outcome. Cancellation
+requests preserve the quarantine state and only set the cancellation flag.
