@@ -19,7 +19,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, Literal
+from typing import Callable, Iterable, Literal
 
 Outcome = Literal["verified_success", "verified_failure", "unverified"]
 Split = Literal["train", "validation", "test"]
@@ -65,7 +65,7 @@ class LearningExportOutcomeUncertainError(RuntimeError):
         self.export_id = export_id
         self.path = str(path)
         super().__init__(
-            f"bundle {export_id} was published at {self.path}, "
+            f"export {export_id} was published at {self.path}, "
             "but its final registry state could not be confirmed"
         )
 
@@ -162,7 +162,15 @@ def _fsync_directory(directory: Path) -> None:
 class LearningStore:
     """Local SQLite journal; raw content is stored only after explicit gates."""
 
-    def __init__(self, database: str | Path) -> None:
+    def __init__(
+        self,
+        database: str | Path,
+        *,
+        consent_verifier: Callable[[LearningConsent], bool] | None = None,
+    ) -> None:
+        if consent_verifier is not None and not callable(consent_verifier):
+            raise LearningDataError("consent_verifier must be callable")
+        self._consent_verifier = consent_verifier
         path = Path(database)
         _require_private_directory(path.parent)
         _ensure_private_database_file(path)
@@ -210,10 +218,33 @@ class LearningStore:
                     manifest_json TEXT NOT NULL,
                     status TEXT NOT NULL CHECK (status IN
                         ('publishing', 'active', 'invalidated', 'failed')),
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    export_kind TEXT NOT NULL DEFAULT 'zip',
+                    artifact_path TEXT NOT NULL DEFAULT '',
+                    staging_path TEXT NOT NULL DEFAULT ''
                 )
                 """
             )
+            export_columns = {
+                row["name"] for row in connection.execute(
+                    "PRAGMA table_info(learning_exports)"
+                ).fetchall()
+            }
+            if "export_kind" not in export_columns:
+                connection.execute(
+                    "ALTER TABLE learning_exports "
+                    "ADD COLUMN export_kind TEXT NOT NULL DEFAULT 'zip'"
+                )
+            if "artifact_path" not in export_columns:
+                connection.execute(
+                    "ALTER TABLE learning_exports "
+                    "ADD COLUMN artifact_path TEXT NOT NULL DEFAULT ''"
+                )
+            if "staging_path" not in export_columns:
+                connection.execute(
+                    "ALTER TABLE learning_exports "
+                    "ADD COLUMN staging_path TEXT NOT NULL DEFAULT ''"
+                )
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS learning_export_consents (
@@ -291,6 +322,16 @@ class LearningStore:
     def record_consent(self, consent: LearningConsent) -> None:
         """Persist a narrow consent record without storing subject identity or raw consent text."""
         self._validate_consent(consent)
+        if self._consent_verifier is None:
+            raise LearningDataError(
+                "a trusted consent-evidence verifier is required to record consent"
+            )
+        try:
+            verified = self._consent_verifier(consent)
+        except Exception as exc:
+            raise LearningDataError("consent evidence verification failed") from exc
+        if verified is not True:
+            raise LearningDataError("consent evidence was not authenticated")
         with self._connection() as connection:
             connection.execute(
                 """INSERT INTO learning_consents
@@ -430,14 +471,14 @@ class LearningStore:
             return "validation"
         return "test"
 
-    def export_jsonl(
+    def _stage_jsonl(
         self,
         destination: str | Path,
         *,
         minimum_quality: float = 0.9,
         allowed_capabilities: Iterable[str] | None = None,
-    ) -> dict[str, int]:
-        """Export only verified-success examples into disjoint stable splits."""
+    ) -> tuple[Path, dict[str, int], list[str], list[str], int]:
+        """Create a private, fsynced JSONL staging file and its consent dependencies."""
         if (
             isinstance(minimum_quality, bool)
             or not isinstance(minimum_quality, (int, float))
@@ -464,16 +505,18 @@ class LearningStore:
                 (minimum_quality,),
             ).fetchall()
 
-        seen_hashes: set[str] = set()
-        counts = {"train": 0, "validation": 0, "test": 0, "excluded_duplicate": 0}
         target = Path(destination)
         _require_private_directory(target.parent)
         descriptor, temporary_name = tempfile.mkstemp(
-            prefix=f".{target.name}.", suffix=".tmp", dir=target.parent
+            prefix=f".{target.name}.", suffix=".jsonl.tmp", dir=target.parent
         )
+        counts = {"train": 0, "validation": 0, "test": 0, "excluded_duplicate": 0}
+        seen_hashes: set[str] = set()
+        consent_ids: set[str] = set()
+        policy_versions: set[str] = set()
         try:
             os.fchmod(descriptor, 0o600)
-            stream = os.fdopen(descriptor, "w", encoding="utf-8", newline="\n")
+            stream = os.fdopen(descriptor, "w", encoding="utf-8", newline="\\n")
             descriptor = -1
             with stream:
                 for row in rows:
@@ -497,27 +540,141 @@ class LearningStore:
                         "consent_policy_version": row["policy_version"],
                         "split": split,
                     }
-                    stream.write(json.dumps(payload, ensure_ascii=False) + "\n")
+                    stream.write(json.dumps(payload, ensure_ascii=False) + "\\n")
                     counts[split] += 1
+                    consent_ids.add(row["consent_id"])
+                    policy_versions.add(row["policy_version"])
                 stream.flush()
                 os.fsync(stream.fileno())
-            # Hard-link publication is atomic and refuses to replace any existing path.
-            os.link(temporary_name, target)
-            os.unlink(temporary_name)
-            try:
-                _fsync_directory(target.parent)
-            except OSError as exc:
-                raise OSError(
-                    f"dataset was published at {target}, but directory durability is uncertain"
-                ) from exc
-        finally:
+        except Exception:
             if descriptor >= 0:
                 os.close(descriptor)
             try:
                 os.unlink(temporary_name)
             except FileNotFoundError:
                 pass
-        return counts
+            raise
+        return (
+            Path(temporary_name), counts, sorted(consent_ids),
+            sorted(policy_versions), sum(counts[key] for key in ("train", "validation", "test")),
+        )
+
+    def export_jsonl(
+        self,
+        destination: str | Path,
+        *,
+        minimum_quality: float = 0.9,
+        allowed_capabilities: Iterable[str] | None = None,
+    ) -> dict[str, object]:
+        """Publish a registered JSONL artifact whose validity follows consent revocation."""
+        target = Path(destination)
+        _require_private_directory(target.parent)
+        if target.exists() or target.is_symlink():
+            raise FileExistsError(target)
+        staged_path, counts, consent_ids, policy_versions, row_count = self._stage_jsonl(
+            target,
+            minimum_quality=minimum_quality,
+            allowed_capabilities=allowed_capabilities,
+        )
+        export_id = str(uuid.uuid4())
+        created_at = datetime.now().astimezone().isoformat()
+        artifact_digest = hashlib.sha256()
+        with staged_path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                artifact_digest.update(chunk)
+        artifact_sha256 = artifact_digest.hexdigest()
+        manifest = {
+            "manifest_version": 1,
+            "export_id": export_id,
+            "artifact_kind": "jsonl",
+            "created_at": created_at,
+            "artifact_sha256": artifact_sha256,
+            "row_count": row_count,
+            "split_counts": {key: counts[key] for key in ("train", "validation", "test")},
+            "consent_ids": consent_ids,
+            "consent_policy_versions": policy_versions,
+        }
+        manifest_json = json.dumps(
+            manifest, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+        )
+        registered = False
+        published = False
+        try:
+            with self._connection() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                if consent_ids:
+                    placeholders = ",".join("?" for _ in consent_ids)
+                    active = {
+                        row["consent_id"] for row in connection.execute(
+                            f"""SELECT consent_id FROM learning_consents
+                                WHERE consent_id IN ({placeholders})
+                                  AND scope='curated_training_examples'
+                                  AND revoked_at IS NULL""",
+                            consent_ids,
+                        ).fetchall()
+                    }
+                    if active != set(consent_ids):
+                        raise LearningDataError("consent changed during JSONL creation; export aborted")
+                connection.execute(
+                    """INSERT INTO learning_exports
+                    (export_id, bundle_sha256, manifest_json, status, created_at,
+                     export_kind, artifact_path, staging_path)
+                    VALUES (?, ?, ?, 'publishing', ?, 'jsonl', ?, ?)""",
+                    (
+                        export_id, artifact_sha256, manifest_json, created_at,
+                        str(target.absolute()), str(staged_path.absolute()),
+                    ),
+                )
+                connection.executemany(
+                    "INSERT INTO learning_export_consents(export_id, consent_id) VALUES (?, ?)",
+                    [(export_id, consent_id) for consent_id in consent_ids],
+                )
+            registered = True
+            os.link(staged_path, target)
+            published = True
+            staged_path.unlink()
+            _fsync_directory(target.parent)
+            with self._connection() as connection:
+                connection.execute(
+                    """UPDATE learning_exports
+                    SET status='active', staging_path=''
+                    WHERE export_id=? AND status='publishing'""",
+                    (export_id,),
+                )
+                status_row = connection.execute(
+                    "SELECT status FROM learning_exports WHERE export_id=?",
+                    (export_id,),
+                ).fetchone()
+            status = status_row["status"]
+            if status != "active":
+                raise LearningExportOutcomeUncertainError(export_id, target)
+            return {
+                **counts,
+                "export_id": export_id,
+                "status": status,
+                "path": str(target),
+                "artifact_sha256": artifact_sha256,
+                "row_count": row_count,
+            }
+        except Exception as exc:
+            if registered and not published:
+                with self._connection() as connection:
+                    connection.execute(
+                        """UPDATE learning_exports
+                        SET status='failed', staging_path=''
+                        WHERE export_id=? AND status='publishing'""",
+                        (export_id,),
+                    )
+            elif registered and published:
+                if isinstance(exc, LearningExportOutcomeUncertainError):
+                    raise
+                raise LearningExportOutcomeUncertainError(export_id, target) from exc
+            raise
+        finally:
+            try:
+                staged_path.unlink()
+            except FileNotFoundError:
+                pass
 
     def counts(self) -> dict[str, int]:
         with self._connection() as connection:
@@ -557,11 +714,14 @@ class LearningStore:
         registered = False
         published = False
         try:
-            counts = self.export_jsonl(
-                dataset_path,
-                minimum_quality=minimum_quality,
-                allowed_capabilities=allowed_capabilities,
+            staged_path, counts, staged_consent_ids, staged_policy_versions, staged_row_count = (
+                self._stage_jsonl(
+                    dataset_path,
+                    minimum_quality=minimum_quality,
+                    allowed_capabilities=allowed_capabilities,
+                )
             )
+            dataset_path = staged_path
             dataset_digest = hashlib.sha256()
             consent_ids_set: set[str] = set()
             policy_versions_set: set[str] = set()
@@ -623,9 +783,13 @@ class LearningStore:
                         raise LearningDataError("consent changed during bundle creation; export aborted")
                 connection.execute(
                     """INSERT INTO learning_exports
-                    (export_id, bundle_sha256, manifest_json, status, created_at)
-                    VALUES (?, ?, ?, 'publishing', ?)""",
-                    (export_id, bundle_sha256, manifest_bytes.decode("utf-8"), created_at),
+                    (export_id, bundle_sha256, manifest_json, status, created_at,
+                     export_kind, artifact_path, staging_path)
+                    VALUES (?, ?, ?, 'publishing', ?, 'zip', ?, ?)""",
+                    (
+                        export_id, bundle_sha256, manifest_bytes.decode("utf-8"), created_at,
+                        str(target.absolute()), str(Path(archive_name).absolute()),
+                    ),
                 )
                 connection.executemany(
                     "INSERT INTO learning_export_consents(export_id, consent_id) VALUES (?, ?)",
@@ -640,14 +804,17 @@ class LearningStore:
             _fsync_directory(target.parent)
             with self._connection() as connection:
                 connection.execute(
-                    "UPDATE learning_exports SET status='active' "
-                    "WHERE export_id=? AND status='publishing'",
+                    """UPDATE learning_exports
+                    SET status='active', staging_path=''
+                    WHERE export_id=? AND status='publishing'""",
                     (export_id,),
                 )
                 status = connection.execute(
                     "SELECT status FROM learning_exports WHERE export_id=?",
                     (export_id,),
                 ).fetchone()["status"]
+            if status != "active":
+                raise LearningExportOutcomeUncertainError(export_id, target)
             return {
                 "export_id": export_id,
                 "bundle_sha256": bundle_sha256,
@@ -660,8 +827,9 @@ class LearningStore:
             if registered and not published:
                 with self._connection() as connection:
                     connection.execute(
-                        "UPDATE learning_exports SET status='failed' "
-                        "WHERE export_id=? AND status='publishing'",
+                        """UPDATE learning_exports
+                        SET status='failed', staging_path=''
+                        WHERE export_id=? AND status='publishing'""",
                         (export_id,),
                     )
             elif registered and published:
@@ -685,55 +853,210 @@ class LearningStore:
             raise LearningDataError("export_id must be a UUID")
         with self._connection() as connection:
             row = connection.execute(
-                "SELECT export_id, bundle_sha256, status, created_at "
-                "FROM learning_exports WHERE export_id=?",
+                """SELECT export_id, bundle_sha256, status, created_at,
+                          export_kind, artifact_path, staging_path, manifest_json
+                   FROM learning_exports WHERE export_id=?""",
                 (export_id,),
             ).fetchone()
         return dict(row) if row is not None else None
 
-    def verify_export(self, export_id: str, bundle_path: str | Path) -> dict[str, object]:
-        """Verify registry state, archive hash, manifest identity, and dataset hash."""
-        record = self.get_export_status(export_id)
-        if record is None:
-            return {"valid": False, "reason": "unregistered"}
-        path = Path(bundle_path)
+    def _inspect_export_artifact(
+        self,
+        record: sqlite3.Row | dict[str, str],
+        export_id: str,
+        artifact_path: str | Path,
+    ) -> dict[str, object]:
+        """Verify an artifact's bytes and registry manifest without changing state."""
+        path = Path(artifact_path)
         try:
             _require_private_directory(path.parent)
             if path.is_symlink() or not path.is_file():
-                return {"valid": False, "reason": "missing_or_unsafe_bundle", "status": record["status"]}
-            bundle_digest = hashlib.sha256()
+                return {"valid": False, "reason": "missing_or_unsafe_artifact"}
+            digest = hashlib.sha256()
             with path.open("rb") as stream:
                 for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-                    bundle_digest.update(chunk)
-            actual_bundle_hash = bundle_digest.hexdigest()
-            if actual_bundle_hash != record["bundle_sha256"]:
-                return {"valid": False, "reason": "bundle_hash_mismatch", "status": record["status"]}
+                    digest.update(chunk)
+            actual_hash = digest.hexdigest()
+            if actual_hash != record["bundle_sha256"]:
+                return {"valid": False, "reason": "artifact_hash_mismatch"}
+            stored_manifest = json.loads(record["manifest_json"])
+            if stored_manifest.get("export_id") != export_id:
+                return {"valid": False, "reason": "manifest_identity_mismatch"}
+
+            dependencies = {
+                row["consent_id"] for row in self._connect().execute(
+                    "SELECT consent_id FROM learning_export_consents WHERE export_id=?",
+                    (export_id,),
+                ).fetchall()
+            }
+            if record["export_kind"] == "jsonl":
+                if stored_manifest.get("artifact_kind") != "jsonl":
+                    return {"valid": False, "reason": "manifest_type_mismatch"}
+                consent_ids: set[str] = set()
+                policy_versions: set[str] = set()
+                row_count = 0
+                with path.open("r", encoding="utf-8") as stream:
+                    for line in stream:
+                        if not line.strip():
+                            return {"valid": False, "reason": "invalid_jsonl"}
+                        row = json.loads(line)
+                        if not isinstance(row, dict):
+                            return {"valid": False, "reason": "invalid_jsonl"}
+                        consent_id = row.get("consent_id")
+                        policy_version = row.get("consent_policy_version")
+                        if not isinstance(consent_id, str) or not isinstance(policy_version, str):
+                            return {"valid": False, "reason": "missing_consent_provenance"}
+                        consent_ids.add(consent_id)
+                        policy_versions.add(policy_version)
+                        row_count += 1
+                if (
+                    row_count != stored_manifest.get("row_count")
+                    or sorted(consent_ids) != stored_manifest.get("consent_ids")
+                    or sorted(policy_versions) != stored_manifest.get("consent_policy_versions")
+                    or consent_ids != dependencies
+                ):
+                    return {"valid": False, "reason": "jsonl_manifest_mismatch"}
+                return {
+                    "valid": True, "reason": "ok", "artifact_sha256": actual_hash,
+                    "row_count": row_count,
+                }
+
+            if record["export_kind"] != "zip":
+                return {"valid": False, "reason": "unsupported_artifact_type"}
             with zipfile.ZipFile(path, "r") as archive:
                 if set(archive.namelist()) != {"dataset.jsonl", "manifest.json"}:
-                    return {"valid": False, "reason": "unexpected_bundle_members", "status": record["status"]}
+                    return {"valid": False, "reason": "unexpected_bundle_members"}
                 manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+                if manifest != stored_manifest:
+                    return {"valid": False, "reason": "manifest_registry_mismatch"}
+                if manifest.get("export_id") != export_id:
+                    return {"valid": False, "reason": "manifest_identity_mismatch"}
                 dataset_digest = hashlib.sha256()
+                consent_ids: set[str] = set()
+                policy_versions: set[str] = set()
+                row_count = 0
                 with archive.open("dataset.jsonl", "r") as dataset_stream:
-                    for chunk in iter(lambda: dataset_stream.read(1024 * 1024), b""):
-                        dataset_digest.update(chunk)
-            if manifest.get("export_id") != export_id:
-                return {"valid": False, "reason": "manifest_identity_mismatch", "status": record["status"]}
-            if dataset_digest.hexdigest() != manifest.get("dataset_sha256"):
-                return {"valid": False, "reason": "dataset_hash_mismatch", "status": record["status"]}
-        except (OSError, ValueError, zipfile.BadZipFile, KeyError, UnicodeDecodeError):
-            return {"valid": False, "reason": "unreadable_bundle", "status": record["status"]}
-        # Re-read after filesystem verification so a consent revocation that
-        # commits during ZIP/hash inspection cannot be masked by the earlier
-        # registry snapshot. This final read is the verification linearization point.
+                    for line in dataset_stream:
+                        dataset_digest.update(line)
+                        if line.strip():
+                            row = json.loads(line.decode("utf-8"))
+                            consent_ids.add(row["consent_id"])
+                            policy_versions.add(row["consent_policy_version"])
+                            row_count += 1
+            if (
+                dataset_digest.hexdigest() != manifest.get("dataset_sha256")
+                or row_count != manifest.get("row_count")
+                or sorted(consent_ids) != manifest.get("consent_ids")
+                or sorted(policy_versions) != manifest.get("consent_policy_versions")
+                or consent_ids != dependencies
+            ):
+                return {"valid": False, "reason": "dataset_manifest_mismatch"}
+            return {
+                "valid": True, "reason": "ok", "artifact_sha256": actual_hash,
+                "row_count": row_count,
+            }
+        except (OSError, ValueError, TypeError, KeyError, zipfile.BadZipFile, UnicodeDecodeError):
+            return {"valid": False, "reason": "unreadable_artifact"}
+
+    def verify_export(self, export_id: str, bundle_path: str | Path) -> dict[str, object]:
+        """Verify artifact bytes and the latest consent-registry state."""
+        record = self.get_export_status(export_id)
+        if record is None:
+            return {"valid": False, "reason": "unregistered"}
+        artifact = self._inspect_export_artifact(record, export_id, bundle_path)
+        if not artifact["valid"]:
+            return {**artifact, "status": record["status"]}
         latest_record = self.get_export_status(export_id)
         if latest_record is None:
             return {"valid": False, "reason": "unregistered"}
         latest_status = latest_record["status"]
         valid = latest_status == "active"
         return {
+            **artifact,
             "valid": valid,
             "reason": "ok" if valid else latest_status,
             "status": latest_status,
-            "bundle_sha256": actual_bundle_hash,
-            "row_count": manifest.get("row_count"),
         }
+
+    def reconcile_pending_exports(self) -> dict[str, object]:
+        """Idempotently recover verifiable publishing artifacts; fail closed otherwise."""
+        with self._connection() as connection:
+            pending = connection.execute(
+                """SELECT export_id, bundle_sha256, manifest_json, status, created_at,
+                          export_kind, artifact_path, staging_path
+                   FROM learning_exports WHERE status='publishing'
+                   ORDER BY created_at, export_id"""
+            ).fetchall()
+        result: dict[str, object] = {
+            "examined": len(pending), "activated": [], "invalidated": [],
+            "failed": [], "still_pending": [],
+        }
+        for record in pending:
+            export_id = record["export_id"]
+            artifact_path = record["artifact_path"]
+            staging_path = record["staging_path"]
+            if not artifact_path:
+                with self._connection() as connection:
+                    connection.execute(
+                        "UPDATE learning_exports SET status='failed', staging_path='' "
+                        "WHERE export_id=? AND status='publishing'",
+                        (export_id,),
+                    )
+                result["failed"].append(export_id)
+                continue
+            artifact = self._inspect_export_artifact(record, export_id, artifact_path)
+            if not artifact["valid"]:
+                with self._connection() as connection:
+                    connection.execute(
+                        "UPDATE learning_exports SET status='failed', staging_path='' "
+                        "WHERE export_id=? AND status='publishing'",
+                        (export_id,),
+                    )
+                result["failed"].append(export_id)
+                continue
+            try:
+                _fsync_directory(Path(artifact_path).parent)
+                if staging_path:
+                    staged = Path(staging_path)
+                    if staged.parent != Path(artifact_path).parent:
+                        raise LearningDataError("staging and artifact paths must share a directory")
+                    if staged.is_symlink():
+                        raise LearningDataError("unsafe staging path")
+                    try:
+                        staged.unlink()
+                    except FileNotFoundError:
+                        pass
+                    _fsync_directory(Path(artifact_path).parent)
+            except OSError:
+                result["still_pending"].append(export_id)
+                continue
+            with self._connection() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                current = connection.execute(
+                    "SELECT status FROM learning_exports WHERE export_id=?",
+                    (export_id,),
+                ).fetchone()
+                if current is None or current["status"] != "publishing":
+                    continue
+                revoked = connection.execute(
+                    """SELECT 1 FROM learning_export_consents ec
+                       JOIN learning_consents c ON c.consent_id=ec.consent_id
+                       WHERE ec.export_id=? AND c.revoked_at IS NOT NULL LIMIT 1""",
+                    (export_id,),
+                ).fetchone()
+                if revoked is not None:
+                    connection.execute(
+                        "UPDATE learning_exports SET status='invalidated', staging_path='' "
+                        "WHERE export_id=? AND status='publishing'",
+                        (export_id,),
+                    )
+                    result["invalidated"].append(export_id)
+                else:
+                    connection.execute(
+                        "UPDATE learning_exports SET status='active', staging_path='' "
+                        "WHERE export_id=? AND status='publishing'",
+                        (export_id,),
+                    )
+                    result["activated"].append(export_id)
+        return result
+
