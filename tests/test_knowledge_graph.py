@@ -30,11 +30,11 @@ def neuron(title, *, notes="", state="Verified", source="https://example.org/evi
     )
 
 
-def edge(left, right, relationship="Related to", *, status="Active", rationale="Evidence-linked relation"):
+def edge(left, right, relationship="Related to", *, status="Active", rationale="Evidence-linked relation", strength=0.8):
     return GraphSynapse(
         str(uuid4()), f"{relationship}: {left.title} -> {right.title}",
         left.neuron_id, right.neuron_id, relationship, rationale,
-        "https://example.org/edge", 0.8, status,
+        "https://example.org/edge", strength, status,
     )
 
 
@@ -165,6 +165,22 @@ class KnowledgeGraphTests(unittest.TestCase):
         context = retrieve_knowledge("OpenAI adapter", provider, max_hops=1)
         self.assertEqual({x.neuron_id for x in context.neurons}, {seed.neuron_id, neighbor.neuron_id})
         self.assertEqual([x.synapse_id for x in context.synapses], [link.synapse_id])
+
+    def test_edge_cap_prioritizes_stronger_synapses(self):
+        seed = neuron("Runtime seed", notes="runtime")
+        weak_neighbor = neuron("Weak relationship target")
+        strong_neighbor = neuron("Strong relationship target")
+        weak = edge(seed, weak_neighbor, "Related to", strength=0.1)
+        strong = edge(seed, strong_neighbor, "Supports", strength=0.99)
+        context = retrieve_knowledge(
+            "runtime",
+            InMemoryKnowledgeGraphProvider((seed, weak_neighbor, strong_neighbor), (weak, strong)),
+            max_hops=1, max_neurons=3, max_synapses=1,
+        )
+        self.assertEqual([item.synapse_id for item in context.synapses], [strong.synapse_id])
+        self.assertIn(strong_neighbor.neuron_id, {item.neuron_id for item in context.neurons})
+        self.assertNotIn(weak_neighbor.neuron_id, {item.neuron_id for item in context.neurons})
+        self.assertTrue(context.truncated)
 
     def test_seed_truncation_prioritizes_sources_and_freshness(self):
         unreferenced = neuron(
