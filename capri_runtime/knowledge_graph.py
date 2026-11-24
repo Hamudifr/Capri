@@ -233,7 +233,7 @@ def retrieve_knowledge(
     selected: dict[str, GraphNeuron] = {}
     selected_edges: dict[str, GraphSynapse] = {}
     queue: deque[tuple[str, int]] = deque()
-    for neuron in candidates[:max_neurons]:
+    for neuron in candidates[:min(5, max_neurons)]:
         selected[neuron.neuron_id] = neuron
         queue.append((neuron.neuron_id, 0))
     adjacency: dict[str, list[GraphSynapse]] = {}
