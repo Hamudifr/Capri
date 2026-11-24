@@ -90,7 +90,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 else:
                     claim = store.claim_next("backup-worker", now=NOW)
                     if scenario == "retry_wait":
-                        store.fail_step(claim, retry_delay_seconds=0, now=NOW + timedelta(seconds=1))
+                        store.fail_step(claim, retry_delay_seconds=0, now=NOW + timedelta(seconds=1), retryable=True)
                     elif scenario == "failed":
                         store.fail_step(claim, retryable=False, now=NOW + timedelta(seconds=1))
                     elif scenario == "cancelled_retry_wait":
@@ -697,7 +697,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         def sometimes_fails(_data, _key):
             attempts["count"] += 1
             if attempts["count"] == 1:
-                raise RuntimeError("private failure")
+                raise RetryableTaskError("private failure")
             return {"ok": True}
         engine = TaskEngine(self.store, {"prepare": sometimes_fails}, "worker")
         self.store.create([{"tool": "prepare", "input": {}, "max_attempts": 2}], now=NOW)
