@@ -9,6 +9,13 @@ from typing import Callable
 
 _AT_FDCWD = -100
 _RENAME_NOREPLACE = 1
+_HARD_LINK_FALLBACK_ERRNOS = {
+    errno.EINVAL,
+    errno.ENOSYS,
+    getattr(errno, "ENOTSUP", errno.EOPNOTSUPP),
+    getattr(errno, "EOPNOTSUPP", errno.ENOTSUP),
+    errno.EMLINK,
+}
 
 
 def _load_renameat2() -> Callable | None:
@@ -37,12 +44,22 @@ def publish_no_replace(source_path: str, destination_path: str) -> str:
     source cleanup to the caller so publication state can be recorded first.
     """
     link = getattr(os, "link", None)
+    link_error = None
     if callable(link):
-        link(source_path, destination_path, follow_symlinks=False)
-        return "hard-link"
+        try:
+            link(source_path, destination_path, follow_symlinks=False)
+            return "hard-link"
+        except NotImplementedError:
+            pass
+        except OSError as error:
+            if error.errno not in _HARD_LINK_FALLBACK_ERRNOS:
+                raise
+            link_error = error
 
     renameat2 = _load_renameat2()
     if renameat2 is None:
+        if link_error is not None:
+            raise link_error
         raise OSError(
             errno.ENOTSUP,
             "atomic no-replace publication is unavailable on this platform",
