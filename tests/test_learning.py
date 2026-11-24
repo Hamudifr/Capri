@@ -490,6 +490,37 @@ class LearningStoreTests(unittest.TestCase):
         self.assertFalse(verification["valid"])
         self.assertEqual(verification["reason"], "invalidated")
 
+    def test_verify_export_observes_consent_revoked_during_file_verification(self):
+        self.store.record(example())
+        output = self.root / "revoked-during-verification.zip"
+        result = self.store.export_bundle(output)
+        self.assertEqual(result["status"], "active")
+
+        original_read = learning_module.zipfile.ZipFile.read
+        revoked = False
+
+        def revoke_after_manifest_read(archive, name, pwd=None):
+            nonlocal revoked
+            content = original_read(archive, name, pwd)
+            if name == "manifest.json" and not revoked:
+                revoked = True
+                self.store.revoke_consent(
+                    "consent-001", "2026-11-24T12:00:00+00:00"
+                )
+            return content
+
+        with patch.object(
+            learning_module.zipfile.ZipFile,
+            "read",
+            side_effect=revoke_after_manifest_read,
+        ):
+            verification = self.store.verify_export(result["export_id"], output)
+
+        self.assertTrue(revoked)
+        self.assertFalse(verification["valid"])
+        self.assertEqual(verification["reason"], "invalidated")
+        self.assertEqual(verification["status"], "invalidated")
+
     def test_bundle_detects_tampering_and_unknown_registry_entries(self):
         self.store.record(example())
         output = self.root / "tampered.zip"
