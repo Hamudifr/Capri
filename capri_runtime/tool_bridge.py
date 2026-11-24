@@ -175,6 +175,33 @@ class ToolExecutionBridge:
             seen.add(call_id)
             prepared.append((call_id, name, normalized, digest, request_bytes))
 
+        resolved_contexts: dict[str, ExecutionContext] = {}
+        if context_resolver is not None and not (
+            cancellation_event is not None and cancellation_event.is_set()
+        ):
+            # Resolve every approval-scoped context before invoking any handler.
+            # A later resolver failure must not leave earlier calls executed.
+            for call_id, name, arguments, _, _ in prepared:
+                if cancellation_event is not None and cancellation_event.is_set():
+                    break
+                try:
+                    spec, _ = self.executor.registry.resolve(name)
+                except ToolNotFoundError:
+                    spec = None
+                if spec is not None and spec.requires_approval and spec.permission in context.permissions:
+                    call_context = context_resolver(call_id, name, arguments, context)
+                    if (
+                        not isinstance(call_context, ExecutionContext)
+                        or call_context.principal_id != context.principal_id
+                        or call_context.permissions != context.permissions
+                        or not isinstance(call_context.operation_id, str)
+                        or not 0 < len(call_context.operation_id) <= 128
+                    ):
+                        raise ToolBridgeValidationError(
+                            "per-call authority must preserve the principal and permissions and bind an operation"
+                        )
+                    resolved_contexts[call_id] = call_context
+
         outcomes = []
         for call_id, name, arguments, digest, _ in prepared:
             if cancellation_event is not None and cancellation_event.is_set():
@@ -186,23 +213,7 @@ class ToolExecutionBridge:
                     for pending_id, pending_name, _, pending_digest, _ in prepared[len(outcomes):]
                 )
                 break
-            call_context = context
-            if context_resolver is not None:
-                try:
-                    spec, _ = self.executor.registry.resolve(name)
-                except ToolNotFoundError:
-                    spec = None
-                if spec is not None and spec.requires_approval and spec.permission in context.permissions:
-                    call_context = context_resolver(call_id, name, arguments, context)
-                    if (
-                        not isinstance(call_context, ExecutionContext)
-                        or call_context.principal_id != context.principal_id
-                        or call_context.permissions != context.permissions
-                        or call_context.operation_id is None
-                    ):
-                        raise ToolBridgeValidationError(
-                            "per-call authority must preserve the principal and permissions and bind an operation"
-                        )
+            call_context = resolved_contexts.get(call_id, context)
             try:
                 result = self.executor.execute(
                     name, arguments, call_context, cancellation_event=cancellation_event
