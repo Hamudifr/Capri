@@ -588,8 +588,7 @@ class SQLiteTaskStore:
                     raise TaskNotFoundError("task does not exist")
                 state, owner, until, index, attempt = row
                 if (state != "running" or owner != claim.executor_id
-                        or index != claim.step_index or attempt != claim.attempt
-                        or until != claim.lease_until):
+                        or index != claim.step_index or attempt != claim.attempt):
                     raise TaskConflictError("task lease is no longer owned by this claim")
                 if _parse_time(until) <= _parse_time(stamp):
                     raise TaskConflictError("task lease expired before uncertainty was recorded")
