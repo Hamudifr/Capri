@@ -55,7 +55,7 @@ class SignedApprovalTests(unittest.TestCase):
     def test_signed_grant_is_bound_and_consumed_once(self):
         grant = self.authority.issue(
             "alice", "delete_record", argument_digest(self.arguments),
-            ttl_seconds=12, operation_id="session-1:call-1"0, operation_id="session-1:call-1",
+            ttl_seconds=120, operation_id="session-1:call-1",
         )
         self.assertTrue(self.authority.verify(grant))
         self.assertEqual(self.executor.execute("delete_record", self.arguments, self.context_with(grant)), {"deleted": True})
@@ -66,7 +66,7 @@ class SignedApprovalTests(unittest.TestCase):
     def test_tampering_principal_tool_digest_or_expiry_invalidates_signature(self):
         grant = self.authority.issue(
             "alice", "delete_record", argument_digest(self.arguments),
-            ttl_seconds=12, operation_id="session-1:call-1"0, operation_id="session-1:call-1",
+            ttl_seconds=120, operation_id="session-1:call-1",
         )
         for tampered in (
             replace(grant, principal_id="bob"),
@@ -84,7 +84,7 @@ class SignedApprovalTests(unittest.TestCase):
     def test_same_principal_tool_and_arguments_cannot_cross_operations(self):
         grant = self.authority.issue(
             "alice", "delete_record", argument_digest(self.arguments),
-            ttl_seconds=12, operation_id="session-1:call-1"0, operation_id="session-1:call-1",
+            ttl_seconds=120, operation_id="session-1:call-1",
         )
         wrong_context = self.context_with(grant, operation_id="session-1:call-2")
         with self.assertRaises(ApprovalRequiredError):
