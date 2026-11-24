@@ -1,10 +1,11 @@
+import sqlite3
 import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 from dataclasses import replace
 
-from capri_core.learning import LearningConsent, LearningDataError, LearningStore
+from capri_core.learning import LearningConsent, LearningStore
 from capri_runtime.learning_consent import (
     HostLearningConsentAuthority,
     LearningConsentAuthorityError,
@@ -110,7 +111,7 @@ class HostLearningConsentAuthorityTests(unittest.TestCase):
             consent_verifier=self.authority.verify,
         )
         store.record_consent(consent)
-        with self.assertRaises(Exception):
+        with self.assertRaises(sqlite3.IntegrityError):
             store.record_consent(consent)
 
     def test_subject_identity_is_not_embedded_in_evidence(self):
