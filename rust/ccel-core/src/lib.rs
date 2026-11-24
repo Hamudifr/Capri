@@ -379,7 +379,10 @@ mod tests {
         assert_eq!(grid.row(0), Some(&[1, 2, 3][..]));
         assert_eq!(grid.row(1), Some(&[4, 5, 6][..]));
         assert_eq!(grid.row(2), None);
-        assert_eq!(grid.rows().collect::<Vec<_>>(), vec![&[1, 2, 3][..], &[4, 5, 6][..]]);
+        assert_eq!(
+            grid.rows().collect::<Vec<_>>(),
+            vec![&[1, 2, 3][..], &[4, 5, 6][..]]
+        );
     }
 
     #[test]
