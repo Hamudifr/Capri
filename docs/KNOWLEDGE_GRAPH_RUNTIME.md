@@ -16,7 +16,7 @@ Implemented as an offline-capable, read-only retrieval layer. The graph provider
 ## Retrieval semantics
 
 - Start from at most five high-relevance seed neurons.
-- Traverse active edges up to two hops (one by default). For neighborhood discovery, an edge can be traversed from either endpoint; each serialized synapse retains its directed `from`/`to` orientation.
+- Traverse active edges up to two hops (one by default). For neighborhood discovery, an edge can be traversed from either endpoint; each serialized synapse retains its directed `from`/`to` orientation. When the synapse cap is reached, stronger edges are considered first, with relationship and ID as deterministic tie-breakers.
 - `truncated` is set when seed, neuron, or synapse caps actually omit matching context. The configured hop depth is an intentional boundary and does not by itself set `truncated`.
 - Keep both endpoints of every returned `Contradicts` edge, even if one endpoint is marked `Superseded`; preserve its lifecycle label so the model sees the history.
 - Exclude superseded neurons and `Supersedes` edges by default. Set `include_history=True` for historical queries.
