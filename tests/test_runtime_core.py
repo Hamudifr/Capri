@@ -1110,5 +1110,26 @@ class LedgerPathSafetyTests(unittest.TestCase):
                     for guard_fd in ledger_module._UNCERTAIN_INODE_FDS.values():
                         os.close(guard_fd)
 
+    def test_android_style_root_open_denial_uses_checked_path_fallback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "runs.jsonl"
+            real_open = os.open
+
+            def deny_root_open(target, flags, *args, **kwargs):
+                if (
+                    os.fspath(target) == os.path.abspath(os.sep)
+                    and kwargs.get("dir_fd") is None
+                ):
+                    raise PermissionError("simulated app-sandbox root restriction")
+                return real_open(target, flags, *args, **kwargs)
+
+            with mock.patch.object(
+                ledger_module.os, "open", side_effect=deny_root_open
+            ):
+                HashChainLedger(path).append(passing("sandbox-path-fallback"))
+
+            self.assertTrue(HashChainLedger(path).verify()["valid"])
+            self.assertEqual(HashChainLedger(path).verify()["records"], 1)
+
 if __name__ == "__main__":
     unittest.main()
