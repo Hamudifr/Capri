@@ -48,6 +48,15 @@ TASKS = {
             "-s", "tests", "-p", "test_termux_bridge.py", "-v",
         ],
     ],
+    "security_store_tests": [
+        [sys.executable, "tools/focused_tests.py", "security_store"],
+    ],
+    "approval_binding_tests": [
+        [sys.executable, "tools/focused_tests.py", "approval_binding"],
+    ],
+    "x7_runtime_tests": [
+        [sys.executable, "tools/focused_tests.py", "x7_runtime"],
+    ],
 }
 SECRET_PATTERNS = [
     re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b"),
