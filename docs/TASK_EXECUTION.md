@@ -37,7 +37,8 @@ The parent directory must already exist and be private (0700 or stricter on POSI
 
 - `queued`: eligible for a worker claim.
 - `running`: held by one executor until its lease expires.
-- `retry_wait`: failed step is eligible after its backoff deadline.
+- `retry_wait`: a handler explicitly declared a pre-side-effect failure and the step is eligible after its backoff deadline.
+- `reconciliation_required`: a handler may have performed a side effect but its outcome cannot be proven; the task is excluded from automatic claims.
 - `succeeded`: every planned step completed.
 - `failed`: a step exhausted its attempts or its lease expired after the attempt budget was exhausted.
 - `cancelled`: cancellation was requested and the task stopped at a safe step boundary.
@@ -46,7 +47,7 @@ Claims and state transitions use `BEGIN IMMEDIATE`, so concurrent workers cannot
 
 ## Delivery and idempotency semantics
 
-Execution is **bounded and may be repeated; it is not exactly once**. A process can crash after claiming a step but before invoking its handler, or after a side effect but before persisting the result. Depending on the crash point and remaining attempt budget, a handler may run zero, one, or multiple times. After lease expiry, another worker may retry the same step. Each step therefore receives the stable idempotency key `<task_id>:<step_index>`; handlers that perform side effects must enforce that key at the side-effect boundary. Do not blindly retry a non-idempotent handler.
+Execution is **not exactly once**. A process can crash after claiming a step but before invoking its handler, or after a side effect but before persisting the result. An expired running lease is now quarantined as `reconciliation_required`; a second worker does not automatically reclaim it. Unknown handler exceptions and invalid/oversized results are also quarantined because a side effect may already have occurred. Only a trusted handler that can prove it failed before any external side effect may raise `RetryableTaskError` to request a bounded retry. Each step receives the stable idempotency key `<task_id>:<step_index>`; handlers that perform side effects must enforce that key at the side-effect boundary.
 
 Leases are bounded to 5–3600 seconds. The store exposes `renew_lease()` so a host-managed heartbeat can extend a live claim. Renewal must occur before expiry and fails closed after expiry or ownership change. The lower-level `TaskEngine.run_once()` helper does not start a heartbeat thread; hosts using it directly must arrange renewal themselves. `TaskWorker` handles heartbeats while its handler is running. Neither API can forcibly interrupt a running handler. If a handler outlives its lease without renewal, a second worker may reclaim it; stable idempotency is mandatory.
 
