@@ -17,6 +17,7 @@ Capri is an experimental, provider-neutral Python runtime with durable state, bo
 - **Permissioned execution:** tool proposals pass through trusted host authority, argument validation, optional approvals, and audit recording before handlers run.
 - **Durable state:** SQLite-backed sessions, task plans, worker leases, checkpoints, and security records.
 - **Project memory:** bounded local memory, a Notion REST adapter, retention and provenance rules, and a separate untrusted-memory context boundary.
+- **Evidence-aware knowledge graph:** read-only Notion Neurons/Synapses retrieval with deterministic lexical ranking, bounded graph traversal, provenance, contradiction handling, and a short process-local snapshot cache. Retrieved graph content remains untrusted data.
 - **Provider integration:** an optional standard-library OpenAI Responses API adapter. Provider calls are explicit and require host-supplied configuration.
 - **Evidence and recovery:** append-only evaluation records, integrity checks, operational diagnostics, and documented backup/recovery procedures.
 - **Research components:** an experimental Rust CCEL implementation, kept distinct from the Python orchestration runtime.
@@ -62,7 +63,7 @@ See the workflow definitions in [`.github/workflows/`](.github/workflows/) for t
 | Area | Location | Responsibility |
 | --- | --- | --- |
 | Core records and integrity | `capri_core/` | Immutable records, validation, learning/evaluation primitives, and the diagnostic CLI |
-| Runtime and orchestration | `capri_runtime/` | Sessions, model adapters, tool orchestration, execution, tasks, approvals, memory, and SQLite stores |
+| Runtime and orchestration | `capri_runtime/` | Sessions, model adapters, tool orchestration, execution, tasks, approvals, memory, evidence-aware graph retrieval, and SQLite stores |
 | Tests | `tests/` | Offline contract, regression, security-boundary, and runtime tests |
 | Documentation | `docs/` | Architecture, operating rules, security assumptions, integration contracts, and recovery procedures |
 | Rust research | `rust/ccel-core/` | Experimental bounded synthesis and causal-compression research |
@@ -101,6 +102,7 @@ The capability roadmap separates implemented foundations from work still require
 - [Host runtime contract](docs/HOST_RUNTIME.md)
 - [Task execution semantics](docs/TASK_EXECUTION.md)
 - [Memory contract](docs/MEMORY_STORE.md)
+- [Knowledge graph runtime](docs/KNOWLEDGE_GRAPH_RUNTIME.md)
 - [Notion memory adapter](docs/NOTION_MEMORY_ADAPTER.md)
 - [OpenAI Responses adapter](docs/OPENAI_RESPONSES_ADAPTER.md)
 - [Backup and recovery operations](docs/LEDGER_OPERATIONS.md)
