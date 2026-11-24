@@ -72,7 +72,9 @@ not a self-modifying hosted model and not an automatic training service.
   blindly repeating the export.
 - Revoking any contributing consent transactionally marks every registered
   dependent bundle invalidated. `verify_export()` checks registry state,
-  bundle hash, manifest identity, and dataset hash. Downstream consumers must
+  bundle hash, manifest identity, and dataset hash, then re-reads registry status
+  after file verification so a revocation committed during inspection is observed.
+  That final status read is the verification linearization point. Downstream consumers must
   call this verifier against the authoritative store before use; a copied ZIP
   alone cannot carry or enforce revocation, and an unavailable registry means
   the bundle must not be treated as verified.
