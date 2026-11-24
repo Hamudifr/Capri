@@ -5,7 +5,7 @@ on:
   push:
     branches: ["main"]
   pull_request:
-    branches: ["main", "recovery/non-x5-foundation", "feature/capri-doctor", "feat/knowledge-graph-runtime"]
+    branches: ["main", "recovery/non-x5-foundation", "feature/capri-doctor"]
   workflow_dispatch:
 
 permissions:
