@@ -63,7 +63,7 @@ class SignedApprovalTests(unittest.TestCase):
             self.executor.execute("delete_record", self.arguments, self.context_with(grant))
         self.assertEqual(self.calls, [self.arguments])
 
-    def test_tampering_principal_tool_digest_or_expiry_invalidates_signature(self):
+    def test_tampering_principal_tool_digest_expiry_or_operation_invalidates_signature(self):
         grant = self.authority.issue(
             "alice", "delete_record", argument_digest(self.arguments),
             ttl_seconds=120, operation_id="session-1:call-1",
