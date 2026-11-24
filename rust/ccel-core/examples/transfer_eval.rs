@@ -97,7 +97,7 @@ fn dataset_v1() -> Vec<Case> {
             family: "two_operation_composition",
             known_solution: "RotateClockwise > RotateClockwise (equivalent FlipHorizontal > FlipVertical)",
             examples: vec![
-                example(&["0482", "9494", "8406"], &["6084", "4949", "2840"]),
+                example(&["0482", "9494", "8406"], &["6048", "4949", "2840"]),
                 example(&["505", "517", "529", "864"], &["468", "925", "715", "505"]),
             ],
             query: grid(&["06734", "18079"]),
