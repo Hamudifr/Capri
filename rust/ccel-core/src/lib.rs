@@ -496,6 +496,46 @@ mod tests {
         );
     }
     #[test]
+    fn geometric_operations_obey_inverse_properties_for_rectangular_grids() {
+        for height in 1..=5 {
+            for width in 1..=5 {
+                let rows: Vec<Vec<u8>> = (0..height)
+                    .map(|r| {
+                        (0..width)
+                            .map(|col| ((r * 7 + col * 3 + r * col) % 10) as u8)
+                            .collect()
+                    })
+                    .collect();
+                let grid = Grid::new(rows).unwrap();
+
+                assert_eq!(
+                    Operation::RotateCounterClockwise
+                        .apply(&Operation::RotateClockwise.apply(&grid)),
+                    grid
+                );
+                assert_eq!(
+                    Operation::Transpose.apply(&Operation::Transpose.apply(&grid)),
+                    grid
+                );
+                assert_eq!(
+                    Operation::FlipHorizontal.apply(&Operation::FlipHorizontal.apply(&grid)),
+                    grid
+                );
+                assert_eq!(
+                    Operation::FlipVertical.apply(&Operation::FlipVertical.apply(&grid)),
+                    grid
+                );
+
+                let mut four_rotations = grid.clone();
+                for _ in 0..4 {
+                    four_rotations = Operation::RotateClockwise.apply(&four_rotations);
+                }
+                assert_eq!(four_rotations, grid);
+            }
+        }
+    }
+
+    #[test]
     fn program_operations_are_read_only_and_preserve_order() {
         let program =
             Program::new(vec![Operation::RotateClockwise, Operation::FlipHorizontal]).unwrap();
