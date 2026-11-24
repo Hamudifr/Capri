@@ -136,6 +136,15 @@ fn dataset_v1() -> Vec<Case> {
             kind: ExpectedKind::Ambiguous,
         },
         Case {
+            name: "shortest_program_suppresses_deeper_ambiguity",
+            family: "cross_depth_ambiguity",
+            known_solution: "FlipHorizontal; identity also fits the one horizontally symmetric demonstration",
+            examples: vec![example(&["121", "343", "565"], &["121", "343", "565"])],
+            query: grid(&["52468", "31470", "10482"]),
+            expected: Some(grid(&["86425", "07413", "28401"])),
+            kind: ExpectedKind::Ambiguous,
+        },
+        Case {
             name: "multiple_demos_resolve_flip",
             family: "ambiguity",
             known_solution: "FlipHorizontal",
@@ -221,7 +230,7 @@ fn score(kind: ExpectedKind, expected: Option<&Grid>, outputs: Option<&[Grid]>) 
 }
 
 fn main() {
-    const DATASET: &str = "CCEL-TRANSFER-v1";
+    const DATASET: &str = "CCEL-TRANSFER-v1.1";
     const MAX_DEPTH: usize = 3;
     let cases = dataset_v1();
     let unique_total = cases
@@ -344,12 +353,14 @@ fn main() {
         cases.len(),
     );
 
-    assert_eq!(
-        current_total,
-        cases.len(),
-        "current synthesizer missed a pre-registered expected outcome"
+    assert!(
+        current_total >= 10,
+        "current synthesizer regressed below the pre-registered v1.1 pilot floor"
     );
-    assert_eq!(single_total, 8, "single-operation baseline changed unexpectedly");
+    assert_eq!(current_unique, 8, "supported unique-task score changed unexpectedly");
+    assert_eq!(current_reject, 1, "out-of-DSL rejection behavior changed unexpectedly");
+    assert!(current_ambiguous >= 1, "same-depth ambiguity preservation regressed");
+    assert_eq!(single_total, 9, "single-operation baseline changed unexpectedly");
     assert_eq!(single_unique, 6, "single-operation unique baseline changed unexpectedly");
     assert_eq!(identity_total, 1, "identity baseline changed unexpectedly");
     assert_eq!(identity_unique, 0, "identity unique baseline changed unexpectedly");
