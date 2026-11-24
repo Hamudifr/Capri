@@ -122,6 +122,17 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         self.assertEqual(record.state, "reconciliation_required")
         self.assertEqual(record.error_code, "lease_expired_outcome_uncertain")
 
+    def test_expired_lease_with_cancel_request_remains_uncertain(self):
+        task = self.store.create(PLAN, now=NOW)
+        self.store.claim_next("worker-a", lease_seconds=5, now=NOW)
+        self.store.request_cancel(task.task_id, now=NOW + timedelta(seconds=1))
+        self.assertIsNone(self.store.claim_next(
+            "worker-b", lease_seconds=5, now=NOW + timedelta(seconds=6)
+        ))
+        record = self.store.get(task.task_id)
+        self.assertEqual(record.state, "reconciliation_required")
+        self.assertTrue(record.cancel_requested)
+
     def test_stale_worker_cannot_commit_after_lease_expiry_quarantine(self):
         task = self.store.create(PLAN, now=NOW)
         old = self.store.claim_next("worker-a", lease_seconds=5, now=NOW)
