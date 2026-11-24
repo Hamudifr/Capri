@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "target_commit": "c1e0a0e462f2e5f481dd3f26dfcf92330bcf701d",
+  "task": "full_validation",
+  "status": "superseded",
+  "reason": "Superseded before execution by exact-head validation job 0a1b2c3d4e5f6789abcdef0123456789; no task was executed.",
+  "steps": []
+}
