@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from collections import deque
 from dataclasses import dataclass
 from typing import Protocol
@@ -161,6 +162,16 @@ class UntrustedKnowledgeContext:
             raise KnowledgeGraphError("serialized knowledge context exceeds 100 KB")
 
 
+def _freshness(value: str) -> float:
+    if not value:
+        return 0.0
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parsed.timestamp() if parsed.tzinfo is not None else 0.0
+    except (ValueError, OverflowError, OSError):
+        return 0.0
+
+
 def _tokens(value: str) -> set[str]:
     return {part.casefold() for part in _TOKEN_RE.findall(value)}
 
@@ -280,7 +291,7 @@ def retrieve_knowledge(
         key=lambda n: (
             -_score(tokens, n), -_EVIDENCE_RANK[n.evidence_state],
             -float(n.confidence), 0 if n.source else 1,
-            n.updated_at, n.title.casefold(), n.neuron_id,
+            -_freshness(n.updated_at), n.title.casefold(), n.neuron_id,
         ),
     ))
     ordered_edges = tuple(sorted(selected_edges.values(), key=lambda e: e.synapse_id))
