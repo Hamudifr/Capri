@@ -433,6 +433,8 @@ class HmacApprovalAuthority:
 
     def verify(self, grant: ApprovalGrant) -> bool:
         if (not isinstance(grant, ApprovalGrant)
+                or not isinstance(grant.operation_id, str)
+                or not _OPERATION_RE.fullmatch(grant.operation_id)
                 or not isinstance(grant.signature, str)
                 or not _DIGEST_RE.fullmatch(grant.signature)):
             return False
