@@ -160,6 +160,35 @@ class KnowledgeGraphTests(unittest.TestCase):
         self.assertNotIn(unreferenced.neuron_id, selected)
         self.assertTrue(context.truncated)
 
+    def test_truncation_flag_requires_an_omitted_reachable_item(self):
+        isolated = neuron("Isolated runtime node", notes="runtime")
+        isolated_context = retrieve_knowledge(
+            "runtime", InMemoryKnowledgeGraphProvider((isolated,), ()),
+            max_hops=1, max_neurons=1,
+        )
+        self.assertFalse(isolated_context.truncated)
+
+        neighbor = neuron("Connected runtime node")
+        link = edge(isolated, neighbor)
+        limited_context = retrieve_knowledge(
+            "runtime", InMemoryKnowledgeGraphProvider((isolated, neighbor), (link,)),
+            max_hops=1, max_neurons=1,
+        )
+        self.assertTrue(limited_context.truncated)
+        self.assertEqual(limited_context.synapses, ())
+
+        no_edges_context = retrieve_knowledge(
+            "runtime", InMemoryKnowledgeGraphProvider((isolated,), ()),
+            max_hops=1, max_synapses=0,
+        )
+        self.assertFalse(no_edges_context.truncated)
+
+        edge_limited_context = retrieve_knowledge(
+            "runtime", InMemoryKnowledgeGraphProvider((isolated, neighbor), (link,)),
+            max_hops=1, max_synapses=0,
+        )
+        self.assertTrue(edge_limited_context.truncated)
+
     def test_contradiction_always_keeps_both_sides_visible(self):
         current = neuron("Concrete adapter exists", notes="runtime OpenAI adapter", state="Verified")
         stale = neuron("No concrete adapter exists", notes="runtime OpenAI adapter", state="Superseded")
