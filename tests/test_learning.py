@@ -631,6 +631,7 @@ class LearningStoreTests(unittest.TestCase):
         with patch.object(
             learning_module.zipfile.ZipFile,
             "read",
+            autospec=True,
             side_effect=revoke_after_manifest_read,
         ):
             verification = self.store.verify_export(result["export_id"], output)
