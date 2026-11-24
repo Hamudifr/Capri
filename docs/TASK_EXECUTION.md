@@ -2,7 +2,7 @@
 
 ## Status and purpose
 
-`capri_runtime.tasks` adds a provider-neutral durable task queue and a synchronous worker primitive. It stores a bounded ordered plan, claims work through SQLite leases, checkpoints each completed step, retries failed steps with bounded exponential backoff, supports cancellation between steps, and recovers abandoned work after a lease expires.
+`capri_runtime.tasks` adds a provider-neutral durable task queue and a synchronous worker primitive. It stores a bounded ordered plan, claims work through SQLite leases, checkpoints each completed step, retries only explicitly declared pre-side-effect failures with bounded exponential backoff, supports cancellation between steps, and quarantines abandoned work after a lease expires.
 
 It includes an explicit `TaskWorker` polling loop with graceful stop-event support and a concurrent lease-heartbeat thread while a handler runs. Constructing a worker starts no thread; the host must call `run_once()` or `run_forever(stop_event)` and owns process lifecycle, authenticated principal context, scheduling, and handler registration. The stop event is checked between tasks and does not forcibly interrupt an active handler; process supervisors must account for the current handler's completion time. It does not call a model provider, create plans from natural language, or grant tool permissions.
 
@@ -53,7 +53,7 @@ Leases are bounded to 5–3600 seconds. The store exposes `renew_lease()` so a h
 
 ## Retry and cancellation
 
-Each step may set `max_attempts` from 1 to 10 (default 3). Retry delay uses bounded exponential backoff, capped at one hour. Error details are deliberately suppressed; only a short error code is stored.
+Each step may set `max_attempts` from 1 to 10 (default 3). Retry delay uses bounded exponential backoff, capped at one hour. `fail_step()` is terminal by default; only trusted code that can prove no side effect occurred may explicitly set `retryable=True`. `TaskEngine` retries only `RetryableTaskError`. A `ToolCancelledError` marked `outcome_uncertain=False` is terminal without quarantine; uncertain cancellation is quarantined. Error details are deliberately suppressed; only a short error code is stored.
 
 Cancellation is cooperative. Queued/retry-wait tasks cancel immediately. A running handler is not killed; its current step may finish and be checkpointed, then the task becomes cancelled without starting another step. If the handler outcome becomes uncertain, reconciliation quarantine takes precedence and the cancellation flag is retained. Hosts should expose this behavior honestly in UI.
 
@@ -79,23 +79,12 @@ Cancellation is cooperative. Queued/retry-wait tasks cancel immediately. A runni
 `tests/test_tasks.py` covers persistent state, idempotent creation, plan validation, concurrent claims, lease-expiry quarantine, stale-worker rejection, renewed-lease handling, bounded explicit retries, step checkpointing, handler failure suppression, principal ownership, cancellation, event persistence, symlink rejection, and directory privacy. The repository quality workflow runs the full suite on Python 3.11, 3.12, 3.13, and 3.15.
 
 
-## Uncertain handler outcomes and reconciliation quarantine
+## Operator handling of reconciliation quarantine
 
-A task handler may perform an external side effect and then raise, return an
-invalid/oversized result, or lose its worker process before the result is
-checkpointed. These cases are not safe automatic retries. The engine now moves
-such tasks to `reconciliation_required`, clears the lease, records an event,
-and excludes the task from future claims. An expired running lease is treated
-the same way because the store cannot prove whether the handler ran.
-
-Only trusted handlers may raise `RetryableTaskError`, and only when they can
-guarantee failure occurred before any external side effect. That explicit signal
-retains bounded retry behavior. A `ToolCancelledError` marked
-`outcome_uncertain=False` is terminal without quarantine; uncertain
-cancellation is quarantined.
-
-The current release adds the durable quarantine state but does not yet provide
-an owner-facing reconciliation decision API. Hosts must inspect and resolve
-quarantined tasks out of band; never reset them to queued/retry_wait or replay
-them without independently establishing the external outcome. Cancellation
-requests preserve the quarantine state and only set the cancellation flag.
+There is no owner-facing reconciliation decision API. The host must inspect the
+external system and establish whether the side effect occurred, then apply any
+repair through an explicit owner-authorized procedure outside the automatic
+worker loop. Never reset a quarantined task to `queued` or `retry_wait`, or
+replay it, without independently establishing the external outcome. A
+cancellation request preserves `reconciliation_required` and records the
+cancellation flag.
