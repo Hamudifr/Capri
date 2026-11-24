@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from .runtime import Message, Session, SessionStore
 from .memory import UntrustedMemoryContext
+from .knowledge_graph import UntrustedKnowledgeContext
 from .tool_bridge import (
     ToolBridgeValidationError,
     ToolCallOutcome,
@@ -66,6 +67,27 @@ class ToolModelAdapter(Protocol):
     ) -> AssistantTurn:
         """Return assistant text or structured tool calls for the next turn."""
         ...
+
+
+class KnowledgeAwareToolModelAdapter(Protocol):
+    """Adapter accepting a separate, bounded, untrusted graph context."""
+
+    def complete_with_tools_and_knowledge(
+        self,
+        session_id: str,
+        history: tuple[Message, ...],
+        tools: tuple[ToolDefinition, ...],
+        knowledge_context: UntrustedKnowledgeContext,
+    ) -> AssistantTurn: ...
+
+    def complete_with_tools_and_memory_and_knowledge(
+        self,
+        session_id: str,
+        history: tuple[Message, ...],
+        tools: tuple[ToolDefinition, ...],
+        memory_context: UntrustedMemoryContext,
+        knowledge_context: UntrustedKnowledgeContext,
+    ) -> AssistantTurn: ...
 
 
 class MemoryAwareToolModelAdapter(Protocol):
@@ -171,6 +193,7 @@ class ToolOrchestrator:
         max_total_messages: int | None = None,
         cancellation_event: threading.Event | None = None,
         memory_context: UntrustedMemoryContext | None = None,
+        knowledge_context: UntrustedKnowledgeContext | None = None,
     ) -> OrchestrationResult:
         """Complete one turn, executing at most max_tool_rounds tool batches.
 
@@ -188,17 +211,20 @@ class ToolOrchestrator:
             raise ToolOrchestrationError("user_text must be bounded non-empty valid text")
         if not isinstance(context, ExecutionContext):
             raise ToolOrchestrationError("a trusted host ExecutionContext is required")
-        if memory_context is not None:
-            if type(memory_context) is not UntrustedMemoryContext:
-                raise ToolOrchestrationError("memory_context must be an exact UntrustedMemoryContext")
-            if not callable(getattr(self.adapter, "complete_with_tools_and_memory", None)):
-                raise ToolOrchestrationError(
-                    "adapter must implement complete_with_tools_and_memory when memory is supplied"
-                )
-        elif not callable(getattr(self.adapter, "complete_with_tools", None)):
-            raise ToolOrchestrationError(
-                "adapter must implement complete_with_tools when memory is not supplied"
-            )
+        if memory_context is not None and type(memory_context) is not UntrustedMemoryContext:
+            raise ToolOrchestrationError("memory_context must be an exact UntrustedMemoryContext")
+        if knowledge_context is not None and type(knowledge_context) is not UntrustedKnowledgeContext:
+            raise ToolOrchestrationError("knowledge_context must be an exact UntrustedKnowledgeContext")
+        if memory_context is not None and knowledge_context is not None:
+            method = "complete_with_tools_and_memory_and_knowledge"
+        elif memory_context is not None:
+            method = "complete_with_tools_and_memory"
+        elif knowledge_context is not None:
+            method = "complete_with_tools_and_knowledge"
+        else:
+            method = "complete_with_tools"
+        if not callable(getattr(self.adapter, method, None)):
+            raise ToolOrchestrationError(f"adapter must implement {method} for the supplied context")
         if max_total_messages is not None and (
             isinstance(max_total_messages, bool)
             or not isinstance(max_total_messages, int)
@@ -235,13 +261,21 @@ class ToolOrchestrator:
             if cancellation_event is not None and cancellation_event.is_set():
                 raise ToolOrchestrationError("orchestration cancelled")
             try:
-                if memory_context is None:
-                    response = self.adapter.complete_with_tools(
-                        session_id, tuple(working), definitions
+                if memory_context is not None and knowledge_context is not None:
+                    response = self.adapter.complete_with_tools_and_memory_and_knowledge(
+                        session_id, tuple(working), definitions, memory_context, knowledge_context
                     )
-                else:
+                elif memory_context is not None:
                     response = self.adapter.complete_with_tools_and_memory(
                         session_id, tuple(working), definitions, memory_context
+                    )
+                elif knowledge_context is not None:
+                    response = self.adapter.complete_with_tools_and_knowledge(
+                        session_id, tuple(working), definitions, knowledge_context
+                    )
+                else:
+                    response = self.adapter.complete_with_tools(
+                        session_id, tuple(working), definitions
                     )
             except Exception:
                 raise ToolOrchestrationError("model adapter failed") from None
