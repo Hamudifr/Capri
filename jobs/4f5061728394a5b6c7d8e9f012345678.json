@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "job_id": "4f5061728394a5b6c7d8e9f012345678",
+  "target_commit": "3dddc7fedc34339f7c3935ccb965892a485382ca",
+  "task": "approval_binding_tests"
+}
