@@ -516,7 +516,7 @@ class LearningStore:
         policy_versions: set[str] = set()
         try:
             os.fchmod(descriptor, 0o600)
-            stream = os.fdopen(descriptor, "w", encoding="utf-8", newline="\\n")
+            stream = os.fdopen(descriptor, "w", encoding="utf-8", newline="\n")
             descriptor = -1
             with stream:
                 for row in rows:
@@ -540,7 +540,7 @@ class LearningStore:
                         "consent_policy_version": row["policy_version"],
                         "split": split,
                     }
-                    stream.write(json.dumps(payload, ensure_ascii=False) + "\\n")
+                    stream.write(json.dumps(payload, ensure_ascii=False) + "\n")
                     counts[split] += 1
                     consent_ids.add(row["consent_id"])
                     policy_versions.add(row["policy_version"])
@@ -880,15 +880,18 @@ class LearningStore:
             if actual_hash != record["bundle_sha256"]:
                 return {"valid": False, "reason": "artifact_hash_mismatch"}
             stored_manifest = json.loads(record["manifest_json"])
+            if not isinstance(stored_manifest, dict):
+                return {"valid": False, "reason": "invalid_manifest"}
             if stored_manifest.get("export_id") != export_id:
                 return {"valid": False, "reason": "manifest_identity_mismatch"}
 
-            dependencies = {
-                row["consent_id"] for row in self._connect().execute(
-                    "SELECT consent_id FROM learning_export_consents WHERE export_id=?",
-                    (export_id,),
-                ).fetchall()
-            }
+            with self._connection() as connection:
+                dependencies = {
+                    row["consent_id"] for row in connection.execute(
+                        "SELECT consent_id FROM learning_export_consents WHERE export_id=?",
+                        (export_id,),
+                    ).fetchall()
+                }
             if record["export_kind"] == "jsonl":
                 if stored_manifest.get("artifact_kind") != "jsonl":
                     return {"valid": False, "reason": "manifest_type_mismatch"}
@@ -927,6 +930,8 @@ class LearningStore:
                 if set(archive.namelist()) != {"dataset.jsonl", "manifest.json"}:
                     return {"valid": False, "reason": "unexpected_bundle_members"}
                 manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+                if not isinstance(manifest, dict):
+                    return {"valid": False, "reason": "invalid_manifest"}
                 if manifest != stored_manifest:
                     return {"valid": False, "reason": "manifest_registry_mismatch"}
                 if manifest.get("export_id") != export_id:
