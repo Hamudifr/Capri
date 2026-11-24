@@ -98,3 +98,16 @@ Track each topic as **unseen, studied, practiced, tested, retained, or needs rev
 - Python CI: all 493 existing Capri tests passed on Python 3.15.2.
 
 Next learning topics: ownership/moves/borrowing in detail; lifetimes; slice APIs; iterator design; then profiling and parallel search.
+
+
+## Learning progress — Lesson 02 (2026-11-24)
+
+**Topic:** ownership, moves, borrowing, lifetimes, slices, String/str, Drop and RAII.
+
+- Status: practiced and tested in the latest stable Rust CI; delayed retrieval review still required before marking retained.
+- Applied to CCEL Grid with a bounds-checked row(index) -> Option<&[u8]> method. The returned slice borrows from &self and cannot outlive the Grid.
+- The new borrowed-row test checks the full contiguous buffer, row 0, row 1, out-of-range row 2, and the row-slice iterator.
+- Latest Rust CI: 14 tests passed, rustfmt and Clippy passed, release build and benchmark passed on Rust 1.100.0 (run #18).
+- Latest Python CI: Python 3.15.2 selected through 3.x, 493 tests passed (run #807).
+
+Next: lifetimes in structs and traits, smart pointers, interior mutability, Send/Sync, and safe parallelism.
