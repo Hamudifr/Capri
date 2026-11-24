@@ -34,6 +34,7 @@ Capri is a research and execution-assistance project. This repository contains p
 - `docs/SQLITE_SESSION_BACKUP.md` — session backup and restore details.
 - `docs/SQLITE_STORE_BACKUP.md` — backup coverage across all local SQLite stores and operational restore guidance.
 - `docs/MEMORY_STORE.md` — durable memory contract, trust rules, privacy constraints, and limitations.
+- `docs/KNOWLEDGE_GRAPH_RUNTIME.md` — evidence-aware Notion graph retrieval, bounded traversal, host resolver, and LLM trust boundary.
 - `docs/NOTION_MEMORY_ADAPTER.md` — Notion REST setup, host transport contract, mapping, correction recovery, optional live smoke test, and limitations.
 - `tests/` — deterministic structural, ledger, and runtime tests.
 - `.github/workflows/quality.yml` — non-X5 documentation and test checks.
