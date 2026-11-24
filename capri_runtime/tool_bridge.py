@@ -10,7 +10,7 @@ import json
 import re
 import threading
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from .tools import (
     ApprovalRequiredError,
@@ -118,6 +118,7 @@ class ToolExecutionBridge:
         context: ExecutionContext,
         *,
         cancellation_event: threading.Event | None = None,
+        context_resolver: Callable[[str, str, dict[str, Any], ExecutionContext], ExecutionContext] | None = None,
     ) -> tuple[ToolCallOutcome, ...]:
         """Execute a fully validated batch in order using host-supplied authority.
 
@@ -129,6 +130,8 @@ class ToolExecutionBridge:
             raise ToolBridgeValidationError("a trusted ExecutionContext is required")
         if cancellation_event is not None and not callable(getattr(cancellation_event, "is_set", None)):
             raise ToolBridgeValidationError("cancellation_event must expose is_set()")
+        if context_resolver is not None and not callable(context_resolver):
+            raise ToolBridgeValidationError("context_resolver must be a trusted callable")
         if not isinstance(requests, (list, tuple)):
             raise ToolBridgeValidationError("requests must be a list or tuple")
         if not requests or len(requests) > self.max_calls:
@@ -183,9 +186,26 @@ class ToolExecutionBridge:
                     for pending_id, pending_name, _, pending_digest, _ in prepared[len(outcomes):]
                 )
                 break
+            call_context = context
+            if context_resolver is not None:
+                try:
+                    spec, _ = self.executor.registry.resolve(name)
+                except ToolNotFoundError:
+                    spec = None
+                if spec is not None and spec.requires_approval and spec.permission in context.permissions:
+                    call_context = context_resolver(call_id, name, arguments, context)
+                    if (
+                        not isinstance(call_context, ExecutionContext)
+                        or call_context.principal_id != context.principal_id
+                        or call_context.permissions != context.permissions
+                        or call_context.operation_id is None
+                    ):
+                        raise ToolBridgeValidationError(
+                            "per-call authority must preserve the principal and permissions and bind an operation"
+                        )
             try:
                 result = self.executor.execute(
-                    name, arguments, context, cancellation_event=cancellation_event
+                    name, arguments, call_context, cancellation_event=cancellation_event
                 )
             except ToolCancelledError as exc:
                 if exc.outcome_uncertain:
