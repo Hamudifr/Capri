@@ -13,7 +13,7 @@ Compares C, C++, Rust and CPython on the same deterministic, single-threaded Con
 - Initialization, process startup, compilation and checksum calculation excluded from the timed region
 - Single-threaded, no third-party libraries; mismatched checksums fail the run
 
-Run on Linux with cc, c++, rustc and Python 3.15+:
+Run on Linux with cc, c++, rustc and Python 3.11+:
 
     python benchmarks/four-language/run.py
 
