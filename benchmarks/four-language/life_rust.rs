@@ -8,12 +8,16 @@ fn main() {
         for r in 0..H {
             let up=(if r==0 {H-1} else {r-1})*W; let mid=r*W;
             let down=(if r+1==H {0} else {r+1})*W;
+            let up_row=&current[up..up+W];
+            let mid_row=&current[mid..mid+W];
+            let down_row=&current[down..down+W];
+            let out_row=&mut next[mid..mid+W];
             for c in 0..W {
-                let left=if c==0 {W-1} else {c-1}; let right=if c+1==W {0} else {c+1}; let i=mid+c;
-                let n=current[up+left] as u32+current[up+c] as u32+current[up+right] as u32+
-                    current[mid+left] as u32+current[mid+right] as u32+
-                    current[down+left] as u32+current[down+c] as u32+current[down+right] as u32;
-                let alive=current[i]; next[i]=if n==3||(alive!=0&&n==2) {1} else {0};
+                let left=if c==0 {W-1} else {c-1}; let right=if c+1==W {0} else {c+1};
+                let n=up_row[left] as u32+up_row[c] as u32+up_row[right] as u32+
+                    mid_row[left] as u32+mid_row[right] as u32+
+                    down_row[left] as u32+down_row[c] as u32+down_row[right] as u32;
+                let alive=mid_row[c]; out_row[c]=if n==3||(alive!=0&&n==2) {1} else {0};
             }
         }
         std::mem::swap(&mut current,&mut next);
