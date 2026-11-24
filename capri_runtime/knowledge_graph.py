@@ -227,7 +227,7 @@ def retrieve_knowledge(
         edge_ids.add(edge.synapse_id)
         if edge.from_neuron_id not in by_id or edge.to_neuron_id not in by_id:
             raise KnowledgeGraphError("provider returned a dangling synapse endpoint")
-        if edge.status == "Active":
+        if edge.status in _ACTIVE_EDGE_STATES or include_history:
             valid_edges.append(edge)
     tokens = _tokens(query)
     candidates = [
