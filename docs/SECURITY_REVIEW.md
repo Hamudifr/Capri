@@ -9,10 +9,11 @@ This document records the current trust boundaries, verified controls, and unres
 The current runtime is a synchronous Python library with durable SQLite sessions, owner-scoped task state, host-injected model adapters, optional local/Notion memory, optional read-only Notion knowledge-graph retrieval, and a permissioned tool-execution gate integrated through `ToolOrchestrator`. `CapriHostRuntime` maps opaque credentials through a trusted `HostAuthorityResolver` and enforces principal ownership for session and task operations. The embedding host still owns its identity provider, permission source, resource-level authorization, secrets, process supervision, and deployment. Capri is not a sandbox or a production-ready multi-tenant service.
 
 Assets requiring protection as the runtime grows:
-- session transcripts and user-provided content;
-- session identifiers and tenant ownership mappings supplied by the host;
+- session transcripts, task plans/results, and user-provided content;
+- session/task identifiers and immutable principal ownership mappings;
+- memory and knowledge-graph records, evidence metadata, and Notion API credentials;
 - model-provider credentials held by host adapters;
-- provider outputs and operational metadata;
+- approval grants, audit metadata, backups, and provider outputs;
 - repository credentials and CI supply-chain integrity.
 
 ## Trust boundaries
@@ -54,8 +55,10 @@ These controls reduce accidental resource abuse and concurrency defects; they do
 | Authentication and session ownership | Host credential mapping and owner-scoped session/task APIs implemented; identity provider remains host-owned | Integrate a real identity provider and test current resource-level permissions inside handlers |
 | Cross-tenant isolation | Application-level session/task ownership exists; complete tenant isolation is not implemented | Add resource ACL, memory/graph scope, per-principal budgets, and end-to-end negative isolation tests |
 | Session count growth | Store has no max-session or expiry policy | Approve quotas, retention, deletion, and expiry before eviction |
-| Transcript persistence | Not implemented | Approve storage, encryption, backups, access, export, deletion |
+| Transcript persistence | Durable SQLite sessions implemented; plaintext at rest | Approve encryption, backups, access, export, deletion, retention, and expiry |
 | Adapter timeout/cancellation | No runtime timeout | Define adapter cancellation contract and provider-specific timeout behavior |
+| Task delivery/reconciliation | Principal-owned tasks and conservative uncertain-outcome quarantine implemented; no owner-facing reconciliation API | Build an authorized reconciliation workflow and verify external side effects before any manual replay |
+| Backup confidentiality/recovery | Atomic private no-replace backups implemented; backups remain plaintext | Add host-managed encryption, retention, off-site copies, restore drills, and recovery objectives |
 | Token/cost budget | Character limits only | Define provider-aware token, spend, and request budgets |
 | Rate limiting | Not implemented | Define per-user/tenant/IP quotas at host boundary |
 | Tool execution | Permissioned gate is integrated through the orchestrator; SQLite audit/approval persistence exists; handlers remain trusted and unsandboxed | Add per-resource authorization inside handlers, timeouts/isolation, budgets, backup/retention, and stronger same-host tamper controls |
