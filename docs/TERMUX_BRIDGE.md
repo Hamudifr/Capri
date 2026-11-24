@@ -62,7 +62,7 @@ git pull --ff-only
 python tools/termux_bridge.py --watch --interval 5
 ```
 
-The bridge uses the existing GitHub repository and does not require a new cloud service or GitHub Actions workflow. The focused task runner is a separate fixed mapping in `tools/focused_tests.py`; the manifest cannot choose test files or module names.
+The bridge uses the existing GitHub repository and does not require a new cloud service or GitHub Actions workflow. Focused task names map to fixed test-file patterns in `FOCUSED_TEST_SUITES` inside `tools/termux_bridge.py`; the worker executes the fixed runner code from the target worktree. The manifest cannot choose test files or module names.
 
 ## Relationship to the durable task runtime
 
