@@ -137,7 +137,10 @@ class HostGatewayApprovalIntegrationTests(unittest.TestCase):
             authority = HostAuthorityResolver(
                 lambda credential: "alice" if credential in {"session-token", "reviewer-token"} else None,
                 lambda principal: ("records:delete",),
-                lambda principal: tuple(delivered_grants) if principal == "alice" else (),
+                lambda principal, operation_id: tuple(
+                    grant for grant in delivered_grants
+                    if principal == "alice" and grant.operation_id == operation_id
+                ),
             )
             gateway = HostToolGateway(
                 authority,
@@ -162,6 +165,15 @@ class HostGatewayApprovalIntegrationTests(unittest.TestCase):
             self.assertEqual(second[0].result, {"deleted": True})
             self.assertEqual(calls, [{"item": "target-1"}])
             self.assertEqual(len(issued), 1)
+
+            second_operation = gateway.execute_batch(
+                "session-token",
+                [ToolCallRequest("call-2", "delete_item", {"item": "target-1"})],
+            )
+            self.assertEqual(second_operation[0].status, "approval_required")
+            self.assertEqual(calls, [{"item": "target-1"}])
+            self.assertEqual(len(issued), 2)
+            self.assertEqual(issued[1].operation_id, "session-42:call-2")
 
     def test_approval_integration_requires_all_host_callbacks(self):
         authority = HostAuthorityResolver(lambda credential: "alice", lambda principal: ())
