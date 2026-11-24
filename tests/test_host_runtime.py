@@ -15,6 +15,7 @@ from capri_runtime import (
     ToolOrchestrator,
     ToolRegistry,
     UntrustedMemoryContext,
+    UntrustedKnowledgeContext,
 )
 from capri_runtime.host_runtime import CapriHostRuntime, HostRuntimeError
 
@@ -23,6 +24,7 @@ class RecordingAdapter:
     def __init__(self):
         self.calls = []
         self.memory_contexts = []
+        self.knowledge_contexts = []
 
     def complete_with_tools(self, session_id, history, tools):
         self.calls.append((session_id, history, tools))
@@ -32,6 +34,19 @@ class RecordingAdapter:
         self.calls.append((session_id, history, tools))
         self.memory_contexts.append(memory_context)
         return AssistantTurn(content="memory-aware answer")
+
+    def complete_with_tools_and_knowledge(self, session_id, history, tools, knowledge_context):
+        self.calls.append((session_id, history, tools))
+        self.knowledge_contexts.append(knowledge_context)
+        return AssistantTurn(content="knowledge-aware answer")
+
+    def complete_with_tools_and_memory_and_knowledge(
+        self, session_id, history, tools, memory_context, knowledge_context
+    ):
+        self.calls.append((session_id, history, tools))
+        self.memory_contexts.append(memory_context)
+        self.knowledge_contexts.append(knowledge_context)
+        return AssistantTurn(content="memory-and-knowledge-aware answer")
 
 
 class CapriHostRuntimeTests(unittest.TestCase):
@@ -104,6 +119,38 @@ class CapriHostRuntimeTests(unittest.TestCase):
         host.run_turn("alice-token", session.session_id, "allowed")
         self.assertEqual(memory_calls, [("alice", session.session_id, "allowed")])
         self.assertEqual(len(self.adapter.memory_contexts), 1)
+
+    def test_unauthorized_session_is_rejected_before_graph_retrieval(self):
+        graph_calls = []
+        host = self.make_host(
+            knowledge_context_resolver=lambda principal, session_id, text: (
+                graph_calls.append((principal, session_id, text))
+                or UntrustedKnowledgeContext((), (), text)
+            )
+        )
+        session = host.create_session("alice-token")
+        with self.assertRaises(SessionNotFoundError):
+            host.run_turn("bob-token", session.session_id, "foreign graph query")
+        self.assertEqual(graph_calls, [])
+        self.assertEqual(self.adapter.knowledge_contexts, [])
+
+        result = host.run_turn("alice-token", session.session_id, "allowed graph query")
+        self.assertEqual(result.result.final_text, "knowledge-aware answer")
+        self.assertEqual(graph_calls, [("alice", session.session_id, "allowed graph query")])
+        self.assertEqual(len(self.adapter.knowledge_contexts), 1)
+
+    def test_host_can_pass_memory_and_graph_as_separate_contexts(self):
+        memory = UntrustedMemoryContext(())
+        knowledge = UntrustedKnowledgeContext((), (), "combined query")
+        host = self.make_host(
+            memory_context_resolver=lambda *_: memory,
+            knowledge_context_resolver=lambda *_: knowledge,
+        )
+        session = host.create_session("alice-token")
+        result = host.run_turn("alice-token", session.session_id, "combined query")
+        self.assertEqual(result.result.final_text, "memory-and-knowledge-aware answer")
+        self.assertEqual(self.adapter.memory_contexts, [memory])
+        self.assertEqual(self.adapter.knowledge_contexts, [knowledge])
 
     def test_close_is_owner_scoped_and_idempotent(self):
         host = self.make_host()
