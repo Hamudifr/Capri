@@ -30,6 +30,54 @@ CLAIM_LEASE_SECONDS = 3600
 MAX_CLAIM_ATTEMPTS = 3
 MAX_OUTPUT = 48_000
 STEP_TIMEOUT = 900
+FOCUSED_TEST_SUITES = {
+    "security_store_tests": ("test_security_store.py",),
+    "approval_binding_tests": (
+        "test_signed_approvals.py",
+        "test_approval_lifecycle.py",
+        "test_host_authority.py",
+        "test_host_gateway.py",
+        "test_tools.py",
+        "test_tool_bridge.py",
+        "test_resource_authorization.py",
+    ),
+    "x7_runtime_tests": (
+        "test_tasks.py",
+        "test_host_runtime.py",
+        "test_runtime_core.py",
+    ),
+}
+FOCUSED_TEST_RUNNER = """\
+import sys
+import unittest
+from pathlib import Path
+
+root = Path.cwd()
+sys.path.insert(0, str(root))
+tests_dir = root / "tests"
+loader = unittest.TestLoader()
+suite = unittest.TestSuite()
+for pattern in sys.argv[1].split(","):
+    suite.addTests(loader.discover(
+        start_dir=str(tests_dir),
+        pattern=pattern,
+        top_level_dir=str(tests_dir),
+    ))
+if suite.countTestCases() == 0:
+    print("No tests discovered for focused suite", file=sys.stderr)
+    raise SystemExit(2)
+result = unittest.TextTestRunner(verbosity=2).run(suite)
+raise SystemExit(0 if result.wasSuccessful() else 1)
+"""
+
+
+def _focused_task(task_name: str) -> list[list[str]]:
+    return [[
+        sys.executable, "-c", FOCUSED_TEST_RUNNER,
+        ",".join(FOCUSED_TEST_SUITES[task_name]),
+    ]]
+
+
 TASKS = {
     "full_validation": [
         [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"],
@@ -48,15 +96,7 @@ TASKS = {
             "-s", "tests", "-p", "test_termux_bridge.py", "-v",
         ],
     ],
-    "security_store_tests": [
-        [sys.executable, "tools/focused_tests.py", "security_store"],
-    ],
-    "approval_binding_tests": [
-        [sys.executable, "tools/focused_tests.py", "approval_binding"],
-    ],
-    "x7_runtime_tests": [
-        [sys.executable, "tools/focused_tests.py", "x7_runtime"],
-    ],
+    **{name: _focused_task(name) for name in FOCUSED_TEST_SUITES},
 }
 SECRET_PATTERNS = [
     re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b"),
