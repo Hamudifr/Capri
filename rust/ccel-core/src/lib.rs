@@ -257,7 +257,7 @@ mod tests {
         assert_eq!(synthesize(&[], 1, 10), Err(CcelError::NoExamples));
         let x = g(&[&[1]]);
         assert_eq!(predict(&[], &x), Err(CcelError::NoPrograms));
-        assert_eq!(select_probe(&[], &[x.clone()]), Err(CcelError::NoPrograms));
+        assert_eq!(select_probe(&[], std::slice::from_ref(&x)), Err(CcelError::NoPrograms));
         assert_eq!(select_probe(&[Program::new(vec![]).unwrap()], &[]), Err(CcelError::NoProbes));
     }
 }
