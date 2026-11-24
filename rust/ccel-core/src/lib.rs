@@ -108,6 +108,12 @@ impl Grid {
         &self.cells
     }
 
+    pub fn row(&self, index: usize) -> Option<&[u8]> {
+        let start = index.checked_mul(self.width)?;
+        let end = start.checked_add(self.width)?;
+        self.cells.get(start..end)
+    }
+
     pub fn height(&self) -> usize {
         self.height
     }
@@ -364,6 +370,16 @@ mod tests {
     use super::*;
     fn g(rows: &[&[u8]]) -> Grid {
         Grid::new(rows.iter().map(|r| r.to_vec()).collect()).unwrap()
+    }
+
+    #[test]
+    fn borrowed_rows_and_cells_are_correct() {
+        let grid = g(&[&[1, 2, 3], &[4, 5, 6]]);
+        assert_eq!(grid.cells(), &[1, 2, 3, 4, 5, 6]);
+        assert_eq!(grid.row(0), Some(&[1, 2, 3][..]));
+        assert_eq!(grid.row(1), Some(&[4, 5, 6][..]));
+        assert_eq!(grid.row(2), None);
+        assert_eq!(grid.rows().collect::<Vec<_>>(), vec![&[1, 2, 3][..], &[4, 5, 6][..]]);
     }
 
     #[test]
