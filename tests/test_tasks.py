@@ -587,6 +587,20 @@ class SQLiteTaskStoreTests(unittest.TestCase):
 
 
 
+    def test_fail_step_defaults_to_nonretryable(self):
+        task = self.store.create(
+            [{"tool": "send", "input": {"value": "x"}, "max_attempts": 3}],
+            now=NOW,
+        )
+        claim = self.store.claim_next("worker-a", now=NOW)
+        self.assertEqual(claim.task_id, task.task_id)
+
+        record = self.store.fail_step(claim, now=NOW + timedelta(seconds=1))
+
+        self.assertEqual(record.state, "failed")
+        self.assertEqual(record.error_code, "handler_failed")
+        self.assertEqual(record.attempts, 1)
+
     def test_retry_backoff_and_attempt_limit(self):
         task = self.store.create(PLAN, now=NOW)
         claim = self.store.claim_next("worker", now=NOW, principal_tools=frozenset({"prepare"}))
