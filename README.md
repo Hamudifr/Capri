@@ -106,6 +106,8 @@ The capability roadmap separates implemented foundations from work still require
 - [Notion memory adapter](docs/NOTION_MEMORY_ADAPTER.md)
 - [OpenAI Responses adapter](docs/OPENAI_RESPONSES_ADAPTER.md)
 - [Backup and recovery operations](docs/LEDGER_OPERATIONS.md)
+- [Contributing and development workflow](CONTRIBUTING.md)
+- [Security reporting policy](SECURITY.md)
 
 A roadmap item is not a shipped capability. Treat a feature as implemented only when its code, tests, documentation, and relevant integration evidence agree.
 
