@@ -2,6 +2,7 @@
 
 All provider responses are fixtures. No network request or paid API call is made.
 """
+import io
 import json
 import os
 import unittest
@@ -385,15 +386,18 @@ class OpenAIResponsesAdapterTests(unittest.TestCase):
         with self.assertRaises(OpenAIResponsesAdapterError):
             adapter.complete_with_tools("session-6", (Message("user", "Go"),), ())
 
-    def test_http_error_details_and_credentials_are_suppressed(self):
-        opener = FakeOpener(error=HTTPError(
+    def test_http_error_details_and_credentials_are_suppressed_and_stream_is_closed(self):
+        error = HTTPError(
             "https://api.openai.com/v1/responses", 401,
-            "invalid token sk-test-secret", {}, None,
-        ))
+            "invalid token sk-test-secret", {}, io.BytesIO(b"private response body"),
+        )
+        opener = FakeOpener(error=error)
         adapter = self.make_adapter(opener)
         with self.assertRaises(OpenAIResponsesAdapterError) as caught:
             adapter.complete_with_tools("session-7", (Message("user", "Go"),), ())
         self.assertNotIn("sk-test-secret", str(caught.exception))
+        self.assertNotIn("private response body", str(caught.exception))
+        self.assertTrue(error.fp.closed)
 
     def test_response_size_limit_is_enforced(self):
         opener = FakeOpener(b"x" * 32)
