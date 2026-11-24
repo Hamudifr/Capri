@@ -97,6 +97,8 @@ class HostToolGateway:
                 raise HostAuthorityError("approval operation could not be matched to its host request")
             try:
                 operation_id = self._operation_id_resolver(credential, base, request)
+                if operation_id in operation_ids.values():
+                    raise HostAuthorityError("host operation identity must be unique within a batch")
                 operation_context = self._authority.for_operation(base, operation_id)
             except Exception:
                 raise HostAuthorityError("host operation authority resolution failed") from None
