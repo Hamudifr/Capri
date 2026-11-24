@@ -44,3 +44,17 @@ Search is bounded by depth and candidate count. Inputs are limited to 30x30 grid
 6. Evaluate on frozen held-out synthetic tasks with composition and distractor shifts.
 7. Compare against simple heuristics and an LLM-only baseline only if a genuinely no-cost model is available.
 8. Add causal interventions and temporal transition tasks only after transfer tests pass.
+
+## Verified initial implementation and benchmark — 2026-11-24
+
+- Rust stable compiler: 1.100.0; Cargo 1.100.0; target x86_64-unknown-linux-gnu; Ubuntu 26.04.1 GitHub-hosted runner.
+- Rust core uses a flat contiguous row-major Vec<u8> buffer with explicit height and width. This avoids one allocation per row and improves locality. Row views are borrowed slices; transformations allocate a single output buffer.
+- Rust CI on exact branch head: rustfmt check, Clippy with warnings denied, 13 unit tests, release build, and matched benchmark all passed.
+- Python CI on exact branch head: Python 3.15.2, package installation, CLI, Capri Doctor, and all 493 existing tests passed.
+- Matched synthetic task: learn a 20x20 grid clockwise rotation using the five-operation DSL, depth limit 1, 10,000 synthesis rounds, 100 warmups, median of 5 samples, same Ubuntu x86_64 runner.
+- Rust release: 10.34789 ms per 10,000 rounds = 966,380.59 operations/second.
+- Python 3.15.2 reference: 0.841468 s per 10,000 rounds = 11,884.00 operations/second.
+- Observed ratio: about 81.3x faster for this specific microbenchmark. Flat-buffer Rust also measured about 5.26x faster than the earlier nested-Vec Rust implementation on the same task.
+- These are microbenchmark results, not a general system speedup claim. They do not measure end-to-end agent reasoning, large-scale memory pressure, multi-core scaling, or generalization.
+
+CI run IDs: Rust #11 (45459282260); Python #797 (45459282207). PR #143 remains draft and unmerged.
