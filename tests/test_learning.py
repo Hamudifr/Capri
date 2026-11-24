@@ -572,7 +572,7 @@ class LearningStoreTests(unittest.TestCase):
         def fail_bundle_directory_sync(directory):
             nonlocal sync_calls
             sync_calls += 1
-            if sync_calls == 2:
+            if sync_calls == 1:
                 raise OSError("bundle directory fsync failed")
             return real_sync(directory)
 
@@ -580,7 +580,7 @@ class LearningStoreTests(unittest.TestCase):
             with self.assertRaises(LearningExportOutcomeUncertainError) as raised:
                 self.store.export_bundle(output)
 
-        self.assertEqual(sync_calls, 2)
+        self.assertEqual(sync_calls, 1)
         self.assertTrue(output.is_file())
         export_id = raised.exception.export_id
         self.assertEqual(raised.exception.path, str(output))
