@@ -85,12 +85,16 @@ class HostLearningConsentAuthorityTests(unittest.TestCase):
 
     def test_tampering_with_any_signed_field_is_rejected(self):
         consent = self.issue()
+        tampered_evidence = consent.evidence_ref[:-1] + (
+            "0" if consent.evidence_ref[-1] != "0" else "1"
+        )
+        self.assertNotEqual(tampered_evidence, consent.evidence_ref)
         changed = (
             replace(consent, consent_id="consent-002"),
             replace(consent, scope="other_scope"),
             replace(consent, policy_version="learning-consent-v2"),
             replace(consent, granted_at="2026-11-25T12:00:00+00:00"),
-            replace(consent, evidence_ref=consent.evidence_ref[:-1] + "0"),
+            replace(consent, evidence_ref=tampered_evidence),
         )
         for record in changed:
             with self.subTest(record=record):
