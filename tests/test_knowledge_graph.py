@@ -23,10 +23,10 @@ from capri_runtime import (
 )
 
 
-def neuron(title, *, notes="", state="Verified", source="https://example.org/evidence", confidence=0.9, tags=()):
+def neuron(title, *, notes="", state="Verified", source="https://example.org/evidence", confidence=0.9, tags=(), updated_at="2026-11-24T00:00:00+00:00"):
     return GraphNeuron(
         str(uuid4()), title, notes, "Fact", "Memory", state, confidence,
-        source, tuple(tags), "2026-11-24T00:00:00+00:00", "2026-11-24T00:00:00+00:00",
+        source, tuple(tags), "2026-11-24T00:00:00+00:00", updated_at,
     )
 
 
@@ -133,6 +133,32 @@ class KnowledgeGraphTests(unittest.TestCase):
         context = retrieve_knowledge("OpenAI adapter", provider, max_hops=1)
         self.assertEqual({x.neuron_id for x in context.neurons}, {seed.neuron_id, neighbor.neuron_id})
         self.assertEqual([x.synapse_id for x in context.synapses], [link.synapse_id])
+
+    def test_seed_truncation_prioritizes_sources_and_freshness(self):
+        unreferenced = neuron(
+            "A unreferenced note", notes="runtime", source=None,
+            updated_at="2026-11-24T23:00:00+00:00",
+        )
+        older = [
+            neuron(
+                f"{letter} older sourced note", notes="runtime",
+                updated_at="2026-11-01T00:00:00+00:00",
+            )
+            for letter in "BCDEF"
+        ]
+        freshest = neuron(
+            "Z freshest sourced note", notes="runtime",
+            updated_at="2026-11-24T00:00:00+00:00",
+        )
+        context = retrieve_knowledge(
+            "runtime",
+            InMemoryKnowledgeGraphProvider((unreferenced, *older, freshest), ()),
+            max_hops=0,
+        )
+        selected = {item.neuron_id for item in context.neurons}
+        self.assertIn(freshest.neuron_id, selected)
+        self.assertNotIn(unreferenced.neuron_id, selected)
+        self.assertTrue(context.truncated)
 
     def test_contradiction_always_keeps_both_sides_visible(self):
         current = neuron("Concrete adapter exists", notes="runtime OpenAI adapter", state="Verified")
