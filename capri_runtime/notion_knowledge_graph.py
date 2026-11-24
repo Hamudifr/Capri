@@ -201,17 +201,22 @@ class NotionKnowledgeGraphProvider:
             raise KnowledgeGraphError("max_neurons must be between one and one thousand")
         if type(max_synapses) is not int or not 1 <= max_synapses <= 5000:
             raise KnowledgeGraphError("max_synapses must be between one and five thousand")
-        if (
-            isinstance(cache_ttl_seconds, bool)
-            or not isinstance(cache_ttl_seconds, (int, float))
-            or not math.isfinite(cache_ttl_seconds)
-            or not 0 <= cache_ttl_seconds <= 300
+        if isinstance(cache_ttl_seconds, bool) or not isinstance(
+            cache_ttl_seconds, (int, float)
         ):
+            raise KnowledgeGraphError("cache_ttl_seconds must be between zero and 300")
+        try:
+            cache_ttl = float(cache_ttl_seconds)
+        except (OverflowError, TypeError, ValueError):
+            raise KnowledgeGraphError(
+                "cache_ttl_seconds must be between zero and 300"
+            ) from None
+        if not math.isfinite(cache_ttl) or not 0 <= cache_ttl <= 300:
             raise KnowledgeGraphError("cache_ttl_seconds must be between zero and 300")
         self.page_size = page_size
         self.max_neurons = max_neurons
         self.max_synapses = max_synapses
-        self.cache_ttl_seconds = float(cache_ttl_seconds)
+        self.cache_ttl_seconds = cache_ttl
         self._cache_lock = threading.Lock()
         self._cached_graph = None
         self._cache_expires_at = 0.0
