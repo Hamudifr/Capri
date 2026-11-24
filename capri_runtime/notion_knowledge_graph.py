@@ -1,8 +1,10 @@
 """Read-only Notion adapter for Capri's Neurons and Synapses data sources."""
 from __future__ import annotations
 
+import math
 import os
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from typing import Protocol
 from uuid import UUID
 
@@ -81,7 +83,13 @@ def _number(properties: object, name: str) -> float:
     value = _property(properties, name, "number").get("number")
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise KnowledgeGraphError(f"Notion number property {name} is malformed")
-    return float(value)
+    try:
+        number = float(value)
+    except (OverflowError, TypeError, ValueError):
+        raise KnowledgeGraphError(f"Notion number property {name} is malformed") from None
+    if not math.isfinite(number):
+        raise KnowledgeGraphError(f"Notion number property {name} is not finite")
+    return number
 
 
 def _tags(properties: object) -> tuple[str, ...]:
@@ -96,6 +104,18 @@ def _tags(properties: object) -> tuple[str, ...]:
     return tuple(result)
 
 
+def _timestamp(value: object, field: str) -> str:
+    if type(value) is not str or not value or len(value) > 64:
+        raise KnowledgeGraphError(f"Notion {field} timestamp is malformed")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            raise ValueError("timezone is required")
+        return parsed.astimezone(timezone.utc).isoformat()
+    except (OverflowError, TypeError, ValueError, OSError):
+        raise KnowledgeGraphError(f"Notion {field} timestamp is malformed") from None
+
+
 def _page_properties(raw: object) -> tuple[str, Mapping[str, object], str, str]:
     if type(raw) is not dict or raw.get("object") != "page":
         raise KnowledgeGraphError("Notion data source returned a non-page object")
@@ -105,10 +125,8 @@ def _page_properties(raw: object) -> tuple[str, Mapping[str, object], str, str]:
     props = raw.get("properties")
     if type(props) is not dict:
         raise KnowledgeGraphError("Notion page properties are missing")
-    created = raw.get("created_time", "")
-    edited = raw.get("last_edited_time", "")
-    if type(created) is not str or type(edited) is not str:
-        raise KnowledgeGraphError("Notion page timestamps are malformed")
+    created = _timestamp(raw.get("created_time"), "created_time")
+    edited = _timestamp(raw.get("last_edited_time"), "last_edited_time")
     return page_id, props, created, edited
 
 
