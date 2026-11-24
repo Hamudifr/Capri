@@ -497,11 +497,8 @@ mod tests {
     }
     #[test]
     fn program_operations_are_read_only_and_preserve_order() {
-        let program = Program::new(vec![
-            Operation::RotateClockwise,
-            Operation::FlipHorizontal,
-        ])
-        .unwrap();
+        let program =
+            Program::new(vec![Operation::RotateClockwise, Operation::FlipHorizontal]).unwrap();
 
         assert_eq!(
             program.operations(),
