@@ -21,7 +21,7 @@ from .tools import ExecutionContext, HostAuthorityResolver
 
 
 class HostRuntimeError(Exception):
-    """A trusted host composition or memory-resolution operation failed."""
+    """A trusted host composition or retrieved-context resolution operation failed."""
 
 
 class PrincipalBoundSessionStore(SessionStore):
@@ -98,10 +98,11 @@ class PrincipalBoundSessionStore(SessionStore):
 class CapriHostRuntime:
     """Compose trusted identity, principal-owned sessions, model turns, and a task worker.
 
-    All provider/model execution remains injected through ToolOrchestrator. The
-    memory resolver is trusted host code and must enforce principal-scoped access.
-    TaskWorker remains explicitly host-managed; run_task_worker() blocks until its
-    stop event is set and should be run under an external process supervisor.
+    All provider/model execution remains injected through ToolOrchestrator.
+    Memory and knowledge-graph resolvers are trusted host code and must enforce
+    principal-scoped access. TaskWorker remains explicitly host-managed;
+    run_task_worker() blocks until its stop event is set and should be run under
+    an external process supervisor.
     """
 
     def __init__(
