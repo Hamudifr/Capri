@@ -1,4 +1,5 @@
 """Dependency-free Python reference benchmark for the CCEL synthesis task."""
+from functools import reduce
 from itertools import product
 from statistics import median
 from time import perf_counter
@@ -27,7 +28,7 @@ def synthesize(examples, max_depth=1):
         matches = []
         for sequence in sequences:
             if all(
-                __import__("functools").reduce(apply, sequence, source) == target
+                reduce(apply, sequence, source) == target
                 for source, target in examples
             ):
                 matches.append(sequence)
