@@ -256,7 +256,7 @@ def retrieve_knowledge(
         adjacency.setdefault(edge.to_neuron_id, []).append(edge)
     for items in adjacency.values():
         items.sort(key=lambda e: (e.relationship, e.synapse_id))
-    while queue and len(selected) < max_neurons and len(selected_edges) < max_synapses:
+    while queue:
         current, depth = queue.popleft()
         if depth >= max_hops:
             continue
@@ -286,8 +286,6 @@ def retrieve_knowledge(
             for endpoint in missing:
                 selected[endpoint.neuron_id] = endpoint
                 queue.append((endpoint.neuron_id, depth + 1))
-    if queue and (len(selected) >= max_neurons or len(selected_edges) >= max_synapses):
-        truncated = True
     ordered_neurons = tuple(sorted(
         selected.values(),
         key=lambda n: (
