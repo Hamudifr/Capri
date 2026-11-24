@@ -183,6 +183,22 @@ class KnowledgeGraphTests(unittest.TestCase):
         self.assertEqual(len(history.neurons), 2)
         self.assertEqual(history.synapses[0].relationship, "Supersedes")
 
+    def test_history_mode_includes_non_active_edge_lifecycle_states(self):
+        for status in ("Proposed", "Rejected", "Superseded"):
+            with self.subTest(status=status):
+                seed = neuron("History source", notes="timeline topic")
+                neighbor = neuron("Historical related node")
+                link = edge(seed, neighbor, "Related to", status=status)
+                provider = InMemoryKnowledgeGraphProvider((seed, neighbor), (link,))
+                current = retrieve_knowledge("timeline topic", provider)
+                self.assertEqual(current.synapses, ())
+                history = retrieve_knowledge(
+                    "timeline topic", provider, include_history=True
+                )
+                self.assertEqual([item.synapse_id for item in history.synapses], [link.synapse_id])
+                self.assertEqual(history.synapses[0].status, status)
+                self.assertIn(neighbor.neuron_id, {item.neuron_id for item in history.neurons})
+
     def test_malicious_knowledge_is_escaped_and_remains_untrusted_data(self):
         hostile = neuron(
             "Security policy",
