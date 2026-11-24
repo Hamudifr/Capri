@@ -1,0 +1,46 @@
+# CCEL: Causal Compression and Experiment Loop
+
+## Rust-first implementation
+
+The canonical CCEL computational core is being migrated to Rust for predictable performance, memory safety and future parallel search. The crate is rust/ccel-core, uses the standard library only, and follows the latest stable toolchain through rust-toolchain.toml. Python remains available for Capri orchestration and integrations, not as the canonical CCEL search engine.
+
+No speedup is claimed until the Rust core is compiled, tested, benchmarked against the previous Python prototype on identical tasks, and profiled. Rust is not itself an intelligence breakthrough.
+
+## Purpose and current scope
+
+A research-only prototype for a non-LLM cognitive component. It learns a bounded family of grid transformations from examples, preserves ambiguity between consistent programs, predicts unseen inputs and selects an informative supplied probe.
+
+This is not AGI and is not claimed to outperform frontier LLMs generally. The current implementation is a small deterministic program-synthesis experiment.
+
+## Core loop
+1. Encode observations as validated grids.
+2. Enumerate bounded candidate programs in a small transformation DSL.
+3. Select minimum-depth consistent program families.
+4. Preserve equally simple explanations rather than silently choosing one.
+5. Predict each model's output for a new input.
+6. Select a safe supplied probe with maximum predictive entropy.
+7. Compare observation with predictions and rerun synthesis.
+
+## Current DSL
+- Rotate clockwise / counter-clockwise
+- Flip horizontally / vertically
+- Transpose
+
+Search is bounded by depth and candidate count. Inputs are limited to 30x30 grids with integer cells 0..9. The Rust core has no third-party crate dependencies, network access, model API calls or side effects.
+
+## Limitations
+- Finite hypothesis search, not a general world model.
+- No learned causal relations, object concepts, language, temporal dynamics or real-world actions yet.
+- Probe selection ranks caller-supplied safe probes; it does not autonomously generate the full experiment space.
+- Hand-designed DSL and priors constrain generalization.
+- This is a component experiment, not an autonomous agent or AGI.
+
+## Next experiments
+1. Compile and test exact Rust source on latest stable; resolve every compiler, format and Clippy finding.
+2. Establish Python-vs-Rust parity tests on identical frozen inputs and edge cases.
+3. Benchmark release builds with repeated runs and record hardware/toolchain; profile before optimizing.
+4. Add compositional object-centric DSL: connected components, recoloring, object movement, conditional rules.
+5. Generate bounded safe experiments and compare active versus passive acquisition.
+6. Evaluate on frozen held-out synthetic tasks with composition and distractor shifts.
+7. Compare against simple heuristics and an LLM-only baseline only if a genuinely no-cost model is available.
+8. Add causal interventions and temporal transition tasks only after transfer tests pass.
