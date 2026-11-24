@@ -411,7 +411,16 @@ class OpenAIResponsesAdapter:
                 raw = response.read(self.max_response_bytes + 1)
         except OpenAIResponsesAdapterError:
             raise
-        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError):
+        except urllib.error.HTTPError as exc:
+            try:
+                exc.close()
+            except Exception:
+                # Preserve the sanitized provider failure if cleanup itself fails.
+                pass
+            raise OpenAIResponsesAdapterError(
+                "provider request failed; response details were suppressed"
+            ) from None
+        except (urllib.error.URLError, TimeoutError, OSError):
             raise OpenAIResponsesAdapterError(
                 "provider request failed; response details were suppressed"
             ) from None
