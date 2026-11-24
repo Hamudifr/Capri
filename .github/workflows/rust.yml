@@ -44,5 +44,11 @@ jobs:
         run: cargo test --manifest-path rust/ccel-core/Cargo.toml --all-targets
       - name: Release build
         run: cargo build --manifest-path rust/ccel-core/Cargo.toml --release
-      - name: Benchmark smoke test
+      - name: Set up latest stable Python for matched reference benchmark
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: "3.15"
+      - name: Benchmark Rust core
         run: cargo bench --manifest-path rust/ccel-core/Cargo.toml --bench ccel
+      - name: Benchmark Python reference on same runner
+        run: python benchmarks/ccel_python.py
