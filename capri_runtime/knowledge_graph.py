@@ -233,7 +233,9 @@ def retrieve_knowledge(
     selected: dict[str, GraphNeuron] = {}
     selected_edges: dict[str, GraphSynapse] = {}
     queue: deque[tuple[str, int]] = deque()
-    for neuron in candidates[:min(5, max_neurons)]:
+    seed_limit = min(5, max_neurons)
+    truncated = len(candidates) > seed_limit
+    for neuron in candidates[:seed_limit]:
         selected[neuron.neuron_id] = neuron
         queue.append((neuron.neuron_id, 0))
     adjacency: dict[str, list[GraphSynapse]] = {}
@@ -271,12 +273,18 @@ def retrieve_knowledge(
                     if endpoint.neuron_id not in selected and len(selected) < max_neurons:
                         selected[endpoint.neuron_id] = endpoint
                         queue.append((endpoint.neuron_id, depth + 1))
+    if queue and (len(selected) >= max_neurons or len(selected_edges) >= max_synapses):
+        truncated = True
     ordered_neurons = tuple(sorted(
         selected.values(),
-        key=lambda n: (0 if n.evidence_state == "Verified" else 1, n.title.casefold(), n.neuron_id),
+        key=lambda n: (
+            -_score(tokens, n), -_EVIDENCE_RANK[n.evidence_state],
+            -float(n.confidence), 0 if n.source else 1,
+            n.updated_at, n.title.casefold(), n.neuron_id,
+        ),
     ))
     ordered_edges = tuple(sorted(selected_edges.values(), key=lambda e: e.synapse_id))
-    return UntrustedKnowledgeContext(ordered_neurons, ordered_edges, query)
+    return UntrustedKnowledgeContext(ordered_neurons, ordered_edges, query, truncated)
 
 
 def serialize_untrusted_knowledge_context(context: UntrustedKnowledgeContext) -> str:
