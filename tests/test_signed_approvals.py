@@ -74,6 +74,7 @@ class SignedApprovalTests(unittest.TestCase):
             replace(grant, argument_digest="f" * 64),
             replace(grant, expires_at="2026-11-06T13:00:00+00:00"),
             replace(grant, operation_id="session-1:call-2"),
+            replace(grant, operation_id=None),
         ):
             with self.subTest(tampered=tampered):
                 self.assertFalse(self.authority.verify(tampered))
