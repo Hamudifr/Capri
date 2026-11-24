@@ -147,12 +147,14 @@ class ToolOrchestrator:
         max_tool_message_bytes: int = 131_072,
         max_history_bytes: int = 2_097_152,
     ) -> None:
-        if not (
-            callable(getattr(adapter, "complete_with_tools", None))
-            or callable(getattr(adapter, "complete_with_tools_and_memory", None))
-        ):
+        if not any(callable(getattr(adapter, name, None)) for name in (
+            "complete_with_tools",
+            "complete_with_tools_and_memory",
+            "complete_with_tools_and_knowledge",
+            "complete_with_tools_and_memory_and_knowledge",
+        )):
             raise ToolOrchestrationError(
-                "adapter must implement complete_with_tools() or complete_with_tools_and_memory()"
+                "adapter must implement at least one supported model completion method"
             )
         if not isinstance(bridge, ToolExecutionBridge):
             raise ToolOrchestrationError("bridge must be a ToolExecutionBridge")
