@@ -65,7 +65,7 @@ The runtime now defines a separate immutable `UntrustedKnowledgeContext` for Neu
 
 - `ToolOrchestrator.run(..., knowledge_context=...)` routes graph context through `complete_with_tools_and_knowledge`.
 - When both context types are supplied, the adapter uses `complete_with_tools_and_memory_and_knowledge`.
-- `OpenAIResponsesAdapter` serializes the graph as deterministic, escaped JSON and appends it as its own data-only user message. The conversation history, trusted instructions, and host-filtered tool definitions remain separate.
+- `OpenAIResponsesAdapter` serializes the graph as deterministic, escaped JSON and prepends it as its own data-only user message before the conversation history, keeping the current user request last. The trusted instructions and host-filtered tool definitions remain separate. Its base policy explicitly treats both memory and graph data as untrusted reference context.
 - `CapriHostRuntime` can inject a trusted `knowledge_context_resolver(principal_id, session_id, user_text)`. It is called only after the host authenticates the principal and verifies session ownership.
 - The Notion provider reads the Neurons and Synapses data sources only. The graph retrieval engine is deterministic, bounded and read-only.
 
