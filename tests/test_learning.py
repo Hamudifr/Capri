@@ -439,6 +439,38 @@ class LearningStoreTests(unittest.TestCase):
             ).fetchone()[0]
         self.assertEqual(export_count, 0)
 
+
+    def test_bundle_directory_fsync_failure_keeps_published_bundle_nonactive(self):
+        self.store.record(example())
+        output = self.root / "uncertain-durable-bundle.zip"
+        real_sync = _fsync_directory
+        sync_calls = 0
+
+        def fail_bundle_directory_sync(directory):
+            nonlocal sync_calls
+            sync_calls += 1
+            if sync_calls == 2:
+                raise OSError("bundle directory fsync failed")
+            return real_sync(directory)
+
+        with patch("capri_core.learning._fsync_directory", side_effect=fail_bundle_directory_sync):
+            with self.assertRaisesRegex(OSError, "bundle directory fsync failed"):
+                self.store.export_bundle(output)
+
+        self.assertEqual(sync_calls, 2)
+        self.assertTrue(output.is_file())
+        with self.store._connection() as connection:
+            rows = connection.execute(
+                "SELECT export_id, status FROM learning_exports"
+            ).fetchall()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["status"], "publishing")
+        verification = self.store.verify_export(rows[0]["export_id"], output)
+        self.assertFalse(verification["valid"])
+        self.assertEqual(verification["reason"], "publishing")
+        self.assertEqual(list(self.root.glob(".uncertain-durable-bundle.zip.*.jsonl")), [])
+        self.assertEqual(list(self.root.glob(".uncertain-durable-bundle.zip.*.tmp")), [])
+
     def test_bundle_is_invalidated_when_any_source_consent_is_revoked(self):
         self.store.record(example())
         output = self.root / "revocable.zip"
