@@ -52,11 +52,14 @@ class SynthesisTests(unittest.TestCase):
         self.assertEqual(result.programs, (Program(()),))
 
     def test_ambiguity_is_preserved(self):
-        # A symmetric example does not identify whether a horizontal flip or
-        # identity generated it. The system must retain both explanations.
-        result = synthesize((Example(((1, 1),), ((1, 1),)),), max_depth=1)
-        self.assertEqual(result.depth, 0)
-        self.assertEqual(result.programs, (Program(()),))
+        # A one-row grid can be transposed or rotated clockwise to the same
+        # column. Both equally simple explanations must remain available.
+        result = synthesize(
+            (Example(((1, 2),), ((1,), (2,))),), max_depth=1
+        )
+        self.assertEqual(result.depth, 1)
+        self.assertIn(Program(("transpose",)), result.programs)
+        self.assertIn(Program(("rotate_cw",)), result.programs)
 
     def test_no_consistent_model_is_explicit(self):
         with self.assertRaises(NoConsistentModelError):
