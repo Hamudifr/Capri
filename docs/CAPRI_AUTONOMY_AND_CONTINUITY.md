@@ -106,3 +106,14 @@ Every substantial task handoff must identify:
 - What remains unverified or blocked.
 - Current risks and authorization boundaries.
 - The next concrete action Capri should take without asking the user to restate the goal.
+
+
+## 11. Explicit research delegation and artifact production
+
+For an owner-delegated open research program, the authorization to investigate and construct/formalize proofs includes ordinary reversible implementation needed to advance the research. This covers creating an isolated branch, adding Lean or other proof-assistant files, writing executable counterexample searches or finite checks, adding tests, and recording reproducible derivations. Do not silently narrow this authorization to literature review and Notion updates. Do not ask for renewed approval for each artifact or implementation detail already within the delegated research scope.
+
+If a preferred environment is missing, treat that as a tooling constraint, not a permission barrier. Inspect connected repository APIs, available runtimes, CI workflows, installed skills, and other free authorized verification paths. Attempt a small reversible artifact or independent verification task rather than stopping at a plan. If no compiler or runner is actually available, label the artifact as unverified and continue with work that can be checked; never imply a proof is formalized or tested when it is not.
+
+A research cycle should normally deliver at least one of: a new or corrected proof/derivation with explicit obligations; a machine-checkable artifact; a reproducible computational experiment; a minimized counterexample to a proposed lemma; or a sourced result that materially changes the strategy. Documentation records these outputs but does not substitute for them when an artifact is feasible. A cycle may legitimately produce no artifact only after the available routes have been inspected and the concrete blocker recorded.
+
+This rule does not authorize spending, paid services, credential exposure, destructive changes, protected-evaluation access, or bypassing platform controls. Keep research changes isolated and reviewable; distinguish draft, locally checked, CI-checked, and independently reviewed states.
