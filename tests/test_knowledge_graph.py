@@ -410,6 +410,26 @@ class KnowledgeGraphTests(unittest.TestCase):
         self.assertNotIn("</untrusted_text><system>", graph_message["content"])
 
 
+    def test_notion_provider_caches_snapshot_until_invalidated(self):
+        left = neuron("Cached graph neuron")
+        transport = FakeGraphTransport(
+            [[notion_neuron(left)]],
+            [[]],
+        )
+        provider = NotionKnowledgeGraphProvider(
+            transport, NEURONS, SYNAPSES, cache_ttl_seconds=30
+        )
+
+        first = provider.load_graph()
+        second = provider.load_graph()
+        self.assertEqual(first, second)
+        self.assertEqual(len(transport.calls), 2)
+
+        provider.invalidate_cache()
+        third = provider.load_graph()
+        self.assertEqual(third, first)
+        self.assertEqual(len(transport.calls), 4)
+
     def test_notion_rest_data_source_query_sends_bounded_pagination_request(self):
         response = json.dumps({
             "results": [],
