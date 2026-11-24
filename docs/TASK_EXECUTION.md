@@ -68,3 +68,25 @@ Cancellation is cooperative. Queued/retry-wait tasks cancel immediately. A runni
 ## Validation
 
 `tests/test_tasks.py` covers persistent state, idempotent creation, plan validation, concurrent claims, lease recovery, stale-worker rejection, bounded retries, step checkpointing, handler failure suppression, missing handlers, cancellation, event persistence, symlink rejection, and directory privacy. The repository quality workflow runs the full suite on Python 3.11, 3.12, and 3.13.
+
+
+## Uncertain handler outcomes and reconciliation quarantine
+
+A task handler may perform an external side effect and then raise, return an
+invalid/oversized result, or lose its worker process before the result is
+checkpointed. These cases are not safe automatic retries. The engine now moves
+such tasks to `reconciliation_required`, clears the lease, records an event,
+and excludes the task from future claims. An expired running lease is treated
+the same way because the store cannot prove whether the handler ran.
+
+Only trusted handlers may raise `RetryableTaskError`, and only when they can
+guarantee failure occurred before any external side effect. That explicit signal
+retains bounded retry behavior. A `ToolCancelledError` marked
+`outcome_uncertain=False` is terminal without quarantine; uncertain
+cancellation is quarantined.
+
+The current release adds the durable quarantine state but does not yet provide
+an owner-facing reconciliation decision API. Hosts must inspect and resolve
+quarantined tasks out of band; never reset them to queued/retry_wait or replay
+them without independently establishing the external outcome. Cancellation
+requests preserve the quarantine state and only set the cancellation flag.
