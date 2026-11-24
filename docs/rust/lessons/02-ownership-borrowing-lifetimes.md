@@ -97,3 +97,13 @@ Transformations take &Grid, read through shared borrows, allocate a separate out
 ## Status
 
 Applied and tested in CCEL. Mark as tested only; perform a delayed retrieval check before marking retained.
+
+
+## Primary references used
+
+- The Rust Book, Chapter 4.1, ownership: https://doc.rust-lang.org/book/ch04-01-what-is-ownership.html
+- The Rust Book, Chapter 4.2, references and borrowing: https://doc.rust-lang.org/book/ch04-02-references-and-borrowing.html
+- The Rust Book, Chapter 4.3, slices: https://doc.rust-lang.org/book/ch04-03-slices.html
+- The Rust Book, Chapter 10.3, lifetime syntax: https://doc.rust-lang.org/book/ch10-03-lifetime-syntax.html
+- The Rust Reference, pointer types: https://doc.rust-lang.org/reference/types/pointer.html
+- The Rust Reference, destructors and drop scopes: https://doc.rust-lang.org/reference/destructors.html
