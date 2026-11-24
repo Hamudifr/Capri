@@ -273,17 +273,18 @@ def retrieve_knowledge(
             neighbor = by_id[neighbor_id]
             if neighbor.evidence_state == "Superseded" and not (include_history or is_contradiction):
                 continue
+            endpoints = (left, right) if is_contradiction else (neighbor,)
+            missing = [item for item in endpoints if item.neuron_id not in selected]
+            if len(selected) + len(missing) > max_neurons:
+                truncated = True
+                continue
             if len(selected_edges) >= max_synapses:
+                truncated = True
                 break
             selected_edges[edge.synapse_id] = edge
-            if neighbor_id not in selected and len(selected) < max_neurons:
-                selected[neighbor_id] = neighbor
-                queue.append((neighbor_id, depth + 1))
-            if is_contradiction:
-                for endpoint in (left, right):
-                    if endpoint.neuron_id not in selected and len(selected) < max_neurons:
-                        selected[endpoint.neuron_id] = endpoint
-                        queue.append((endpoint.neuron_id, depth + 1))
+            for endpoint in missing:
+                selected[endpoint.neuron_id] = endpoint
+                queue.append((endpoint.neuron_id, depth + 1))
     if queue and (len(selected) >= max_neurons or len(selected_edges) >= max_synapses):
         truncated = True
     ordered_neurons = tuple(sorted(
