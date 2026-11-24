@@ -46,7 +46,7 @@ jobs:
       - name: Set up latest stable Python for matched reference benchmark
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
         with:
-          python-version: "3.15"
+          python-version: "3.x"
       - name: Benchmark Rust core
         run: cargo bench --manifest-path rust/ccel-core/Cargo.toml --bench ccel
       - name: Benchmark Python reference on same runner
