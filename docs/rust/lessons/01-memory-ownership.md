@@ -48,7 +48,7 @@ The slice borrows the original vector. It does not copy the row.
 
 ## Evidence from the Capri implementation
 
-The CCEL engine moved from Vec<Vec<u8>> to Vec<u8> with explicit width and height. On the final exact-head same-runner synthetic 20x20 rotation-synthesis benchmark, Rust release throughput was 749,805 ops/s and the Python 3.15.2 reference was 10,353 ops/s, about 72.4x for this one task. An earlier Rust run reached 81.3x; run-to-run variance is material. A nested-Vec Rust run measured 183,717 ops/s in a separate CI run, suggesting a roughly 4.1x flat-buffer gain, but this is not a controlled paired A/B. Do not generalize these microbenchmarks to all workloads.
+The CCEL engine moved from Vec<Vec<u8>> to Vec<u8> with explicit width and height. On the final exact-head same-runner synthetic 20x20 rotation-synthesis benchmark, Rust release throughput was 743,390 ops/s and the Python 3.15.2 reference was 10,345 ops/s, about 71.9x for this one task. Recent exact-head runs ranged from 71.9x to 77.4x; run-to-run variance is material. A nested-Vec Rust run measured 183,717 ops/s in a separate CI run, suggesting a roughly 4.1x flat-buffer gain, but this is not a controlled paired A/B. Do not generalize these microbenchmarks to all workloads.
 
 ## Exercises
 
