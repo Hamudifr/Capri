@@ -65,7 +65,11 @@ not a self-modifying hosted model and not an automatic training service.
   SQLite foreign-key enforcement binds each registry dependency to an existing
   export and consent record. The registry tracks `publishing`, `active`, `invalidated`, or `failed` state;
   publication uses a same-directory no-overwrite hard link. A crash or uncertain
-  publication remains non-active and therefore fails closed.
+  publication remains non-active and therefore fails closed. If the file is
+  published but final registry activation cannot be confirmed, the API raises
+  `LearningExportOutcomeUncertainError` with `export_id` and `path`; callers
+  can use `get_export_status()` and `verify_export()` to reconcile without
+  blindly repeating the export.
 - Revoking any contributing consent transactionally marks every registered
   dependent bundle invalidated. `verify_export()` checks registry state,
   bundle hash, manifest identity, and dataset hash. Downstream consumers must

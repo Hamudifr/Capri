@@ -58,6 +58,18 @@ class LearningDataError(ValueError):
     """Raised when an example fails the learning-data admission contract."""
 
 
+class LearningExportOutcomeUncertainError(RuntimeError):
+    """Published a bundle, but could not confirm its final registry state."""
+
+    def __init__(self, export_id: str, path: str | Path) -> None:
+        self.export_id = export_id
+        self.path = str(path)
+        super().__init__(
+            f"bundle {export_id} was published at {self.path}, "
+            "but its final registry state could not be confirmed"
+        )
+
+
 def _require_private_directory(directory: Path) -> None:
     """Create/check an owner-only POSIX directory without unsafe path ancestors."""
     if os.name != "posix":
@@ -526,7 +538,10 @@ class LearningStore:
 
         The registry is authoritative for revocation status. A bundle is usable
         only while verify_export reports valid; copying the ZIP does not copy
-        this registry or make revocation checks portable.
+        this registry or make revocation checks portable. If publication succeeds
+        but final registry state cannot be confirmed, the method raises
+        LearningExportOutcomeUncertainError with the export ID and path so the
+        caller can reconcile without blindly retrying.
         """
         target = Path(destination)
         _require_private_directory(target.parent)
@@ -641,7 +656,7 @@ class LearningStore:
                 "row_count": row_count,
                 "split_counts": manifest["split_counts"],
             }
-        except Exception:
+        except Exception as exc:
             if registered and not published:
                 with self._connection() as connection:
                     connection.execute(
@@ -649,6 +664,8 @@ class LearningStore:
                         "WHERE export_id=? AND status='publishing'",
                         (export_id,),
                     )
+            elif registered and published:
+                raise LearningExportOutcomeUncertainError(export_id, target) from exc
             raise
         finally:
             if descriptor >= 0:

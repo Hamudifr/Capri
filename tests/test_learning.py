@@ -8,7 +8,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from capri_core import learning as learning_module
-from capri_core.learning import LearningConsent, LearningDataError, LearningExample, LearningStore
+from capri_core.learning import (
+    LearningConsent,
+    LearningDataError,
+    LearningExample,
+    LearningExportOutcomeUncertainError,
+    LearningStore,
+)
 
 
 def example(**overrides):
@@ -455,20 +461,20 @@ class LearningStoreTests(unittest.TestCase):
             return real_sync(directory)
 
         with patch("capri_core.learning._fsync_directory", side_effect=fail_bundle_directory_sync):
-            with self.assertRaisesRegex(OSError, "bundle directory fsync failed"):
+            with self.assertRaises(LearningExportOutcomeUncertainError) as raised:
                 self.store.export_bundle(output)
 
         self.assertEqual(sync_calls, 2)
         self.assertTrue(output.is_file())
-        with self.store._connection() as connection:
-            rows = connection.execute(
-                "SELECT export_id, status FROM learning_exports"
-            ).fetchall()
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["status"], "publishing")
-        verification = self.store.verify_export(rows[0]["export_id"], output)
+        export_id = raised.exception.export_id
+        self.assertEqual(raised.exception.path, str(output))
+        status = self.store.get_export_status(export_id)
+        self.assertIsNotNone(status)
+        self.assertEqual(status["status"], "publishing")
+        verification = self.store.verify_export(export_id, output)
         self.assertFalse(verification["valid"])
         self.assertEqual(verification["reason"], "publishing")
+        self.assertEqual(verification["row_count"], 1)
         self.assertEqual(list(self.root.glob(".uncertain-durable-bundle.zip.*.jsonl")), [])
         self.assertEqual(list(self.root.glob(".uncertain-durable-bundle.zip.*.tmp")), [])
 
