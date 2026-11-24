@@ -5,6 +5,7 @@ owns authentication callbacks, process supervision, credentials, and lifecycle.
 """
 from __future__ import annotations
 
+import json
 from typing import Any, Callable
 
 from .memory import UntrustedMemoryContext
@@ -15,12 +16,36 @@ from .orchestration import (
 )
 from .runtime import Message, Session, SessionClosedError, SessionStore
 from .sqlite_sessions import SQLiteSessionStore
-from .tasks import TaskWorker
+from .tasks import SQLiteTaskStore, TaskRecord, TaskWorker
 from .tools import ExecutionContext, HostAuthorityResolver
 
 
 class HostRuntimeError(Exception):
     """A trusted host composition or memory-resolution operation failed."""
+
+
+def _assert_reconciliation_json(value: Any, depth: int = 0) -> None:
+    """Mirror the task store's strict JSON-value contract before callbacks."""
+    if depth > 16:
+        raise ValueError("JSON nesting exceeds 16 levels")
+    if value is None or type(value) in (bool, int, float):
+        return
+    if type(value) is str:
+        if any(0xD800 <= ord(character) <= 0xDFFF for character in value):
+            raise ValueError("JSON strings must contain Unicode scalar values")
+        return
+    if type(value) is list:
+        for child in value:
+            _assert_reconciliation_json(child, depth + 1)
+        return
+    if type(value) is dict:
+        for key, child in value.items():
+            if type(key) is not str:
+                raise ValueError("JSON object keys must be strings")
+            _assert_reconciliation_json(key, depth + 1)
+            _assert_reconciliation_json(child, depth + 1)
+        return
+    raise ValueError("value contains a non-JSON type")
 
 
 class PrincipalBoundSessionStore(SessionStore):
@@ -114,6 +139,10 @@ class CapriHostRuntime:
             [str, str, str], UntrustedMemoryContext | None
         ] | None = None,
         task_worker: TaskWorker | None = None,
+        task_store: SQLiteTaskStore | None = None,
+        task_reconciliation_verifier: Callable[
+            [str, str, str, str, str, dict[str, Any]], bool
+        ] | None = None,
     ) -> None:
         if not isinstance(authority, HostAuthorityResolver):
             raise HostRuntimeError("a trusted HostAuthorityResolver is required")
@@ -141,12 +170,26 @@ class CapriHostRuntime:
             raise HostRuntimeError("memory_context_resolver must be callable")
         if task_worker is not None and not isinstance(task_worker, TaskWorker):
             raise HostRuntimeError("task_worker must be a TaskWorker")
+        if task_store is not None and not isinstance(task_store, SQLiteTaskStore):
+            raise HostRuntimeError("task_store must be a SQLiteTaskStore")
+        if task_reconciliation_verifier is not None and not callable(task_reconciliation_verifier):
+            raise HostRuntimeError("task_reconciliation_verifier must be callable")
+        if (
+            task_store is not None and task_worker is not None
+            and task_store.path != task_worker.engine.store.path
+        ):
+            raise HostRuntimeError("task_store and task_worker must use the same database")
         self._authority = authority
         self._session_store = session_store
         self._orchestrator = orchestrator
         self._coordinator = coordinator
         self._memory_context_resolver = memory_context_resolver
         self._task_worker = task_worker
+        self._task_reconciliation_verifier = task_reconciliation_verifier
+        self._task_store = (
+            task_store if task_store is not None
+            else (task_worker.engine.store if task_worker is not None else None)
+        )
 
     def _context(self, credential: Any) -> ExecutionContext:
         return self._authority.resolve(credential)
@@ -165,6 +208,126 @@ class CapriHostRuntime:
         """Close only a session owned by the authenticated principal."""
         context = self._context(credential)
         return self._session_store.close_for_principal(session_id, context.principal_id)
+
+    def create_task(
+        self, credential: Any, plan: Any, idempotency_key: str | None = None
+    ) -> TaskRecord:
+        """Create a durable task owned by the authenticated principal.
+
+        Task creation requires a configured worker registry so plans cannot
+        enqueue handler names that are not currently approved for principal work.
+        """
+        context = self._context(credential)
+        if self._task_store is None:
+            raise HostRuntimeError("no task store is configured")
+        if self._task_worker is None:
+            raise HostRuntimeError("principal task creation requires a configured task worker")
+        allowed = self._task_worker.engine.principal_handlers
+        if type(plan) is list:
+            for step in plan:
+                if type(step) is dict and type(step.get("tool")) is str:
+                    if step["tool"] not in allowed:
+                        raise HostRuntimeError("task plan references an unavailable principal handler")
+        return self._task_store.create_for_principal(
+            context.principal_id, plan, idempotency_key=idempotency_key
+        )
+
+    def get_task(self, credential: Any, task_id: str) -> TaskRecord:
+        """Read only a task owned by the authenticated principal."""
+        context = self._context(credential)
+        if self._task_store is None:
+            raise HostRuntimeError("no task store is configured")
+        return self._task_store.get_for_principal(task_id, context.principal_id)
+
+    def cancel_task(self, credential: Any, task_id: str) -> TaskRecord:
+        """Cancel only a task owned by the authenticated principal."""
+        context = self._context(credential)
+        if self._task_store is None:
+            raise HostRuntimeError("no task store is configured")
+        return self._task_store.request_cancel_for_principal(
+            task_id, context.principal_id
+        )
+
+    def reconcile_task(
+        self,
+        credential: Any,
+        task_id: str,
+        decision_id: str,
+        outcome: str,
+        evidence_ref: str,
+        result: Any = None,
+    ) -> TaskRecord:
+        """Resolve an owned quarantined task through authenticated host policy.
+
+        The caller cannot supply an actor identity. The evidence verifier is
+        trusted host code and must verify that the referenced evidence supports
+        this exact actor, task, decision, outcome, and checkpoint result.
+        """
+        context = self._context(credential)
+        if "task.reconcile.owned" not in context.permissions:
+            raise HostRuntimeError("task reconciliation permission is required")
+        if self._task_store is None:
+            raise HostRuntimeError("no task store is configured")
+        if self._task_reconciliation_verifier is None:
+            raise HostRuntimeError("no trusted task evidence verifier is configured")
+        # Check immutable task ownership before invoking any host evidence
+        # callback. The store repeats ownership/state checks transactionally
+        # and preserves exact-decision idempotent replay.
+        self._task_store.get_for_principal(task_id, context.principal_id)
+        for value, limit, label in (
+            (task_id, 64, "task_id"),
+            (decision_id, 128, "decision_id"),
+            (evidence_ref, 512, "evidence_ref"),
+        ):
+            if (type(value) is not str or not value or len(value) > limit
+                    or any(0xD800 <= ord(character) <= 0xDFFF for character in value)):
+                raise HostRuntimeError(f"task reconciliation {label} is invalid")
+        if type(outcome) is not str or outcome not in {"succeeded", "failed", "unresolved"}:
+            raise HostRuntimeError("unsupported task reconciliation outcome")
+        if outcome != "succeeded" and result is not None:
+            raise HostRuntimeError("only a succeeded reconciliation may include a result")
+        if outcome == "succeeded" and result is not None and type(result) not in (dict, list):
+            raise HostRuntimeError("reconciliation result must be a JSON object or array")
+        try:
+            _assert_reconciliation_json(result)
+            payload = {
+                "task_id": task_id,
+                "decision_id": decision_id,
+                "outcome": outcome,
+                "evidence_ref": evidence_ref,
+                "result": result,
+            }
+            encoded = json.dumps(
+                payload, ensure_ascii=False, allow_nan=False, sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8", errors="strict")
+            if len(encoded) > 65_536:
+                raise ValueError("decision too large")
+            snapshot = json.loads(encoded.decode("utf-8"))
+        except (TypeError, ValueError, UnicodeEncodeError, RecursionError):
+            raise HostRuntimeError("task reconciliation decision is invalid") from None
+        verifier_payload = json.loads(encoded.decode("utf-8"))
+        try:
+            verified = self._task_reconciliation_verifier(
+                context.principal_id,
+                task_id,
+                decision_id,
+                outcome,
+                evidence_ref,
+                verifier_payload,
+            )
+        except Exception:
+            raise HostRuntimeError("task reconciliation evidence verification failed") from None
+        if verified is not True:
+            raise HostRuntimeError("task reconciliation evidence was not verified")
+        return self._task_store.reconcile_for_principal(
+            task_id,
+            context.principal_id,
+            decision_id,
+            outcome,
+            evidence_ref,
+            result=snapshot["result"],
+        )
 
     def run_turn(
         self,
