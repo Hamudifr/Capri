@@ -269,6 +269,7 @@ class SQLiteTaskStore:
             raise TaskValidationError("database ownership, permissions, or link count changed")
         connection = sqlite3.connect(self.path, timeout=5.0, isolation_level=None)
         connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute("PRAGMA recursive_triggers=ON")
         connection.execute("PRAGMA trusted_schema=OFF")
         connection.execute("PRAGMA synchronous=FULL")
         return connection
@@ -312,6 +313,12 @@ class SQLiteTaskStore:
                     BEGIN SELECT RAISE(ABORT, 'task ownership is immutable'); END""")
                 connection.execute("""CREATE TRIGGER IF NOT EXISTS task_owner_immutable_delete
                     BEFORE DELETE ON task_owners
+                    BEGIN SELECT RAISE(ABORT, 'task ownership is immutable'); END""")
+                connection.execute("""CREATE TRIGGER IF NOT EXISTS task_owner_immutable_insert
+                    BEFORE INSERT ON task_owners
+                    WHEN EXISTS (
+                        SELECT 1 FROM task_owners WHERE task_id=NEW.task_id
+                    )
                     BEGIN SELECT RAISE(ABORT, 'task ownership is immutable'); END""")
                 connection.execute("CREATE INDEX IF NOT EXISTS task_ready_idx ON tasks(state, available_at, created_at)")
                 connection.execute("CREATE INDEX IF NOT EXISTS task_owner_principal_idx ON task_owners(principal_id, task_id)")
