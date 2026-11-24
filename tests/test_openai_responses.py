@@ -269,15 +269,22 @@ class OpenAIResponsesAdapterTests(unittest.TestCase):
             '{"type":"object","properties":{},"required":[],"additionalProperties":false}',
             False,
         )
+        history = (
+            Message("user", "Earlier request."),
+            Message("assistant", "Earlier response."),
+            Message("user", "Continue"),
+        )
         adapter.complete_with_tools_and_memory(
-            "session-3", (Message("user", "Continue"),), (tool,), memory
+            "session-3", history, (tool,), memory
         )
         body = json.loads(opener.request.data.decode("utf-8"))
         self.assertNotIn(memory.records[0].content, body["instructions"])
         self.assertIn(memory.records[0].content, body["input"][0]["content"])
         self.assertEqual(body["input"][0]["role"], "user")
         self.assertIn("untrusted project-memory reference data", body["input"][0]["content"])
-        self.assertEqual(body["input"][-1], {"role": "user", "content": "Continue"})
+        self.assertEqual(body["input"][1], {"role": "user", "content": "Earlier request."})
+        self.assertEqual(body["input"][2], {"role": "assistant", "content": "Earlier response."})
+        self.assertEqual(body["input"][3], {"role": "user", "content": "Continue"})
         self.assertNotIn(memory.records[0].content, json.dumps(body["tools"]))
 
     def test_combined_memory_and_graph_precede_the_current_user_turn(self):
