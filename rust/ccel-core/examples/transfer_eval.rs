@@ -31,7 +31,7 @@ fn example(source: &[&str], target: &[&str]) -> Example {
     Example::new(grid(source), grid(target))
 }
 
-fn dataset_v1() -> Vec<Case> {
+fn dataset_v1_1() -> Vec<Case> {
     vec![
         Case {
             name: "rotate_cw_rectangular",
@@ -233,7 +233,7 @@ fn main() {
     // v1.1 deliberately records the cross-depth ambiguity limitation instead of hiding it.
     const DATASET: &str = "CCEL-TRANSFER-v1.1";
     const MAX_DEPTH: usize = 3;
-    let cases = dataset_v1();
+    let cases = dataset_v1_1();
     let unique_total = cases
         .iter()
         .filter(|case| matches!(case.kind, ExpectedKind::Unique))
