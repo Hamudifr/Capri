@@ -124,6 +124,38 @@ def response_payload():
 
 
 class KnowledgeGraphTests(unittest.TestCase):
+    def test_graph_models_and_context_reject_wrong_runtime_types(self):
+        invalid_neurons = (
+            ("kind", []),
+            ("layer", []),
+            ("evidence_state", []),
+        )
+        for field, value in invalid_neurons:
+            with self.subTest(field=field):
+                fields = {
+                    "neuron_id": str(uuid4()), "title": "Invalid graph node",
+                    "notes": "", "kind": "Fact", "layer": "Memory",
+                    "evidence_state": "Verified", "confidence": 0.9,
+                }
+                fields[field] = value
+                with self.assertRaises(KnowledgeGraphError):
+                    GraphNeuron(**fields)
+
+        left = neuron("Left endpoint")
+        right = neuron("Right endpoint")
+        for relationship, status in (([], "Active"), ("Related to", [])):
+            with self.subTest(relationship=relationship, status=status):
+                with self.assertRaises(KnowledgeGraphError):
+                    GraphSynapse(
+                        str(uuid4()), "Invalid relation", left.neuron_id,
+                        right.neuron_id, relationship, "", None, 0.8, status,
+                    )
+
+        with self.assertRaises(KnowledgeGraphError):
+            UntrustedKnowledgeContext((object(),), (), "query")
+        with self.assertRaises(KnowledgeGraphError):
+            UntrustedKnowledgeContext((), (object(),), "query")
+
     def test_traversal_retrieves_connected_neurons_and_edges(self):
         seed = neuron("OpenAI Responses adapter", notes="existing runtime adapter")
         neighbor = neuron("Host-owned tool authority", notes="permissions are host controlled")
