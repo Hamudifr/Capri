@@ -341,6 +341,17 @@ class KnowledgeGraphTests(unittest.TestCase):
         self.assertEqual(context.synapses, ())
         self.assertFalse(context.truncated)
 
+    def test_notion_provider_rejects_empty_page_with_continuation_cursor(self):
+        class EmptyPageWithCursorTransport(FakeGraphTransport):
+            def query_data_source(self, data_source_id, *, cursor=None, page_size=100):
+                return {"results": [], "next_cursor": "next"}
+
+        provider = NotionKnowledgeGraphProvider(
+            EmptyPageWithCursorTransport([], []), NEURONS, SYNAPSES
+        )
+        with self.assertRaises(KnowledgeGraphError):
+            provider.load_graph()
+
     def test_notion_provider_rejects_dangling_relations(self):
         left = neuron("Adapter")
         dangling = edge(left, neuron("Not in database"))
