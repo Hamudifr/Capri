@@ -122,10 +122,13 @@ class LearningStoreTests(unittest.TestCase):
         os.chmod(database, 0o600)
 
         LearningStore(database)
-        with sqlite3.connect(database) as connection:
+        connection = sqlite3.connect(database)
+        try:
             columns = {
                 row[1] for row in connection.execute("PRAGMA table_info(learning_exports)")
             }
+        finally:
+            connection.close()
         self.assertTrue({"export_kind", "artifact_path", "staging_path"}.issubset(columns))
 
     def test_rejects_example_without_active_consent_record(self):
