@@ -93,7 +93,7 @@ Track each topic as **unseen, studied, practiced, tested, retained, or needs rev
 - Index formula: row * width + column. A row is borrowed as a slice; no row-copy is needed for read-only views.
 - Why: nested vectors require separate row allocations and indirection. A flat buffer gives one allocation, contiguous storage, predictable indexing and improved cache locality.
 - Safety: Grid owns its buffer; callers receive shared slices. Transformations build a separate output buffer, avoiding aliasing and preserving safe Rust.
-- Evidence: the same 20x20 rotation-synthesis benchmark improved from 183,717 ops/s (nested rows) to 966,381 ops/s (flat buffer), approximately 5.26x on the same runner.
+- Evidence: the same 20x20 rotation-synthesis benchmark improved from 183,717 ops/s (nested rows) to 749,805 ops/s (flat buffer) across separate CI runs, an indicative ~4.1x change that still needs a paired A/B test.
 - Rust CI: 13 unit tests, Clippy, formatting, release build and benchmark passed on Rust 1.100.0.
 - Python CI: all 493 existing Capri tests passed on Python 3.15.2.
 
