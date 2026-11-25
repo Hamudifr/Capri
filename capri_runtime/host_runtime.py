@@ -551,6 +551,7 @@ class CapriHostRuntime:
             try:
                 snapshot = self._worker_registry.register(
                     approved, authenticated_worker_id=identity,
+                    **self._worker_registry_expiry_kwargs(),
                 )
             except WorkerRegistryError:
                 self._finish_worker_audit_operation()
@@ -605,6 +606,7 @@ class CapriHostRuntime:
                         worker_id,
                         authenticated_worker_id=worker_id,
                         in_flight_resolver=self._worker_in_flight,
+                        **self._worker_registry_expiry_kwargs(),
                     )
                     in_flight = snapshot.health.in_flight
                 else:
@@ -612,6 +614,7 @@ class CapriHostRuntime:
                     in_flight = self._worker_in_flight(worker_id)
                     snapshot = self._worker_registry.heartbeat(
                         worker_id, authenticated_worker_id=worker_id, in_flight=in_flight,
+                        **self._worker_registry_expiry_kwargs(),
                     )
             except HostRuntimeError:
                 # A rejected host load observation happens before the registry
@@ -652,6 +655,7 @@ class CapriHostRuntime:
             try:
                 snapshot = self._worker_registry.record_failure(
                     worker_id, authenticated_worker_id=worker_id,
+                    **self._worker_registry_expiry_kwargs(),
                 )
             except WorkerRegistryError:
                 self._finish_worker_audit_operation()
@@ -670,6 +674,8 @@ class CapriHostRuntime:
             # committed work. Close only the pending host wrappers it removed.
             for context in pending_contexts:
                 token = context.reservation.token
+                if token not in self._worker_reservation_contexts:
+                    continue
                 self._worker_reservation_contexts.pop(token, None)
                 self._record_worker_lifecycle_event(
                     "worker.reservation.revoked",
@@ -711,6 +717,31 @@ class CapriHostRuntime:
             and left.reservation.token == right.reservation.token
             and left.reservation.worker_id == right.reservation.worker_id
         )
+
+    def _record_expired_worker_reservations(
+        self, reservations: tuple[WorkerReservation, ...],
+    ) -> None:
+        """Persist expirations discovered by the registry operation's own transaction."""
+        for reservation in reservations:
+            self._worker_reservation_contexts.pop(reservation.token, None)
+            self._record_worker_lifecycle_event(
+                "worker.reservation.expired",
+                reservation.worker_id,
+                principal_id=reservation.principal_id or "host",
+                task_id=reservation.task_id,
+                capability=reservation.capability,
+                protocol_version=reservation.protocol_version,
+                descriptor_revision=reservation.descriptor_revision,
+                reservation_token=reservation.token,
+                expires_at_ns=reservation.expires_at_ns,
+                status="expired",
+                error_code="reservation_ttl_elapsed",
+            )
+
+    def _worker_registry_expiry_kwargs(self) -> dict[str, Any]:
+        if isinstance(self._worker_registry, SQLiteWorkerRegistry):
+            return {"on_expired": self._record_expired_worker_reservations}
+        return {}
 
     def _purge_worker_reservation_contexts(self) -> None:
         if self._worker_registry is None:
@@ -813,14 +844,22 @@ class CapriHostRuntime:
         allowed = self._worker_policy_allowlist(context.principal_id, task_id, capability)
         with self._worker_reservation_lock:
             self._purge_worker_reservation_contexts()
+            self._begin_worker_audit_operation()
             try:
-                return self._worker_registry.eligible(
+                candidates = self._worker_registry.eligible(
                     capability,
                     protocol_version=protocol_version,
                     authorized_worker_ids=allowed,
+                    **self._worker_registry_expiry_kwargs(),
                 )
             except WorkerRegistryError:
+                self._finish_worker_audit_operation()
                 raise HostRuntimeError("host worker candidate lookup was rejected") from None
+            except Exception:
+                self._worker_audit_healthy = False
+                raise HostRuntimeError("host worker candidate lookup failed; reconciliation is required") from None
+            self._finish_worker_audit_operation()
+            return candidates
 
     def get_worker_reservation_for_task(
         self, credential: Any, task_id: str,
@@ -836,13 +875,17 @@ class CapriHostRuntime:
             raise HostRuntimeError("task is unavailable to the authenticated principal") from None
         with self._worker_reservation_lock:
             self._purge_worker_reservation_contexts()
+            self._begin_worker_audit_operation()
             try:
                 reservation = self._worker_registry.get_reservation_for_task(
                     context.principal_id, task_id,
+                    **self._worker_registry_expiry_kwargs(),
                 )
             except Exception:
-                raise HostRuntimeError("durable worker reservation recovery failed") from None
+                self._worker_audit_healthy = False
+                raise HostRuntimeError("durable worker reservation recovery failed; reconciliation is required") from None
             if reservation is None:
+                self._finish_worker_audit_operation()
                 return None
             if (
                 reservation.principal_id != context.principal_id
@@ -857,6 +900,7 @@ class CapriHostRuntime:
                 reservation.protocol_version, reservation,
             )
             self._worker_reservation_contexts[reservation.token] = wrapped
+            self._finish_worker_audit_operation()
             return wrapped
 
     def reserve_worker_candidate(
@@ -884,6 +928,7 @@ class CapriHostRuntime:
                     authorized_worker_ids=allowed,
                     principal_id=context.principal_id,
                     task_id=task_id,
+                    **self._worker_registry_expiry_kwargs(),
                 )
             except WorkerRegistryError:
                 self._finish_worker_audit_operation()
@@ -901,6 +946,7 @@ class CapriHostRuntime:
                 try:
                     self._worker_registry.release_reservation(
                         reservation, authenticated_worker_id=reservation.worker_id,
+                        **self._worker_registry_expiry_kwargs(),
                     )
                 except WorkerRegistryError:
                     self._worker_audit_healthy = False
@@ -989,6 +1035,7 @@ class CapriHostRuntime:
                 try:
                     self._worker_registry.release_reservation(
                         stored.reservation, authenticated_worker_id=worker_id,
+                        **self._worker_registry_expiry_kwargs(),
                     )
                 except WorkerRegistryError:
                     self._worker_audit_healthy = False
@@ -1040,6 +1087,7 @@ class CapriHostRuntime:
             try:
                 committed = self._worker_registry.commit_reservation(
                     stored.reservation, authenticated_worker_id=worker_id,
+                    **self._worker_registry_expiry_kwargs(),
                 )
             except WorkerRegistryError:
                 self._finish_worker_audit_operation()
@@ -1124,10 +1172,12 @@ class CapriHostRuntime:
                         stored.reservation,
                         authenticated_worker_id=worker_id,
                         observed_unreserved_in_flight=observed_in_flight,
+                        **self._worker_registry_expiry_kwargs(),
                     )
                 else:
                     released = self._worker_registry.release_reservation(
                         stored.reservation, authenticated_worker_id=worker_id,
+                        **self._worker_registry_expiry_kwargs(),
                     )
             except WorkerRegistryError:
                 self._finish_worker_audit_operation()
