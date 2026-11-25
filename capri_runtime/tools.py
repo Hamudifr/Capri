@@ -594,6 +594,10 @@ class AuditEvent:
     argument_digest: str
     status: str
     error_code: str | None = None
+    resource_type: str | None = None
+    resource_id: str | None = None
+    task_id: str | None = None
+    metadata_json: str | None = None
 
 
 class AuditSink:
