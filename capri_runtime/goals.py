@@ -18,7 +18,7 @@ from uuid import uuid4
 
 from capri_core.validation import contains_surrogate
 from .sqlite_backup import backup_sqlite_database
-from .domain_events import DomainEvent, goal_event
+from .domain_events import DomainEvent, goal_event, project_domain_events
 
 
 class GoalError(Exception):
@@ -714,11 +714,33 @@ class SQLiteGoalStore:
                     WHERE goal_id=? ORDER BY event_id""",
                     (goal_id,),
                 ).fetchall()
-                return tuple(goal_event(
-                    event_id=row[0], goal_id=goal_id, timestamp=row[1],
-                    state=row[2], version=row[3], event_type=row[4],
-                    principal_id=principal_id,
-                ) for row in rows)
+                evidence = connection.execute(
+                    """SELECT evidence_id,evidence_type,reference,step_index,created_at
+                    FROM goal_evidence WHERE goal_id=? AND principal_id=? ORDER BY evidence_id""",
+                    (goal_id, principal_id),
+                ).fetchall()
+                events = [
+                    goal_event(
+                        event_id=row[0], goal_id=goal_id, timestamp=row[1],
+                        state=row[2], version=row[3], event_type=row[4],
+                        principal_id=principal_id,
+                    ) for row in rows
+                ]
+                events.extend(DomainEvent(
+                    id=f"evidence-{row[0]}",
+                    source=f"urn:capri:goal:{goal_id}",
+                    type="com.capri.goal.evidence_recorded",
+                    subject=goal_id,
+                    time=row[4],
+                    data=(
+                        ("actor_id", principal_id),
+                        ("evidence_type", row[1]),
+                        ("evidence_reference", row[2]),
+                        ("step_index", row[3]),
+                        ("derived_from", row[2]),
+                    ),
+                ) for row in evidence)
+                return project_domain_events(events)
             finally:
                 connection.close()
 
