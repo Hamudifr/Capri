@@ -29,7 +29,7 @@ class WorkerProtocolTests(unittest.TestCase):
             output={"value": 479001600},
         )
         decoded = WorkerResponse.from_json(response.to_json())
-        decoded.validate_for(self.request, expected_worker_id="local-python-1")
+        decoded.validate_for(self.request, expected_worker_id="local-python-1", elapsed_ms=4)
         self.assertEqual(decoded, response)
 
     def test_failed_response_requires_error_only(self):
@@ -101,7 +101,7 @@ class WorkerProtocolTests(unittest.TestCase):
             "req-18", "worker-1", "succeeded", 2, output={"value": 1}
         )
         with self.assertRaises(WorkerProtocolError):
-            response.validate_for(self.request, expected_worker_id="worker-1")
+            response.validate_for(self.request, expected_worker_id="worker-1", elapsed_ms=2)
         response = WorkerResponse(
             "req-17", "worker-2", "succeeded", 2, output={"value": 1}
         )
@@ -130,7 +130,41 @@ class WorkerProtocolTests(unittest.TestCase):
         short_request = WorkerRequest("req-17", "math.factorial", {}, 10)
         late_response = WorkerResponse("req-17", "worker-1", "succeeded", 11, output={"value": 1})
         with self.assertRaises(WorkerProtocolError):
-            late_response.validate_for(short_request, expected_worker_id="worker-1")
+            late_response.validate_for(short_request, expected_worker_id="worker-1", elapsed_ms=11)
+
+
+    def test_validate_for_requires_trusted_host_elapsed_time(self):
+        request = WorkerRequest("req-17", "math.factorial", {}, 10)
+        response = WorkerResponse(
+            "req-17", "worker-1", "succeeded", 1, output={"value": 1}
+        )
+        for elapsed in (None, True, 1.5, -1):
+            with self.subTest(elapsed=elapsed):
+                with self.assertRaises(WorkerProtocolError):
+                    response.validate_for(
+                        request, expected_worker_id="worker-1", elapsed_ms=elapsed
+                    )
+        response.validate_for(
+            request, expected_worker_id="worker-1", elapsed_ms=10
+        )
+        with self.assertRaises(WorkerProtocolError):
+            response.validate_for(
+                request, expected_worker_id="worker-1", elapsed_ms=11
+            )
+
+    def test_rejects_cycles_and_extreme_depth_without_recursion_error(self):
+        cyclic = {}
+        cyclic["self"] = cyclic
+        with self.assertRaises(WorkerProtocolError):
+            WorkerRequest("req-1", "math.factorial", cyclic, 100).to_json()
+
+        deeply_nested = {}
+        cursor = deeply_nested
+        for _ in range(2_000):
+            cursor["next"] = {}
+            cursor = cursor["next"]
+        with self.assertRaises(WorkerProtocolError):
+            WorkerRequest("req-1", "math.factorial", deeply_nested, 100).to_json()
 
     def test_worker_protocol_types_are_package_exports(self):
         from capri_runtime import WorkerProtocolError as ExportedError
