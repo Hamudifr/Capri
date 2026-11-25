@@ -4,6 +4,7 @@ import unittest
 from dataclasses import replace
 
 from capri_core.strategy import StrategyObservation
+from capri_runtime import SQLiteExecutionEvidenceJournal as ExportedExecutionEvidenceJournal
 from capri_runtime.execution_evidence import (
     SQLiteExecutionEvidenceJournal,
     StrategyBinding,
@@ -67,6 +68,9 @@ class SQLiteExecutionEvidenceJournalTests(unittest.TestCase):
             estimated_cost_units=10,
             latency_ms=125,
         )
+
+    def test_journal_is_a_public_package_export(self):
+        self.assertIs(ExportedExecutionEvidenceJournal, SQLiteExecutionEvidenceJournal)
 
     def test_signed_execution_event_validates_strategy_observation(self):
         reference = self.journal.record_execution(
