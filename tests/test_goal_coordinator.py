@@ -255,13 +255,12 @@ class GoalCoordinatorTests(unittest.TestCase):
             uncertain_goal.goal_id, "alice",
             expected_version=uncertain_goal.version, now=NOW,
         )
+        def uncertain_handler(data, key, principal):
+            raise RuntimeError("external effect uncertain")
+
         uncertain_engine = TaskEngine(
             self.task_store, {}, "uncertain-worker",
-            principal_handlers={
-                "collect": lambda data, key, principal: (
-                    (_ for _ in ()).throw(RuntimeError("external effect uncertain"))
-                ),
-            },
+            principal_handlers={"collect": uncertain_handler},
         )
         uncertain_task = uncertain_engine.run_once(now=NOW)
         self.assertEqual(uncertain_task.state, "reconciliation_required")
