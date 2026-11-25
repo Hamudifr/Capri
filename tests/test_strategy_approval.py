@@ -68,6 +68,11 @@ class HostStrategyApprovalAuthorityTests(unittest.TestCase):
             with self.subTest(field=field):
                 self.assertFalse(self.authority.verify(replace(grant, **{field: value})))
 
+    def test_unhashable_action_fails_with_typed_validation_error(self):
+        malformed = replace(self.request, action=[])
+        with self.assertRaises(StrategyAuthorizationError):
+            self.authority.issue_grant("valid", malformed)
+
     def test_invalid_credentials_fail_closed(self):
         with self.assertRaises(StrategyAuthorizationError):
             self.authority.issue_grant("invalid", self.request)
@@ -116,6 +121,11 @@ class HostStrategyApprovalAuthorityTests(unittest.TestCase):
         newer = authority.issue_grant("valid", self.request)
         self.assertEqual(newer.signature.split(":", 1)[0], "k2")
         self.assertTrue(authority.verify(newer))
+
+    def test_oversized_or_malformed_grants_fail_closed(self):
+        grant = self.authority.issue_grant("valid", self.request)
+        self.assertFalse(self.authority.verify(replace(grant, signature="x" * 2049)))
+        self.assertFalse(self.authority.verify(replace(grant, action=[])))
 
     def test_tampered_signature_is_rejected(self):
         grant = self.authority.issue_grant("valid", self.request)
