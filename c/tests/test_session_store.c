@@ -455,6 +455,41 @@ int main(void) {
     CapriSessionStore *schema_reopen=capri_session_store_open(schema_path,200,16000,64000,131072,&error);
     assert(schema_reopen==NULL && error==CAPRI_SESSION_DATABASE);
 
+    /* Removing a CHECK constraint must fail closed even when table names,
+       primary keys, foreign keys, indexes and triggers remain unchanged. */
+    char constraint_schema_path[512],constraint_backup_path[512];
+    snprintf(constraint_schema_path,sizeof constraint_schema_path,"%s/constraint-tampered.sqlite3",dir);
+    snprintf(constraint_backup_path,sizeof constraint_backup_path,"%s/constraint-backup.sqlite3",dir);
+    CapriSessionStore *constraint_store=capri_session_store_open(constraint_schema_path,200,16000,64000,131072,&error);
+    assert(constraint_store!=NULL && error==CAPRI_SESSION_OK);
+    CapriSession constraint_session={0};
+    assert(capri_session_create_for_principal(constraint_store,"constraint-principal",&constraint_session)==CAPRI_SESSION_OK);
+    capri_session_free(&constraint_session);
+    sqlite3 *constraint_tamper=NULL;
+    assert(sqlite3_open(constraint_schema_path,&constraint_tamper)==SQLITE_OK);
+    assert(sqlite3_exec(
+        constraint_tamper,
+        "PRAGMA foreign_keys=OFF;"
+        "DROP INDEX sessions_updated_at;"
+        "CREATE TABLE sessions_new("
+        "session_id TEXT PRIMARY KEY,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,"
+        "version INTEGER NOT NULL,closed INTEGER NOT NULL CHECK(closed IN(0,1)),"
+        "messages_json TEXT NOT NULL CHECK(json_valid(messages_json) AND json_type(messages_json)='array'));"
+        "INSERT INTO sessions_new SELECT * FROM sessions;"
+        "DROP TABLE sessions;"
+        "ALTER TABLE sessions_new RENAME TO sessions;"
+        "CREATE INDEX sessions_updated_at ON sessions(updated_at);",
+        NULL,NULL,NULL
+    )==SQLITE_OK);
+    sqlite3_close(constraint_tamper);
+    assert(capri_session_integrity_check(constraint_store)==CAPRI_SESSION_CORRUPT);
+    assert(capri_session_backup_to(constraint_store,constraint_backup_path)==CAPRI_SESSION_CORRUPT);
+    struct stat constraint_backup_missing;
+    assert(lstat(constraint_backup_path,&constraint_backup_missing)!=0);
+    capri_session_store_close(constraint_store);
+    CapriSessionStore *constraint_reopen=capri_session_store_open(constraint_schema_path,200,16000,64000,131072,&error);
+    assert(constraint_reopen==NULL && error==CAPRI_SESSION_DATABASE);
+
     /* Missing owner and lease foreign keys must fail startup, integrity and backup. */
     char owner_fk_schema_path[512],owner_fk_backup_path[512];
     snprintf(owner_fk_schema_path,sizeof owner_fk_schema_path,"%s/owner-fk-tampered.sqlite3",dir);
