@@ -488,7 +488,7 @@ class SQLiteStrategyEvidenceManifestStore:
             return False
 
 def validate_strategy_evidence_snapshot(connection: sqlite3.Connection) -> None:
-    """Validate optional strategy evidence manifests during task-store backup/restore."""
+    """Validate optional strategy evidence manifests during task-store backup and integrity checks."""
     table = connection.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='strategy_evidence_manifests'"
     ).fetchone()
@@ -512,16 +512,21 @@ def validate_strategy_evidence_snapshot(connection: sqlite3.Connection) -> None:
             "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND tbl_name='strategy_evidence_manifests'"
         ).fetchall()
     }
-    if (
-        "BEFORE UPDATE ON STRATEGY_EVIDENCE_MANIFESTS" not in triggers.get("strategy_evidence_immutable_update", "")
-        or "RAISE(ABORT" not in triggers.get("strategy_evidence_immutable_update", "")
-        or "BEFORE DELETE ON STRATEGY_EVIDENCE_MANIFESTS" not in triggers.get("strategy_evidence_immutable_delete", "")
-        or "RAISE(ABORT" not in triggers.get("strategy_evidence_immutable_delete", "")
-    ):
+    update_trigger = re.sub(r"\\s+", " ", triggers.get("strategy_evidence_immutable_update", "")).strip()
+    delete_trigger = re.sub(r"\\s+", " ", triggers.get("strategy_evidence_immutable_delete", "")).strip()
+    update_expected = (
+        "BEFORE UPDATE ON STRATEGY_EVIDENCE_MANIFESTS BEGIN SELECT RAISE(ABORT, "
+        "'STRATEGY EVIDENCE MANIFESTS ARE APPEND-ONLY'); END"
+    )
+    delete_expected = (
+        "BEFORE DELETE ON STRATEGY_EVIDENCE_MANIFESTS BEGIN SELECT RAISE(ABORT, "
+        "'STRATEGY EVIDENCE MANIFESTS ARE APPEND-ONLY'); END"
+    )
+    if update_expected not in update_trigger or delete_expected not in delete_trigger:
         raise StrategyStoreError("strategy evidence append-only protections are missing")
     unique_cohort_index = False
     for index in connection.execute("PRAGMA index_list(strategy_evidence_manifests)").fetchall():
-        if index[2] != 1:
+        if index[2] != 1 or index[4] != 0:
             continue
         index_name = str(index[1]).replace('"', '""')
         indexed_columns = [

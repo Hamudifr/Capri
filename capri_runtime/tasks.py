@@ -1337,7 +1337,7 @@ class SQLiteTaskStore:
                 validate_strategy_evidence_snapshot(connection)
             except Exception:
                 raise TaskValidationError(
-                    "backup contains invalid strategy evidence manifests"
+                    "task store contains invalid strategy evidence manifests"
                 ) from None
 
     def backup_to(self, destination_path: str) -> str:
