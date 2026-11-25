@@ -10,6 +10,10 @@ from .domain_events import (
 from .worker_protocol import (
     WorkerProtocolError, WorkerRequest, WorkerResponse,
 )
+from .worker_registry import (
+    InMemoryWorkerRegistry, WorkerConflictError, WorkerDescriptor,
+    WorkerHealth, WorkerNotFoundError, WorkerRegistryError, WorkerSnapshot,
+)
 from .runtime import (
     Message,
     ModelAdapter,
@@ -160,6 +164,13 @@ __all__ = [
     "WorkerProtocolError",
     "WorkerRequest",
     "WorkerResponse",
+    "InMemoryWorkerRegistry",
+    "WorkerConflictError",
+    "WorkerDescriptor",
+    "WorkerHealth",
+    "WorkerNotFoundError",
+    "WorkerRegistryError",
+    "WorkerSnapshot",
     "ToolBudgetExceededError",
     "GoalCoordinator",
     "GoalExecution",
