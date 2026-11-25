@@ -23,9 +23,11 @@ The task claim is revalidated against the authoritative `SQLiteTaskStore` and pr
 1. A trusted worker obtains a live `TaskClaim`.
 2. The worker executes the host-authorized handler.
 3. Configure `TaskEngine` with both `execution_evidence_journal` and a host-only `execution_evidence_credential(claim)` resolver. After a principal-owned handler returns and its result passes JSON validation, `TaskEngine` calls `record_execution(credential, claim, result)` before `finish_step` consumes the claim lease. Legacy unowned tasks are not recorded.
-4. The journal hashes the canonical bounded result, asks the injected verifier to independently derive outcome/metrics, signs canonical event metadata, and appends the event to the shared private SQLite database.
-5. The returned `host-execution-event:<uuid>` reference can populate a `StrategyObservation.evidence_ref`.
-6. The existing `SQLiteStrategyEvidenceManifestStore` can use the journal's `classify_task_family` and `validate_source_events` methods as its trusted callbacks.
+4. The journal hashes the canonical bounded result, asks the injected verifier to independently derive outcome/metrics, signs canonical event metadata, and appends the event to the shared private SQLite database before `finish_step`.
+5. The event is not eligible for strategy evidence until the authoritative task reaches `succeeded`. Admission rechecks the immutable task-event history for the exact step index and attempt, then hashes the exact persisted result at that step and compares it with the event's result digest.
+6. If the process crashes, the lease is lost, or `finish_step` fails after the append, the event remains cryptographically intact but is not admitted into a strategy cohort. A later successful retry does not validate the stale attempt because its completion event has a different attempt number.
+7. Only after successful task completion can the returned `host-execution-event:<uuid>` reference populate a `StrategyObservation.evidence_ref`.
+8. The existing `SQLiteStrategyEvidenceManifestStore` can use the journal's `classify_task_family` and `validate_source_events` methods as its trusted callbacks.
 
 A task step attempt admits at most one evidence event, regardless of strategy ID. A repeated write is idempotent only when the claim/result digests, principal, strategy class/version, task classification, verified outcome, and all measured metrics match. Any drift is rejected as conflicting evidence.
 
@@ -38,6 +40,7 @@ SQLite update/delete triggers provide append-only guards. Canonical payload hash
 ## Important limits
 
 - A signed event proves that the configured trusted host callbacks attested to the recorded execution metadata. It does not make a defective or dishonest verifier correct.
+- Cryptographic integrity and cohort admissibility are separate: `integrity_check()` validates stored signatures even for pending/orphan events, while `validate_source_events()` additionally requires successful task completion and an exact persisted-result digest match.
 - Strategy identity is only as reliable as the injected host resolver.
 - Task-family classification is only as reliable as the injected host classifier and its source metadata.
 - Evidence collection is opt-in. The embedding host must construct the journal with trusted callbacks, then configure `TaskEngine` with that journal and a credential resolver that returns a host-held collector credential for the claim's principal. Never expose either object or credential resolver to model-visible tools.
