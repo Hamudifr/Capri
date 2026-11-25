@@ -217,7 +217,7 @@ CapriSessionStore *capri_session_store_open(const char *path,size_t max_messages
     if(rc==SQLITE_OK && sqlite3_db_config(s->db,SQLITE_DBCONFIG_DEFENSIVE,1,NULL)!=SQLITE_OK) rc=SQLITE_ERROR;
 #endif
     if(rc!=SQLITE_OK || !schema(s->db) || !store_path_safe(s) ||
-       !owner_triggers_valid(s->db)){
+       !session_schema_valid(s->db) || !owner_triggers_valid(s->db)){
         if(s->db)sqlite3_close(s->db);
         pthread_mutex_destroy(&s->mutex);free(s->path);free(s);
         if(error)*error=CAPRI_SESSION_DATABASE;
@@ -337,8 +337,58 @@ static bool owner_triggers_valid(sqlite3 *db) {
         "CREATE TRIGGER session_owners_immutable_insert BEFORE INSERT ON session_owners WHEN EXISTS(SELECT 1 FROM session_owners WHERE session_id=NEW.session_id) BEGIN SELECT RAISE(ABORT,'session owner is immutable'); END"
     );
 }
+static bool table_primary_key_is(sqlite3 *db,const char *table,const char *column) {
+    char query[96];
+    int written=snprintf(query,sizeof query,"PRAGMA table_info(%s)",table);
+    if(written<0||(size_t)written>=sizeof query)return false;
+    sqlite3_stmt *st=NULL;
+    if(sqlite3_prepare_v2(db,query,-1,&st,NULL)!=SQLITE_OK)return false;
+    int rc,primary_key_columns=0;
+    bool expected_primary_key=false;
+    while((rc=sqlite3_step(st))==SQLITE_ROW){
+        const unsigned char *name=sqlite3_column_text(st,1);
+        int primary_key_ordinal=sqlite3_column_int(st,5);
+        if(primary_key_ordinal>0){
+            ++primary_key_columns;
+            expected_primary_key=primary_key_ordinal==1&&name
+                &&strcmp((const char*)name,column)==0;
+        }
+    }
+    bool valid=rc==SQLITE_DONE&&primary_key_columns==1&&expected_primary_key;
+    sqlite3_finalize(st);
+    return valid;
+}
+
+static bool table_session_foreign_key_is_valid(sqlite3 *db,const char *table) {
+    char query[112];
+    int written=snprintf(query,sizeof query,"PRAGMA foreign_key_list(%s)",table);
+    if(written<0||(size_t)written>=sizeof query)return false;
+    sqlite3_stmt *st=NULL;
+    if(sqlite3_prepare_v2(db,query,-1,&st,NULL)!=SQLITE_OK)return false;
+    int rc=sqlite3_step(st);
+    bool valid=rc==SQLITE_ROW
+        &&sqlite3_column_text(st,2)&&strcmp((const char*)sqlite3_column_text(st,2),"sessions")==0
+        &&sqlite3_column_text(st,3)&&strcmp((const char*)sqlite3_column_text(st,3),"session_id")==0
+        &&sqlite3_column_text(st,4)&&strcmp((const char*)sqlite3_column_text(st,4),"session_id")==0
+        &&sqlite3_column_text(st,5)&&strcmp((const char*)sqlite3_column_text(st,5),"NO ACTION")==0
+        &&sqlite3_column_text(st,6)&&strcmp((const char*)sqlite3_column_text(st,6),"CASCADE")==0
+        &&sqlite3_column_text(st,7)&&strcmp((const char*)sqlite3_column_text(st,7),"NONE")==0;
+    if(valid)valid=sqlite3_step(st)==SQLITE_DONE;
+    else if(rc==SQLITE_ROW)sqlite3_step(st);
+    sqlite3_finalize(st);
+    return valid;
+}
+
+static bool session_schema_valid(sqlite3 *db) {
+    return table_primary_key_is(db,"sessions","session_id")
+        &&table_primary_key_is(db,"session_owners","session_id")
+        &&table_primary_key_is(db,"session_turn_leases","session_id")
+        &&table_session_foreign_key_is_valid(db,"session_owners")
+        &&table_session_foreign_key_is_valid(db,"session_turn_leases");
+}
+
 static CapriSessionError validate_backup_snapshot(CapriSessionStore *store,sqlite3 *db) {
-    if(!owner_triggers_valid(db))return CAPRI_SESSION_CORRUPT;
+    if(!session_schema_valid(db)||!owner_triggers_valid(db))return CAPRI_SESSION_CORRUPT;
     sqlite3_stmt *st=NULL;int rc=sqlite3_prepare_v2(db,"PRAGMA integrity_check",-1,&st,NULL);
     if(rc!=SQLITE_OK)return map_sqlite(rc);
     rc=sqlite3_step(st);bool integrity=rc==SQLITE_ROW&&sqlite3_column_text(st,0)&&strcmp((const char*)sqlite3_column_text(st,0),"ok")==0;sqlite3_finalize(st);
