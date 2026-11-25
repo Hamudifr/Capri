@@ -110,7 +110,8 @@ class SQLiteStrategyEvidenceManifestStore:
                     matched_pairs INTEGER NOT NULL,
                     task_family TEXT NOT NULL,
                     manifest_json TEXT NOT NULL,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    UNIQUE(principal_id,strategy_class,cohort_sha256)
                 )""")
                 connection.execute("""CREATE TRIGGER IF NOT EXISTS strategy_evidence_immutable_update
                     BEFORE UPDATE ON strategy_evidence_manifests
@@ -144,6 +145,9 @@ class SQLiteStrategyEvidenceManifestStore:
             raise StrategyAuthorizationError("strategy observations are invalid") from None
         if not evaluation.eligible_for_manual_review:
             raise StrategyAuthorizationError("strategy cohort is not eligible for manual review")
+        seen_references: set[tuple[str, str]] = set()
+        baseline_references: set[str] = set()
+        candidate_references: set[str] = set()
         for record in records:
             if (
                 not _IDENTIFIER.fullmatch(record.task_id)
@@ -154,6 +158,16 @@ class SQLiteStrategyEvidenceManifestStore:
                 or not _OPAQUE_REF.fullmatch(record.evidence_ref)
             ):
                 raise StrategyAuthorizationError("observation identifiers must be bounded opaque host references")
+            reference_key = (record.strategy_id, record.evidence_ref)
+            if reference_key in seen_references:
+                raise StrategyAuthorizationError("evidence references must be unique within each strategy")
+            seen_references.add(reference_key)
+            if record.strategy_id == baseline_id:
+                baseline_references.add(record.evidence_ref)
+            else:
+                candidate_references.add(record.evidence_ref)
+        if baseline_references & candidate_references:
+            raise StrategyAuthorizationError("baseline and candidate evidence references must be disjoint")
         return records
 
     def register_manifest(
@@ -357,7 +371,8 @@ class SQLiteStrategyEvidenceManifestStore:
                 if type(item) is not dict or set(item) != _OBSERVATION_FIELDS:
                     return False
                 records.append(StrategyObservation(**item))
-            evaluation = evaluate_strategies(baseline, candidate, tuple(records), min_pairs=20)
+            validated_records = self._validate_observations(baseline, candidate, tuple(records))
+            evaluation = evaluate_strategies(baseline, candidate, validated_records, min_pairs=20)
             if (
                 not evaluation.eligible_for_manual_review
                 or evaluation.cohort_sha256 != cohort_sha256
