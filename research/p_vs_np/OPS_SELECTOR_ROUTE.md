@@ -60,3 +60,25 @@ This is only a finite combinatorial analogy. It does not model the circuit-size 
 - Chen et al., *Beyond Natural Proofs: Hardness Magnification and Locality*, JACM 69(4), 2022: https://doi.org/10.1145/3538391
 - Ježil–Tsintsilidas, *Parallelism and Adaptivity in Student-Teacher Witnessing* (2026): https://arxiv.org/abs/2602.19934
 - Wittcop, *2N Circuit Lower Bounds for the Minimum Circuit Size Problem* (November 2026 manuscript): https://www.academia.edu/180415409/2N_Circuit_Lower_Bounds_for_the_Minimum_Circuit_Size_Problem
+
+# R37 APC1 transfer audit — relative counting is the obstacle
+
+A tempting bridge to the Pich–Santhanam Open Problem 2 is to rescale the OPS greedy selector to polynomial circuit sizes. If the high hardness threshold is H=n^d and the low threshold is s=H/(10n), then the OPS majority argument has a polynomial number of rounds and a polynomial-size sample. For SAT, the sample can be augmented with one representative satisfying assignment for each satisfiable formula, producing the mixed-label package shape required by the KPS interface.
+
+However, this does **not** by itself give an APC₁ proof.
+
+The OPS selector does not merely need an additive approximation to the number of consistent circuits. At a late stage, its survivor set R_i may contain only 4n² circuits among a universe of 2^{poly(n)} descriptions. An additive approximation with error ε|U| for ε=1/poly(n) cannot distinguish |R_i|=4n² from |R_i|=0, because ε|U| is exponentially larger than 4n². OPS uses relative approximate counting of the NP relation “circuit description is consistent with the current sample”; under NP⊆Circuit[poly], this can be implemented nonuniformly. That relative-counting strength is not supplied merely by APC₁'s polynomial-precision additive counting.
+
+The existence proof for a good next point is a combinatorial double-counting argument over n-subsets of R_i (OPS Lemma 4.7 / Claim 4.8). Formalizing it in APC₁ still requires handling the sparse definable set R_i. The fact that the set has at least 4n² elements does not make it a noticeable fraction of the full circuit-description universe.
+
+**Conclusion:** OPS gives a constructive selector under the stronger nonuniform relative-counting assumption NP⊆P/poly. It is not yet a direct solution to the APC₁ MinMax bottleneck. A viable APC₁ proof must avoid conditioning on an exponentially sparse survivor set, or find a way to represent/count that set with only polynomial-precision additive counting.
+
+Potential alternatives, not yet proved:
+- a soft-weight potential over all circuits whose total mass has a polynomial lower bound;
+- a direct minimax/duality proof that never conditions on the survivor set;
+- a dense encoding or compressed representation of relevant circuits that preserves the disagreement relation;
+- a proof that the special structure of circuit disagreement prevents the survivor set from becoming too sparse.
+
+The naive soft-weight idea also has a warning: ordinary exponential weights can assign minimum mass exp(-poly(n)) after poly(n) rounds, again below APC₁'s additive precision. A polynomial floor may destroy the usual regret bound. This requires a genuine new lemma, not just replacing zero-one weights by clipped weights.
+
+Parameter caveat: choosing β_n=Θ(log n/n) makes 2^(β_n n) polynomial in n and the OPS sample size polynomial, but the published hardness-magnification theorem states β as a fixed positive constant. The variable-β rescaling is an exploratory parameter substitution for the combinatorial selector lemma, not a published corollary of Theorem 1.4.
