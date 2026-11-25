@@ -228,6 +228,15 @@ class HostStrategyApprovalAuthority:
             _grant_payload(grant)
             if type(grant.signature) is not str or len(grant.signature) > 2048:
                 return False
+            issued = datetime.fromisoformat(grant.issued_at.replace("Z", "+00:00"))
+            expires = datetime.fromisoformat(grant.expires_at.replace("Z", "+00:00"))
+            if (
+                issued.tzinfo is None or issued.utcoffset() is None
+                or expires.tzinfo is None or expires.utcoffset() is None
+                or expires <= issued
+                or (expires - issued).total_seconds() > self._max_ttl
+            ):
+                return False
             key_id, separator, encoded_tag = grant.signature.partition(":")
             if not separator or not _KEY_ID.fullmatch(key_id) or not re.fullmatch(r"[0-9a-f]{64}", encoded_tag):
                 return False
