@@ -82,4 +82,4 @@ if reservation is not None:
 
 ## Next integration boundary
 
-Before connecting this catalogue to a dispatcher, implement host-authenticated transport/supervisor identity, durable audit integration, and an atomic host-owned capacity reservation. Keep dispatch policy and worker execution separate from this registry.
+Before connecting this catalogue to a dispatcher, integrate a trusted host supervisor that supplies authenticated transport identity, re-checks principal/task/capability/resource/approval/budget policy at dispatch and response acceptance, updates host-observed in-flight counts, and records lifecycle events in a durable audit sink. Keep process launch, cancellation, OS isolation and restart policy separate from this registry.
