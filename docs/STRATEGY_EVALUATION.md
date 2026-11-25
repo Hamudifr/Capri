@@ -37,6 +37,8 @@ A candidate is eligible for manual review only when all conditions hold:
 
 Any per-task safety, success, or resource regression blocks eligibility, even if aggregate averages look better. Equal outcomes with no strict improvement do not justify changing strategy. The result includes matched/unmatched counts, both metric summaries, improved dimensions, and stable block reasons.
 
+The result also includes `input_fingerprint_sha256`, a deterministic SHA-256 fingerprint over the strategy IDs and every supplied baseline/candidate observation (including unmatched records). Input ordering does not affect the fingerprint; changing an observation does. This identifies the exact input set for audit comparison, but it is not a signature, does not prove that evidence references are truthful, and is not a privacy/anonymization mechanism.
+
 Estimated-cost units are abstract owner-defined integers, not currency, and the evaluator does not spend money or call a provider. Latency is supplied by the caller; this module does not measure it.
 
 ## Interpretation and limits
