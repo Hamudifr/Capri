@@ -339,8 +339,20 @@ class CapriHostRuntimeTests(unittest.TestCase):
         self.assertEqual(host.get_goal_events("alice-token", goal.goal_id)[-1]["event_type"], "task_linked")
         self.assertEqual(worker.run_once().state, "succeeded")
         reconciled = host.reconcile_goal("alice-token", goal.goal_id)
-        self.assertEqual(reconciled.goal.state, "succeeded")
+        self.assertEqual(reconciled.goal.state, "awaiting_verification")
         self.assertEqual(len(reconciled.goal.evidence), 1)
+        with self.assertRaises(HostRuntimeError):
+            host.transition_goal(
+                "alice-token", goal.goal_id, "succeeded",
+                expected_version=reconciled.goal.version,
+            )
+        accepted = host.verify_goal(
+            "alice-token", goal.goal_id, accepted=True,
+            evidence_reference="d" * 64,
+            expected_version=reconciled.goal.version,
+        )
+        self.assertEqual(accepted.state, "succeeded")
+        self.assertEqual(len(accepted.evidence), 2)
         with self.assertRaises(GoalNotFoundError):
             host.get_goal_events("bob-token", goal.goal_id)
 
