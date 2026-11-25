@@ -90,12 +90,13 @@ class SQLiteSessionStore(SessionStore):
                 if opened.st_uid != os.geteuid() or opened.st_nlink != 1:
                     raise ValidationError("database file ownership or link count is unsafe")
                 os.fchmod(descriptor, 0o600)
+            fresh_database = opened.st_size == 0
         finally:
             os.close(descriptor)
 
         self.path = absolute
         self._lock = threading.RLock()
-        self._initialize()
+        self._initialize(fresh_database=fresh_database)
 
     def _connect(self) -> sqlite3.Connection:
         parent = os.path.dirname(self.path)
@@ -124,65 +125,167 @@ class SQLiteSessionStore(SessionStore):
         connection.execute("PRAGMA synchronous=FULL")
         return connection
 
-    def _initialize(self) -> None:
+    @staticmethod
+    def _normalized_schema_sql(sql: str) -> str:
+        return "".join(sql.split()).casefold()
+
+    @staticmethod
+    def _schema_primary_key_matches(
+        connection: sqlite3.Connection, table: str, column: str,
+    ) -> bool:
+        rows = connection.execute(f"PRAGMA table_info({table})").fetchall()
+        primary_keys = [(row[1], row[5]) for row in rows if row[5] > 0]
+        return primary_keys == [(column, 1)]
+
+    @staticmethod
+    def _schema_foreign_key_matches(
+        connection: sqlite3.Connection, table: str,
+    ) -> bool:
+        rows = connection.execute(f"PRAGMA foreign_key_list({table})").fetchall()
+        expected = [(0, 0, "sessions", "session_id", "session_id", "NO ACTION", "CASCADE", "NONE")]
+        return rows == expected
+
+    @classmethod
+    def _schema_sql_matches(
+        cls,
+        connection: sqlite3.Connection,
+        object_type: str,
+        name: str,
+        table: str,
+        expected_sql: str,
+    ) -> bool:
+        row = connection.execute(
+            "SELECT tbl_name, sql FROM sqlite_master WHERE type = ? AND name = ?",
+            (object_type, name),
+        ).fetchone()
+        return (
+            row is not None
+            and row[0] == table
+            and isinstance(row[1], str)
+            and cls._normalized_schema_sql(row[1]) == cls._normalized_schema_sql(expected_sql)
+        )
+
+    @classmethod
+    def _validate_schema(cls, connection: sqlite3.Connection) -> None:
+        expected_objects = {
+            ("table", "sessions", "sessions"),
+            ("table", "session_turn_leases", "session_turn_leases"),
+            ("table", "session_owners", "session_owners"),
+            ("index", "sessions_updated_at", "sessions"),
+            ("index", "session_owners_principal_id", "session_owners"),
+            ("trigger", "session_owners_immutable_update", "session_owners"),
+            ("trigger", "session_owners_immutable_delete", "session_owners"),
+            ("trigger", "session_owners_immutable_insert", "session_owners"),
+        }
+        actual_objects = set(connection.execute(
+            """SELECT type, name, tbl_name FROM sqlite_master
+            WHERE name NOT LIKE 'sqlite_%'"""
+        ).fetchall())
+        if actual_objects != expected_objects:
+            raise ValidationError("SQLite session schema objects are incomplete or unexpected")
+
+        for table in ("sessions", "session_owners", "session_turn_leases"):
+            if not cls._schema_primary_key_matches(connection, table, "session_id"):
+                raise ValidationError("SQLite session schema primary key is invalid")
+        for table in ("session_owners", "session_turn_leases"):
+            if not cls._schema_foreign_key_matches(connection, table):
+                raise ValidationError("SQLite session schema foreign key is invalid")
+
+        indexes = (
+            ("sessions_updated_at", "sessions",
+             "CREATE INDEX sessions_updated_at ON sessions(updated_at)"),
+            ("session_owners_principal_id", "session_owners",
+             "CREATE INDEX session_owners_principal_id ON session_owners(principal_id)"),
+        )
+        for name, table, sql in indexes:
+            if not cls._schema_sql_matches(connection, "index", name, table, sql):
+                raise ValidationError("SQLite session schema index is invalid")
+
+        triggers = (
+            ("session_owners_immutable_update",
+             "CREATE TRIGGER session_owners_immutable_update BEFORE UPDATE ON session_owners BEGIN SELECT RAISE(ABORT, 'session owner is immutable'); END"),
+            ("session_owners_immutable_delete",
+             "CREATE TRIGGER session_owners_immutable_delete BEFORE DELETE ON session_owners BEGIN SELECT RAISE(ABORT, 'session owner is immutable'); END"),
+            ("session_owners_immutable_insert",
+             "CREATE TRIGGER session_owners_immutable_insert BEFORE INSERT ON session_owners WHEN EXISTS (SELECT 1 FROM session_owners WHERE session_id = NEW.session_id) BEGIN SELECT RAISE(ABORT, 'session owner is immutable'); END"),
+        )
+        for name, sql in triggers:
+            if not cls._schema_sql_matches(connection, "trigger", name, "session_owners", sql):
+                raise ValidationError("SQLite session ownership trigger is invalid")
+
+    def _initialize(self, *, fresh_database: bool) -> None:
         with self._lock:
             connection = self._connect()
             try:
-                connection.execute("PRAGMA journal_mode=WAL")
-                connection.execute(
-                    """CREATE TABLE IF NOT EXISTS sessions (
-                        session_id TEXT PRIMARY KEY,
-                        created_at TEXT NOT NULL,
-                        updated_at TEXT NOT NULL,
-                        version INTEGER NOT NULL CHECK(version >= 0),
-                        closed INTEGER NOT NULL CHECK(closed IN (0, 1)),
-                        messages_json TEXT NOT NULL
-                    )"""
-                )
-                connection.execute(
-                    "CREATE INDEX IF NOT EXISTS sessions_updated_at ON sessions(updated_at)"
-                )
-                connection.execute(
-                    """CREATE TABLE IF NOT EXISTS session_turn_leases (
-                        session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
-                        owner_token TEXT NOT NULL,
-                        expires_at TEXT NOT NULL
-                    )"""
-                )
-                connection.execute(
-                    """CREATE TABLE IF NOT EXISTS session_owners (
-                        session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
-                        principal_id TEXT NOT NULL,
-                        created_at TEXT NOT NULL
-                    )"""
-                )
-                connection.execute(
-                    "CREATE INDEX IF NOT EXISTS session_owners_principal_id ON session_owners(principal_id)"
-                )
-                connection.execute(
-                    """CREATE TRIGGER IF NOT EXISTS session_owners_immutable_update
-                    BEFORE UPDATE ON session_owners
-                    BEGIN
-                        SELECT RAISE(ABORT, 'session owner is immutable');
-                    END"""
-                )
-                connection.execute(
-                    """CREATE TRIGGER IF NOT EXISTS session_owners_immutable_delete
-                    BEFORE DELETE ON session_owners
-                    BEGIN
-                        SELECT RAISE(ABORT, 'session owner is immutable');
-                    END"""
-                )
-                connection.execute(
-                    """CREATE TRIGGER IF NOT EXISTS session_owners_immutable_insert
-                    BEFORE INSERT ON session_owners
-                    WHEN EXISTS (
-                        SELECT 1 FROM session_owners WHERE session_id = NEW.session_id
-                    )
-                    BEGIN
-                        SELECT RAISE(ABORT, 'session owner is immutable');
-                    END"""
-                )
+                if fresh_database:
+                    connection.execute("PRAGMA journal_mode=WAL")
+                    connection.execute("BEGIN IMMEDIATE")
+                    try:
+                        connection.execute(
+                            """CREATE TABLE sessions (
+                                session_id TEXT PRIMARY KEY,
+                                created_at TEXT NOT NULL,
+                                updated_at TEXT NOT NULL,
+                                version INTEGER NOT NULL CHECK(version >= 0),
+                                closed INTEGER NOT NULL CHECK(closed IN (0, 1)),
+                                messages_json TEXT NOT NULL
+                            )"""
+                        )
+                        connection.execute(
+                            "CREATE INDEX sessions_updated_at ON sessions(updated_at)"
+                        )
+                        connection.execute(
+                            """CREATE TABLE session_turn_leases (
+                                session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
+                                owner_token TEXT NOT NULL,
+                                expires_at TEXT NOT NULL
+                            )"""
+                        )
+                        connection.execute(
+                            """CREATE TABLE session_owners (
+                                session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
+                                principal_id TEXT NOT NULL,
+                                created_at TEXT NOT NULL
+                            )"""
+                        )
+                        connection.execute(
+                            "CREATE INDEX session_owners_principal_id ON session_owners(principal_id)"
+                        )
+                        connection.execute(
+                            """CREATE TRIGGER session_owners_immutable_update
+                            BEFORE UPDATE ON session_owners
+                            BEGIN
+                                SELECT RAISE(ABORT, 'session owner is immutable');
+                            END"""
+                        )
+                        connection.execute(
+                            """CREATE TRIGGER session_owners_immutable_delete
+                            BEFORE DELETE ON session_owners
+                            BEGIN
+                                SELECT RAISE(ABORT, 'session owner is immutable');
+                            END"""
+                        )
+                        connection.execute(
+                            """CREATE TRIGGER session_owners_immutable_insert
+                            BEFORE INSERT ON session_owners
+                            WHEN EXISTS (
+                                SELECT 1 FROM session_owners WHERE session_id = NEW.session_id
+                            )
+                            BEGIN
+                                SELECT RAISE(ABORT, 'session owner is immutable');
+                            END"""
+                        )
+                        self._validate_schema(connection)
+                        connection.execute("COMMIT")
+                    except Exception:
+                        if connection.in_transaction:
+                            connection.execute("ROLLBACK")
+                        raise
+                else:
+                    # Existing snapshots are validation-only. Never recreate a
+                    # missing ownership table or immutable trigger on reopen.
+                    self._validate_schema(connection)
+                    connection.execute("PRAGMA journal_mode=WAL")
             finally:
                 connection.close()
 
