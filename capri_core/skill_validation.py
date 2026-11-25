@@ -16,8 +16,6 @@ _ALLOWED_FIELDS = {
     "name", "description", "license", "compatibility", "metadata", "allowed-tools",
 }
 _NAME_PATTERN = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
-_KEY_PATTERN = re.compile(r"[a-z][a-z0-9-]*\Z")
-_METADATA_KEY_PATTERN = re.compile(r"[A-Za-z0-9_-]+\Z")
 _LINK_PATTERN = re.compile(r"!?(?:\[[^\]]*\])\(([^)\s]+)(?:\s+[^)]*)?\)")
 
 
