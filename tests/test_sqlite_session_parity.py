@@ -4,6 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from capri_runtime.runtime import ValidationError
+
 from capri_runtime import (
     Message,
     SessionConflictError,
@@ -240,6 +242,28 @@ class NativeSQLiteSessionParityTests(unittest.TestCase):
             self.assertEqual(native_state["messages"], [
                 {"role": item.role, "content": item.content} for item in TURN_ONE
             ])
+
+    def test_python_whitespace_control_characters_match_native_validation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = str(Path(directory) / "sessions.sqlite3")
+            python_store = SQLiteSessionStore(path)
+            created = python_store.create_for_principal("principal-whitespace")
+            invalid_turn = (
+                Message(role="user", content="\\x1c"),
+                Message(role="assistant", content="reply"),
+            )
+            with self.assertRaises(ValidationError):
+                python_store.commit_turn_messages(created.session_id, 0, invalid_turn)
+            self.invoke_error(
+                1, "commit-principal", path, created.session_id,
+                "principal-whitespace", "0", encode_turn(invalid_turn),
+            )
+            self.assertEqual(
+                python_store.get_for_principal(
+                    created.session_id, "principal-whitespace"
+                ).version,
+                0,
+            )
 
 
 if __name__ == "__main__":
