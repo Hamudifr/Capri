@@ -224,62 +224,72 @@ class SQLiteSessionStore(SessionStore):
                     connection.execute("PRAGMA journal_mode=WAL")
                     connection.execute("BEGIN IMMEDIATE")
                     try:
-                        connection.execute(
-                            """CREATE TABLE sessions (
-                                session_id TEXT PRIMARY KEY,
-                                created_at TEXT NOT NULL,
-                                updated_at TEXT NOT NULL,
-                                version INTEGER NOT NULL CHECK(version >= 0),
-                                closed INTEGER NOT NULL CHECK(closed IN (0, 1)),
-                                messages_json TEXT NOT NULL
-                            )"""
-                        )
-                        connection.execute(
-                            "CREATE INDEX sessions_updated_at ON sessions(updated_at)"
-                        )
-                        connection.execute(
-                            """CREATE TABLE session_turn_leases (
-                                session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
-                                owner_token TEXT NOT NULL,
-                                expires_at TEXT NOT NULL
-                            )"""
-                        )
-                        connection.execute(
-                            """CREATE TABLE session_owners (
-                                session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
-                                principal_id TEXT NOT NULL,
-                                created_at TEXT NOT NULL
-                            )"""
-                        )
-                        connection.execute(
-                            "CREATE INDEX session_owners_principal_id ON session_owners(principal_id)"
-                        )
-                        connection.execute(
-                            """CREATE TRIGGER session_owners_immutable_update
-                            BEFORE UPDATE ON session_owners
-                            BEGIN
-                                SELECT RAISE(ABORT, 'session owner is immutable');
-                            END"""
-                        )
-                        connection.execute(
-                            """CREATE TRIGGER session_owners_immutable_delete
-                            BEFORE DELETE ON session_owners
-                            BEGIN
-                                SELECT RAISE(ABORT, 'session owner is immutable');
-                            END"""
-                        )
-                        connection.execute(
-                            """CREATE TRIGGER session_owners_immutable_insert
-                            BEFORE INSERT ON session_owners
-                            WHEN EXISTS (
-                                SELECT 1 FROM session_owners WHERE session_id = NEW.session_id
+                        # Recheck after acquiring the cross-process writer lock.
+                        # Another opener may have initialized this database while
+                        # this process was waiting.
+                        schema_object_count = connection.execute(
+                            "SELECT count(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"
+                        ).fetchone()[0]
+                        if schema_object_count > 0:
+                            self._validate_schema(connection)
+                            connection.execute("COMMIT")
+                        else:
+                            connection.execute(
+                                """CREATE TABLE sessions (
+                                    session_id TEXT PRIMARY KEY,
+                                    created_at TEXT NOT NULL,
+                                    updated_at TEXT NOT NULL,
+                                    version INTEGER NOT NULL CHECK(version >= 0),
+                                    closed INTEGER NOT NULL CHECK(closed IN (0, 1)),
+                                    messages_json TEXT NOT NULL
+                                )"""
                             )
-                            BEGIN
-                                SELECT RAISE(ABORT, 'session owner is immutable');
-                            END"""
-                        )
-                        self._validate_schema(connection)
-                        connection.execute("COMMIT")
+                            connection.execute(
+                                "CREATE INDEX sessions_updated_at ON sessions(updated_at)"
+                            )
+                            connection.execute(
+                                """CREATE TABLE session_turn_leases (
+                                    session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
+                                    owner_token TEXT NOT NULL,
+                                    expires_at TEXT NOT NULL
+                                )"""
+                            )
+                            connection.execute(
+                                """CREATE TABLE session_owners (
+                                    session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
+                                    principal_id TEXT NOT NULL,
+                                    created_at TEXT NOT NULL
+                                )"""
+                            )
+                            connection.execute(
+                                "CREATE INDEX session_owners_principal_id ON session_owners(principal_id)"
+                            )
+                            connection.execute(
+                                """CREATE TRIGGER session_owners_immutable_update
+                                BEFORE UPDATE ON session_owners
+                                BEGIN
+                                    SELECT RAISE(ABORT, 'session owner is immutable');
+                                END"""
+                            )
+                            connection.execute(
+                                """CREATE TRIGGER session_owners_immutable_delete
+                                BEFORE DELETE ON session_owners
+                                BEGIN
+                                    SELECT RAISE(ABORT, 'session owner is immutable');
+                                END"""
+                            )
+                            connection.execute(
+                                """CREATE TRIGGER session_owners_immutable_insert
+                                BEFORE INSERT ON session_owners
+                                WHEN EXISTS (
+                                    SELECT 1 FROM session_owners WHERE session_id = NEW.session_id
+                                )
+                                BEGIN
+                                    SELECT RAISE(ABORT, 'session owner is immutable');
+                                END"""
+                            )
+                            self._validate_schema(connection)
+                            connection.execute("COMMIT")
                     except Exception:
                         if connection.in_transaction:
                             connection.execute("ROLLBACK")
