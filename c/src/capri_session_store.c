@@ -181,18 +181,26 @@ static CapriSessionError validate_backup_snapshot(CapriSessionStore *store,sqlit
 static bool owner_triggers_valid(sqlite3 *db);
 static bool session_schema_valid(sqlite3 *db);
 
+static bool configure_database(sqlite3 *db) {
+    return exec_sql_retry_busy(
+        db,
+        "PRAGMA foreign_keys=ON; PRAGMA recursive_triggers=ON; "
+        "PRAGMA trusted_schema=OFF; PRAGMA synchronous=FULL; PRAGMA journal_mode=WAL;",
+        5000
+    );
+}
+
 static bool schema(sqlite3 *db) {
     const char *sql=
-      "PRAGMA foreign_keys=ON; PRAGMA recursive_triggers=ON; PRAGMA trusted_schema=OFF; PRAGMA synchronous=FULL; PRAGMA journal_mode=WAL;"
-      "CREATE TABLE IF NOT EXISTS sessions(session_id TEXT PRIMARY KEY,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,version INTEGER NOT NULL CHECK(version>=0),closed INTEGER NOT NULL CHECK(closed IN(0,1)),messages_json TEXT NOT NULL CHECK(json_valid(messages_json) AND json_type(messages_json)='array'));"
-      "CREATE INDEX IF NOT EXISTS sessions_updated_at ON sessions(updated_at);"
-      "CREATE TABLE IF NOT EXISTS session_turn_leases(session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,owner_token TEXT NOT NULL,expires_at TEXT NOT NULL);"
-      "CREATE TABLE IF NOT EXISTS session_owners(session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,principal_id TEXT NOT NULL,created_at TEXT NOT NULL);"
-      "CREATE INDEX IF NOT EXISTS session_owners_principal_id ON session_owners(principal_id);"
-      "CREATE TRIGGER IF NOT EXISTS session_owners_immutable_update BEFORE UPDATE ON session_owners BEGIN SELECT RAISE(ABORT,'session owner is immutable'); END;"
-      "CREATE TRIGGER IF NOT EXISTS session_owners_immutable_delete BEFORE DELETE ON session_owners BEGIN SELECT RAISE(ABORT,'session owner is immutable'); END;"
-      "CREATE TRIGGER IF NOT EXISTS session_owners_immutable_insert BEFORE INSERT ON session_owners WHEN EXISTS(SELECT 1 FROM session_owners WHERE session_id=NEW.session_id) BEGIN SELECT RAISE(ABORT,'session owner is immutable'); END;";
-    return exec_sql_retry_busy(db,sql,5000);
+      "CREATE TABLE sessions(session_id TEXT PRIMARY KEY,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,version INTEGER NOT NULL CHECK(version>=0),closed INTEGER NOT NULL CHECK(closed IN(0,1)),messages_json TEXT NOT NULL CHECK(json_valid(messages_json) AND json_type(messages_json)='array'));"
+      "CREATE INDEX sessions_updated_at ON sessions(updated_at);"
+      "CREATE TABLE session_turn_leases(session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,owner_token TEXT NOT NULL,expires_at TEXT NOT NULL);"
+      "CREATE TABLE session_owners(session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,principal_id TEXT NOT NULL,created_at TEXT NOT NULL);"
+      "CREATE INDEX session_owners_principal_id ON session_owners(principal_id);"
+      "CREATE TRIGGER session_owners_immutable_update BEFORE UPDATE ON session_owners BEGIN SELECT RAISE(ABORT,'session owner is immutable'); END;"
+      "CREATE TRIGGER session_owners_immutable_delete BEFORE DELETE ON session_owners BEGIN SELECT RAISE(ABORT,'session owner is immutable'); END;"
+      "CREATE TRIGGER session_owners_immutable_insert BEFORE INSERT ON session_owners WHEN EXISTS(SELECT 1 FROM session_owners WHERE session_id=NEW.session_id) BEGIN SELECT RAISE(ABORT,'session owner is immutable'); END;";
+    return configure_database(db) && exec_sql_retry_busy(db,sql,5000);
 }
 CapriSessionStore *capri_session_store_open(const char *path,size_t max_messages,size_t max_input,size_t max_output,size_t max_tool,CapriSessionError *error) {
     if(error) *error=CAPRI_SESSION_INVALID;
