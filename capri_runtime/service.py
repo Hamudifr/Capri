@@ -117,10 +117,7 @@ class CapriHostService:
 
     def start(self) -> HostServiceHealth:
         with self._lock:
-            if self._state is HostServiceState.RUNNING:
-                already_running = True
-            else:
-                already_running = False
+            if self._state is not HostServiceState.RUNNING:
                 if self._state in {HostServiceState.STOPPING, HostServiceState.FAILED}:
                     raise HostServiceError("service cannot start from its current state")
                 self._stop_event = threading.Event()
@@ -149,8 +146,8 @@ class CapriHostService:
     def stop(self, timeout_seconds: float = 10.0) -> HostServiceHealth:
         if (isinstance(timeout_seconds, bool)
                 or not isinstance(timeout_seconds, (int, float))
-                or not math.isfinite(timeout_seconds)
-                or not 0 <= timeout_seconds <= 300):
+                or timeout_seconds < 0 or timeout_seconds > 300
+                or not math.isfinite(float(timeout_seconds))):
             raise HostServiceError("timeout_seconds must be between 0 and 300")
 
         with self._lock:
@@ -237,7 +234,7 @@ class CapriHostService:
     def _run_worker(self, stop_event: threading.Event) -> None:
         try:
             self.runtime.run_task_worker(stop_event)
-        except Exception:
+        except BaseException:
             with self._lock:
                 self._state = HostServiceState.FAILED
                 self._failure_code = "task_worker_failed"
