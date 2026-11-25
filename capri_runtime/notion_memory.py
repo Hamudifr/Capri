@@ -363,8 +363,21 @@ class NotionMemoryAdapter:
             # Cursors are opaque API tokens: never parse, normalize, or persist them.
             cursor = next_cursor
 
-    def search(self, query: str, *, limit: int = 20, offset: int = 0) -> tuple[MemoryRecord, ...]:
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+        scope: str | None = None,
+        updated_after: datetime | None = None,
+    ) -> tuple[MemoryRecord, ...]:
         _validate_transport_text(query, "query", 500)
+        if scope is not None:
+            _validate_transport_text(scope, "scope", 100)
+        cutoff = _iso(updated_after) if updated_after is not None and type(updated_after) is datetime else None
+        if updated_after is not None and cutoff is None:
+            raise MemoryValidationError("updated_after must be a plain timezone-aware datetime or None")
         if type(limit) is not int or not 1 <= limit <= 100:
             raise MemoryValidationError("limit must be between 1 and 100")
         if type(offset) is not int or not 0 <= offset <= self._max_records:
@@ -375,6 +388,10 @@ class NotionMemoryAdapter:
         ranked = []
         for record in self._list_all():
             if record.status not in {"active", "review"}:
+                continue
+            if scope is not None and record.scope != scope:
+                continue
+            if cutoff is not None and record.updated_at < cutoff:
                 continue
             if record.expires_at is not None and record.expires_at <= _iso(_now()):
                 continue

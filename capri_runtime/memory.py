@@ -32,7 +32,7 @@ class MemoryProvider(Protocol):
     """Provider adapter contract; implementations own credentials and transport."""
     def create(self, **fields: object) -> "MemoryRecord": ...
     def get(self, memory_id: str) -> "MemoryRecord": ...
-    def search(self, query: str, *, limit: int = 20, offset: int = 0) -> tuple["MemoryRecord", ...]: ...
+    def search(self, query: str, *, limit: int = 20, offset: int = 0, scope: str | None = None, updated_after: datetime | None = None) -> tuple["MemoryRecord", ...]: ...
     def correct(self, memory_id: str, **changes: object) -> "MemoryRecord": ...
     def archive(self, memory_id: str) -> "MemoryRecord": ...
     def delete(self, memory_id: str) -> None: ...
@@ -185,6 +185,8 @@ def build_untrusted_memory_context(
     query: str,
     *,
     limit: int = 20,
+    scope: str | None = None,
+    updated_after: datetime | None = None,
 ) -> UntrustedMemoryContext:
     """Retrieve bounded eligible records for separate model-adapter delivery.
 
@@ -195,10 +197,27 @@ def build_untrusted_memory_context(
     """
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 20:
         raise MemoryValidationError("memory context limit must be between 1 and 20")
+    if scope is not None:
+        if type(scope) is not str:
+            raise MemoryValidationError("scope must be a plain string or None")
+        _validate_text(scope, "scope", _MAX_SCOPE)
+    cutoff = _iso(updated_after) if updated_after is not None and type(updated_after) is datetime else None
+    if updated_after is not None and cutoff is None:
+        raise MemoryValidationError("updated_after must be a plain timezone-aware datetime or None")
     search = getattr(provider, "search", None)
     if not callable(search):
         raise MemoryValidationError("memory provider must implement search()")
-    records = search(query, limit=limit)
+    filters: dict[str, object] = {}
+    if scope is not None:
+        filters["scope"] = scope
+    if updated_after is not None:
+        filters["updated_after"] = updated_after
+    try:
+        records = search(query, limit=limit, **filters)
+    except TypeError:
+        if filters:
+            raise MemoryValidationError("memory provider does not support the requested retrieval filters") from None
+        raise
     if type(records) is not tuple or len(records) > limit:
         raise MemoryValidationError("memory provider returned an invalid search result")
 
@@ -211,6 +230,12 @@ def build_untrusted_memory_context(
             raise MemoryValidationError("memory provider returned invalid trust metadata")
         if record.status != "active" or record.sensitivity != "non_sensitive":
             continue
+        if scope is not None and (type(record.scope) is not str or record.scope != scope):
+            raise MemoryValidationError("memory provider returned a record outside the requested scope")
+        if cutoff is not None:
+            updated = _validate_expiry(record.updated_at)
+            if updated is None or updated < cutoff:
+                continue
         expiry = _validate_expiry(record.expires_at)
         if expiry is not None and datetime.fromisoformat(expiry) <= now:
             continue
@@ -441,8 +466,23 @@ class SQLiteMemoryStore:
             finally:
                 db.close()
 
-    def search(self, query: str, *, limit: int = 20, offset: int = 0) -> tuple[MemoryRecord, ...]:
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+        scope: str | None = None,
+        updated_after: datetime | None = None,
+    ) -> tuple[MemoryRecord, ...]:
         _validate_text(query, "query", _MAX_QUERY)
+        if scope is not None:
+            if type(scope) is not str:
+                raise MemoryValidationError("scope must be a plain string or None")
+            _validate_text(scope, "scope", _MAX_SCOPE)
+        cutoff = _iso(updated_after) if updated_after is not None and type(updated_after) is datetime else None
+        if updated_after is not None and cutoff is None:
+            raise MemoryValidationError("updated_after must be a plain timezone-aware datetime or None")
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
             raise MemoryValidationError("limit must be between 1 and 100")
         if isinstance(offset, bool) or not isinstance(offset, int) or not 0 <= offset <= _MAX_RECORDS:
@@ -455,16 +495,24 @@ class SQLiteMemoryStore:
             db = self._connect()
             try:
                 rows = db.execute(
-                    "SELECT * FROM memories WHERE status IN ('active','review') AND (expires_at IS NULL OR expires_at > ?)",
-                    (now,),
+                    """SELECT * FROM memories
+                       WHERE status IN ('active','review')
+                         AND (expires_at IS NULL OR expires_at > ?)
+                         AND (? IS NULL OR scope = ?)""",
+                    (now, scope, scope),
                 ).fetchall()
                 ranked = []
                 for row in rows:
+                    record = self._record(row)
+                    if cutoff is not None:
+                        updated = _validate_expiry(record.updated_at)
+                        if updated is None or updated < cutoff:
+                            continue
                     haystack = (row["title"] + "\n" + row["content"] + "\n" + row["scope"] + "\n" + row["tags"]).casefold()
                     matched = sum(term in haystack for term in terms)
                     if matched == len(terms):
                         exact = int(row["title"].casefold() == query.casefold())
-                        ranked.append((exact, matched, row["updated_at"], self._record(row)))
+                        ranked.append((exact, matched, row["updated_at"], record))
                 ranked.sort(key=lambda item: (-item[0], -item[1], -datetime.fromisoformat(item[2]).timestamp(), item[3].memory_id))
                 return tuple(item[3] for item in ranked[offset:offset + limit])
             finally:
