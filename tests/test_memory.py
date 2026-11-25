@@ -8,6 +8,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 from capri_runtime.memory import (
+    MemoryConflictError,
     MemoryNotFoundError,
     MemoryRecord,
     MemoryValidationError,
@@ -429,6 +430,57 @@ class SQLiteMemoryStoreTests(unittest.TestCase):
         self.assertEqual(self.store.search("Updated safe")[0].memory_id, corrected.memory_id)
         self.assertIn(("superseded", self.store.events(original.memory_id)[-1][1]),
                       self.store.events(original.memory_id))
+
+    def test_archived_predecessor_cannot_be_corrected_again(self):
+        original = self.create()
+        corrected = self.store.correct(original.memory_id, content="First correction.")
+        with self.assertRaises(MemoryConflictError):
+            self.store.correct(original.memory_id, content="Competing correction.")
+        self.assertEqual(self.store.search("First correction")[0].memory_id, corrected.memory_id)
+        self.assertEqual(self.store.integrity_check(), "ok")
+
+    def test_concurrent_corrections_from_separate_store_instances_have_one_winner(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        original = self.create()
+        second_store = SQLiteMemoryStore(self.path)
+
+        def correct(store, suffix):
+            try:
+                return store.correct(original.memory_id, content="Correction " + suffix)
+            except MemoryConflictError:
+                return None
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = tuple(pool.map(
+                lambda pair: correct(*pair),
+                ((self.store, "one"), (second_store, "two")),
+            ))
+        self.assertEqual(sum(item is not None for item in results), 1)
+        self.assertEqual(
+            len([row for row in self.store.export_records() if row.supersedes_id == original.memory_id]),
+            1,
+        )
+        self.assertEqual(self.store.integrity_check(), "ok")
+
+    def test_memory_events_are_immutable_and_project_without_content(self):
+        original = self.create()
+        corrected = self.store.correct(original.memory_id, content="Corrected content.")
+        events = self.store.domain_events(original.memory_id)
+        correction_events = self.store.domain_events(corrected.memory_id)
+        self.assertEqual(events[-1].type, "com.capri.memory.superseded")
+        self.assertEqual(correction_events[-1].type, "com.capri.memory.correction_created")
+        projected = correction_events[-1].as_dict()
+        self.assertEqual(projected["data"]["supersedes_id"], original.memory_id)
+        self.assertNotIn("content", projected["data"])
+        connection = sqlite3.connect(self.path)
+        try:
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute("UPDATE memory_events SET event_type='rewritten'")
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute("DELETE FROM memory_events")
+        finally:
+            connection.close()
 
     def test_archive_is_reversible_only_by_explicit_new_record(self):
         record = self.create()
