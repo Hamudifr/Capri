@@ -6,6 +6,8 @@ permissions, changes active configuration, or trains/modifies a model.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from hashlib import sha256
+import json
 from statistics import fmean
 from typing import Iterable, Literal
 
@@ -54,6 +56,7 @@ class StrategyEvaluation:
     baseline_id: str
     candidate_id: str
     matched_pairs: int
+    input_fingerprint_sha256: str
     baseline_unmatched: int
     candidate_unmatched: int
     baseline: StrategyMetrics
@@ -108,6 +111,43 @@ def _metrics(records: list[StrategyObservation]) -> StrategyMetrics:
         mean_latency_ms=fmean(r.latency_ms for r in records),
     )
 
+
+
+def _input_fingerprint(
+    baseline_id: str,
+    candidate_id: str,
+    baseline_records: dict[str, StrategyObservation],
+    candidate_records: dict[str, StrategyObservation],
+) -> str:
+    """Hash the exact compared input records for reproducible audit references."""
+    observations = []
+    for strategy_id, records in (
+        (baseline_id, baseline_records),
+        (candidate_id, candidate_records),
+    ):
+        for task_id in sorted(records):
+            record = records[task_id]
+            observations.append({
+                "task_id": record.task_id,
+                "scenario": record.scenario,
+                "strategy_id": record.strategy_id,
+                "outcome": record.outcome,
+                "evidence_ref": record.evidence_ref,
+                "safety_violation": record.safety_violation,
+                "tool_calls": record.tool_calls,
+                "context_tokens": record.context_tokens,
+                "estimated_cost_units": record.estimated_cost_units,
+                "latency_ms": record.latency_ms,
+            })
+    payload = {
+        "baseline_id": baseline_id,
+        "candidate_id": candidate_id,
+        "observations": observations,
+    }
+    canonical = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return sha256(canonical).hexdigest()
 
 def evaluate_strategies(
     baseline_id: str,
@@ -220,6 +260,9 @@ def evaluate_strategies(
         baseline_id=baseline_id,
         candidate_id=candidate_id,
         matched_pairs=len(common_tasks),
+        input_fingerprint_sha256=_input_fingerprint(
+            baseline_id, candidate_id, baseline_records, candidate_records
+        ),
         baseline_unmatched=len(baseline_tasks - candidate_tasks),
         candidate_unmatched=len(candidate_tasks - baseline_tasks),
         baseline=baseline_metrics,
