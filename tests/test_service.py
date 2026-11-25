@@ -9,7 +9,6 @@ from capri_runtime import (
     AssistantTurn,
     CapriHostRuntime,
     CapriHostService,
-    ExecutionContext,
     HostAuthorityResolver,
     HostServiceError,
     HostServiceState,
