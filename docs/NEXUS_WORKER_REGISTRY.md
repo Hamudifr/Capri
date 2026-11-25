@@ -25,7 +25,11 @@ It is deliberately not a distributed registry or a worker runtime.
 - `quarantine` / `clear_quarantine`: quarantine is sticky until an explicit host-side compare-and-swap recovery, followed by a fresh heartbeat.
 - `retire`: permanently disables the worker record in v1.
 - `update_descriptor`: host-side compare-and-swap descriptor update.
-- `eligible`: filters by the host policy allow-list, capability, protocol version, enabled state, health, heartbeat freshness and available concurrency. Ranking is deterministic: configured priority descending, in-flight load ascending, worker ID ascending.
+- `eligible`: advisory filtering by host policy allow-list, capability, protocol version, enabled state, health, heartbeat freshness and remaining capacity. Ranking is deterministic: configured priority descending, combined in-flight/reserved load ascending, worker ID ascending.
+- `reserve_eligible`: atomically selects one eligible worker and creates a short-lived pending capacity hold under the registry lock. It returns an opaque `WorkerReservation` or `None` when no worker is eligible.
+- `commit_reservation`: atomically converts a live pending hold into a non-expiring committed/in-flight hold before dispatch. It fails closed if the hold expired, was revoked, the descriptor revision changed, or worker health is no longer fresh/healthy. Repeating the commit with the committed token is idempotent.
+- `release_reservation`: releases a pending or committed hold once. Repeated, expired or revoked releases return `False`; an identity mismatch is rejected. For committed work, update host-observed in-flight load before releasing the committed hold.
+- Pending reservations expire after a bounded TTL (default 10 seconds, configurable from 1–60 seconds); committed reservations do not expire automatically. Both count against capacity and the global 4,096 reservation cap. Worker health/descriptor changes revoke pending holds but preserve committed work until explicit completion/reconciliation release.
 
 ## Limits and failure semantics
 
@@ -36,7 +40,7 @@ It is deliberately not a distributed registry or a worker runtime.
 - Health freshness uses host monotonic time only. Missing, stale or future timestamps fail closed.
 - The registry is process-local and non-durable. Restart loses the catalogue and all health state; a host must re-register workers and obtain fresh authenticated heartbeats.
 - This module does not persist audit events. The integrating host must send registration, policy, health, quarantine, recovery and retirement transitions to its durable audit sink.
-- There is no atomic dispatch reservation in v1. Candidate selection is advisory and can become stale immediately; a future dispatcher must own race-safe capacity reservation and revalidate policy at dispatch time.
+- Reservations prevent concurrent dispatchers using this registry from over-selecting the same advertised capacity. They are process-local coordination tokens, not dispatch authorization or durable leases. The required order is: reserve; re-check policy and transport identity; commit the pending hold; dispatch; after completion, update host-observed in-flight counts; then release the committed hold. Never release a committed hold before active work is reflected in host-observed load. A process crash loses all holds and requires supervisor reconciliation before the registry is considered healthy again.
 - No process launch, IPC transport, sandboxing, cancellation, retry, side-effect reconciliation or automatic recovery is implemented here.
 
 ## Minimal usage
@@ -61,17 +65,31 @@ registry.heartbeat(
 )
 
 # This allow-list must come from the separate host authorization policy.
-candidates = registry.eligible(
+reservation = registry.reserve_eligible(
     "math.factorial",
     protocol_version=1,
     authorized_worker_ids={"local-python-1"},
 )
+if reservation is not None:
+    authenticated_worker_id = authenticated_transport.worker_id
+    # Re-check policy and authenticated transport immediately before dispatch.
+    committed = registry.commit_reservation(
+        reservation, authenticated_worker_id=authenticated_worker_id,
+    )
+    if committed is not None:
+        try:
+            # The trusted host dispatcher starts work here.
+            pass
+        finally:
+            # First publish the host-observed in-flight count, then release.
+            registry.release_reservation(
+                committed, authenticated_worker_id=authenticated_worker_id,
+            )
 ```
 
 ## Next integration boundary
 
-Before connecting this catalogue to a dispatcher, implement host-authenticated transport/supervisor identity, durable audit integration, and an atomic host-owned capacity reservation. Keep dispatch policy and worker execution separate from this registry.
-
+Before connecting this catalogue to a dispatcher, integrate a trusted host supervisor that supplies authenticated transport identity, re-checks principal/task/capability/resource/approval/budget policy at dispatch and response acceptance, updates host-observed in-flight counts, and records lifecycle events in a durable audit sink. Keep process launch, cancellation, OS isolation and restart policy separate from this registry.
 
 ## Trusted host runtime gateway
 
