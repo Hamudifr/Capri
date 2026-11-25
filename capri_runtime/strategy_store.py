@@ -1106,7 +1106,7 @@ class SQLiteStrategyStore:
 
                 target = connection.execute(
                     """SELECT v.config_json,v.config_sha256,v.is_baseline,v.evaluation_id,
-                    e.cohort_sha256,e.eligible,e.evidence_verified,e.baseline_id,e.candidate_id
+                    e.cohort_sha256,e.eligible,e.evidence_verified,e.baseline_id,e.candidate_id,e.summary_json
                     FROM strategy_versions v LEFT JOIN strategy_evaluations e
                     ON e.evaluation_id=v.evaluation_id
                     WHERE v.principal_id=? AND v.strategy_class=?
@@ -1118,7 +1118,7 @@ class SQLiteStrategyStore:
                 (
                     config_json, config_hash, is_baseline, evaluation_id,
                     cohort_hash, eligible, evidence_verified,
-                    evaluation_baseline_id, evaluation_candidate_id,
+                    evaluation_baseline_id, evaluation_candidate_id, evaluation_summary_json,
                 ) = target
                 expected_hash = None if is_baseline else cohort_hash
                 if grant.config_sha256 != config_hash:
@@ -1153,12 +1153,19 @@ class SQLiteStrategyStore:
                         item.get("cohort_id") for item in cohort_results
                         if type(item) is dict and type(item.get("cohort_id")) is str
                     } if type(cohort_results) is list else set()
+                    try:
+                        evaluation_summary = json.loads(evaluation_summary_json)
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        raise StrategyIntegrityError("candidate evaluation summary is corrupt") from None
                     if (
-                        promotion_record.policy_version != STRATEGY_PROMOTION_POLICY_VERSION
+                        type(evaluation_summary) is not dict
+                        or promotion_record.policy_version != STRATEGY_PROMOTION_POLICY_VERSION
                         or promotion_record.summary.get("eligible_for_canary") is not True
                         or promotion_record.summary.get("policy_version") != promotion_record.policy_version
                         or promotion_record.baseline_id != evaluation_baseline_id
                         or promotion_record.candidate_id != evaluation_candidate_id
+                        or promotion_record.baseline_version != evaluation_summary.get("baseline_version")
+                        or promotion_record.candidate_version != evaluation_summary.get("candidate_version")
                         or promotion_record.candidate_version != grant.version
                         or cohort_ids != {key for key, _ in promotion_record.evidence_manifest_refs}
                         or cohort_ids != {key for key, _ in promotion_record.cohort_sha256s}
