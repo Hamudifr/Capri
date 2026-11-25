@@ -24,7 +24,7 @@ _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in __import__("sys").path:
     __import__("sys").path.insert(0, str(_ROOT))
 
-from capri_runtime import SQLiteBudgetStore, SQLiteGoalStore, SQLiteTaskStore
+from capri_runtime import BudgetPolicy, SQLiteBudgetStore, SQLiteGoalStore, SQLiteTaskStore
 
 _PLAN = [{"tool": "noop", "input": {"value": "persistence-profile"}, "max_attempts": 1}]
 _PRINCIPAL = "persistence-benchmark-principal"
@@ -209,13 +209,32 @@ def run(*, warmup: int = 10, samples: int = 50, workers: int = 4, queue_size: in
             warmup, samples,
         ))
 
-        budgets = SQLiteBudgetStore(str(root / "budgets.sqlite3"))
+        budgets = SQLiteBudgetStore(
+            str(root / "budgets.sqlite3"),
+            BudgetPolicy(
+                max_provider_calls=100_000,
+                max_provider_input_bytes=1_073_741_824,
+                max_tool_calls=1_000_000,
+                max_task_steps=1_000_000,
+                max_task_input_bytes=1_073_741_824,
+            ),
+        )
         budgets.reserve_for_principal(
             _PRINCIPAL, {"provider_calls": 1}, now=now,
         )
         results.append(_measure(
             "budget_usage_for_principal",
             lambda: budgets.usage_for_principal(_PRINCIPAL, now=now),
+            warmup, samples,
+        ))
+        results.append(_measure(
+            "budget_reserve_multi_dimension",
+            lambda: budgets.reserve_for_principal(
+                _PRINCIPAL,
+                {"provider_calls": 1, "provider_input_bytes": 64,
+                 "tool_calls": 1, "task_steps": 1, "task_input_bytes": 64},
+                now=now,
+            ),
             warmup, samples,
         ))
 
