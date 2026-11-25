@@ -256,6 +256,133 @@ class SQLiteWorkerRegistryTests(unittest.TestCase):
         with self.assertRaises(WorkerRegistryError):
             self.make_registry(SQLiteTaskStore(self.path))
 
+
+    def test_partial_active_reservation_unique_index_fails_closed(self):
+        connection = self.store._connect()
+        try:
+            connection.execute("DROP INDEX worker_registry_one_active_task_reservation")
+            connection.execute(
+                "CREATE UNIQUE INDEX worker_registry_one_active_task_reservation "
+                "ON worker_registry_reservations(principal_id, task_id) WHERE committed=1"
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        self.assertEqual(self.registry.integrity_check(), "worker registry validation failed")
+        with self.assertRaises(WorkerRegistryError):
+            self.make_registry(SQLiteTaskStore(self.path))
+
+    def test_missing_reservation_token_primary_key_fails_closed(self):
+        connection = self.store._connect()
+        try:
+            connection.execute("PRAGMA foreign_keys=OFF")
+            connection.execute(
+                "ALTER TABLE worker_registry_reservations "
+                "RENAME TO worker_registry_reservations_old"
+            )
+            connection.execute(
+                """
+                CREATE TABLE worker_registry_reservations (
+                    token TEXT NOT NULL,
+                    worker_id TEXT NOT NULL,
+                    principal_id TEXT NOT NULL,
+                    task_id TEXT NOT NULL,
+                    capability TEXT NOT NULL,
+                    protocol_version INTEGER NOT NULL,
+                    descriptor_revision INTEGER NOT NULL,
+                    expires_at_wall_ns INTEGER NOT NULL,
+                    committed INTEGER NOT NULL CHECK(committed IN (0, 1)),
+                    revision INTEGER NOT NULL,
+                    created_at_wall_ns INTEGER NOT NULL,
+                    FOREIGN KEY(worker_id) REFERENCES worker_registry_state(worker_id)
+                        ON DELETE RESTRICT
+                )
+                """
+            )
+            connection.execute(
+                "INSERT INTO worker_registry_reservations SELECT * "
+                "FROM worker_registry_reservations_old"
+            )
+            connection.execute("DROP TABLE worker_registry_reservations_old")
+            connection.execute(
+                "CREATE UNIQUE INDEX worker_registry_one_active_task_reservation "
+                "ON worker_registry_reservations(principal_id, task_id)"
+            )
+            connection.execute(
+                "CREATE INDEX worker_registry_reservations_worker_idx "
+                "ON worker_registry_reservations(worker_id)"
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        self.assertEqual(self.registry.integrity_check(), "worker registry validation failed")
+        with self.assertRaises(WorkerRegistryError):
+            self.make_registry(SQLiteTaskStore(self.path))
+
+    def test_partial_event_id_unique_index_fails_closed(self):
+        connection = self.store._connect()
+        try:
+            connection.execute("DROP TRIGGER worker_registry_events_immutable_update")
+            connection.execute("DROP TRIGGER worker_registry_events_immutable_delete")
+            connection.execute(
+                "ALTER TABLE worker_registry_events RENAME TO worker_registry_events_old"
+            )
+            connection.execute(
+                """
+                CREATE TABLE worker_registry_events (
+                    sequence INTEGER PRIMARY KEY,
+                    event_id TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    worker_id TEXT NOT NULL,
+                    actor_id TEXT NOT NULL,
+                    principal_id TEXT,
+                    task_id TEXT,
+                    token_sha256 TEXT,
+                    timestamp_wall_ns INTEGER NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    previous_event_sha256 TEXT NOT NULL,
+                    event_sha256 TEXT NOT NULL,
+                    FOREIGN KEY(worker_id) REFERENCES worker_registry_state(worker_id)
+                        ON DELETE RESTRICT
+                )
+                """
+            )
+            connection.execute(
+                "INSERT INTO worker_registry_events SELECT * FROM worker_registry_events_old"
+            )
+            connection.execute("DROP TABLE worker_registry_events_old")
+            connection.execute(
+                "CREATE UNIQUE INDEX worker_registry_event_id_partial "
+                "ON worker_registry_events(event_id) WHERE event_type='worker_registered'"
+            )
+            connection.execute(
+                "CREATE INDEX worker_registry_events_worker_idx "
+                "ON worker_registry_events(worker_id, sequence)"
+            )
+            connection.execute(
+                """
+                CREATE TRIGGER worker_registry_events_immutable_update
+                BEFORE UPDATE ON worker_registry_events
+                BEGIN SELECT RAISE(ABORT, 'worker registry audit is append-only'); END
+                """
+            )
+            connection.execute(
+                """
+                CREATE TRIGGER worker_registry_events_immutable_delete
+                BEFORE DELETE ON worker_registry_events
+                BEGIN SELECT RAISE(ABORT, 'worker registry audit is append-only'); END
+                """
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        self.assertEqual(self.registry.integrity_check(), "worker registry validation failed")
+        with self.assertRaises(WorkerRegistryError):
+            self.make_registry(SQLiteTaskStore(self.path))
+
     def test_missing_reservation_foreign_key_fails_closed(self):
         connection = self.store._connect()
         try:
