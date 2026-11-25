@@ -209,6 +209,7 @@ int main(void) {
     CapriSession corrupt_session={0};
     assert(sqlite3_open(path,&raw)==SQLITE_OK);
     assert(capri_session_create_for_principal(store,"principal-corrupt",&corrupt_session)==CAPRI_SESSION_OK);
+    char corrupt_session_id[37];strcpy(corrupt_session_id,corrupt_session.session_id);
     sqlite3_stmt *lease_insert=NULL;
     assert(sqlite3_prepare_v2(raw,"INSERT INTO session_turn_leases(session_id,owner_token,expires_at) VALUES(?1,'worker-corrupt','not-a-date')",-1,&lease_insert,NULL)==SQLITE_OK);
     sqlite3_bind_text(lease_insert,1,corrupt_session.session_id,-1,SQLITE_TRANSIENT);
@@ -230,6 +231,7 @@ int main(void) {
     capri_session_free(&corrupt_session); capri_session_free(&committed);
     CapriSession nul_owner_session={0};
     assert(capri_session_create_for_principal(store,"principal-nul-owner",&nul_owner_session)==CAPRI_SESSION_OK);
+    char nul_owner_session_id[37];strcpy(nul_owner_session_id,nul_owner_session.session_id);
     sqlite3_stmt *nul_insert=NULL;
     assert(sqlite3_prepare_v2(raw,"INSERT INTO session_turn_leases(session_id,owner_token,expires_at) VALUES(?1,CAST('worker-corrupt' || char(0) || 'tail' AS TEXT),'2099-01-01T00:00:00Z')",-1,&nul_insert,NULL)==SQLITE_OK);
     sqlite3_bind_text(nul_insert,1,nul_owner_session.session_id,-1,SQLITE_TRANSIENT);
@@ -239,6 +241,16 @@ int main(void) {
     assert(capri_session_release_turn_lease_for_principal(store,nul_owner_session.session_id,"principal-nul-owner","worker-corrupt",&released)==CAPRI_SESSION_CORRUPT);
     assert(capri_session_commit_turn_for_principal(store,nul_owner_session.session_id,"principal-nul-owner",0,turn,NULL,&committed)==CAPRI_SESSION_CORRUPT);
     capri_session_free(&nul_owner_session); capri_session_free(&committed);
+    /* Remove deliberately corrupt rows before later clean-startup lock tests. */
+    sqlite3_stmt *lease_cleanup=NULL;
+    assert(sqlite3_prepare_v2(
+        raw,"DELETE FROM session_turn_leases WHERE session_id IN (?1,?2)",
+        -1,&lease_cleanup,NULL
+    )==SQLITE_OK);
+    sqlite3_bind_text(lease_cleanup,1,corrupt_session_id,-1,SQLITE_TRANSIENT);
+    sqlite3_bind_text(lease_cleanup,2,nul_owner_session_id,-1,SQLITE_TRANSIENT);
+    assert(sqlite3_step(lease_cleanup)==SQLITE_DONE);
+    sqlite3_finalize(lease_cleanup);
     sqlite3_close(raw);
     struct stat database_mode;assert(stat(path,&database_mode)==0&&(database_mode.st_mode&0777u)==0600u);
     assert(chmod(path,0644)==0);
