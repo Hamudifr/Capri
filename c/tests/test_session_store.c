@@ -313,6 +313,34 @@ int main(void) {
     assert(sqlite3_step(nul_timestamp_update)==SQLITE_DONE&&sqlite3_changes(raw)==1);
     sqlite3_finalize(nul_timestamp_update);
     assert(capri_session_integrity_check(store)==CAPRI_SESSION_OK);
+
+    /* Primary-key text must also be checked by byte length, not strlen(). */
+    CapriSession nul_id_session={0};
+    assert(capri_session_create(store,&nul_id_session)==CAPRI_SESSION_OK);
+    sqlite3_stmt *nul_id_update=NULL;
+    assert(sqlite3_prepare_v2(
+        raw,
+        "UPDATE sessions SET session_id=CAST(session_id || char(0) || 'trailing' AS TEXT) WHERE session_id=?1",
+        -1,&nul_id_update,NULL
+    )==SQLITE_OK);
+    sqlite3_bind_text(nul_id_update,1,nul_id_session.session_id,-1,SQLITE_TRANSIENT);
+    assert(sqlite3_step(nul_id_update)==SQLITE_DONE&&sqlite3_changes(raw)==1);
+    sqlite3_finalize(nul_id_update);
+    assert(capri_session_integrity_check(store)==CAPRI_SESSION_CORRUPT);
+    assert(capri_session_backup_to(store,nul_json_backup_path)==CAPRI_SESSION_CORRUPT);
+    struct stat nul_id_backup_missing;
+    assert(lstat(nul_json_backup_path,&nul_id_backup_missing)!=0);
+    assert(sqlite3_prepare_v2(
+        raw,
+        "DELETE FROM sessions WHERE session_id=CAST(?1 || char(0) || 'trailing' AS TEXT)",
+        -1,&nul_id_update,NULL
+    )==SQLITE_OK);
+    sqlite3_bind_text(nul_id_update,1,nul_id_session.session_id,-1,SQLITE_TRANSIENT);
+    assert(sqlite3_step(nul_id_update)==SQLITE_DONE&&sqlite3_changes(raw)==1);
+    sqlite3_finalize(nul_id_update);
+    capri_session_free(&nul_id_session);
+    assert(capri_session_integrity_check(store)==CAPRI_SESSION_OK);
+
     capri_session_free(&nul_json_session);
     sqlite3_close(raw);
     struct stat database_mode;assert(stat(path,&database_mode)==0&&(database_mode.st_mode&0777u)==0600u);
