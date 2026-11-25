@@ -98,6 +98,40 @@ class StrategyEvaluationTests(unittest.TestCase):
                 self.assertFalse(result.eligible_for_manual_review)
                 self.assertIn(f"{field}_regression", result.blocked_reasons)
 
+    def test_pairwise_success_regression_cannot_be_hidden_by_another_win(self):
+        records = cohort(
+            baseline_overrides={0: {"outcome": "verified_failure"}},
+            candidate_overrides={1: {"outcome": "verified_failure"}},
+        )
+        result = evaluate_strategies("baseline", "candidate", records)
+        self.assertEqual(
+            result.baseline.verified_success_rate,
+            result.candidate.verified_success_rate,
+        )
+        self.assertFalse(result.eligible_for_manual_review)
+        self.assertIn("verified_success_pair_regression", result.blocked_reasons)
+
+    def test_pairwise_resource_regression_cannot_be_hidden_by_another_saving(self):
+        records = cohort(candidate_overrides={
+            0: {"estimated_cost_units": 200},
+            1: {"estimated_cost_units": 0},
+        })
+        result = evaluate_strategies("baseline", "candidate", records)
+        self.assertEqual(
+            result.baseline.mean_estimated_cost_units,
+            result.candidate.mean_estimated_cost_units,
+        )
+        self.assertFalse(result.eligible_for_manual_review)
+        self.assertIn("estimated_cost_units_regression", result.blocked_reasons)
+
+    def test_removing_a_safety_violation_is_a_strict_improvement(self):
+        records = cohort(
+            baseline_overrides={0: {"safety_violation": True}},
+        )
+        result = evaluate_strategies("baseline", "candidate", records)
+        self.assertTrue(result.eligible_for_manual_review)
+        self.assertIn("safety_violations", result.improved_dimensions)
+
     def test_sample_floor_is_required(self):
         result = evaluate_strategies("baseline", "candidate", cohort(count=19))
         self.assertFalse(result.eligible_for_manual_review)
