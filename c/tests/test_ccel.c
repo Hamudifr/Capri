@@ -33,6 +33,13 @@ int main(void) {
     ccel_synthesis_result_free(&result);
 
     assert(ccel_grid_init(&out, 1, 1, (const uint8_t[]){10}, 1) == CCEL_ERR_CELL_OUT_OF_RANGE);
+    CcelGrid malformed = g;
+    malformed.cells[0] = 255u;
+    assert(!ccel_grid_equal(&malformed, &g));
+    assert(ccel_grid_compare(&malformed, &g) == 0);
+    assert(ccel_operation_apply(CCEL_FLIP_HORIZONTAL, &malformed, &out) == CCEL_ERR_CELL_OUT_OF_RANGE);
+    malformed = (CcelGrid){.height=SIZE_MAX, .width=2};
+    assert(!ccel_grid_equal(&malformed, &g));
     assert(ccel_synthesize(NULL, 0, 1, 10, &result) == CCEL_ERR_NO_EXAMPLES);
     assert(ccel_program_init(&(CcelProgram){0}, NULL, 6) == CCEL_ERR_PROGRAM_TOO_DEEP);
     puts("CCEL C tests passed");
