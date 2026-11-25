@@ -470,6 +470,10 @@ class SQLiteBudgetStore:
                     return str(row[0])
                 if foreign_key_errors:
                     return "foreign key check failed"
+                try:
+                    self._validate_backup_snapshot(connection)
+                except BudgetValidationError:
+                    return "budget ledger validation failed"
                 return "ok"
             finally:
                 connection.close()
