@@ -46,7 +46,15 @@ int main(void) {
     char restored_path[512]; snprintf(restored_path,sizeof restored_path,"%s/sessions-restored.sqlite3",dir);
     char corrupt_backup_path[512]; snprintf(corrupt_backup_path,sizeof corrupt_backup_path,"%s/corrupt-backup.sqlite3",dir);
     char corrupt_restore_path[512]; snprintf(corrupt_restore_path,sizeof corrupt_restore_path,"%s/corrupt-restored.sqlite3",dir);
-    CapriSessionError error; CapriSessionStore *store=capri_session_store_open(path,200,16000,64000,131072,&error);
+    CapriSessionError error;
+    char unsafe_dir[]="/tmp/capri-c-insecure-XXXXXX";
+    assert(mkdtemp(unsafe_dir)!=NULL);
+    assert(chmod(unsafe_dir,0755)==0);
+    char unsafe_path[512]; snprintf(unsafe_path,sizeof unsafe_path,"%s/sessions.sqlite3",unsafe_dir);
+    assert(capri_session_store_open(unsafe_path,200,16000,64000,131072,&error)==NULL);
+    assert(chmod(unsafe_dir,0700)==0);
+    assert(rmdir(unsafe_dir)==0);
+    CapriSessionStore *store=capri_session_store_open(path,200,16000,64000,131072,&error);
     assert(store!=NULL && error==CAPRI_SESSION_OK);
     CapriSession alice={0}, bob={0}, committed={0};
     assert(capri_session_create_for_principal(store,"principal-alice",&alice)==CAPRI_SESSION_OK);
@@ -247,6 +255,10 @@ int main(void) {
     int child_status=0; assert(waitpid(opener,&child_status,0)==opener);
     assert(WIFEXITED(child_status)&&WEXITSTATUS(child_status)==0&&opener_result==CAPRI_SESSION_OK);
 
+    char hardlinkpath[512]; snprintf(hardlinkpath,sizeof hardlinkpath,"%s/hardlink.sqlite3",dir);
+    assert(link(path,hardlinkpath)==0);
+    store=capri_session_store_open(hardlinkpath,200,16000,64000,131072,&error); assert(store==NULL);
+    unlink(hardlinkpath);
     char linkpath[512]; snprintf(linkpath,sizeof linkpath,"%s/symlink.sqlite3",dir);
     assert(symlink(path,linkpath)==0);
     store=capri_session_store_open(linkpath,200,16000,64000,131072,&error); assert(store==NULL);
