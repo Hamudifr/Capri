@@ -265,7 +265,10 @@ class CapriHostRuntime:
             raise HostRuntimeError("worker_in_flight_resolver must be callable")
         if worker_policy_resolver is not None and not callable(worker_policy_resolver):
             raise HostRuntimeError("worker_policy_resolver must be callable")
-        if worker_lifecycle_audit_sink is not None and not isinstance(worker_lifecycle_audit_sink, AuditSink):
+        if worker_lifecycle_audit_sink is not None and (
+            not isinstance(worker_lifecycle_audit_sink, AuditSink)
+            or type(worker_lifecycle_audit_sink).write is AuditSink.write
+        ):
             raise HostRuntimeError("worker_lifecycle_audit_sink must implement the trusted AuditSink contract")
         if worker_registry is None and worker_lifecycle_audit_sink is not None:
             raise HostRuntimeError("worker lifecycle audit sink requires a configured worker_registry")
@@ -453,7 +456,7 @@ class CapriHostRuntime:
             "max_concurrency": max_concurrency,
         }
         metadata_json = json.dumps(
-            metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+            metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
         )
         digest = hashlib.sha256(metadata_json.encode("utf-8")).hexdigest()
         event = AuditEvent(
