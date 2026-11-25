@@ -302,8 +302,11 @@ CapriSessionError capri_session_backup_to(CapriSessionStore *s,const char *desti
     if(!store_path_safe(s)){pthread_mutex_unlock(&s->mutex);unlink(temporary);free(temporary);free(parent);free(absolute);return CAPRI_SESSION_IO;}
     sqlite3 *destination=NULL;int rc=sqlite3_open_v2(temporary,&destination,SQLITE_OPEN_READWRITE|SQLITE_OPEN_FULLMUTEX,NULL);
     if(rc!=SQLITE_OK){if(destination)sqlite3_close(destination);pthread_mutex_unlock(&s->mutex);unlink(temporary);free(temporary);free(parent);free(absolute);return map_sqlite(rc);}
-    (void)sqlite3_busy_timeout(destination,5000);
-    bool configured=exec_sql(destination,"PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF; PRAGMA synchronous=FULL; PRAGMA journal_mode=DELETE;");
+    bool configured=sqlite3_busy_timeout(destination,5000)==SQLITE_OK;
+#ifdef SQLITE_DBCONFIG_DEFENSIVE
+    if(configured && sqlite3_db_config(destination,SQLITE_DBCONFIG_DEFENSIVE,1,NULL)!=SQLITE_OK)configured=false;
+#endif
+    configured=configured&&exec_sql(destination,"PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF; PRAGMA synchronous=FULL; PRAGMA journal_mode=DELETE;");
     sqlite3_backup *backup=configured?sqlite3_backup_init(destination,"main",s->db,"main"):NULL;
     if(!backup){sqlite3_close(destination);pthread_mutex_unlock(&s->mutex);unlink(temporary);free(temporary);free(parent);free(absolute);return CAPRI_SESSION_DATABASE;}
     unsigned attempts=0u,steps=0u;do{rc=sqlite3_backup_step(backup,256);if(rc==SQLITE_OK){if(++steps<100000u)continue;rc=SQLITE_BUSY;break;}if((rc==SQLITE_BUSY||rc==SQLITE_LOCKED)&&attempts++<500u){sqlite3_sleep(10);continue;}break;}while(true);
@@ -631,8 +634,11 @@ CapriSessionError capri_session_restore_to(CapriSessionStore *s,const char *back
     if(result==CAPRI_SESSION_OK){
         rc=sqlite3_open_v2(temporary,&destination,SQLITE_OPEN_READWRITE|SQLITE_OPEN_FULLMUTEX,NULL);
         if(rc==SQLITE_OK){
-            if(sqlite3_busy_timeout(destination,5000)!=SQLITE_OK ||
-               !exec_sql(destination,"PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF; PRAGMA synchronous=FULL; PRAGMA journal_mode=DELETE;"))result=CAPRI_SESSION_DATABASE;
+            if(sqlite3_busy_timeout(destination,5000)!=SQLITE_OK)result=CAPRI_SESSION_DATABASE;
+#ifdef SQLITE_DBCONFIG_DEFENSIVE
+            if(result==CAPRI_SESSION_OK && sqlite3_db_config(destination,SQLITE_DBCONFIG_DEFENSIVE,1,NULL)!=SQLITE_OK)result=CAPRI_SESSION_DATABASE;
+#endif
+            if(result==CAPRI_SESSION_OK && !exec_sql(destination,"PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF; PRAGMA synchronous=FULL; PRAGMA journal_mode=DELETE;"))result=CAPRI_SESSION_DATABASE;
         } else result=map_sqlite(rc);
     }
     if(result==CAPRI_SESSION_OK){
