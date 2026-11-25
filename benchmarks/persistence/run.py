@@ -43,18 +43,24 @@ def _percentile(values: list[float], fraction: float) -> float:
 
 
 def _summary(
-    name: str, values_ns: list[int], *, wall_elapsed_ns: int, unit: str = "operation"
+    name: str, values_ns: list[int], *, wall_elapsed_ns: int | None = None,
+    unit: str = "operation"
 ) -> dict[str, Any]:
     values_us = [value / 1_000 for value in values_ns]
     aggregate_operation_s = sum(values_ns) / 1_000_000_000
-    wall_elapsed_s = wall_elapsed_ns / 1_000_000_000
+    wall_elapsed_s = (
+        wall_elapsed_ns / 1_000_000_000 if wall_elapsed_ns is not None else None
+    )
     return {
         "name": name,
         "unit": unit,
         "sample_count": len(values_ns),
-        "elapsed_seconds": round(wall_elapsed_s, 6),
+        "elapsed_seconds": round(wall_elapsed_s, 9) if wall_elapsed_s is not None else None,
         "aggregate_operation_seconds": round(aggregate_operation_s, 6),
-        "throughput_per_second": round(len(values_ns) / wall_elapsed_s, 2) if wall_elapsed_s else None,
+        "throughput_per_second": (
+            round(len(values_ns) / wall_elapsed_s, 2)
+            if wall_elapsed_s is not None and wall_elapsed_s > 0 else None
+        ),
         "latency_us": {
             "min": round(min(values_us), 3),
             "median": round(statistics.median(values_us), 3),
@@ -88,10 +94,7 @@ def _transaction_phases(path: Path, warmup: int, samples: int) -> tuple[dict[str
         connection.execute("CREATE TABLE phase_probe (id INTEGER PRIMARY KEY, payload TEXT NOT NULL)")
         execute_ns: list[int] = []
         commit_ns: list[int] = []
-        sample_batch_started: int | None = None
         for index in range(warmup + samples):
-            if index == warmup:
-                sample_batch_started = time.perf_counter_ns()
             connection.execute("BEGIN IMMEDIATE")
             started = time.perf_counter_ns()
             connection.execute("INSERT INTO phase_probe(payload) VALUES(?)", (f"row-{index}",))
@@ -101,19 +104,9 @@ def _transaction_phases(path: Path, warmup: int, samples: int) -> tuple[dict[str
             if index >= warmup:
                 execute_ns.append(executed - started)
                 commit_ns.append(committed - executed)
-        sample_batch_elapsed_ns = (
-            time.perf_counter_ns() - sample_batch_started
-            if sample_batch_started is not None else 0
-        )
         return (
-            _summary(
-                "sqlite_insert_statement_only", execute_ns,
-                wall_elapsed_ns=sample_batch_elapsed_ns,
-            ),
-            _summary(
-                "sqlite_commit_only_after_insert", commit_ns,
-                wall_elapsed_ns=sample_batch_elapsed_ns,
-            ),
+            _summary("sqlite_insert_statement_only", execute_ns),
+            _summary("sqlite_commit_only_after_insert", commit_ns),
         )
     finally:
         connection.close()
