@@ -18,6 +18,17 @@ from .strategy_promotion import (
     StrategyPromotionError,
     assess_strategy_canary,
 )
+from .action_capsule import (
+    ActionCapsule,
+    ActionCapsuleError,
+    CapsuleEvent,
+    CapsuleIntegrityError,
+    CapsuleState,
+    create_action_capsule,
+    transition_action_capsule,
+    verify_action_capsule_history,
+)
+
 from .validation import RecordValidationError, contains_surrogate, validate_record
 
 __all__ = [
@@ -28,4 +39,7 @@ __all__ = [
     "StrategyObservation", "evaluate_strategies", "verify_strategy_evaluation",
     "PromotionCohort", "CohortPromotionResult", "StrategyPromotionAssessment",
     "StrategyPromotionError", "assess_strategy_canary",
+    "ActionCapsule", "ActionCapsuleError", "CapsuleEvent", "CapsuleIntegrityError",
+    "CapsuleState", "create_action_capsule", "transition_action_capsule",
+    "verify_action_capsule_history",
 ]
