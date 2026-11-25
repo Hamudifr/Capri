@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from capri_core.validation import contains_surrogate
+
 from .memory import UntrustedMemoryContext
 from .knowledge_graph import UntrustedKnowledgeContext
 from .orchestration import (
@@ -237,7 +239,7 @@ class CapriHostRuntime:
             not isinstance(user_text, str)
             or not user_text.strip()
             or len(user_text) > self._session_store.max_input_chars
-            or any(0xD800 <= ord(character) <= 0xDFFF for character in user_text)
+            or contains_surrogate(user_text)
         ):
             raise HostRuntimeError("user_text is invalid or exceeds the host input limit")
         # Authenticate ownership before memory retrieval or model invocation. A
