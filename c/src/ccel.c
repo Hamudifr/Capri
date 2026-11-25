@@ -4,10 +4,17 @@
 #include <stdlib.h>
 #include <string.h>
 
-static int grid_is_valid(const CcelGrid *g) {
+static int grid_shape_is_valid(const CcelGrid *g) {
     return g && g->height > 0 && g->width > 0 &&
            g->height <= CCEL_MAX_SIDE && g->width <= CCEL_MAX_SIDE &&
            g->height <= CCEL_MAX_CELLS / g->width;
+}
+
+static int grid_is_valid(const CcelGrid *g) {
+    if (!grid_shape_is_valid(g)) return 0;
+    for (size_t i = 0; i < g->height * g->width; ++i)
+        if (g->cells[i] > 9u) return 0;
+    return 1;
 }
 
 static const CcelOperation all_operations[5] = {
@@ -47,7 +54,8 @@ CcelError ccel_grid_init(CcelGrid *out, size_t h, size_t w,
 }
 
 int ccel_grid_equal(const CcelGrid *a, const CcelGrid *b) {
-    return a && b && a->height == b->height && a->width == b->width &&
+    return grid_is_valid(a) && grid_is_valid(b) &&
+           a->height == b->height && a->width == b->width &&
            memcmp(a->cells, b->cells, a->height * a->width) == 0;
 }
 
@@ -60,9 +68,10 @@ int ccel_grid_compare(const CcelGrid *a, const CcelGrid *b) {
 }
 
 CcelError ccel_operation_apply(CcelOperation op, const CcelGrid *in, CcelGrid *out) {
-    if (!in || !out || in->height == 0 || in->width == 0 ||
-        in->height > CCEL_MAX_SIDE || in->width > CCEL_MAX_SIDE)
+    if (!in || !out || !grid_shape_is_valid(in))
         return CCEL_ERR_EMPTY_GRID;
+    for (size_t i = 0; i < in->height * in->width; ++i)
+        if (in->cells[i] > 9u) return CCEL_ERR_CELL_OUT_OF_RANGE;
     const size_t h = in->height, w = in->width;
     const int swaps = op == CCEL_ROTATE_CLOCKWISE ||
         op == CCEL_ROTATE_COUNTERCLOCKWISE || op == CCEL_TRANSPOSE;
