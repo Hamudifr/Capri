@@ -639,7 +639,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
         )
         host.register_worker(
             "worker-token",
-            WorkerDescriptor("worker-1", (1,), ("math.factorial",), max_concurrency=1),
+            WorkerDescriptor("worker-1", (1,), ("math.factorial",), max_concurrency=2),
         )
         host.heartbeat_worker("monitor-token", "worker-1")
         task = self.task_store.create_for_principal(
@@ -648,15 +648,32 @@ class CapriHostRuntimeTests(unittest.TestCase):
         pending = host.reserve_worker_candidate(
             "alice-token", task.task_id, "math.factorial", 1,
         )
+        committed_task = self.task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {"scope": "committed-survives-failure"}}],
+        )
+        committed_pending = host.reserve_worker_candidate(
+            "alice-token", committed_task.task_id, "math.factorial", 1,
+        )
         self.assertIsNotNone(pending)
+        self.assertIsNotNone(committed_pending)
+        committed = host.commit_worker_reservation(
+            "alice-token", "monitor-token", committed_pending,
+        )
+        self.assertTrue(committed.reservation.committed)
         self.assertTrue(audit.worker_lifecycle_reconciliation_required())
 
         failed = host.record_worker_failure("monitor-token", "worker-1")
         self.assertEqual(failed.health.state, "degraded")
         self.assertIsNone(registry.get_reservation(pending.reservation.token))
         self.assertNotIn(pending.reservation.token, host._worker_reservation_contexts)
+        surviving = registry.get_reservation(committed.reservation.token)
+        self.assertIsNotNone(surviving)
+        self.assertTrue(surviving.committed)
+        self.assertIn(committed.reservation.token, host._worker_reservation_contexts)
         events = audit.events()
         self.assertIn("worker.reservation.revoked", [event.tool_name for event in events])
+        self.assertTrue(audit.worker_lifecycle_reconciliation_required())
+        self.assertTrue(host.release_worker_reservation("monitor-token", committed))
         self.assertFalse(audit.worker_lifecycle_reconciliation_required())
         self.assertEqual(host.get_worker_candidates(
             "alice-token", task.task_id, "math.factorial", 1,
