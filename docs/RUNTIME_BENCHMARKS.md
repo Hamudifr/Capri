@@ -26,7 +26,7 @@ Store initialization, temporary-directory creation, and pre-population of the ta
 
 ## Environment and memory
 
-The report records Python implementation/version, SQLite version, OS/platform, machine architecture, CPU model when detectable, logical CPU count, commit SHA and workflow run ID. It also reports process peak RSS where the operating system exposes it. Peak RSS is process-wide for the entire benchmark, not attributed to an individual workload.
+The report records Python implementation/version, SQLite version, OS/platform, machine architecture, CPU model when detectable, logical CPU count, the source branch head SHA, pull-request base SHA, workflow merge SHA, branch name and workflow run ID. The workflow summary shows compact latency/throughput metrics; raw sample latencies remain in the job log. It also reports process peak RSS where the operating system exposes it. Peak RSS is process-wide for the entire benchmark, not attributed to an individual workload.
 
 For meaningful comparisons, run on the same hardware class, runner image, Python and SQLite versions, with the same warm-up and sample counts. Repeat runs and compare distributions; do not treat a single shared-runner result as a universal performance ranking. Background load, virtualization and CPU scheduling can affect results.
 
