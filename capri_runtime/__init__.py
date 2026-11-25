@@ -11,9 +11,10 @@ from .worker_protocol import (
     WorkerProtocolError, WorkerRequest, WorkerResponse,
 )
 from .worker_registry import (
-    InMemoryWorkerRegistry, WorkerConflictError, WorkerDescriptor,
+    InMemoryWorkerRegistry, WorkerRegistry, WorkerConflictError, WorkerDescriptor,
     WorkerHealth, WorkerNotFoundError, WorkerRegistryError, WorkerReservation, WorkerSnapshot,
 )
+from .sqlite_worker_registry import SQLiteWorkerRegistry
 from .runtime import (
     Message,
     ModelAdapter,
