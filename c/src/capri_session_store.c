@@ -211,7 +211,10 @@ CapriSessionStore *capri_session_store_open(const char *path,size_t max_messages
     flags|=O_NOFOLLOW;
 #endif
     int fd=open(absolute,flags,0600); if(fd<0){free(absolute);if(error)*error=CAPRI_SESSION_IO;return NULL;}
-    struct stat st; bool ok=fstat(fd,&st)==0 && S_ISREG(st.st_mode) && st.st_uid==geteuid() && st.st_nlink==1 && fchmod(fd,0600)==0;
+    struct stat st;
+    bool ok=fstat(fd,&st)==0 && S_ISREG(st.st_mode) && st.st_uid==geteuid()
+        && st.st_nlink==1 && fchmod(fd,0600)==0;
+    bool fresh_database=ok && st.st_size==0;
     close(fd); if(!ok){free(absolute);if(error)*error=CAPRI_SESSION_IO;return NULL;}
     CapriSessionStore *s=calloc(1u,sizeof *s); if(!s){free(absolute);if(error)*error=CAPRI_SESSION_NO_MEMORY;return NULL;}
     s->path=absolute;s->max_messages=max_messages;s->max_input=max_input;s->max_output=max_output;s->max_tool=max_tool;
@@ -225,7 +228,19 @@ CapriSessionStore *capri_session_store_open(const char *path,size_t max_messages
 #ifdef SQLITE_DBCONFIG_DEFENSIVE
     if(rc==SQLITE_OK && sqlite3_db_config(s->db,SQLITE_DBCONFIG_DEFENSIVE,1,NULL)!=SQLITE_OK) rc=SQLITE_ERROR;
 #endif
-    if(rc!=SQLITE_OK || !schema(s->db) || !store_path_safe(s) ||
+    bool schema_ready=false;
+    if(rc==SQLITE_OK){
+        if(fresh_database){
+            schema_ready=schema(s->db);
+        }else{
+            /* Never recreate missing tables, indexes or triggers in an existing
+               database. Validate the complete security boundary first. */
+            schema_ready=session_schema_valid(s->db)
+                &&owner_triggers_valid(s->db)
+                &&configure_database(s->db);
+        }
+    }
+    if(rc!=SQLITE_OK || !schema_ready || !store_path_safe(s) ||
        !session_schema_valid(s->db) || !owner_triggers_valid(s->db)){
         if(s->db)sqlite3_close(s->db);
         pthread_mutex_destroy(&s->mutex);free(s->path);free(s);
