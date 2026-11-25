@@ -117,11 +117,16 @@ def _canonical(value: object) -> bytes:
 def _normalize_scope(values: Iterable[str]) -> tuple[str, ...]:
     if isinstance(values, (str, bytes)):
         raise ActionCapsuleError("resource_scope must be a collection of identifiers")
+    unique: set[str] = set()
     try:
-        scope = tuple(sorted({_identifier(value, "resource_scope item") for value in values}))
+        for count, value in enumerate(values, start=1):
+            if count > _MAX_SCOPE_ITEMS:
+                raise ActionCapsuleError("resource_scope exceeds the input item limit")
+            unique.add(_identifier(value, "resource_scope item"))
     except TypeError:
         raise ActionCapsuleError("resource_scope must be iterable") from None
-    if not scope or len(scope) > _MAX_SCOPE_ITEMS:
+    scope = tuple(sorted(unique))
+    if not scope:
         raise ActionCapsuleError("resource_scope must contain 1–128 unique items")
     return scope
 
@@ -130,7 +135,9 @@ def _normalize_budgets(values: Mapping[str, int]) -> tuple[tuple[str, int], ...]
     if not isinstance(values, Mapping) or not values or len(values) > _MAX_BUDGET_ITEMS:
         raise ActionCapsuleError("budgets must be a non-empty mapping of at most 32 limits")
     result: list[tuple[str, int]] = []
-    for key, value in values.items():
+    for count, (key, value) in enumerate(values.items(), start=1):
+        if count > _MAX_BUDGET_ITEMS:
+            raise ActionCapsuleError("budgets exceed the input item limit")
         if type(key) is not str or not _BUDGET_KEY.fullmatch(key):
             raise ActionCapsuleError("budget names must be lowercase identifiers")
         if type(value) is not int or not 0 <= value <= _MAX_BUDGET_VALUE:
@@ -470,20 +477,32 @@ def transition_action_capsule(
     if target_state is CapsuleState.VERIFIED:
         if isinstance(evidence_refs, (str, bytes)):
             raise ActionCapsuleError("evidence_refs must be a collection")
+        collected: list[str] = []
+        seen_evidence: set[str] = set()
         try:
-            next_evidence = tuple(dict.fromkeys(_identifier(item, "evidence reference") for item in evidence_refs))
+            for count, item in enumerate(evidence_refs, start=1):
+                if count > _MAX_EVIDENCE_REFS:
+                    raise ActionCapsuleError("evidence_refs exceed the input item limit")
+                reference = _identifier(item, "evidence reference")
+                if reference not in seen_evidence:
+                    seen_evidence.add(reference)
+                    collected.append(reference)
         except TypeError:
             raise ActionCapsuleError("evidence_refs must be iterable") from None
-        if not next_evidence or len(next_evidence) > _MAX_EVIDENCE_REFS:
+        next_evidence = tuple(collected)
+        if not next_evidence:
             raise ActionCapsuleError("verification requires 1–128 unique evidence references")
         next_verifier = _identifier(verifier_id, "verifier_id")
         next_verifier_version = _identifier(verifier_version, "verifier_version")
     else:
+        if isinstance(evidence_refs, (str, bytes)):
+            raise ActionCapsuleError("evidence_refs must be a collection")
         try:
-            extra_evidence = tuple(evidence_refs)
+            iterator = iter(evidence_refs)
+            has_extra_evidence = next(iterator, None) is not None
         except TypeError:
             raise ActionCapsuleError("evidence_refs must be iterable") from None
-        if any(value is not None for value in (verifier_id, verifier_version)) or extra_evidence:
+        if any(value is not None for value in (verifier_id, verifier_version)) or has_extra_evidence:
             raise ActionCapsuleError("verifier identity and evidence may only be set during verification")
 
     if target_state in {CapsuleState.REJECTED, CapsuleState.INDETERMINATE}:
