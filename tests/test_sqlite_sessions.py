@@ -412,7 +412,10 @@ class SQLiteSessionStoreTests(unittest.TestCase):
 
     def test_close_state_survives_reopen_and_is_idempotent(self):
         session = self.store.create()
-        closed = self.store.close(session.session_id)
+        original_connect = self.store._connect
+        with patch.object(self.store, "_connect", wraps=original_connect) as connect:
+            closed = self.store.close(session.session_id)
+        self.assertEqual(connect.call_count, 1)
         reopened = SQLiteSessionStore(self.path)
         self.assertEqual(reopened.get(session.session_id), closed)
         self.assertEqual(reopened.close(session.session_id), closed)
