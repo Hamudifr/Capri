@@ -91,7 +91,10 @@ from .security_store import SQLiteSecurityStore
 from .memory import MemoryErrorBase, MemoryNotFoundError, MemoryProvider, MemoryRecord, MemoryValidationError, SQLiteMemoryStore, UntrustedMemoryContext, build_untrusted_memory_context, serialize_untrusted_memory_context
 from .notion_memory import MemorySyncError, NotionMemoryAdapter, NotionMemoryTransport
 from .notion_rest import NotionRateLimitError, NotionRESTTransport, NotionTransportError, create_notion_memory_adapter_from_environment
-from .goal_coordinator import GoalCoordinator, GoalExecution
+from .goal_coordinator import (
+    GoalCompletionReport, GoalCoordinator, GoalExecution,
+    GoalEvidenceSummary, GoalEventSummary, TaskEventSummary,
+)
 from .goals import (
     GoalConflictError, GoalError, GoalIdempotencyConflict, GoalNotFoundError,
     GoalPlanProposal, GoalPlanner, GoalRecord, GoalValidationError, SQLiteGoalStore,
@@ -122,6 +125,10 @@ __all__ = [
     "ToolBudgetExceededError",
     "GoalCoordinator",
     "GoalExecution",
+"GoalCompletionReport",
+    "GoalEvidenceSummary",
+    "GoalEventSummary",
+    "TaskEventSummary",
     "GoalConflictError",
     "GoalError",
     "GoalIdempotencyConflict",
