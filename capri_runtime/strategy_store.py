@@ -369,6 +369,54 @@ def _promotion_record_from_row(row: tuple[Any, ...]) -> StrategyPromotionRecord:
     )
 
 
+def _promotion_record_matches(
+    record: StrategyPromotionRecord,
+    *,
+    strategy_class: str,
+    baseline_id: str,
+    candidate_id: str,
+    baseline_version: str,
+    candidate_version: str,
+    cohort_sha256: str | None = None,
+    require_current_policy: bool = False,
+) -> bool:
+    summary = record.summary
+    cohort_results = summary.get("cohort_results")
+    if type(cohort_results) is not list or not 2 <= len(cohort_results) <= 4:
+        return False
+    cohort_ids = {
+        item.get("cohort_id") for item in cohort_results
+        if type(item) is dict and type(item.get("cohort_id")) is str
+    }
+    refs = {key for key, _ in record.evidence_manifest_refs}
+    hashes = {key for key, _ in record.cohort_sha256s}
+    hash_values = {value for _, value in record.cohort_sha256s}
+    return (
+        len(cohort_ids) == len(cohort_results)
+        and len(hash_values) == len(record.cohort_sha256s)
+        and cohort_ids == refs == hashes
+        and (cohort_sha256 is None or cohort_sha256 in hash_values)
+        and record.strategy_class == strategy_class
+        and record.baseline_id == baseline_id
+        and record.candidate_id == candidate_id
+        and record.baseline_version == baseline_version
+        and record.candidate_version == candidate_version
+        and record.summary.get("eligible_for_canary") is True
+        and record.summary.get("policy_version") == record.policy_version
+        and record.summary.get("strategy_class") == record.strategy_class
+        and record.summary.get("baseline_id") == record.baseline_id
+        and record.summary.get("candidate_id") == record.candidate_id
+        and record.summary.get("baseline_version") == record.baseline_version
+        and record.summary.get("candidate_version") == record.candidate_version
+        and record.summary.get("task_family") == record.task_family
+        and record.summary.get("primary_metric") == record.primary_metric
+        and (
+            not require_current_policy
+            or record.policy_version == STRATEGY_PROMOTION_POLICY_VERSION
+        )
+    )
+
+
 class SQLiteStrategyStore:
     """Append-only strategy registry sharing the task store's private SQLite DB.
 
