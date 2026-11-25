@@ -439,30 +439,59 @@ class SQLiteGoalStore:
                 connection.close()
         return self.get_for_principal(goal_id, principal_id)
 
+    @staticmethod
+    def _owned_row_on_connection(
+        connection: sqlite3.Connection, goal_id: str, principal_id: str
+    ) -> tuple[Any, ...]:
+        row = connection.execute(
+            """SELECT g.goal_id,g.outcome,g.constraints_json,g.deadline,g.criteria_json,
+            g.state,g.version,g.created_at,g.updated_at,g.plan_json,o.principal_id,l.task_id
+            FROM goals g JOIN goal_owners o ON o.goal_id=g.goal_id
+            LEFT JOIN goal_task_links l ON l.goal_id=g.goal_id
+            WHERE g.goal_id=? AND o.principal_id=?""",
+            (goal_id, principal_id),
+        ).fetchone()
+        if row is None:
+            raise GoalNotFoundError("goal does not exist")
+        return row
+
+    @staticmethod
+    def _evidence_rows_on_connection(
+        connection: sqlite3.Connection, goal_id: str, principal_id: str
+    ) -> tuple[dict[str, Any], ...]:
+        rows = connection.execute(
+            """SELECT evidence_type,reference,step_index,created_at
+            FROM goal_evidence WHERE goal_id=? AND principal_id=?
+            ORDER BY evidence_id""",
+            (goal_id, principal_id),
+        ).fetchall()
+        return tuple({
+            "evidence_type": row[0], "reference": row[1],
+            "step_index": row[2], "created_at": row[3],
+        } for row in rows)
+
     def _owned_row(self, goal_id: str, principal_id: str) -> tuple[Any, ...]:
         _text(goal_id, "goal_id", 64)
         principal_id = _text(principal_id, "principal_id", 128)
         connection = self._connect()
         try:
-            row = connection.execute(
-                """SELECT g.goal_id,g.outcome,g.constraints_json,g.deadline,g.criteria_json,
-                g.state,g.version,g.created_at,g.updated_at,g.plan_json,o.principal_id,l.task_id
-                FROM goals g JOIN goal_owners o ON o.goal_id=g.goal_id
-                LEFT JOIN goal_task_links l ON l.goal_id=g.goal_id
-                WHERE g.goal_id=? AND o.principal_id=?""",
-                (goal_id, principal_id),
-            ).fetchone()
-            if row is None:
-                raise GoalNotFoundError("goal does not exist")
-            return row
+            return self._owned_row_on_connection(connection, goal_id, principal_id)
         finally:
             connection.close()
 
     def get_for_principal(self, goal_id: str, principal_id: str) -> GoalRecord:
+        _text(goal_id, "goal_id", 64)
+        principal_id = _text(principal_id, "principal_id", 128)
         with self._lock:
-            row = self._owned_row(goal_id, principal_id)
-            evidence = self._evidence_rows(goal_id, principal_id)
-            return self._record(row[:10], row[10], row[11], evidence)
+            connection = self._connect()
+            try:
+                row = self._owned_row_on_connection(connection, goal_id, principal_id)
+                evidence = self._evidence_rows_on_connection(
+                    connection, goal_id, principal_id
+                )
+                return self._record(row[:10], row[10], row[11], evidence)
+            finally:
+                connection.close()
 
     def save_plan_for_principal(
         self, goal_id: str, principal_id: str, proposal: GoalPlanProposal,
