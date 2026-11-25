@@ -384,6 +384,28 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             "cancelled",
         )
 
+    def test_principal_activation_authorizes_and_returns_record_on_one_connection(self):
+        task = self.store.create_for_principal(
+            "alice", PLAN, "single-activation", NOW, deferred=True,
+        )
+        with self.assertRaises(TaskNotFoundError):
+            self.store.activate_for_principal(task.task_id, "bob", NOW)
+        self.assertEqual(
+            self.store.get_for_principal(task.task_id, "alice").state,
+            "blocked",
+        )
+
+        original_connect = self.store._connect
+        with patch.object(self.store, "_connect", wraps=original_connect) as connect:
+            activated = self.store.activate_for_principal(task.task_id, "alice", NOW)
+        self.assertEqual(activated.state, "queued")
+        self.assertEqual(connect.call_count, 1)
+
+        with patch.object(self.store, "_connect", wraps=original_connect) as connect:
+            repeated = self.store.activate_for_principal(task.task_id, "alice", NOW)
+        self.assertEqual(repeated, activated)
+        self.assertEqual(connect.call_count, 1)
+
     def test_task_integrity_check_detects_missing_event_protection(self):
         self.store.create(PLAN, "event-trigger-check", NOW)
         connection = sqlite3.connect(self.path)
