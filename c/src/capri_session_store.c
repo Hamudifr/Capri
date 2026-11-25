@@ -269,20 +269,20 @@ static bool normalized_sql_equal(const char *actual,const char *expected) {
         while(*a&&isspace(*a))++a;
         while(*b&&isspace(*b))++b;
         if(!*a||!*b)return *a==*b;
-        if(*a=='\\''){
-            if(*b!='\\'')return false;
+        if(*a=='\''){
+            if(*b!='\'')return false;
             ++a;++b;
             while(*a&&*b){
                 if(*a!=*b)return false;
-                if(*a=='\\''){
-                    if(a[1]=='\\''&&b[1]=='\\''){a+=2;b+=2;continue;}
+                if(*a=='\''){
+                    if(a[1]=='\''&&b[1]=='\''){a+=2;b+=2;continue;}
                     ++a;++b;
                     break;
                 }
                 ++a;++b;
             }
         }else{
-            if(*b=='\\''||toupper(*a)!=toupper(*b))return false;
+            if(*b=='\''||toupper(*a)!=toupper(*b))return false;
             ++a;++b;
         }
     }
