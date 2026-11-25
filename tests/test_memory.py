@@ -431,6 +431,19 @@ class SQLiteMemoryStoreTests(unittest.TestCase):
         self.assertIn(("superseded", self.store.events(original.memory_id)[-1][1]),
                       self.store.events(original.memory_id))
 
+    def test_identical_memory_correction_retry_reuses_existing_successor(self):
+        original = self.create()
+        first = self.store.correct(original.memory_id, content="Idempotent correction.")
+        replay = self.store.correct(original.memory_id, content="Idempotent correction.")
+        self.assertEqual(replay.memory_id, first.memory_id)
+        with self.assertRaises(MemoryConflictError):
+            self.store.correct(original.memory_id, content="Different correction.")
+        self.assertEqual(
+            len([row for row in json.loads(self.store.export_json())
+                 if row["supersedes_id"] == original.memory_id]),
+            1,
+        )
+
     def test_archived_predecessor_cannot_be_corrected_again(self):
         original = self.create()
         corrected = self.store.correct(original.memory_id, content="First correction.")
