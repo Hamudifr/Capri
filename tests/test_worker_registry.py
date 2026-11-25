@@ -1,6 +1,5 @@
 import threading
 import unittest
-from dataclasses import replace
 
 from capri_runtime.worker_registry import (
     InMemoryWorkerRegistry,
@@ -47,7 +46,7 @@ class WorkerRegistryTests(unittest.TestCase):
             for item in self.registry.eligible(
                 "math.factorial",
                 protocol_version=1,
-                authorized_worker_ids={"worker-1", "worker-2", "worker-3"},
+                authorized_worker_ids={"worker-1", "worker-2", "worker-3", "worker-a", "worker-b", "worker-c"},
                 now_ns=self.now,
                 **kwargs,
             )
