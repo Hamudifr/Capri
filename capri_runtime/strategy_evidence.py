@@ -42,7 +42,7 @@ def _text(value: object, label: str, limit: int = 512) -> str:
 def _validate_context(context: StrategyEvidenceContext, *, token: bool) -> None:
     if type(context) is not StrategyEvidenceContext:
         raise StrategyAuthorizationError("a typed strategy evidence context is required")
-    _text(context.principal_id, "principal_id", 128)
+    _text(context.principal_id, "principal_id", 256)
     if not _IDENTIFIER.fullmatch(_text(context.strategy_class, "strategy_class", 64)):
         raise StrategyAuthorizationError("strategy_class is invalid")
     if not _IDENTIFIER.fullmatch(_text(context.baseline_id, "baseline_id", 64)):
