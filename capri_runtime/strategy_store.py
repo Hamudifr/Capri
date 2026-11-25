@@ -1227,6 +1227,8 @@ class SQLiteStrategyStore:
                 if grant.promotion_assessment_sha256 is not None:
                     if is_baseline:
                         raise StrategyAuthorizationError("baseline activation cannot claim a promotion assessment")
+                    if grant.evaluation_sha256 != cohort_hash:
+                        raise StrategyAuthorizationError("promotion grant must bind the candidate cohort fingerprint")
                     assessment_row = connection.execute(
                         """SELECT assessment_id,principal_id,strategy_class,baseline_id,baseline_version,
                         candidate_id,candidate_version,policy_version,task_family,assessment_sha256,
