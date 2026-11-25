@@ -140,6 +140,16 @@ class SQLiteProviderUsageJournal:
         self._tasks = task_store
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._initialize()
+        with self._tasks._lock:
+            connection = self._tasks._connect()
+            try:
+                validate_provider_usage_snapshot(connection)
+            except Exception:
+                raise ProviderUsageJournalError(
+                    "provider usage journal failed integrity validation"
+                ) from None
+            finally:
+                connection.close()
 
     def _initialize(self) -> None:
         with self._tasks._lock:
@@ -274,9 +284,19 @@ class SQLiteProviderUsageJournal:
                 cached_input_tokens=row[6], cache_write_tokens=row[7],
                 reasoning_tokens=row[8], provider_latency_ms=row[9],
             )
+            timestamp = _safe_text(row[10], "recorded_at", 64)
+            try:
+                parsed = datetime.fromisoformat(timestamp)
+            except ValueError:
+                raise ProviderUsageJournalError("provider usage timestamp is invalid") from None
+            if (
+                parsed.tzinfo is None or parsed.utcoffset() is None
+                or parsed.astimezone(timezone.utc).isoformat() != timestamp
+            ):
+                raise ProviderUsageJournalError("provider usage timestamp is invalid")
             if _event_digest(principal, session, usage) != row[11]:
                 raise ProviderUsageJournalError("provider usage record integrity check failed")
-            records.append(ProviderUsageRecord(principal, session, usage, row[10], row[11]))
+            records.append(ProviderUsageRecord(principal, session, usage, timestamp, row[11]))
         return tuple(records)
 
     def summary_for_principal(
@@ -319,6 +339,21 @@ def validate_provider_usage_snapshot(connection: sqlite3.Connection) -> None:
     columns = {row[1] for row in column_info}
     if columns != _COLUMNS:
         raise ProviderUsageJournalError("provider usage journal schema is invalid")
+    column_map = {row[1]: row for row in column_info}
+    expected_types = {
+        "provider": "TEXT", "response_id": "TEXT", "principal_id": "TEXT",
+        "session_id": "TEXT", "model": "TEXT", "input_tokens": "INTEGER",
+        "output_tokens": "INTEGER", "total_tokens": "INTEGER",
+        "cached_input_tokens": "INTEGER", "cache_write_tokens": "INTEGER",
+        "reasoning_tokens": "INTEGER", "provider_latency_ms": "INTEGER",
+        "recorded_at": "TEXT", "event_sha256": "TEXT",
+    }
+    if any(column_map[name][2].upper() != kind for name, kind in expected_types.items()):
+        raise ProviderUsageJournalError("provider usage journal column types are invalid")
+    if any(column_map[name][3] != 1 for name in _COLUMNS - {"provider_latency_ms"}):
+        raise ProviderUsageJournalError("provider usage journal required columns are nullable")
+    if column_map["provider_latency_ms"][3] != 0:
+        raise ProviderUsageJournalError("provider usage latency must remain nullable")
     primary_key = [row[1] for row in sorted(
         (row for row in column_info if row[5]), key=lambda item: item[5],
     )]
