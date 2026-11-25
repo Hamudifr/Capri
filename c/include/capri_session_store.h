@@ -97,10 +97,14 @@ CapriSessionError capri_session_close_for_principal(
     CapriSession *out);
 /* Creates a consistent, validated, mode-0600 snapshot without overwriting an
  * existing destination. The destination parent must already be private.
+ * If CAPRI_SESSION_IO is returned after publication, a complete destination may
+ * already exist while directory durability is uncertain. Inspect before retrying.
  */
 CapriSessionError capri_session_backup_to(CapriSessionStore *store, const char *destination_path);
 /* Restores a validated snapshot to a new private database path. The destination
  * must not exist; the live store and source backup are never overwritten.
+ * If CAPRI_SESSION_IO is returned after publication, a complete destination may
+ * already exist while directory durability is uncertain. Inspect before retrying.
  */
 CapriSessionError capri_session_restore_to(
     CapriSessionStore *store, const char *backup_path, const char *destination_path);
