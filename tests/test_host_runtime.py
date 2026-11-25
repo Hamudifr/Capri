@@ -302,7 +302,9 @@ class CapriHostRuntimeTests(unittest.TestCase):
             worker_identity_resolver=lambda credential: (
                 "worker-1" if credential == "worker-token" else None
             ),
-            worker_descriptor_resolver=self.approve_worker_descriptor,
+            worker_descriptor_resolver=lambda worker_id, proposed: WorkerDescriptor(
+                worker_id, (1,), ("math.factorial",), max_concurrency=1,
+            ),
             worker_observer_authorizer=lambda credential, worker_id: (
                 credential == "monitor-token" and worker_id == "worker-1"
             ),
