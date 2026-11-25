@@ -1,4 +1,5 @@
 import json
+import multiprocessing
 import os
 import sqlite3
 import stat
@@ -27,6 +28,31 @@ def example(**overrides):
     )
     values.update(overrides)
     return LearningExample(**values)
+
+
+def _reconcile_learning_exports_worker(database, start_event, result_queue):
+    if not start_event.wait(10):
+        result_queue.put(("error", "start_timeout"))
+        return
+    try:
+        store = LearningStore(database)
+        result_queue.put(("reconciled", store.reconcile_pending_exports()))
+    except Exception as exc:
+        result_queue.put(("error", type(exc).__name__))
+
+
+def _revoke_learning_consent_worker(database, consent_id, start_event, result_queue):
+    if not start_event.wait(10):
+        result_queue.put(("error", "start_timeout"))
+        return
+    try:
+        store = LearningStore(database)
+        deleted = store.revoke_consent(
+            consent_id, "2026-11-25T00:30:00+00:00"
+        )
+        result_queue.put(("revoked", deleted))
+    except Exception as exc:
+        result_queue.put(("error", type(exc).__name__))
 
 
 class LearningStoreTests(unittest.TestCase):
@@ -832,6 +858,53 @@ class LearningStoreTests(unittest.TestCase):
         self.assertEqual(self.store.integrity_check(), "semantic validation failed")
         with self.assertRaises(LearningDataError):
             self.store.backup_to(self.root / "revoked-export-backup.sqlite3")
+
+    def test_multiprocess_reconciliation_never_reactivates_revoked_export(self):
+        self.store.record(example())
+        output = self.root / "multiprocess-reconcile.zip"
+        result = self.store.export_bundle(output, minimum_quality=0.0)
+        with self.store._connection() as connection:
+            connection.execute(
+                "UPDATE learning_exports SET status='publishing' WHERE export_id=?",
+                (result["export_id"],),
+            )
+
+        context = multiprocessing.get_context("spawn")
+        start_event = context.Event()
+        result_queue = context.Queue()
+        reconcile = context.Process(
+            target=_reconcile_learning_exports_worker,
+            args=(self.store.database, start_event, result_queue),
+        )
+        revoke = context.Process(
+            target=_revoke_learning_consent_worker,
+            args=(self.store.database, "consent-001", start_event, result_queue),
+        )
+        reconcile.start()
+        revoke.start()
+        start_event.set()
+        reconcile.join(20)
+        revoke.join(20)
+        if reconcile.is_alive():
+            reconcile.terminate()
+            reconcile.join()
+        if revoke.is_alive():
+            revoke.terminate()
+            revoke.join()
+        results = [result_queue.get(timeout=5) for _ in range(2)]
+        result_queue.close()
+        result_queue.join_thread()
+        reconcile.close()
+        revoke.close()
+
+        self.assertEqual(reconcile.exitcode, 0)
+        self.assertEqual(revoke.exitcode, 0)
+        self.assertEqual({result[0] for result in results}, {"reconciled", "revoked"})
+        self.assertNotIn("error", {result[0] for result in results})
+        status = self.store.get_export_status(result["export_id"])
+        self.assertEqual(status["status"], "invalidated")
+        self.assertFalse(self.store.verify_export(result["export_id"], output)["valid"])
+        self.assertEqual(self.store.counts(), {})
 
 
 if __name__ == "__main__":
