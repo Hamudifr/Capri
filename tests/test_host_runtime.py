@@ -273,6 +273,50 @@ class CapriHostRuntimeTests(unittest.TestCase):
                 "alice-token", [{"tool": "not-registered", "input": {}}]
             )
 
+    def test_host_worker_dispatches_owned_task_only_to_authenticated_principal_handler(self):
+        legacy_calls = []
+        principal_calls = []
+        worker = TaskWorker(TaskEngine(
+            self.task_store,
+            {
+                "collect": lambda arguments, key: (
+                    legacy_calls.append((arguments, key)) or {"legacy": True}
+                ),
+            },
+            "host-integration-worker",
+            principal_handlers={
+                "collect": lambda arguments, key, principal_id: (
+                    principal_calls.append((arguments, key, principal_id))
+                    or {"owner": principal_id}
+                ),
+            },
+        ))
+        host = self.make_host(task_worker=worker)
+        task = host.create_task(
+            "alice-token",
+            [{"tool": "collect", "input": {"scope": "private"}}],
+            idempotency_key="host-worker-integration",
+        )
+
+        class StopAfterOneTask:
+            def __init__(self):
+                self.checks = 0
+
+            def is_set(self):
+                self.checks += 1
+                return self.checks > 1
+
+            def wait(self, timeout):
+                return False
+
+        host.run_task_worker(StopAfterOneTask())
+        completed = host.get_task("alice-token", task.task_id)
+        self.assertEqual(completed.state, "succeeded")
+        self.assertEqual(len(principal_calls), 1)
+        self.assertEqual(principal_calls[0][0], {"scope": "private"})
+        self.assertEqual(principal_calls[0][2], "alice")
+        self.assertEqual(legacy_calls, [])
+
     def test_task_creation_rejects_hostile_plan_containers_before_inspection(self):
         class HostileList(list):
             def __iter__(self):
