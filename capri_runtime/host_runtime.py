@@ -298,6 +298,18 @@ class CapriHostRuntime:
         context = self._context(credential)
         return self._goal_coordinator().reconcile(goal_id, context.principal_id)
 
+    def verify_goal(
+        self, credential: Any, goal_id: str, *, accepted: bool,
+        evidence_reference: str, expected_version: int,
+    ) -> GoalRecord:
+        """Record the authenticated owner's explicit acceptance decision."""
+        context = self._context(credential)
+        return self._goal_coordinator().verify(
+            goal_id, context.principal_id, accepted=accepted,
+            evidence_reference=evidence_reference,
+            expected_version=expected_version,
+        )
+
     def cancel_goal(
         self, credential: Any, goal_id: str, *, expected_version: int,
     ) -> GoalExecution | GoalRecord:
@@ -321,10 +333,10 @@ class CapriHostRuntime:
         context = self._context(credential)
         if self._goal_store is None:
             raise HostRuntimeError("no goal store is configured")
-        if new_state in {"cancelled", "paused"}:
+        if new_state in {"cancelled", "paused", "succeeded", "failed"}:
             current = self._goal_store.get_for_principal(goal_id, context.principal_id)
             if current.task_id is not None:
-                raise HostRuntimeError("use the goal coordinator; direct pause/cancel would leave a linked task active")
+                raise HostRuntimeError("use cancel_goal or verify_goal; direct transitions bypass task coordination or acceptance evidence")
         return self._goal_store.transition_for_principal(
             goal_id, context.principal_id, new_state,
             expected_version=expected_version,
