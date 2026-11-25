@@ -470,5 +470,65 @@ class CapriHostRuntimeTests(unittest.TestCase):
             )
 
 
+    def test_goal_report_is_read_only_owner_scoped_and_redacts_task_results(self):
+        goal_store = SQLiteGoalStore(
+            os.path.join(self.temp.name, "goal-report.sqlite3")
+        )
+        engine = TaskEngine(
+            self.task_store,
+            {},
+            "goal-report-worker",
+            principal_handlers={
+                "collect": lambda arguments, idempotency_key, principal_id: {
+                    "message": "private raw result",
+                },
+            },
+        )
+        worker = TaskWorker(
+            engine, poll_interval_seconds=0.05, heartbeat_interval_seconds=0.1,
+        )
+        host = self.make_host(task_worker=worker, goal_store=goal_store)
+        goal = host.create_goal(
+            "alice-token", "Prepare a verified report",
+            acceptance_criteria=["Evidence is checked"],
+        )
+        planned = host.save_goal_plan(
+            "alice-token", goal.goal_id,
+            GoalPlanProposal(({"tool": "collect", "input": {}},)),
+            expected_version=goal.version,
+        )
+        host.prepare_goal(
+            "alice-token", goal.goal_id, expected_version=planned.version,
+        )
+
+        events_before = host.get_goal_events("alice-token", goal.goal_id)
+        active = host.get_goal_report("alice-token", goal.goal_id)
+        self.assertEqual(active.completion_status, "in_progress")
+        self.assertEqual(active.steps_completed, 0)
+        self.assertEqual(host.get_goal_events("alice-token", goal.goal_id), events_before)
+        with self.assertRaises(GoalNotFoundError):
+            host.get_goal_report("bob-token", goal.goal_id)
+
+        worker.run_once()
+        completed_task = host.get_goal_report("alice-token", goal.goal_id)
+        self.assertEqual(completed_task.completion_status, "reconciliation_pending")
+        self.assertNotIn("private raw result", str(completed_task.as_dict()))
+        self.assertEqual(host.get_goal_events("alice-token", goal.goal_id), events_before)
+
+        host.reconcile_goal("alice-token", goal.goal_id)
+        awaiting = host.get_goal_report("alice-token", goal.goal_id)
+        self.assertEqual(awaiting.completion_status, "awaiting_owner_verification")
+        self.assertEqual(awaiting.owner_acceptance_status, "pending")
+        accepted = host.verify_goal(
+            "alice-token", goal.goal_id, accepted=True,
+            evidence_reference="d" * 64,
+            expected_version=awaiting.goal_version,
+        )
+        self.assertEqual(accepted.state, "succeeded")
+        final = host.get_goal_report("alice-token", goal.goal_id)
+        self.assertEqual(final.completion_status, "completed")
+        self.assertEqual(final.owner_acceptance_status, "accepted")
+
+
 if __name__ == "__main__":
     unittest.main()
