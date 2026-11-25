@@ -249,7 +249,7 @@ class NativeSQLiteSessionParityTests(unittest.TestCase):
             python_store = SQLiteSessionStore(path)
             created = python_store.create_for_principal("principal-whitespace")
             invalid_turn = (
-                Message(role="user", content="\\x1c"),
+                Message(role="user", content="\x1c"),
                 Message(role="assistant", content="reply"),
             )
             with self.assertRaises(ValidationError):
