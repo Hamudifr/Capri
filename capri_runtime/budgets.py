@@ -176,6 +176,10 @@ class SQLiteBudgetStore:
             connection = self._connect()
             try:
                 connection.execute("PRAGMA journal_mode=WAL")
+                connection.execute("""CREATE TABLE IF NOT EXISTS budget_meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                )""")
                 connection.execute("""CREATE TABLE IF NOT EXISTS budget_policies (
                     principal_id TEXT PRIMARY KEY,
                     policy_json TEXT NOT NULL,
@@ -199,6 +203,16 @@ class SQLiteBudgetStore:
                     "CREATE INDEX IF NOT EXISTS budget_usage_principal_window_idx "
                     "ON budget_usage(principal_id,window_start)"
                 )
+                existing_default = connection.execute(
+                    "SELECT value FROM budget_meta WHERE key='default_policy'"
+                ).fetchone()
+                if existing_default:
+                    self.default_policy = self._policy_from_json(existing_default[0])
+                else:
+                    connection.execute(
+                        "INSERT INTO budget_meta(key,value) VALUES('default_policy',?)",
+                        (json.dumps(asdict(self.default_policy), sort_keys=True, separators=(",", ":")),),
+                    )
                 connection.execute("""CREATE TRIGGER IF NOT EXISTS budget_reservation_immutable_update
                     BEFORE UPDATE ON budget_reservations
                     BEGIN SELECT RAISE(ABORT, 'budget reservations are append-only'); END""")
@@ -358,7 +372,8 @@ class SQLiteBudgetStore:
                 used = {dimension: amount for dimension, amount in rows}
             finally:
                 connection.close()
-        return BudgetUsage(principal_id, window_start, reset_at, policy, used)
+        complete_usage = {dimension: used.get(dimension, 0) for dimension in _DIMENSIONS}
+        return BudgetUsage(principal_id, window_start, reset_at, policy, complete_usage)
 
     @staticmethod
     def _validate_backup_snapshot(connection: sqlite3.Connection) -> None:
