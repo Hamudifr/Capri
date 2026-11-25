@@ -687,6 +687,43 @@ class SQLiteSessionStoreTests(unittest.TestCase):
             session,
         )
 
+    def test_reopen_rejects_removed_versioned_session_check_constraint(self):
+        session = self.store.create_for_principal("principal-owner")
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute("PRAGMA foreign_keys=OFF")
+            connection.executescript(
+                "DROP INDEX sessions_updated_at;"
+                "CREATE TABLE sessions_new ("
+                "session_id TEXT PRIMARY KEY, created_at TEXT NOT NULL, "
+                "updated_at TEXT NOT NULL, version INTEGER NOT NULL, "
+                "closed INTEGER NOT NULL CHECK(closed IN (0, 1)), "
+                "messages_json TEXT NOT NULL "
+                "CHECK(json_valid(messages_json) AND json_type(messages_json) = 'array'));"
+                "INSERT INTO sessions_new SELECT * FROM sessions;"
+                "DROP TABLE sessions;"
+                "ALTER TABLE sessions_new RENAME TO sessions;"
+                "CREATE INDEX sessions_updated_at ON sessions(updated_at);"
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        with self.assertRaisesRegex(ValidationError, "schema constraints are invalid"):
+            SQLiteSessionStore(self.path)
+
+        connection = sqlite3.connect(self.path)
+        try:
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+            persisted = connection.execute(
+                "SELECT count(*) FROM sessions WHERE session_id = ?",
+                (session.session_id,),
+            ).fetchone()[0]
+            self.assertEqual(version, 1)
+            self.assertEqual(persisted, 1)
+        finally:
+            connection.close()
+
     def test_reopen_rejects_missing_ownership_table_without_recreating_it(self):
         session = self.store.create_for_principal("principal-owner")
         connection = sqlite3.connect(self.path)
