@@ -6,12 +6,13 @@ Run from the repository root:
 python benchmarks/persistence/run.py --warmup 10 --samples 50 --workers 4 --queue-size 100 --output persistence-profile.json
 ```
 
-The harness is offline and standard-library-only. It creates private temporary databases, uses the production `SQLiteGoalStore`, `SQLiteTaskStore`, and `SQLiteBudgetStore` APIs, and makes no provider or network calls.
+The harness is offline and standard-library-only. It creates private temporary databases, uses the production `SQLiteGoalStore`, `SQLiteTaskStore`, `SQLiteBudgetStore`, and `SQLiteSessionStore` APIs, and makes no provider or network calls.
 
 ## Measurements
 
 - Goal create API (includes the store's readback), principal-scoped goal reads, evidence reads, event reads, and domain-event projection.
 - Principal-scoped budget usage reads (policy and counters from one consistent SQLite snapshot), plus multi-dimension reservation writes.
+- Principal-scoped session transcript commits, including owner authorization and the versioned durable write.
 - Task create, unscoped task reads, and principal-scoped task/event reads (including owner authorization and event projection).
 - Plan JSON encode/decode cost, measured separately from database calls.
 - A controlled SQLite insert probe with statement execution and COMMIT wall time reported separately. It uses WAL and `synchronous=FULL`; it does not weaken durability.
