@@ -37,7 +37,7 @@ At construction, CapriHostRuntime rejects a journal that differs from the engine
 - The host-only execution-evidence credential resolver is separate from the user's session credential. It must not be exposed as a model tool or copied into task inputs.
 - A task result and its execution event are committed atomically. A pending standalone event is not eligible for a strategy evidence cohort until the task, exact attempt, and persisted result digest all verify.
 
-When both `HostStrategyApprovalAuthority` and `HostStrategyEvidenceAuthority` are supplied, CapriHostRuntime composes a `SQLiteStrategyStore` over the same task store. If a strategy store is supplied instead, its approval and evidence verifier callbacks must be bound to those exact authority instances. A partial authority pair is rejected.
+When both `HostStrategyApprovalAuthority` and `HostStrategyEvidenceAuthority` are supplied, CapriHostRuntime composes a `SQLiteStrategyStore` over the same task store. If a strategy store is supplied instead, its approval and evidence verifier callbacks must be bound to those exact authority instances. A partial authority pair is rejected. The strategy registry, approval authority, evidence authority, manifest store, task store and host identity resolver all enforce the same 256-character principal-ID bound.
 
 The embedding host should construct `SQLiteStrategyEvidenceManifestStore` with the execution journal's `classify_task_family` and `validate_source_events` callbacks, then bind its `attest_manifest` and `verify_manifest` methods into `HostStrategyEvidenceAuthority`. The strategy store is therefore wired to a host-verified manifest and a host-signed approval verifier rather than model-supplied assertions.
 
