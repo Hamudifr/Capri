@@ -14,6 +14,7 @@ from capri_runtime.strategy_store import (
     StrategyAuthorizationError,
     StrategyConflictError,
     StrategyIntegrityError,
+    StrategyNotFoundError,
     StrategyStoreError,
 )
 
