@@ -42,8 +42,9 @@ from .strategy_approval import HostStrategyApprovalAuthority, StrategyApprovalRe
 from .strategy_evidence import HostStrategyEvidenceAuthority
 from .tools import AuditEvent, AuditSink, ExecutionContext, HostAuthorityResolver
 from .worker_registry import (
-    InMemoryWorkerRegistry, WorkerDescriptor, WorkerRegistryError, WorkerReservation, WorkerSnapshot,
+    InMemoryWorkerRegistry, WorkerRegistry, WorkerDescriptor, WorkerRegistryError, WorkerReservation, WorkerSnapshot,
 )
+from .sqlite_worker_registry import SQLiteWorkerRegistry
 
 
 class HostRuntimeError(Exception):
@@ -190,10 +191,11 @@ class CapriHostRuntime:
         execution_evidence_journal: SQLiteExecutionEvidenceJournal | None = None,
         strategy_approval_authority: HostStrategyApprovalAuthority | None = None,
         strategy_evidence_authority: HostStrategyEvidenceAuthority | None = None,
-        worker_registry: InMemoryWorkerRegistry | None = None,
+        worker_registry: WorkerRegistry | None = None,
         worker_identity_resolver: Callable[[Any], str | None] | None = None,
         worker_descriptor_resolver: Callable[[str, WorkerDescriptor], WorkerDescriptor] | None = None,
         worker_observer_authorizer: Callable[[Any, str], bool] | None = None,
+        worker_unreserved_in_flight_resolver: Callable[[str], int] | None = None,
         worker_in_flight_resolver: Callable[[str], int] | None = None,
         worker_policy_resolver: Callable[[str, str, str], set[str] | frozenset[str]] | None = None,
         worker_lifecycle_audit_sink: AuditSink | None = None,
@@ -253,16 +255,25 @@ class CapriHostRuntime:
             raise HostRuntimeError(
                 "strategy approval and evidence authorities must be configured together"
             )
-        if worker_registry is not None and not isinstance(worker_registry, InMemoryWorkerRegistry):
-            raise HostRuntimeError("worker_registry must be an InMemoryWorkerRegistry")
+        if worker_registry is not None and not isinstance(worker_registry, WorkerRegistry):
+            raise HostRuntimeError("worker_registry must implement the trusted WorkerRegistry contract")
         if worker_identity_resolver is not None and not callable(worker_identity_resolver):
             raise HostRuntimeError("worker_identity_resolver must be callable")
         if worker_descriptor_resolver is not None and not callable(worker_descriptor_resolver):
             raise HostRuntimeError("worker_descriptor_resolver must be callable")
         if worker_observer_authorizer is not None and not callable(worker_observer_authorizer):
             raise HostRuntimeError("worker_observer_authorizer must be callable")
+        if worker_unreserved_in_flight_resolver is not None and not callable(worker_unreserved_in_flight_resolver):
+            raise HostRuntimeError("worker_unreserved_in_flight_resolver must be callable")
         if worker_in_flight_resolver is not None and not callable(worker_in_flight_resolver):
             raise HostRuntimeError("worker_in_flight_resolver must be callable")
+        if worker_unreserved_in_flight_resolver is not None and worker_in_flight_resolver is not None:
+            raise HostRuntimeError("configure only worker_unreserved_in_flight_resolver, not both load resolver names")
+        resolved_worker_in_flight_resolver = (
+            worker_unreserved_in_flight_resolver
+            if worker_unreserved_in_flight_resolver is not None
+            else worker_in_flight_resolver
+        )
         if worker_policy_resolver is not None and not callable(worker_policy_resolver):
             raise HostRuntimeError("worker_policy_resolver must be callable")
         audit_contract_methods = (
@@ -286,7 +297,7 @@ class CapriHostRuntime:
             worker_identity_resolver is not None,
             worker_descriptor_resolver is not None,
             worker_observer_authorizer is not None,
-            worker_in_flight_resolver is not None,
+            resolved_worker_in_flight_resolver is not None,
             worker_policy_resolver is not None,
         )):
             raise HostRuntimeError("worker registry callbacks require a configured worker_registry")
@@ -294,7 +305,7 @@ class CapriHostRuntime:
             worker_identity_resolver is None,
             worker_descriptor_resolver is None,
             worker_observer_authorizer is None,
-            worker_in_flight_resolver is None,
+            resolved_worker_in_flight_resolver is None,
             worker_policy_resolver is None,
         )):
             raise HostRuntimeError(
@@ -333,6 +344,10 @@ class CapriHostRuntime:
             task_store if task_store is not None
             else (task_worker.engine.store if task_worker is not None else None)
         )
+        if isinstance(worker_registry, SQLiteWorkerRegistry) and (
+            self._task_store is None or worker_registry.task_store is not self._task_store
+        ):
+            raise HostRuntimeError("SQLite worker registry must share the exact configured task store")
         engine = task_worker.engine if task_worker is not None else None
         engine_journal = engine.execution_evidence_journal if engine is not None else None
         if execution_evidence_journal is None and engine_journal is not None:
@@ -389,7 +404,7 @@ class CapriHostRuntime:
         self._worker_identity_resolver = worker_identity_resolver
         self._worker_descriptor_resolver = worker_descriptor_resolver
         self._worker_observer_authorizer = worker_observer_authorizer
-        self._worker_in_flight_resolver = worker_in_flight_resolver
+        self._worker_in_flight_resolver = resolved_worker_in_flight_resolver
         self._worker_policy_resolver = worker_policy_resolver
         self._worker_lifecycle_audit_sink = worker_lifecycle_audit_sink
         self._worker_audit_healthy = True
@@ -697,6 +712,39 @@ class CapriHostRuntime:
         except WorkerRegistryError:
             raise HostRuntimeError("host worker candidate lookup was rejected") from None
 
+    def get_worker_reservation_for_task(
+        self, credential: Any, task_id: str,
+    ) -> HostWorkerReservation | None:
+        """Recover a durable reservation only after authenticating its task owner."""
+        self._require_worker_audit_healthy()
+        context = self._context(credential)
+        if self._worker_registry is None or self._task_store is None:
+            raise HostRuntimeError("worker reservation requires the configured host registry and task store")
+        try:
+            self._task_store.get_for_principal(task_id, context.principal_id)
+            reservation = self._worker_registry.get_reservation_for_task(
+                context.principal_id, task_id,
+            )
+        except Exception:
+            raise HostRuntimeError("durable worker reservation recovery failed") from None
+        if reservation is None:
+            return None
+        if (
+            reservation.principal_id != context.principal_id
+            or reservation.task_id != task_id
+            or reservation.capability is None
+            or reservation.protocol_version is None
+        ):
+            self._worker_audit_healthy = False
+            raise HostRuntimeError("durable worker reservation context is invalid; reconciliation is required")
+        wrapped = HostWorkerReservation(
+            context.principal_id, task_id, reservation.capability,
+            reservation.protocol_version, reservation,
+        )
+        with self._worker_reservation_lock:
+            self._worker_reservation_contexts[reservation.token] = wrapped
+        return wrapped
+
     def reserve_worker_candidate(
         self, credential: Any, task_id: str, capability: str, protocol_version: int,
     ) -> HostWorkerReservation | None:
@@ -720,6 +768,8 @@ class CapriHostRuntime:
                     capability,
                     protocol_version=protocol_version,
                     authorized_worker_ids=allowed,
+                    principal_id=context.principal_id,
+                    task_id=task_id,
                 )
             except WorkerRegistryError:
                 self._finish_worker_audit_operation()
@@ -959,7 +1009,7 @@ class CapriHostRuntime:
                     released = self._worker_registry.release_reservation(
                         stored.reservation,
                         authenticated_worker_id=worker_id,
-                        observed_in_flight=observed_in_flight,
+                        observed_unreserved_in_flight=observed_in_flight,
                     )
                 else:
                     released = self._worker_registry.release_reservation(
@@ -1338,6 +1388,7 @@ class CapriHostRuntime:
             "execution_evidence": self._execution_evidence_journal,
             "goals": self._goal_store,
             "budgets": self._budget_store,
+            "worker_registry": self._worker_registry,
         }
         health: dict[str, str] = {}
         for name, store in stores.items():
@@ -1349,7 +1400,10 @@ class CapriHostRuntime:
             except Exception:
                 health[name] = "unavailable"
             else:
-                health[name] = "healthy" if result == "ok" else "degraded"
+                health[name] = (
+                    "ephemeral" if result == "ephemeral"
+                    else "healthy" if result == "ok" else "degraded"
+                )
         return health
 
     def run_task_worker(self, stop_event: Any) -> None:
