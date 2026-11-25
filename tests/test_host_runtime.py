@@ -35,7 +35,7 @@ from capri_runtime import (
     UntrustedMemoryContext,
     UntrustedKnowledgeContext,
 )
-from capri_runtime.host_runtime import CapriHostRuntime, HostRuntimeError
+from capri_runtime.host_runtime import CapriHostRuntime, HostRuntimeError, HostWorkerReservation
 from capri_runtime.tasks import TaskNotFoundError, TaskValidationError
 from capri_runtime.goals import GoalNotFoundError, GoalPlanProposal, GoalValidationError, SQLiteGoalStore
 from capri_runtime.budgets import BudgetExceededError, BudgetPolicy, SQLiteBudgetStore
@@ -205,6 +205,159 @@ class CapriHostRuntimeTests(unittest.TestCase):
                 "bob-token", task.task_id, "math.factorial", 1,
             )
         self.assertEqual(len(policy_calls), 1)
+
+    def test_host_worker_reservation_is_principal_task_scoped_and_supervisor_committed(self):
+        registry = InMemoryWorkerRegistry()
+        host = self.make_worker_host(
+            registry, {"worker-token": "worker-1"}, lambda *args: {"worker-1"},
+        )
+        host.register_worker(
+            "worker-token",
+            WorkerDescriptor("worker-1", (1,), ("math.factorial",), max_concurrency=1),
+        )
+        host.heartbeat_worker("monitor-token", "worker-1")
+        task = self.task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {"scope": "owned"}}],
+        )
+
+        pending = host.reserve_worker_candidate(
+            "alice-token", task.task_id, "math.factorial", 1,
+        )
+        self.assertIsInstance(pending, HostWorkerReservation)
+        self.assertFalse(pending.reservation.committed)
+        self.assertEqual(pending.principal_id, "alice")
+        self.assertEqual(pending.task_id, task.task_id)
+        self.assertEqual(registry.get_reservation(pending.reservation.token), pending.reservation)
+
+        with self.assertRaises(HostRuntimeError):
+            host.commit_worker_reservation("bob-token", "monitor-token", pending)
+        with self.assertRaises(HostRuntimeError):
+            host.commit_worker_reservation("alice-token", "worker-token", pending)
+
+        committed = host.commit_worker_reservation(
+            "alice-token", "monitor-token", pending,
+        )
+        self.assertTrue(committed.reservation.committed)
+        # Repeated commit with the original pending wrapper returns the current committed wrapper.
+        self.assertEqual(
+            host.commit_worker_reservation("alice-token", "monitor-token", pending),
+            committed,
+        )
+        with self.assertRaises(HostRuntimeError):
+            host.release_worker_reservation("worker-token", committed)
+        self.assertTrue(host.release_worker_reservation("monitor-token", committed))
+        self.assertIsNone(registry.get_reservation(committed.reservation.token))
+
+    def test_host_worker_reservation_cannot_be_rebound_to_another_task(self):
+        registry = InMemoryWorkerRegistry()
+        host = self.make_worker_host(
+            registry, {"worker-token": "worker-1"}, lambda *args: {"worker-1"},
+        )
+        host.register_worker(
+            "worker-token", WorkerDescriptor("worker-1", (1,), ("math.factorial",)),
+        )
+        host.heartbeat_worker("monitor-token", "worker-1")
+        first = self.task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {"task": "first"}}],
+        )
+        second = self.task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {"task": "second"}}],
+        )
+        pending = host.reserve_worker_candidate(
+            "alice-token", first.task_id, "math.factorial", 1,
+        )
+        rebound = replace(pending, task_id=second.task_id)
+        with self.assertRaisesRegex(HostRuntimeError, "another task"):
+            host.commit_worker_reservation("alice-token", "monitor-token", rebound)
+        self.assertTrue(host.release_worker_reservation("monitor-token", pending))
+
+    def test_host_worker_reservation_rechecks_policy_before_commit(self):
+        registry = InMemoryWorkerRegistry()
+        policy_state = {"allowed": {"worker-1"}}
+        host = self.make_worker_host(
+            registry, {"worker-token": "worker-1"},
+            lambda principal, task_id, capability: set(policy_state["allowed"]),
+        )
+        host.register_worker(
+            "worker-token", WorkerDescriptor("worker-1", (1,), ("math.factorial",)),
+        )
+        host.heartbeat_worker("monitor-token", "worker-1")
+        task = self.task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {}}],
+        )
+        pending = host.reserve_worker_candidate(
+            "alice-token", task.task_id, "math.factorial", 1,
+        )
+        policy_state["allowed"] = set()
+        with self.assertRaisesRegex(HostRuntimeError, "no longer authorized"):
+            host.commit_worker_reservation("alice-token", "monitor-token", pending)
+        self.assertIsNone(registry.get_reservation(pending.reservation.token))
+
+    def test_host_worker_reservation_release_uses_host_observed_load(self):
+        registry = InMemoryWorkerRegistry()
+        load = {"worker-1": 0}
+        host = self.make_host(
+            task_store=self.task_store,
+            worker_registry=registry,
+            worker_identity_resolver=lambda credential: (
+                "worker-1" if credential == "worker-token" else None
+            ),
+            worker_descriptor_resolver=self.approve_worker_descriptor,
+            worker_observer_authorizer=lambda credential, worker_id: (
+                credential == "monitor-token" and worker_id == "worker-1"
+            ),
+            worker_in_flight_resolver=lambda worker_id: load[worker_id],
+            worker_policy_resolver=lambda *args: {"worker-1"},
+        )
+        host.register_worker(
+            "worker-token",
+            WorkerDescriptor("worker-1", (1,), ("math.factorial",), max_concurrency=1),
+        )
+        host.heartbeat_worker("monitor-token", "worker-1")
+        task = self.task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {}}],
+        )
+        pending = host.reserve_worker_candidate(
+            "alice-token", task.task_id, "math.factorial", 1,
+        )
+        committed = host.commit_worker_reservation(
+            "alice-token", "monitor-token", pending,
+        )
+
+        # A different task remains active after the committed task completes.
+        load["worker-1"] = 1
+        self.assertTrue(host.release_worker_reservation("monitor-token", committed))
+        self.assertEqual(registry.get("worker-1").health.in_flight, 1)
+        self.assertEqual(
+            registry.eligible(
+                "math.factorial", protocol_version=1,
+                authorized_worker_ids={"worker-1"},
+            ),
+            (),
+        )
+        load["worker-1"] = 0
+        host.heartbeat_worker("monitor-token", "worker-1")
+        self.assertEqual(
+            len(registry.eligible(
+                "math.factorial", protocol_version=1,
+                authorized_worker_ids={"worker-1"},
+            )),
+            1,
+        )
+
+    def test_host_worker_reservation_returns_none_when_no_policy_candidate(self):
+        registry = InMemoryWorkerRegistry()
+        host = self.make_worker_host(registry, {"worker-token": "worker-1"}, lambda *args: set())
+        host.register_worker(
+            "worker-token", WorkerDescriptor("worker-1", (1,), ("math.factorial",)),
+        )
+        host.heartbeat_worker("monitor-token", "worker-1")
+        task = self.task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {}}],
+        )
+        self.assertIsNone(host.reserve_worker_candidate(
+            "alice-token", task.task_id, "math.factorial", 1,
+        ))
 
     def test_worker_policy_failure_and_invalid_allowlist_fail_closed(self):
         identities = {"worker-token": "worker-1"}
