@@ -16,7 +16,7 @@ from typing import Protocol
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from .domain_events import DomainEvent, memory_event, project_domain_events
+from .domain_events import memory_event, project_domain_events
 from .memory import (
     MemoryConflictError,
     MemoryErrorBase,
