@@ -320,6 +320,7 @@ class SQLiteProviderUsageJournal:
         with self._tasks._lock:
             connection = self._tasks._connect()
             try:
+                validate_provider_usage_snapshot(connection)
                 rows = connection.execute(
                     """SELECT provider,model,COUNT(*),SUM(input_tokens),SUM(output_tokens),
                     SUM(total_tokens),SUM(cached_input_tokens),SUM(cache_write_tokens),
