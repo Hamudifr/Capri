@@ -47,7 +47,7 @@ The caller must persist each event append-only and atomically with the updated c
 
 1. Add a host authorization adapter that validates principal, capability, scope, policy version, deadline, and one-use approval.
 2. Bind worker references to actual authenticated process/channel identity, not merely a worker-supplied string.
-3. Enforce time and budgets in the host at dispatch and at the final commit boundary.
+3. Enforce time and budgets in the host at dispatch and at the final commit boundary. Convert the capsule's absolute UTC deadline to a monotonic deadline once at admission; use the host monotonic clock for elapsed-time enforcement and recheck after slow verification immediately before acceptance.
 4. Persist events and capsule projection atomically, with idempotency uniqueness enforced by the host store.
 5. Add action-specific independent verifiers and readback receipts.
 6. Reconcile INDETERMINATE outcomes before retry; use separately authorized compensating actions for rollback.
