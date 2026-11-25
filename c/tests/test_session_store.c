@@ -510,6 +510,43 @@ int main(void) {
     CapriSessionStore *lease_fk_reopen=capri_session_store_open(lease_fk_schema_path,200,16000,64000,131072,&error);
     assert(lease_fk_reopen==NULL && error==CAPRI_SESSION_DATABASE);
 
-    unlink(backup_path); unlink(restored_path); unlink(corrupt_backup_path); unlink(corrupt_restore_path); unlink(path); unlink(schema_path); unlink(owner_fk_schema_path); unlink(owner_fk_backup_path); unlink(lease_fk_schema_path); unlink(lease_fk_backup_path); char wal[520],shm[520],schema_wal[540],schema_shm[540],owner_fk_wal[540],owner_fk_shm[540],lease_fk_wal[540],lease_fk_shm[540];snprintf(wal,sizeof wal,"%s-wal",path);snprintf(shm,sizeof shm,"%s-shm",path);snprintf(schema_wal,sizeof schema_wal,"%s-wal",schema_path);snprintf(schema_shm,sizeof schema_shm,"%s-shm",schema_path);snprintf(owner_fk_wal,sizeof owner_fk_wal,"%s-wal",owner_fk_schema_path);snprintf(owner_fk_shm,sizeof owner_fk_shm,"%s-shm",owner_fk_schema_path);snprintf(lease_fk_wal,sizeof lease_fk_wal,"%s-wal",lease_fk_schema_path);snprintf(lease_fk_shm,sizeof lease_fk_shm,"%s-shm",lease_fk_schema_path);unlink(wal);unlink(shm);unlink(schema_wal);unlink(schema_shm);unlink(owner_fk_wal);unlink(owner_fk_shm);unlink(lease_fk_wal);unlink(lease_fk_shm);rmdir(dir);
+    /* Missing security tables and triggers must not be silently recreated. */
+    char missing_owner_path[512],missing_trigger_path[512];
+    snprintf(missing_owner_path,sizeof missing_owner_path,"%s/missing-owner.sqlite3",dir);
+    snprintf(missing_trigger_path,sizeof missing_trigger_path,"%s/missing-trigger.sqlite3",dir);
+    CapriSessionStore *missing_owner_store=capri_session_store_open(missing_owner_path,200,16000,64000,131072,&error);
+    assert(missing_owner_store!=NULL && error==CAPRI_SESSION_OK);
+    CapriSession owned_before_drop={0};
+    assert(capri_session_create_for_principal(missing_owner_store,"owner-before-drop",&owned_before_drop)==CAPRI_SESSION_OK);
+    capri_session_free(&owned_before_drop);
+    capri_session_store_close(missing_owner_store);
+    sqlite3 *missing_owner_db=NULL;
+    assert(sqlite3_open(missing_owner_path,&missing_owner_db)==SQLITE_OK);
+    assert(sqlite3_exec(missing_owner_db,"PRAGMA foreign_keys=OFF; DROP TABLE session_owners;",NULL,NULL,NULL)==SQLITE_OK);
+    sqlite3_close(missing_owner_db);
+    CapriSessionStore *missing_owner_reopen=capri_session_store_open(missing_owner_path,200,16000,64000,131072,&error);
+    assert(missing_owner_reopen==NULL && error==CAPRI_SESSION_DATABASE);
+    assert(sqlite3_open(missing_owner_path,&missing_owner_db)==SQLITE_OK);
+    sqlite3_stmt *missing_owner_check=NULL;
+    assert(sqlite3_prepare_v2(missing_owner_db,"SELECT count(*) FROM sqlite_master WHERE type='table' AND name='session_owners'",-1,&missing_owner_check,NULL)==SQLITE_OK);
+    assert(sqlite3_step(missing_owner_check)==SQLITE_ROW && sqlite3_column_int(missing_owner_check,0)==0);
+    sqlite3_finalize(missing_owner_check);sqlite3_close(missing_owner_db);
+
+    CapriSessionStore *missing_trigger_store=capri_session_store_open(missing_trigger_path,200,16000,64000,131072,&error);
+    assert(missing_trigger_store!=NULL && error==CAPRI_SESSION_OK);
+    capri_session_store_close(missing_trigger_store);
+    sqlite3 *missing_trigger_db=NULL;
+    assert(sqlite3_open(missing_trigger_path,&missing_trigger_db)==SQLITE_OK);
+    assert(sqlite3_exec(missing_trigger_db,"DROP TRIGGER session_owners_immutable_update;",NULL,NULL,NULL)==SQLITE_OK);
+    sqlite3_close(missing_trigger_db);
+    CapriSessionStore *missing_trigger_reopen=capri_session_store_open(missing_trigger_path,200,16000,64000,131072,&error);
+    assert(missing_trigger_reopen==NULL && error==CAPRI_SESSION_DATABASE);
+    assert(sqlite3_open(missing_trigger_path,&missing_trigger_db)==SQLITE_OK);
+    sqlite3_stmt *missing_trigger_check=NULL;
+    assert(sqlite3_prepare_v2(missing_trigger_db,"SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name='session_owners_immutable_update'",-1,&missing_trigger_check,NULL)==SQLITE_OK);
+    assert(sqlite3_step(missing_trigger_check)==SQLITE_ROW && sqlite3_column_int(missing_trigger_check,0)==0);
+    sqlite3_finalize(missing_trigger_check);sqlite3_close(missing_trigger_db);
+
+    unlink(backup_path); unlink(restored_path); unlink(corrupt_backup_path); unlink(corrupt_restore_path); unlink(path); unlink(schema_path); unlink(owner_fk_schema_path); unlink(owner_fk_backup_path); unlink(lease_fk_schema_path); unlink(lease_fk_backup_path); unlink(missing_owner_path); unlink(missing_trigger_path); char wal[520],shm[520],schema_wal[540],schema_shm[540],owner_fk_wal[540],owner_fk_shm[540],lease_fk_wal[540],lease_fk_shm[540];snprintf(wal,sizeof wal,"%s-wal",path);snprintf(shm,sizeof shm,"%s-shm",path);snprintf(schema_wal,sizeof schema_wal,"%s-wal",schema_path);snprintf(schema_shm,sizeof schema_shm,"%s-shm",schema_path);snprintf(owner_fk_wal,sizeof owner_fk_wal,"%s-wal",owner_fk_schema_path);snprintf(owner_fk_shm,sizeof owner_fk_shm,"%s-shm",owner_fk_schema_path);snprintf(lease_fk_wal,sizeof lease_fk_wal,"%s-wal",lease_fk_schema_path);snprintf(lease_fk_shm,sizeof lease_fk_shm,"%s-shm",lease_fk_schema_path);unlink(wal);unlink(shm);unlink(schema_wal);unlink(schema_shm);unlink(owner_fk_wal);unlink(owner_fk_shm);unlink(lease_fk_wal);unlink(lease_fk_shm);rmdir(dir);
     puts("native SQLite session tests: ok"); return 0;
 }
