@@ -16,6 +16,7 @@ Outcome = Literal["verified_success", "verified_failure", "unverified"]
 _ALLOWED_OUTCOMES = frozenset({"verified_success", "verified_failure", "unverified"})
 _MAX_OBSERVATIONS = 20_000
 _MAX_TEXT = 256
+_COHORT_SCHEMA = "capri.strategy-cohort.v2"
 
 
 class StrategyEvaluationError(ValueError):
@@ -73,7 +74,7 @@ class StrategyEvaluation:
     # Keyword-only fields preserve the complete v1 public positional constructor.
     baseline_version: str = field(default="unversioned", kw_only=True)
     candidate_version: str = field(default="unversioned", kw_only=True)
-    cohort_schema: str = field(default="capri.strategy-cohort.v2", kw_only=True)
+    cohort_schema: str = field(default="unversioned", kw_only=True)
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -175,7 +176,7 @@ def evaluate_strategies(
         for _, record in sorted(by_strategy[strategy_id].items())
     ]
     manifest = {
-        "schema": "capri.strategy-cohort.v2",
+        "schema": _COHORT_SCHEMA,
         "baseline_id": baseline_id,
         "candidate_id": candidate_id,
         "observations": canonical_observations,
@@ -266,4 +267,5 @@ def evaluate_strategies(
         improved_dimensions=improved_dimensions,
         blocked_reasons=blocked_reasons,
         eligible_for_manual_review=eligible,
+        cohort_schema=_COHORT_SCHEMA,
     )
