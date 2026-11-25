@@ -14,7 +14,8 @@ import sqlite3
 import stat
 import threading
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
+from uuid import uuid4
 
 from capri_core.validation import contains_surrogate
 
