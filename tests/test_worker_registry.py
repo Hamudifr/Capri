@@ -464,6 +464,30 @@ class WorkerRegistryTests(unittest.TestCase):
             authorized_worker_ids={"worker-1"}, now_ns=self.now,
         ))
 
+    def test_committing_reservation_is_idempotent_without_double_counting(self):
+        self.register_healthy(max_concurrency=1)
+        pending = self.registry.reserve_eligible(
+            "math.factorial", protocol_version=1,
+            authorized_worker_ids={"worker-1"}, now_ns=self.now,
+        )
+        committed = self.registry.commit_reservation(
+            pending, authenticated_worker_id="worker-1", now_ns=self.now,
+        )
+        self.assertIsNotNone(committed)
+        self.assertTrue(committed.committed)
+        repeated = self.registry.commit_reservation(
+            committed, authenticated_worker_id="worker-1", now_ns=self.now,
+        )
+        self.assertEqual(repeated, committed)
+        self.assertIsNone(self.registry.reserve_eligible(
+            "math.factorial", protocol_version=1,
+            authorized_worker_ids={"worker-1"}, now_ns=self.now,
+        ))
+        self.assertTrue(self.registry.release_reservation(
+            committed, authenticated_worker_id="worker-1",
+            observed_in_flight=0, now_ns=self.now,
+        ))
+
     def test_committed_release_atomically_hands_off_to_host_observed_load(self):
         registry = InMemoryWorkerRegistry(clock_ns=lambda: self.now)
         registry.register(
