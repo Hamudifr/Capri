@@ -28,7 +28,8 @@ The backup is published without overwriting a destination created in a race. The
 Before publishing, the implementation checks:
 - SQLite `integrity_check` and `foreign_key_check`.
 - Every stored session transcript against the configured session limits.
-- Every principal-owner identifier.
+- Every principal-owner identifier and creation timestamp.
+- Every durable turn lease's session reference, bounded owner token, and timezone-aware expiry. Expired leases are preserved as stale state; they are not treated as corruption.
 - File type, ownership, link count, and POSIX file mode.
 
 ## Restoring
