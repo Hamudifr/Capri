@@ -1,0 +1,367 @@
+{
+  "format": "capri.labelled-knowledge-graph-benchmark.v1",
+  "description": "Small deterministic synthetic fixture for graph seed ranking, bounded traversal, and contradiction preservation. Not representative of production owner queries.",
+  "neurons": [
+    {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "title": "Principal task idempotency scope",
+      "notes": "Task creation binds an idempotency key to an authenticated principal so retries cannot cross owners.",
+      "kind": "Rule",
+      "layer": "Validation",
+      "evidence_state": "Verified",
+      "confidence": 1,
+      "source": "https://example.org/capri/tasks",
+      "tags": [
+        "principal",
+        "task",
+        "idempotency"
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000002",
+      "title": "Principal identifier validation",
+      "notes": "Host authority and session boundaries accept principal identifiers up to 256 characters.",
+      "kind": "Fact",
+      "layer": "Validation",
+      "evidence_state": "Verified",
+      "confidence": 0.99,
+      "source": "https://example.org/capri/authority",
+      "tags": [
+        "principal",
+        "identity",
+        "validation"
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000003",
+      "title": "Versioned idempotency digest encoding",
+      "notes": "Length-prefixed tuple hashing avoids ambiguous separator and NUL byte collisions between principal IDs and idempotency keys.",
+      "kind": "Fact",
+      "layer": "Validation",
+      "evidence_state": "Verified",
+      "confidence": 1,
+      "source": "https://example.org/capri/idempotency",
+      "tags": [
+        "idempotency",
+        "collision",
+        "hashing"
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000004",
+      "title": "Legacy idempotency retry compatibility",
+      "notes": "Existing delimiter-hash rows remain retry compatible only when their stored owner matches the authenticated principal.",
+      "kind": "Rule",
+      "layer": "Validation",
+      "evidence_state": "Reported",
+      "confidence": 0.95,
+      "source": "https://example.org/capri/legacy-retries",
+      "tags": [
+        "idempotency",
+        "legacy",
+        "principal"
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000005",
+      "title": "Authenticated host worker dispatch",
+      "notes": "Host task worker passes the authenticated principal to the principal-aware handler and does not invoke the legacy handler for owned work.",
+      "kind": "Fact",
+      "layer": "Output",
+      "evidence_state": "Verified",
+      "confidence": 1,
+      "source": "https://example.org/capri/host-worker",
+      "tags": [
+        "authenticated",
+        "worker",
+        "dispatch"
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000006",
+      "title": "Consent revocation invalidates export",
+      "notes": "The authoritative consent registry must remain valid; revocation invalidates dependent learning exports and consumers recheck status.",
+      "kind": "Rule",
+      "layer": "Validation",
+      "evidence_state": "Verified",
+      "confidence": 1,
+      "source": "https://example.org/capri/consent",
+      "tags": [
+        "consent",
+        "revocation",
+        "export"
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000007",
+      "title": "Learning export publication recovery",
+      "notes": "Pending export reconciliation verifies artifact hashes and consent dependencies before activating a publication.",
+      "kind": "Fact",
+      "layer": "Output",
+      "evidence_state": "Verified",
+      "confidence": 0.98,
+      "source": "https://example.org/capri/export-recovery",
+      "tags": [
+        "learning",
+        "export",
+        "recovery"
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000008",
+      "title": "Legacy pathless staging artifact",
+      "notes": "A publishing row without a verifiable artifact path must fail closed; an unknown staging path is retained for operator inspection, not guessed deletion.",
+      "kind": "Rule",
+      "layer": "Decision",
+      "evidence_state": "Verified",
+      "confidence": 1,
+      "source": "https://example.org/capri/staging",
+      "tags": [
+        "staging",
+        "pathless",
+        "quarantine"
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000009",
+      "title": "Atomic Notion graph snapshot limitation",
+      "notes": "Neurons and Synapses data sources are fetched sequentially, so edits between reads can create a mixed-time graph snapshot.",
+      "kind": "Fact",
+      "layer": "Validation",
+      "evidence_state": "Verified",
+      "confidence": 1,
+      "source": "https://example.org/capri/notion-graph",
+      "tags": [
+        "notion",
+        "snapshot",
+        "consistency"
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000010",
+      "title": "Sequential graph data source reads",
+      "notes": "The Notion graph provider reads the Neurons data source before the Synapses data source; the pair is not an atomic transaction.",
+      "kind": "Fact",
+      "layer": "Input",
+      "evidence_state": "Verified",
+      "confidence": 0.99,
+      "source": "https://example.org/capri/notion-provider",
+      "tags": [
+        "notion",
+        "sequential",
+        "graph"
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000011",
+      "title": "Semantic embedding retrieval proposal",
+      "notes": "Embeddings may improve semantic retrieval, but should be considered only after a labelled graph benchmark demonstrates a meaningful lexical retrieval gap.",
+      "kind": "Hypothesis",
+      "layer": "Reasoning",
+      "evidence_state": "Reported",
+      "confidence": 0.8,
+      "source": "https://example.org/capri/retrieval-proposal",
+      "tags": [
+        "semantic",
+        "embeddings",
+        "retrieval"
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000012",
+      "title": "Freshness first ranking baseline",
+      "notes": "A previous retrieval baseline prioritized recency ahead of query relevance and performed poorly on the synthetic hard-negative memory fixture.",
+      "kind": "Fact",
+      "layer": "Feedback",
+      "evidence_state": "Reported",
+      "confidence": 0.9,
+      "source": "https://example.org/capri/baseline",
+      "tags": [
+        "freshness",
+        "ranking",
+        "baseline"
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000013",
+      "title": "Export remained active after consent revocation",
+      "notes": "Historical status claim superseded by authoritative consent revocation and export invalidation.",
+      "kind": "Fact",
+      "layer": "Memory",
+      "evidence_state": "Superseded",
+      "confidence": 0.7,
+      "source": "https://example.org/capri/historical-export",
+      "tags": [
+        "export",
+        "active",
+        "revocation"
+      ]
+    }
+  ],
+  "synapses": [
+    {
+      "id": "10000000-0000-4000-8000-000000000001",
+      "from": "00000000-0000-4000-8000-000000000001",
+      "to": "00000000-0000-4000-8000-000000000002",
+      "relationship": "Depends on",
+      "title": "Task ownership depends on principal identity",
+      "rationale": "Owner identity is checked consistently at task boundaries.",
+      "strength": 0.95,
+      "status": "Active"
+    },
+    {
+      "id": "10000000-0000-4000-8000-000000000002",
+      "from": "00000000-0000-4000-8000-000000000001",
+      "to": "00000000-0000-4000-8000-000000000003",
+      "relationship": "Implements",
+      "title": "Idempotency scope uses versioned digest",
+      "rationale": "The digest scopes retries to an unambiguous principal/key tuple.",
+      "strength": 1,
+      "status": "Active"
+    },
+    {
+      "id": "10000000-0000-4000-8000-000000000003",
+      "from": "00000000-0000-4000-8000-000000000003",
+      "to": "00000000-0000-4000-8000-000000000004",
+      "relationship": "Supports",
+      "title": "Legacy retries preserve same-owner identity",
+      "rationale": "Compatibility is constrained by the stored owner.",
+      "strength": 0.9,
+      "status": "Active"
+    },
+    {
+      "id": "10000000-0000-4000-8000-000000000004",
+      "from": "00000000-0000-4000-8000-000000000005",
+      "to": "00000000-0000-4000-8000-000000000002",
+      "relationship": "Depends on",
+      "title": "Worker dispatch depends on authenticated principal",
+      "rationale": "The host-resolved principal reaches the authorized handler.",
+      "strength": 0.9,
+      "status": "Active"
+    },
+    {
+      "id": "10000000-0000-4000-8000-000000000005",
+      "from": "00000000-0000-4000-8000-000000000006",
+      "to": "00000000-0000-4000-8000-000000000007",
+      "relationship": "Depends on",
+      "title": "Export recovery depends on consent validity",
+      "rationale": "An export cannot activate after a required consent is revoked.",
+      "strength": 1,
+      "status": "Active"
+    },
+    {
+      "id": "10000000-0000-4000-8000-000000000006",
+      "from": "00000000-0000-4000-8000-000000000006",
+      "to": "00000000-0000-4000-8000-000000000013",
+      "relationship": "Contradicts",
+      "title": "Revocation contradicts historical active export claim",
+      "rationale": "The historical active status is superseded by authoritative revocation.",
+      "strength": 1,
+      "status": "Active"
+    },
+    {
+      "id": "10000000-0000-4000-8000-000000000007",
+      "from": "00000000-0000-4000-8000-000000000007",
+      "to": "00000000-0000-4000-8000-000000000008",
+      "relationship": "Related to",
+      "title": "Pathless staging is a recovery edge case",
+      "rationale": "Publication recovery must fail closed when artifact identity is unavailable.",
+      "strength": 0.85,
+      "status": "Active"
+    },
+    {
+      "id": "10000000-0000-4000-8000-000000000008",
+      "from": "00000000-0000-4000-8000-000000000009",
+      "to": "00000000-0000-4000-8000-000000000010",
+      "relationship": "Related to",
+      "title": "Sequential reads explain mixed-time snapshot risk",
+      "rationale": "Two separate reads cannot guarantee one atomic cross-source version.",
+      "strength": 0.9,
+      "status": "Active"
+    },
+    {
+      "id": "10000000-0000-4000-8000-000000000009",
+      "from": "00000000-0000-4000-8000-000000000011",
+      "to": "00000000-0000-4000-8000-000000000012",
+      "relationship": "Related to",
+      "title": "Embedding proposal compared with lexical baseline",
+      "rationale": "Benchmark evidence should precede architecture changes.",
+      "strength": 0.7,
+      "status": "Active"
+    }
+  ],
+  "queries": [
+    {
+      "id": "principal-idempotency",
+      "query": "principal idempotency collision",
+      "relevant_neurons": [
+        "00000000-0000-4000-8000-000000000001",
+        "00000000-0000-4000-8000-000000000003",
+        "00000000-0000-4000-8000-000000000004"
+      ],
+      "relevant_edges": [
+        "10000000-0000-4000-8000-000000000002",
+        "10000000-0000-4000-8000-000000000003"
+      ]
+    },
+    {
+      "id": "authenticated-worker",
+      "query": "authenticated worker principal dispatch",
+      "relevant_neurons": [
+        "00000000-0000-4000-8000-000000000005",
+        "00000000-0000-4000-8000-000000000002"
+      ],
+      "relevant_edges": [
+        "10000000-0000-4000-8000-000000000004"
+      ]
+    },
+    {
+      "id": "consent-revocation",
+      "query": "consent revocation export recovery",
+      "relevant_neurons": [
+        "00000000-0000-4000-8000-000000000006",
+        "00000000-0000-4000-8000-000000000007",
+        "00000000-0000-4000-8000-000000000013"
+      ],
+      "relevant_edges": [
+        "10000000-0000-4000-8000-000000000005",
+        "10000000-0000-4000-8000-000000000006"
+      ],
+      "required_contradiction_edges": [
+        "10000000-0000-4000-8000-000000000006"
+      ]
+    },
+    {
+      "id": "pathless-staging",
+      "query": "pathless staging artifact quarantine",
+      "relevant_neurons": [
+        "00000000-0000-4000-8000-000000000008",
+        "00000000-0000-4000-8000-000000000007"
+      ],
+      "relevant_edges": [
+        "10000000-0000-4000-8000-000000000007"
+      ]
+    },
+    {
+      "id": "notion-snapshot",
+      "query": "Notion sequential graph snapshot consistency",
+      "relevant_neurons": [
+        "00000000-0000-4000-8000-000000000009",
+        "00000000-0000-4000-8000-000000000010"
+      ],
+      "relevant_edges": [
+        "10000000-0000-4000-8000-000000000008"
+      ]
+    },
+    {
+      "id": "semantic-retrieval",
+      "query": "semantic embeddings retrieval",
+      "relevant_neurons": [
+        "00000000-0000-4000-8000-000000000011"
+      ],
+      "relevant_edges": [
+        "10000000-0000-4000-8000-000000000009"
+      ]
+    }
+  ]
+}
