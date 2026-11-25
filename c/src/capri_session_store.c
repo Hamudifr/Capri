@@ -76,6 +76,17 @@ static bool text_ok(const char *s, size_t max, bool nonblank) {
     if (n==0u || n>max || !utf8_valid((const unsigned char *)s,n,&chars)) return false;
     return !nonblank || has_non_whitespace((const unsigned char *)s,n);
 }
+static bool text_chars_ok(const char *s,size_t max_chars,bool nonblank) {
+    if(!s || max_chars>SIZE_MAX/4u)return false;
+    size_t n=strlen(s),characters=0u;
+    if(n==0u || n>max_chars*4u || !utf8_valid((const unsigned char*)s,n,&characters) || characters>max_chars)return false;
+    return !nonblank || has_non_whitespace((const unsigned char*)s,n);
+}
+static bool sqlite_text_chars_ok(sqlite3_stmt *st,int column,size_t max_chars,bool nonblank) {
+    const unsigned char *value=sqlite3_column_text(st,column);int bytes=sqlite3_column_bytes(st,column);size_t characters=0u;
+    if(!value || bytes<=0 || max_chars>SIZE_MAX/4u || (size_t)bytes>max_chars*4u || memchr(value,0,(size_t)bytes)!=NULL || !utf8_valid(value,(size_t)bytes,&characters) || characters>max_chars)return false;
+    return !nonblank || has_non_whitespace(value,(size_t)bytes);
+}
 static bool sqlite_text_ok(sqlite3_stmt *st,int column,size_t max_bytes,bool nonblank) {
     const unsigned char *value=sqlite3_column_text(st,column);int bytes=sqlite3_column_bytes(st,column);size_t characters=0u;
     if(!value||bytes<=0||(size_t)bytes>max_bytes||memchr(value,0,(size_t)bytes)!=NULL||!utf8_valid(value,(size_t)bytes,&characters))return false;
@@ -257,7 +268,7 @@ static CapriSessionError validate_backup_snapshot(CapriSessionStore *store,sqlit
     if(result!=CAPRI_SESSION_OK) return result;
     rc=sqlite3_prepare_v2(db,"SELECT session_id,principal_id,created_at FROM session_owners",-1,&st,NULL);if(rc!=SQLITE_OK)return map_sqlite(rc);
     while((rc=sqlite3_step(st))==SQLITE_ROW){
-        if(!sqlite_text_ok(st,0,36u,true)||!sqlite_text_ok(st,1,256u,true)||!sqlite_text_ok(st,2,64u,true)||!lease_timestamp_aware(sqlite3_column_text(st,2),sqlite3_column_bytes(st,2))){result=CAPRI_SESSION_CORRUPT;break;}
+        if(!sqlite_text_ok(st,0,36u,true)||!sqlite_text_chars_ok(st,1,256u,true)||!sqlite_text_ok(st,2,64u,true)||!lease_timestamp_aware(sqlite3_column_text(st,2),sqlite3_column_bytes(st,2))){result=CAPRI_SESSION_CORRUPT;break;}
     }
     if(result==CAPRI_SESSION_OK&&rc!=SQLITE_DONE) result=map_sqlite(rc);
     sqlite3_finalize(st);
@@ -317,7 +328,7 @@ CapriSessionError capri_session_backup_to(CapriSessionStore *s,const char *desti
     free(temporary);free(parent);free(absolute);return result;
 }
 CapriSessionError capri_session_create_for_principal(CapriSessionStore *s,const char *principal,CapriSession *out) {
-    if(!s||!out||!text_ok(principal,256u,true))return CAPRI_SESSION_INVALID;
+    if(!s||!out||!text_chars_ok(principal,256u,true))return CAPRI_SESSION_INVALID;
     char id[37],now[32];if(!random_uuid(id)||!utc_now(now))return CAPRI_SESSION_IO;
     pthread_mutex_lock(&s->mutex);
     if(!store_path_safe(s)) RETURN_UNLOCK(s,CAPRI_SESSION_IO);
@@ -330,7 +341,7 @@ CapriSessionError capri_session_create_for_principal(CapriSessionStore *s,const 
     memset(out,0,sizeof *out);strcpy(out->session_id,id);strcpy(out->created_at,now);strcpy(out->updated_at,now);out->messages_json=empty_json;RETURN_UNLOCK(s,CAPRI_SESSION_OK);
 }
 CapriSessionError capri_session_get_for_principal(CapriSessionStore *s,const char *id,const char *principal,CapriSession *out) {
-    if(!s||!out||!text_ok(id,36u,true)||!text_ok(principal,256u,true))return CAPRI_SESSION_INVALID;
+    if(!s||!out||!text_ok(id,36u,true)||!text_chars_ok(principal,256u,true))return CAPRI_SESSION_INVALID;
     pthread_mutex_lock(&s->mutex);
     if(!store_path_safe(s)) RETURN_UNLOCK(s,CAPRI_SESSION_IO);
     CapriSessionError result=select_owned(s,id,principal,out);
@@ -381,7 +392,7 @@ static CapriSessionError validate_turn(CapriSessionStore *s,const char *json,siz
     sqlite3_finalize(st);if(count)*count=n;return result;
 }
 static CapriSessionError commit_turn_internal(CapriSessionStore *s,const char *id,const char *principal,int64_t expected,const char *turn_json,const char *lease_owner,CapriSession *out) {
-    if(!s||!out||!text_ok(id,36u,true)||(principal&&!text_ok(principal,256u,true))||expected<0)return CAPRI_SESSION_INVALID;
+    if(!s||!out||!text_ok(id,36u,true)||(principal&&!text_chars_ok(principal,256u,true))||expected<0)return CAPRI_SESSION_INVALID;
     pthread_mutex_lock(&s->mutex);
     if(!store_path_safe(s)) RETURN_UNLOCK(s,CAPRI_SESSION_IO);
     size_t turn_count=0u;CapriSessionError e=validate_turn(s,turn_json,&turn_count);if(e!=CAPRI_SESSION_OK) RETURN_UNLOCK(s,e);
@@ -390,7 +401,7 @@ static CapriSessionError commit_turn_internal(CapriSessionStore *s,const char *i
     if(current.closed){e=CAPRI_SESSION_CLOSED;goto fail;}
     if(current.version!=expected){e=CAPRI_SESSION_CONFLICT;goto fail;}
     sqlite3_stmt *st=NULL;int rc=sqlite3_prepare_v2(s->db,"SELECT owner_token,expires_at,(julianday(expires_at)>julianday('now')),(julianday(expires_at) IS NULL) FROM session_turn_leases WHERE session_id=?1",-1,&st,NULL);
-    if(rc==SQLITE_OK){sqlite3_bind_text(st,1,id,-1,SQLITE_TRANSIENT);rc=sqlite3_step(st);}if(rc==SQLITE_ROW){const char *owner=(const char*)sqlite3_column_text(st,0);const unsigned char *expiry=sqlite3_column_text(st,1);if(!sqlite_text_ok(st,0,128u,true)||!sqlite_text_ok(st,1,64u,true)||!lease_timestamp_aware(expiry,sqlite3_column_bytes(st,1))||sqlite3_column_int(st,3)==1)e=CAPRI_SESSION_CORRUPT;else if(sqlite3_column_int(st,2)!=1||!lease_owner||strcmp(owner,lease_owner)!=0)e=CAPRI_SESSION_CONFLICT;}else if(rc!=SQLITE_DONE)e=map_sqlite(rc);else if(lease_owner)e=CAPRI_SESSION_CONFLICT;sqlite3_finalize(st);if(e!=CAPRI_SESSION_OK)goto fail;
+    if(rc==SQLITE_OK){sqlite3_bind_text(st,1,id,-1,SQLITE_TRANSIENT);rc=sqlite3_step(st);}if(rc==SQLITE_ROW){const char *owner=(const char*)sqlite3_column_text(st,0);const unsigned char *expiry=sqlite3_column_text(st,1);if(!sqlite_text_chars_ok(st,0,128u,false)||!sqlite_text_ok(st,1,64u,true)||!lease_timestamp_aware(expiry,sqlite3_column_bytes(st,1))||sqlite3_column_int(st,3)==1)e=CAPRI_SESSION_CORRUPT;else if(sqlite3_column_int(st,2)!=1||!lease_owner||strcmp(owner,lease_owner)!=0)e=CAPRI_SESSION_CONFLICT;}else if(rc!=SQLITE_DONE)e=map_sqlite(rc);else if(lease_owner)e=CAPRI_SESSION_CONFLICT;sqlite3_finalize(st);if(e!=CAPRI_SESSION_OK)goto fail;
     st=NULL;rc=sqlite3_prepare_v2(s->db,"SELECT json_array_length(?1), (SELECT count(*) FROM json_each(?1) WHERE json_extract(value,'$.role')='user')",-1,&st,NULL);if(rc==SQLITE_OK){sqlite3_bind_text(st,1,current.messages_json,-1,SQLITE_TRANSIENT);rc=sqlite3_step(st);}size_t old_count=rc==SQLITE_ROW?(size_t)sqlite3_column_int64(st,0):0u;size_t old_users=rc==SQLITE_ROW?(size_t)sqlite3_column_int64(st,1):0u;sqlite3_finalize(st);if(rc!=SQLITE_ROW){e=CAPRI_SESSION_CORRUPT;goto fail;}
     if(old_count+turn_count>s->max_messages){e=CAPRI_SESSION_LIMIT;goto fail;}
     if(old_users!=(size_t)current.version){e=CAPRI_SESSION_CORRUPT;goto fail;}
@@ -406,7 +417,7 @@ fail:
 }
 
 CapriSessionError capri_session_commit_turn_for_principal(CapriSessionStore *s,const char *id,const char *principal,int64_t expected,const char *turn_json,const char *lease_owner,CapriSession *out) {
-    if(!text_ok(principal,256u,true))return CAPRI_SESSION_INVALID;
+    if(!text_chars_ok(principal,256u,true))return CAPRI_SESSION_INVALID;
     return commit_turn_internal(s,id,principal,expected,turn_json,lease_owner,out);
 }
 CapriSessionError capri_session_commit_turn(CapriSessionStore *s,const char *id,int64_t expected,const char *turn_json,const char *lease_owner,CapriSession *out) {
@@ -414,7 +425,7 @@ CapriSessionError capri_session_commit_turn(CapriSessionStore *s,const char *id,
 }
 
 static bool lease_input(const char *id,const char *principal,const char *token,double seconds) {
-    return text_ok(id,36u,true)&&text_ok(principal,256u,true)&&text_ok(token,128u,true)&&seconds>=3.0&&seconds<=3600.0;
+    return text_ok(id,36u,true)&&text_chars_ok(principal,256u,true)&&text_chars_ok(token,128u,false)&&seconds>=3.0&&seconds<=3600.0;
 }
 static bool lease_expiry(char out[40],double seconds) {
     struct timespec ts; if(clock_gettime(CLOCK_REALTIME,&ts)!=0)return false;
@@ -432,7 +443,7 @@ CapriSessionError capri_session_claim_turn_lease_for_principal(CapriSessionStore
     if(!exec_sql(s->db,"BEGIN IMMEDIATE")) RETURN_UNLOCK(s,CAPRI_SESSION_DATABASE);
     sqlite3_stmt *st=NULL;int rc=sqlite3_prepare_v2(s->db,"SELECT s.closed FROM sessions s JOIN session_owners o ON o.session_id=s.session_id WHERE s.session_id=?1 AND o.principal_id=?2",-1,&st,NULL);
     if(rc==SQLITE_OK){sqlite3_bind_text(st,1,id,-1,SQLITE_TRANSIENT);sqlite3_bind_text(st,2,principal,-1,SQLITE_TRANSIENT);rc=sqlite3_step(st);}if(rc!=SQLITE_ROW){sqlite3_finalize(st);exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,rc==SQLITE_DONE?CAPRI_SESSION_NOT_FOUND:map_sqlite(rc));}if(sqlite3_column_int(st,0)!=0){sqlite3_finalize(st);exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,CAPRI_SESSION_CLOSED);}sqlite3_finalize(st);
-    st=NULL;rc=sqlite3_prepare_v2(s->db,"SELECT owner_token,expires_at,(julianday(expires_at)>julianday('now')),(julianday(expires_at) IS NULL) FROM session_turn_leases WHERE session_id=?1",-1,&st,NULL);if(rc==SQLITE_OK){sqlite3_bind_text(st,1,id,-1,SQLITE_TRANSIENT);rc=sqlite3_step(st);}if(rc==SQLITE_ROW){const char *old=(const char*)sqlite3_column_text(st,0);const unsigned char *old_expiry=sqlite3_column_text(st,1);int live=sqlite3_column_int(st,2);if(!sqlite_text_ok(st,0,128u,true)||!sqlite_text_ok(st,1,64u,true)||!lease_timestamp_aware(old_expiry,sqlite3_column_bytes(st,1))||sqlite3_column_int(st,3)==1){sqlite3_finalize(st);exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,CAPRI_SESSION_CORRUPT);}if((live&&strcmp(old,token)!=0)||(!live&&strcmp(old,token)==0)){sqlite3_finalize(st);exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,CAPRI_SESSION_CONFLICT);}sqlite3_finalize(st);st=NULL;rc=sqlite3_prepare_v2(s->db,"UPDATE session_turn_leases SET owner_token=?1,expires_at=?2 WHERE session_id=?3",-1,&st,NULL);if(rc==SQLITE_OK){sqlite3_bind_text(st,1,token,-1,SQLITE_TRANSIENT);sqlite3_bind_text(st,2,expiry,-1,SQLITE_TRANSIENT);sqlite3_bind_text(st,3,id,-1,SQLITE_TRANSIENT);rc=sqlite3_step(st);}sqlite3_finalize(st);}else if(rc==SQLITE_DONE){sqlite3_finalize(st);st=NULL;rc=sqlite3_prepare_v2(s->db,"INSERT INTO session_turn_leases VALUES(?1,?2,?3)",-1,&st,NULL);if(rc==SQLITE_OK){sqlite3_bind_text(st,1,id,-1,SQLITE_TRANSIENT);sqlite3_bind_text(st,2,token,-1,SQLITE_TRANSIENT);sqlite3_bind_text(st,3,expiry,-1,SQLITE_TRANSIENT);rc=sqlite3_step(st);}sqlite3_finalize(st);}else{sqlite3_finalize(st);exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,map_sqlite(rc));}
+    st=NULL;rc=sqlite3_prepare_v2(s->db,"SELECT owner_token,expires_at,(julianday(expires_at)>julianday('now')),(julianday(expires_at) IS NULL) FROM session_turn_leases WHERE session_id=?1",-1,&st,NULL);if(rc==SQLITE_OK){sqlite3_bind_text(st,1,id,-1,SQLITE_TRANSIENT);rc=sqlite3_step(st);}if(rc==SQLITE_ROW){const char *old=(const char*)sqlite3_column_text(st,0);const unsigned char *old_expiry=sqlite3_column_text(st,1);int live=sqlite3_column_int(st,2);if(!sqlite_text_chars_ok(st,0,128u,false)||!sqlite_text_ok(st,1,64u,true)||!lease_timestamp_aware(old_expiry,sqlite3_column_bytes(st,1))||sqlite3_column_int(st,3)==1){sqlite3_finalize(st);exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,CAPRI_SESSION_CORRUPT);}if((live&&strcmp(old,token)!=0)||(!live&&strcmp(old,token)==0)){sqlite3_finalize(st);exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,CAPRI_SESSION_CONFLICT);}sqlite3_finalize(st);st=NULL;rc=sqlite3_prepare_v2(s->db,"UPDATE session_turn_leases SET owner_token=?1,expires_at=?2 WHERE session_id=?3",-1,&st,NULL);if(rc==SQLITE_OK){sqlite3_bind_text(st,1,token,-1,SQLITE_TRANSIENT);sqlite3_bind_text(st,2,expiry,-1,SQLITE_TRANSIENT);sqlite3_bind_text(st,3,id,-1,SQLITE_TRANSIENT);rc=sqlite3_step(st);}sqlite3_finalize(st);}else if(rc==SQLITE_DONE){sqlite3_finalize(st);st=NULL;rc=sqlite3_prepare_v2(s->db,"INSERT INTO session_turn_leases VALUES(?1,?2,?3)",-1,&st,NULL);if(rc==SQLITE_OK){sqlite3_bind_text(st,1,id,-1,SQLITE_TRANSIENT);sqlite3_bind_text(st,2,token,-1,SQLITE_TRANSIENT);sqlite3_bind_text(st,3,expiry,-1,SQLITE_TRANSIENT);rc=sqlite3_step(st);}sqlite3_finalize(st);}else{sqlite3_finalize(st);exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,map_sqlite(rc));}
     if(rc!=SQLITE_DONE){exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,map_sqlite(rc));}if(!exec_sql(s->db,"COMMIT")){exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,CAPRI_SESSION_DATABASE);}RETURN_UNLOCK(s,CAPRI_SESSION_OK);
 }
 CapriSessionError capri_session_renew_turn_lease_for_principal(CapriSessionStore *s,const char *id,const char *principal,const char *token,double seconds) {
@@ -442,20 +453,20 @@ CapriSessionError capri_session_renew_turn_lease_for_principal(CapriSessionStore
     char expiry[40];if(!lease_expiry(expiry,seconds)) RETURN_UNLOCK(s,CAPRI_SESSION_IO);
     if(!exec_sql(s->db,"BEGIN IMMEDIATE")) RETURN_UNLOCK(s,CAPRI_SESSION_DATABASE);
     sqlite3_stmt *st=NULL;int rc=sqlite3_prepare_v2(s->db,"SELECT 1 FROM session_owners WHERE session_id=?1 AND principal_id=?2",-1,&st,NULL);if(rc==SQLITE_OK){sqlite3_bind_text(st,1,id,-1,SQLITE_TRANSIENT);sqlite3_bind_text(st,2,principal,-1,SQLITE_TRANSIENT);rc=sqlite3_step(st);}sqlite3_finalize(st);if(rc!=SQLITE_ROW){exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,rc==SQLITE_DONE?CAPRI_SESSION_NOT_FOUND:map_sqlite(rc));}
-    st=NULL;rc=sqlite3_prepare_v2(s->db,"SELECT owner_token,expires_at,(julianday(expires_at)>julianday('now')),(julianday(expires_at) IS NULL) FROM session_turn_leases WHERE session_id=?1",-1,&st,NULL);if(rc==SQLITE_OK){sqlite3_bind_text(st,1,id,-1,SQLITE_TRANSIENT);rc=sqlite3_step(st);}if(rc!=SQLITE_ROW){sqlite3_finalize(st);exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,rc==SQLITE_DONE?CAPRI_SESSION_CONFLICT:map_sqlite(rc));}const unsigned char *owner_text=sqlite3_column_text(st,0);const unsigned char *current_expiry=sqlite3_column_text(st,1);int owner_bytes=sqlite3_column_bytes(st,0),live=sqlite3_column_int(st,2),invalid=sqlite3_column_int(st,3);char current_owner[129]={0};bool owner_valid=sqlite_text_ok(st,0,128u,true)&&owner_text&&owner_bytes>0&&owner_bytes<129;if(owner_valid)memcpy(current_owner,owner_text,(size_t)owner_bytes);bool aware=lease_timestamp_aware(current_expiry,sqlite3_column_bytes(st,1));sqlite3_finalize(st);if(!owner_valid||!current_expiry||!aware||invalid){exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,CAPRI_SESSION_CORRUPT);}if(strcmp(current_owner,token)!=0||!live){exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,CAPRI_SESSION_CONFLICT);}
+    st=NULL;rc=sqlite3_prepare_v2(s->db,"SELECT owner_token,expires_at,(julianday(expires_at)>julianday('now')),(julianday(expires_at) IS NULL) FROM session_turn_leases WHERE session_id=?1",-1,&st,NULL);if(rc==SQLITE_OK){sqlite3_bind_text(st,1,id,-1,SQLITE_TRANSIENT);rc=sqlite3_step(st);}if(rc!=SQLITE_ROW){sqlite3_finalize(st);exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,rc==SQLITE_DONE?CAPRI_SESSION_CONFLICT:map_sqlite(rc));}const unsigned char *owner_text=sqlite3_column_text(st,0);const unsigned char *current_expiry=sqlite3_column_text(st,1);int owner_bytes=sqlite3_column_bytes(st,0),live=sqlite3_column_int(st,2),invalid=sqlite3_column_int(st,3);char current_owner[513]={0};bool owner_valid=sqlite_text_chars_ok(st,0,128u,false)&&owner_text&&owner_bytes>0&&owner_bytes<(int)sizeof current_owner;if(owner_valid)memcpy(current_owner,owner_text,(size_t)owner_bytes);bool aware=lease_timestamp_aware(current_expiry,sqlite3_column_bytes(st,1));sqlite3_finalize(st);if(!owner_valid||!current_expiry||!aware||invalid){exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,CAPRI_SESSION_CORRUPT);}if(strcmp(current_owner,token)!=0||!live){exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,CAPRI_SESSION_CONFLICT);}
     st=NULL;rc=sqlite3_prepare_v2(s->db,"UPDATE session_turn_leases SET expires_at=?1 WHERE session_id=?2 AND owner_token=?3",-1,&st,NULL);if(rc==SQLITE_OK){sqlite3_bind_text(st,1,expiry,-1,SQLITE_TRANSIENT);sqlite3_bind_text(st,2,id,-1,SQLITE_TRANSIENT);sqlite3_bind_text(st,3,token,-1,SQLITE_TRANSIENT);rc=sqlite3_step(st);}sqlite3_finalize(st);if(rc!=SQLITE_DONE){exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,map_sqlite(rc));}if(sqlite3_changes(s->db)!=1){exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,CAPRI_SESSION_CONFLICT);}if(!exec_sql(s->db,"COMMIT")){exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,CAPRI_SESSION_DATABASE);}RETURN_UNLOCK(s,CAPRI_SESSION_OK);
 }
 CapriSessionError capri_session_release_turn_lease_for_principal(CapriSessionStore *s,const char *id,const char *principal,const char *token,int *released) {
-    if(!s||!text_ok(id,36u,true)||!text_ok(principal,256u,true)||!text_ok(token,128u,true)||!released) return CAPRI_SESSION_INVALID;
+    if(!s||!text_ok(id,36u,true)||!text_chars_ok(principal,256u,true)||!text_chars_ok(token,128u,false)||!released) return CAPRI_SESSION_INVALID;
     pthread_mutex_lock(&s->mutex);
     if(!store_path_safe(s)) RETURN_UNLOCK(s,CAPRI_SESSION_IO);
     *released=0;
     if(!exec_sql(s->db,"BEGIN IMMEDIATE")) RETURN_UNLOCK(s,CAPRI_SESSION_DATABASE);
     sqlite3_stmt *st=NULL;int rc=sqlite3_prepare_v2(s->db,"SELECT 1 FROM session_owners WHERE session_id=?1 AND principal_id=?2",-1,&st,NULL);if(rc==SQLITE_OK){sqlite3_bind_text(st,1,id,-1,SQLITE_TRANSIENT);sqlite3_bind_text(st,2,principal,-1,SQLITE_TRANSIENT);rc=sqlite3_step(st);}sqlite3_finalize(st);if(rc!=SQLITE_ROW){exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,rc==SQLITE_DONE?CAPRI_SESSION_NOT_FOUND:map_sqlite(rc));}
-    st=NULL;rc=sqlite3_prepare_v2(s->db,"SELECT owner_token,expires_at,(julianday(expires_at)>julianday('now')),(julianday(expires_at) IS NULL) FROM session_turn_leases WHERE session_id=?1",-1,&st,NULL);if(rc==SQLITE_OK){sqlite3_bind_text(st,1,id,-1,SQLITE_TRANSIENT);rc=sqlite3_step(st);}if(rc==SQLITE_DONE){sqlite3_finalize(st);if(!exec_sql(s->db,"COMMIT")){exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,CAPRI_SESSION_DATABASE);}RETURN_UNLOCK(s,CAPRI_SESSION_OK);}if(rc!=SQLITE_ROW){sqlite3_finalize(st);exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,map_sqlite(rc));}const unsigned char *owner_text=sqlite3_column_text(st,0);const unsigned char *current_expiry=sqlite3_column_text(st,1);int owner_bytes=sqlite3_column_bytes(st,0),live=sqlite3_column_int(st,2),invalid=sqlite3_column_int(st,3);char current_owner[129]={0};bool owner_valid=sqlite_text_ok(st,0,128u,true)&&owner_text&&owner_bytes>0&&owner_bytes<129;if(owner_valid)memcpy(current_owner,owner_text,(size_t)owner_bytes);bool aware=lease_timestamp_aware(current_expiry,sqlite3_column_bytes(st,1));sqlite3_finalize(st);if(!owner_valid||!current_expiry||!aware||invalid){exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,CAPRI_SESSION_CORRUPT);}if(strcmp(current_owner,token)!=0||!live){if(!exec_sql(s->db,"COMMIT")){exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,CAPRI_SESSION_DATABASE);}RETURN_UNLOCK(s,CAPRI_SESSION_OK);}st=NULL;rc=sqlite3_prepare_v2(s->db,"DELETE FROM session_turn_leases WHERE session_id=?1 AND owner_token=?2",-1,&st,NULL);if(rc==SQLITE_OK){sqlite3_bind_text(st,1,id,-1,SQLITE_TRANSIENT);sqlite3_bind_text(st,2,token,-1,SQLITE_TRANSIENT);rc=sqlite3_step(st);}sqlite3_finalize(st);if(rc!=SQLITE_DONE){exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,map_sqlite(rc));}*released=sqlite3_changes(s->db)==1;if(!exec_sql(s->db,"COMMIT")){exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,CAPRI_SESSION_DATABASE);}RETURN_UNLOCK(s,CAPRI_SESSION_OK);
+    st=NULL;rc=sqlite3_prepare_v2(s->db,"SELECT owner_token,expires_at,(julianday(expires_at)>julianday('now')),(julianday(expires_at) IS NULL) FROM session_turn_leases WHERE session_id=?1",-1,&st,NULL);if(rc==SQLITE_OK){sqlite3_bind_text(st,1,id,-1,SQLITE_TRANSIENT);rc=sqlite3_step(st);}if(rc==SQLITE_DONE){sqlite3_finalize(st);if(!exec_sql(s->db,"COMMIT")){exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,CAPRI_SESSION_DATABASE);}RETURN_UNLOCK(s,CAPRI_SESSION_OK);}if(rc!=SQLITE_ROW){sqlite3_finalize(st);exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,map_sqlite(rc));}const unsigned char *owner_text=sqlite3_column_text(st,0);const unsigned char *current_expiry=sqlite3_column_text(st,1);int owner_bytes=sqlite3_column_bytes(st,0),live=sqlite3_column_int(st,2),invalid=sqlite3_column_int(st,3);char current_owner[513]={0};bool owner_valid=sqlite_text_chars_ok(st,0,128u,false)&&owner_text&&owner_bytes>0&&owner_bytes<(int)sizeof current_owner;if(owner_valid)memcpy(current_owner,owner_text,(size_t)owner_bytes);bool aware=lease_timestamp_aware(current_expiry,sqlite3_column_bytes(st,1));sqlite3_finalize(st);if(!owner_valid||!current_expiry||!aware||invalid){exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,CAPRI_SESSION_CORRUPT);}if(strcmp(current_owner,token)!=0||!live){if(!exec_sql(s->db,"COMMIT")){exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,CAPRI_SESSION_DATABASE);}RETURN_UNLOCK(s,CAPRI_SESSION_OK);}st=NULL;rc=sqlite3_prepare_v2(s->db,"DELETE FROM session_turn_leases WHERE session_id=?1 AND owner_token=?2",-1,&st,NULL);if(rc==SQLITE_OK){sqlite3_bind_text(st,1,id,-1,SQLITE_TRANSIENT);sqlite3_bind_text(st,2,token,-1,SQLITE_TRANSIENT);rc=sqlite3_step(st);}sqlite3_finalize(st);if(rc!=SQLITE_DONE){exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,map_sqlite(rc));}*released=sqlite3_changes(s->db)==1;if(!exec_sql(s->db,"COMMIT")){exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,CAPRI_SESSION_DATABASE);}RETURN_UNLOCK(s,CAPRI_SESSION_OK);
 }
 static bool unowned_lease_input(const char *id,const char *token,double seconds) {
-    return text_ok(id,36u,true)&&text_ok(token,128u,true)&&seconds>=3.0&&seconds<=3600.0;
+    return text_ok(id,36u,true)&&text_chars_ok(token,128u,false)&&seconds>=3.0&&seconds<=3600.0;
 }
 CapriSessionError capri_session_claim_turn_lease(CapriSessionStore *s,const char *id,const char *token,double seconds) {
     if(!s||!unowned_lease_input(id,token,seconds))return CAPRI_SESSION_INVALID;
@@ -473,7 +484,7 @@ CapriSessionError capri_session_claim_turn_lease(CapriSessionStore *s,const char
     if(rc==SQLITE_ROW){
         const unsigned char *old=sqlite3_column_text(st,0),*old_expiry=sqlite3_column_text(st,1);
         int live=sqlite3_column_int(st,2),invalid=sqlite3_column_int(st,3);
-        if(!sqlite_text_ok(st,0,128u,true)||!sqlite_text_ok(st,1,64u,true)||!lease_timestamp_aware(old_expiry,sqlite3_column_bytes(st,1))||invalid){sqlite3_finalize(st);exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,CAPRI_SESSION_CORRUPT);}
+        if(!sqlite_text_chars_ok(st,0,128u,false)||!sqlite_text_ok(st,1,64u,true)||!lease_timestamp_aware(old_expiry,sqlite3_column_bytes(st,1))||invalid){sqlite3_finalize(st);exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,CAPRI_SESSION_CORRUPT);}
         if((live&&strcmp((const char*)old,token)!=0)||(!live&&strcmp((const char*)old,token)==0)){sqlite3_finalize(st);exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,CAPRI_SESSION_CONFLICT);}
         sqlite3_finalize(st);st=NULL;
         rc=sqlite3_prepare_v2(s->db,"UPDATE session_turn_leases SET owner_token=?1,expires_at=?2 WHERE session_id=?3",-1,&st,NULL);
@@ -504,7 +515,7 @@ CapriSessionError capri_session_renew_turn_lease(CapriSessionStore *s,const char
     if(rc!=SQLITE_ROW){sqlite3_finalize(st);exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,rc==SQLITE_DONE?CAPRI_SESSION_CONFLICT:map_sqlite(rc));}
     const unsigned char *owner=sqlite3_column_text(st,0),*current_expiry=sqlite3_column_text(st,1);
     int owner_bytes=sqlite3_column_bytes(st,0),live=sqlite3_column_int(st,2),invalid=sqlite3_column_int(st,3);
-    char current_owner[129]={0};bool owner_valid=sqlite_text_ok(st,0,128u,true)&&owner&&owner_bytes>0&&owner_bytes<129;
+    char current_owner[513]={0};bool owner_valid=sqlite_text_chars_ok(st,0,128u,false)&&owner&&owner_bytes>0&&owner_bytes<(int)sizeof current_owner;
     if(owner_valid)memcpy(current_owner,owner,(size_t)owner_bytes);
     bool aware=lease_timestamp_aware(current_expiry,sqlite3_column_bytes(st,1));sqlite3_finalize(st);
     if(!owner_valid||!aware||invalid){exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,CAPRI_SESSION_CORRUPT);}
@@ -518,7 +529,7 @@ CapriSessionError capri_session_renew_turn_lease(CapriSessionStore *s,const char
     RETURN_UNLOCK(s,CAPRI_SESSION_OK);
 }
 CapriSessionError capri_session_release_turn_lease(CapriSessionStore *s,const char *id,const char *token,int *released) {
-    if(!s||!text_ok(id,36u,true)||!text_ok(token,128u,true)||!released)return CAPRI_SESSION_INVALID;
+    if(!s||!text_ok(id,36u,true)||!text_chars_ok(token,128u,false)||!released)return CAPRI_SESSION_INVALID;
     pthread_mutex_lock(&s->mutex);
     if(!store_path_safe(s))RETURN_UNLOCK(s,CAPRI_SESSION_IO);
     *released=0;
@@ -533,7 +544,7 @@ CapriSessionError capri_session_release_turn_lease(CapriSessionStore *s,const ch
     if(rc!=SQLITE_ROW){sqlite3_finalize(st);exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,map_sqlite(rc));}
     const unsigned char *owner=sqlite3_column_text(st,0),*current_expiry=sqlite3_column_text(st,1);
     int owner_bytes=sqlite3_column_bytes(st,0),live=sqlite3_column_int(st,2),invalid=sqlite3_column_int(st,3);
-    char current_owner[129]={0};bool owner_valid=sqlite_text_ok(st,0,128u,true)&&owner&&owner_bytes>0&&owner_bytes<129;
+    char current_owner[513]={0};bool owner_valid=sqlite_text_chars_ok(st,0,128u,false)&&owner&&owner_bytes>0&&owner_bytes<(int)sizeof current_owner;
     if(owner_valid)memcpy(current_owner,owner,(size_t)owner_bytes);
     bool aware=lease_timestamp_aware(current_expiry,sqlite3_column_bytes(st,1));sqlite3_finalize(st);
     if(!owner_valid||!aware||invalid){exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,CAPRI_SESSION_CORRUPT);}
@@ -564,7 +575,7 @@ CapriSessionError capri_session_close(CapriSessionStore *s,const char *id,CapriS
     *out=current;RETURN_UNLOCK(s,CAPRI_SESSION_OK);
 }
 CapriSessionError capri_session_close_for_principal(CapriSessionStore *s,const char *id,const char *principal,CapriSession *out) {
-    if(!s||!out||!text_ok(id,36u,true)||!text_ok(principal,256u,true))return CAPRI_SESSION_INVALID;
+    if(!s||!out||!text_ok(id,36u,true)||!text_chars_ok(principal,256u,true))return CAPRI_SESSION_INVALID;
     pthread_mutex_lock(&s->mutex);
     if(!store_path_safe(s)) RETURN_UNLOCK(s,CAPRI_SESSION_IO);
     if(!exec_sql(s->db,"BEGIN IMMEDIATE")) RETURN_UNLOCK(s,CAPRI_SESSION_DATABASE);
