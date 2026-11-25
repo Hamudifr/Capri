@@ -334,15 +334,31 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 "alice", [{"tool": "different", "input": {}}], "same-key", NOW
             )
 
-    def test_principal_task_read_uses_one_connection_and_preserves_isolation(self):
+    def test_principal_task_reads_and_event_reads_reuse_one_connection(self):
         alice = self.store.create_for_principal("alice", PLAN, "single-read", NOW)
         original_connect = self.store._connect
         with patch.object(self.store, "_connect", wraps=original_connect) as connect:
             reopened = self.store.get_for_principal(alice.task_id, "alice")
         self.assertEqual(reopened, alice)
         self.assertEqual(connect.call_count, 1)
-        with self.assertRaises(TaskNotFoundError):
-            self.store.get_for_principal(alice.task_id, "bob")
+
+        with patch.object(self.store, "_connect", wraps=original_connect) as connect:
+            events = self.store.events_for_principal(alice.task_id, "alice")
+        self.assertEqual(events[0]["state"], "queued")
+        self.assertEqual(connect.call_count, 1)
+
+        with patch.object(self.store, "_connect", wraps=original_connect) as connect:
+            domain_events = self.store.domain_events_for_principal(alice.task_id, "alice")
+        self.assertEqual(len(domain_events), len(events))
+        self.assertEqual(connect.call_count, 1)
+
+        for operation in (
+            lambda: self.store.get_for_principal(alice.task_id, "bob"),
+            lambda: self.store.events_for_principal(alice.task_id, "bob"),
+            lambda: self.store.domain_events_for_principal(alice.task_id, "bob"),
+        ):
+            with self.assertRaises(TaskNotFoundError):
+                operation()
 
     def test_task_integrity_check_detects_missing_event_protection(self):
         self.store.create(PLAN, "event-trigger-check", NOW)
