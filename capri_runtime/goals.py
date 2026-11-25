@@ -56,7 +56,7 @@ _TRANSITIONS = {
 
 
 def _text(value: Any, label: str, limit: int) -> str:
-    if type(value) is not str or not value or len(value) > limit or contains_surrogate(value):
+    if type(value) is not str or not value.strip() or len(value) > limit or contains_surrogate(value):
         raise GoalValidationError(f"{label} is invalid")
     return value
 
