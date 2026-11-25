@@ -540,10 +540,15 @@ static bool sessions_constraints_valid(sqlite3 *db) {
         "CREATE TABLE sessions(session_id TEXT PRIMARY KEY,created_at TEXT NOT NULL,"
         "updated_at TEXT NOT NULL,version INTEGER NOT NULL,"
         "closed INTEGER NOT NULL CHECK(closed IN(0,1)),messages_json TEXT NOT NULL)";
+    const legacy_checked_sql=
+        "CREATE TABLE sessions(session_id TEXT PRIMARY KEY,created_at TEXT NOT NULL,"
+        "updated_at TEXT NOT NULL,version INTEGER NOT NULL CHECK(version>=0),"
+        "closed INTEGER NOT NULL CHECK(closed IN(0,1)),messages_json TEXT NOT NULL)";
     if(version==0){
-        /* Existing Python stores predate the versioned JSON CHECK. Accept that
-           legacy profile without rewriting it, as well as early strict C files. */
+        /* Existing Python stores predate the JSON CHECK. Accept both historical
+           version-column variants without rewriting the original schema. */
         return table_matches(db,"sessions",legacy_sql)
+            ||table_matches(db,"sessions",legacy_checked_sql)
             ||table_matches(db,"sessions",strict_sql);
     }
     if(version!=1)return false;
