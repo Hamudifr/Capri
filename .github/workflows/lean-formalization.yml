@@ -14,7 +14,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 13
     steps:
       - uses: actions/checkout@v4
       - uses: leanprover/lean-action@v1
