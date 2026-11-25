@@ -104,6 +104,11 @@ from .goals import (
     GoalPlanProposal, GoalPlanner, GoalRecord, GoalValidationError, SQLiteGoalStore,
     validate_goal_plan,
 )
+from .strategy_approval import (
+    HostStrategyApprovalAuthority,
+    StrategyApprovalIdentity,
+    StrategyApprovalRequest,
+)
 from .strategy_store import (
     ActiveStrategyRecord,
     SQLiteStrategyStore,
@@ -239,6 +244,9 @@ __all__ = [
     "SQLiteApprovalChallengeStore",
     "SQLiteSecurityStore",
     "SQLiteSessionStore",
+    "HostStrategyApprovalAuthority",
+    "StrategyApprovalIdentity",
+    "StrategyApprovalRequest",
     "ActiveStrategyRecord",
     "SQLiteStrategyStore",
     "StrategyActivationEvent",
