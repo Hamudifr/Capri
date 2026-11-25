@@ -69,7 +69,7 @@ The validator checks:
 
 The validator uses a deliberately small, dependency-free YAML subset suitable for the repository's skill files. It supports plain/quoted scalars, literal/folded block scalars, and flat `metadata` maps. Unsupported YAML constructs such as anchors, aliases, tags, and flow collections fail closed with a diagnostic. This is a local implementation constraint, not a claim that the Agent Skills specification forbids those YAML features. Use a full spec validator such as `skills-ref validate` when validating arbitrary third-party skill packages.
 
-Validation is static only. It never imports, executes, or trusts skill scripts or instructions. CI runs the validator alongside the repository test suite on Python 3.11–3.15.
+Validation is static only. It never imports, executes, or trusts skill scripts or instructions. CI runs the validator alongside the repository test suite on Python 3.15 only.
 
 ## Release checklist
 
