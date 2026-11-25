@@ -186,7 +186,7 @@ class ToolOrchestrator:
         self.max_output_chars = max_output_chars
         self.max_tool_message_bytes = max_tool_message_bytes
         self.max_history_bytes = max_history_bytes
-        self.budget_store: SQLiteBudgetStore | None = None
+        self.budget_store: SQLiteBudgetStore | None = self.bridge.executor.budget_store
         if budget_store is not None:
             self.set_budget_store(budget_store)
 
