@@ -172,10 +172,17 @@ def _validate_capsule(capsule: object) -> ActionCapsule:
     _identifier(capsule.policy_version, "policy_version")
     if type(capsule.budgets) is not tuple or not capsule.budgets or len(capsule.budgets) > _MAX_BUDGET_ITEMS:
         raise ActionCapsuleError("budgets must be a non-empty tuple")
+    checked_budgets: list[tuple[str, int]] = []
     for item in capsule.budgets:
         if type(item) is not tuple or len(item) != 2:
             raise ActionCapsuleError("each budget must be a name/value pair")
-    if _normalize_budgets(dict(capsule.budgets)) != capsule.budgets:
+        key, value = item
+        if type(key) is not str or not _BUDGET_KEY.fullmatch(key):
+            raise ActionCapsuleError("budget names must be lowercase identifiers")
+        if type(value) is not int or not 0 <= value <= _MAX_BUDGET_VALUE:
+            raise ActionCapsuleError("budget values must be bounded non-negative integers")
+        checked_budgets.append((key, value))
+    if tuple(sorted(checked_budgets)) != capsule.budgets or len({key for key, _ in checked_budgets}) != len(checked_budgets):
         raise ActionCapsuleError("budgets must be sorted and unique")
     _identifier(capsule.idempotency_key, "idempotency_key")
     _digest(capsule.input_digest, "input_digest")
@@ -459,13 +466,21 @@ def transition_action_capsule(
     if target_state is CapsuleState.VERIFIED:
         if isinstance(evidence_refs, (str, bytes)):
             raise ActionCapsuleError("evidence_refs must be a collection")
-        next_evidence = tuple(dict.fromkeys(_identifier(item, "evidence reference") for item in evidence_refs))
+        try:
+            next_evidence = tuple(dict.fromkeys(_identifier(item, "evidence reference") for item in evidence_refs))
+        except TypeError:
+            raise ActionCapsuleError("evidence_refs must be iterable") from None
         if not next_evidence or len(next_evidence) > _MAX_EVIDENCE_REFS:
             raise ActionCapsuleError("verification requires 1–128 unique evidence references")
         next_verifier = _identifier(verifier_id, "verifier_id")
         next_verifier_version = _identifier(verifier_version, "verifier_version")
-    elif any(value is not None for value in (verifier_id, verifier_version)) or tuple(evidence_refs):
-        raise ActionCapsuleError("verifier identity and evidence may only be set during verification")
+    else:
+        try:
+            extra_evidence = tuple(evidence_refs)
+        except TypeError:
+            raise ActionCapsuleError("evidence_refs must be iterable") from None
+        if any(value is not None for value in (verifier_id, verifier_version)) or extra_evidence:
+            raise ActionCapsuleError("verifier identity and evidence may only be set during verification")
 
     if target_state in {CapsuleState.REJECTED, CapsuleState.INDETERMINATE}:
         reason_code = _identifier(reason_code, "reason_code")

@@ -211,7 +211,28 @@ class ActionCapsuleTests(unittest.TestCase):
                 created_at=self.created.isoformat(),
             )
 
-    def test_invalid_budget_types_are_rejected(self):
+    def test_non_iterable_evidence_rejected_with_domain_error(self):
+        authorized, auth_event = self.step(
+            self.capsule, CapsuleState.AUTHORIZED, 1, approval_ref="approval-1"
+        )
+        dispatched, dispatch_event = self.step(
+            authorized, CapsuleState.DISPATCHED, 2,
+            history=(auth_event,), worker_binding="worker-1"
+        )
+        received, received_event = self.step(
+            dispatched, CapsuleState.RECEIVED, 3,
+            history=(auth_event, dispatch_event), result_digest="c" * 64
+        )
+        with self.assertRaises(ActionCapsuleError):
+            transition_action_capsule(
+                received, CapsuleState.VERIFIED,
+                history=(auth_event, dispatch_event, received_event),
+                occurred_at=(self.created + timedelta(seconds=4)).isoformat(),
+                actor="host-1", evidence_refs=None,
+                verifier_id="verifier-1", verifier_version="v1",
+            )
+
+    def test_invalid_budget_types_and_duplicate_scope_are_normalized_or_rejected(self):
         with self.assertRaises(ActionCapsuleError):
             create_action_capsule(
                 capsule_id="bad", intent_digest="a" * 64,
