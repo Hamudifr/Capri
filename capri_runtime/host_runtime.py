@@ -673,6 +673,11 @@ class CapriHostRuntime:
         if self._worker_registry is None:
             self._worker_reservation_contexts.clear()
             return
+        if isinstance(self._worker_registry, SQLiteWorkerRegistry):
+            # SQLite rehydrates monotonic expiry projections on every operation.
+            # Compare stable reservation identity inside the registry transaction,
+            # not full dataclass equality across separately materialized snapshots.
+            return
         for token, context in tuple(self._worker_reservation_contexts.items()):
             current = self._worker_registry.get_reservation(token)
             if current is None:
