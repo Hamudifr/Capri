@@ -1360,6 +1360,45 @@ class CapriHostRuntimeTests(unittest.TestCase):
         ))
         self.assertEqual(reopened_host.storage_health()["worker_registry"], "healthy")
 
+    def test_sqlite_expired_reservation_context_is_pruned_before_next_reserve(self):
+        now = {"value": 1_000_000_000}
+        registry = SQLiteWorkerRegistry(
+            self.task_store,
+            heartbeat_ttl_ms=5_000,
+            reservation_ttl_ms=1_000,
+            clock_ns=lambda: now["value"],
+            clock_wall_ns=lambda: now["value"],
+        )
+        host = self.make_worker_host(
+            registry, {"worker-token": "worker-1"}, lambda *args: {"worker-1"},
+        )
+        host.register_worker(
+            "worker-token",
+            WorkerDescriptor("worker-1", (1,), ("math.factorial",), max_concurrency=1),
+        )
+        host.heartbeat_worker("monitor-token", "worker-1")
+        first_task = self.task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {"scope": "first"}}],
+        )
+        first = host.reserve_worker_candidate(
+            "alice-token", first_task.task_id, "math.factorial", 1,
+        )
+        self.assertIsNotNone(first)
+        self.assertIn(first.reservation.token, host._worker_reservation_contexts)
+
+        now["value"] += 2_000_000_000
+        second_task = self.task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {"scope": "second"}}],
+        )
+        second = host.reserve_worker_candidate(
+            "alice-token", second_task.task_id, "math.factorial", 1,
+        )
+        self.assertIsNotNone(second)
+        self.assertNotIn(first.reservation.token, host._worker_reservation_contexts)
+        self.assertIn(second.reservation.token, host._worker_reservation_contexts)
+        self.assertIsNone(registry.get_reservation(first.reservation.token))
+        self.assertEqual(registry.integrity_check(), "ok")
+
     def test_sqlite_worker_registry_must_share_exact_host_task_store(self):
         other_store = SQLiteTaskStore(
             os.path.join(self.temp.name, "other-tasks.sqlite3")
