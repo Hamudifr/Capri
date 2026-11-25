@@ -48,8 +48,9 @@ _TRANSITIONS = {
     "accepted": {"planning", "cancelled"},
     "planning": {"planned", "paused", "failed", "cancelled"},
     "planned": {"running", "paused", "cancelled"},
-    "running": {"paused", "succeeded", "failed", "cancelled", "reconciliation_required"},
+    "running": {"paused", "succeeded", "failed", "cancelled", "cancelling", "reconciliation_required"},
     "paused": {"planning", "planned", "running", "cancelled"},
+    "cancelling": {"cancelled", "reconciliation_required", "failed"},
     "reconciliation_required": {"running", "failed", "cancelled"},
     "succeeded": set(), "failed": set(), "cancelled": set(),
 }
@@ -634,7 +635,7 @@ class SQLiteGoalStore:
                 ).fetchone()
                 if row is None:
                     raise GoalNotFoundError("goal does not exist")
-                if row[0] not in {"running", "succeeded"}:
+                if row[0] not in {"running", "succeeded", "cancelling", "reconciliation_required"}:
                     raise GoalConflictError("goal is not accepting task evidence")
                 inserted = connection.execute(
                     """INSERT OR IGNORE INTO goal_evidence(
@@ -697,6 +698,34 @@ class SQLiteGoalStore:
         ).fetchall()
         for row in rows:
             SQLiteGoalStore._record(row[:10], row[10])
+        owners = {
+            goal_id: principal_id
+            for goal_id, principal_id in connection.execute(
+                "SELECT goal_id,principal_id FROM goal_owners"
+            ).fetchall()
+        }
+        links = connection.execute(
+            "SELECT goal_id,task_id,principal_id,linked_at FROM goal_task_links"
+        ).fetchall()
+        for goal_id, task_id, principal_id, linked_at in links:
+            _text(goal_id, "goal task link goal_id", 64)
+            _text(task_id, "goal task link task_id", 64)
+            _text(principal_id, "goal task link principal_id", 128)
+            _text(linked_at, "goal task link timestamp", 64)
+            _parse = datetime.fromisoformat(linked_at.replace("Z", "+00:00"))
+            if goal_id not in owners or owners[goal_id] != principal_id:
+                raise GoalValidationError("goal backup contains a mismatched task link owner")
+        evidence_rows = connection.execute(
+            "SELECT goal_id,principal_id,evidence_type,reference,step_index,created_at FROM goal_evidence"
+        ).fetchall()
+        for goal_id, principal_id, evidence_type, reference, step_index, created_at in evidence_rows:
+            if goal_id not in owners or owners[goal_id] != principal_id:
+                raise GoalValidationError("goal backup contains mismatched evidence ownership")
+            _text(evidence_type, "evidence type", 64)
+            _text(reference, "evidence reference", 512)
+            _text(created_at, "evidence timestamp", 64)
+            if type(step_index) is not int or not 0 <= step_index < 32:
+                raise GoalValidationError("goal backup contains invalid evidence step index")
         event_rows = connection.execute(
             "SELECT state,version,event_type FROM goal_events"
         ).fetchall()
