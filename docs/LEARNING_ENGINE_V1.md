@@ -75,6 +75,7 @@ not a self-modifying hosted model and not an automatic training service.
   unverifiable pending artifacts become failed; revoked dependencies remain
   invalidated. Stale private staging files are cleaned only when their path
   matches the recorded artifact sibling. Recovery is idempotent.
+- A legacy `publishing` row with no artifact path is marked `failed`; if it still has a staging path, the path and file are retained because no safe sibling relationship can be proven. See [Learning Export Recovery](LEARNING_EXPORT_RECOVERY.md) for the operator-safe, fail-closed procedure. Do not infer deletion or quarantine authority from a registry path.
 - If an artifact is published but final registry activation cannot be confirmed,
   the API raises `LearningExportOutcomeUncertainError` with `export_id` and
   `path`; callers must inspect `get_export_status()`, run
