@@ -116,6 +116,9 @@ class SQLiteSessionStoreTests(unittest.TestCase):
                 Message(role="assistant", content="private transcript"),
             ),
         )
+        lease_expiry = self.store.claim_turn_lease_for_principal(
+            session.session_id, "principal-alice", "worker-alice", 3600
+        )
         backup_path = os.path.join(self.temp.name, "session-backup.sqlite3")
         self.assertEqual(self.store.backup_to(backup_path), backup_path)
         self.assertTrue(os.path.isfile(backup_path))
@@ -126,6 +129,13 @@ class SQLiteSessionStoreTests(unittest.TestCase):
         self.assertEqual(
             restored.get_for_principal(session.session_id, "principal-alice"),
             committed,
+        )
+        renewed_expiry = restored.renew_turn_lease_for_principal(
+            session.session_id, "principal-alice", "worker-alice", 3600
+        )
+        self.assertGreater(
+            datetime.fromisoformat(renewed_expiry),
+            datetime.fromisoformat(lease_expiry),
         )
         with self.assertRaises(SessionNotFoundError):
             restored.get_for_principal(session.session_id, "principal-bob")
@@ -138,6 +148,58 @@ class SQLiteSessionStoreTests(unittest.TestCase):
                 )
         finally:
             connection.close()
+
+    def test_backup_preserves_expired_turn_lease_as_reclaimable_state(self):
+        session = self.store.create()
+        self.store.claim_turn_lease(session.session_id, "expired-worker", 3600)
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute(
+                "UPDATE session_turn_leases SET expires_at=? WHERE session_id=?",
+                ("2000-01-01T00:00:00+00:00", session.session_id),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        backup_path = os.path.join(self.temp.name, "expired-lease-backup.sqlite3")
+        self.store.backup_to(backup_path)
+        restored = SQLiteSessionStore(backup_path)
+        self.assertEqual(restored.integrity_check(), "ok")
+        self.assertTrue(
+            restored.claim_turn_lease(session.session_id, "new-worker", 3600)
+        )
+
+    def test_backup_rejects_malformed_persisted_turn_lease_expiry(self):
+        session = self.store.create()
+        self.store.claim_turn_lease(session.session_id, "worker-token", 3600)
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute(
+                "UPDATE session_turn_leases SET expires_at=? WHERE session_id=?",
+                ("2026-11-25T00:00:00", session.session_id),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        self.assertEqual(self.store.integrity_check(), "semantic validation failed")
+        with self.assertRaises(ValidationError):
+            self.store.backup_to(os.path.join(self.temp.name, "invalid-lease.sqlite3"))
+
+    def test_backup_rejects_invalid_persisted_turn_lease_owner_token(self):
+        session = self.store.create()
+        self.store.claim_turn_lease(session.session_id, "worker-token", 3600)
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute(
+                "UPDATE session_turn_leases SET owner_token='' WHERE session_id=?",
+                (session.session_id,),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        self.assertEqual(self.store.integrity_check(), "semantic validation failed")
+        with self.assertRaises(ValidationError):
+            self.store.backup_to(os.path.join(self.temp.name, "invalid-owner.sqlite3"))
 
     def test_backup_refuses_live_existing_and_symlink_destinations(self):
         with self.assertRaises(ValidationError):
