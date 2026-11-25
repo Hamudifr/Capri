@@ -16,7 +16,7 @@ Import `StrategyObservation` and `evaluate_strategies` from `capri_core`.
 
 Each observation contains:
 - task ID and scenario label;
-- strategy ID and explicit strategy version;
+- strategy ID;
 - outcome: `verified_success`, `verified_failure`, or `unverified`;
 - a non-empty evidence reference;
 - an explicit strategy version (keyword-only in the public constructor, defaulting to `unversioned` for legacy positional callers);
