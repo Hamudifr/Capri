@@ -362,18 +362,23 @@ class SQLiteTaskStoreTests(unittest.TestCase):
 
     def test_principal_cancel_authorizes_and_returns_record_on_one_connection(self):
         task = self.store.create_for_principal("alice", PLAN, "single-cancel", NOW)
+        with self.assertRaises(TaskNotFoundError):
+            self.store.request_cancel_for_principal(
+                task.task_id, "bob", now=NOW + timedelta(seconds=1),
+            )
+        self.assertEqual(
+            self.store.get_for_principal(task.task_id, "alice").state,
+            "queued",
+        )
+
         original_connect = self.store._connect
         with patch.object(self.store, "_connect", wraps=original_connect) as connect:
             cancelled = self.store.request_cancel_for_principal(
-                task.task_id, "alice", now=NOW + timedelta(seconds=1),
+                task.task_id, "alice", now=NOW + timedelta(seconds=2),
             )
         self.assertEqual(cancelled.state, "cancelled")
         self.assertTrue(cancelled.cancel_requested)
         self.assertEqual(connect.call_count, 1)
-        with self.assertRaises(TaskNotFoundError):
-            self.store.request_cancel_for_principal(
-                task.task_id, "bob", now=NOW + timedelta(seconds=2),
-            )
         self.assertEqual(
             self.store.get_for_principal(task.task_id, "alice").state,
             "cancelled",
