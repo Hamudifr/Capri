@@ -251,6 +251,69 @@ int main(void) {
     sqlite3_bind_text(lease_cleanup,2,nul_owner_session_id,-1,SQLITE_TRANSIENT);
     assert(sqlite3_step(lease_cleanup)==SQLITE_DONE);
     sqlite3_finalize(lease_cleanup);
+
+    /* JSON1 accepts a valid JSON prefix before an embedded NUL. Persisted
+       rows must reject the entire SQLite text value, not just its C prefix. */
+    assert(capri_session_integrity_check(store)==CAPRI_SESSION_OK);
+    CapriSession nul_json_session={0},nul_json_read={0};
+    assert(capri_session_create_for_principal(
+        store,"principal-nul-json",&nul_json_session
+    )==CAPRI_SESSION_OK);
+    sqlite3_stmt *nul_json_update=NULL;
+    assert(sqlite3_prepare_v2(
+        raw,
+        "UPDATE sessions SET messages_json=CAST('[]' || char(0) || 'trailing' AS TEXT) WHERE session_id=?1",
+        -1,&nul_json_update,NULL
+    )==SQLITE_OK);
+    sqlite3_bind_text(nul_json_update,1,nul_json_session.session_id,-1,SQLITE_TRANSIENT);
+    assert(sqlite3_step(nul_json_update)==SQLITE_DONE&&sqlite3_changes(raw)==1);
+    sqlite3_finalize(nul_json_update);
+    assert(capri_session_get_for_principal(
+        store,nul_json_session.session_id,"principal-nul-json",&nul_json_read
+    )==CAPRI_SESSION_CORRUPT);
+    assert(capri_session_integrity_check(store)==CAPRI_SESSION_CORRUPT);
+    char nul_json_backup_path[512];
+    snprintf(nul_json_backup_path,sizeof nul_json_backup_path,"%s/nul-json-backup.sqlite3",dir);
+    assert(capri_session_backup_to(store,nul_json_backup_path)==CAPRI_SESSION_CORRUPT);
+    struct stat nul_json_backup_missing;
+    assert(lstat(nul_json_backup_path,&nul_json_backup_missing)!=0);
+    capri_session_free(&nul_json_read);
+    assert(sqlite3_prepare_v2(
+        raw,"UPDATE sessions SET messages_json='[]' WHERE session_id=?1",
+        -1,&nul_json_update,NULL
+    )==SQLITE_OK);
+    sqlite3_bind_text(nul_json_update,1,nul_json_session.session_id,-1,SQLITE_TRANSIENT);
+    assert(sqlite3_step(nul_json_update)==SQLITE_DONE&&sqlite3_changes(raw)==1);
+    sqlite3_finalize(nul_json_update);
+    assert(capri_session_integrity_check(store)==CAPRI_SESSION_OK);
+
+    /* The same full-byte validation applies to session metadata columns. */
+    sqlite3_stmt *nul_timestamp_update=NULL;
+    assert(sqlite3_prepare_v2(
+        raw,
+        "UPDATE sessions SET updated_at=CAST(updated_at || char(0) || 'trailing' AS TEXT) WHERE session_id=?1",
+        -1,&nul_timestamp_update,NULL
+    )==SQLITE_OK);
+    sqlite3_bind_text(nul_timestamp_update,1,nul_json_session.session_id,-1,SQLITE_TRANSIENT);
+    assert(sqlite3_step(nul_timestamp_update)==SQLITE_DONE&&sqlite3_changes(raw)==1);
+    sqlite3_finalize(nul_timestamp_update);
+    assert(capri_session_get_for_principal(
+        store,nul_json_session.session_id,"principal-nul-json",&nul_json_read
+    )==CAPRI_SESSION_CORRUPT);
+    assert(capri_session_integrity_check(store)==CAPRI_SESSION_CORRUPT);
+    assert(capri_session_backup_to(store,nul_json_backup_path)==CAPRI_SESSION_CORRUPT);
+    struct stat nul_timestamp_backup_missing;
+    assert(lstat(nul_json_backup_path,&nul_timestamp_backup_missing)!=0);
+    capri_session_free(&nul_json_read);
+    assert(sqlite3_prepare_v2(
+        raw,"UPDATE sessions SET updated_at='2026-11-25T00:00:00Z' WHERE session_id=?1",
+        -1,&nul_timestamp_update,NULL
+    )==SQLITE_OK);
+    sqlite3_bind_text(nul_timestamp_update,1,nul_json_session.session_id,-1,SQLITE_TRANSIENT);
+    assert(sqlite3_step(nul_timestamp_update)==SQLITE_DONE&&sqlite3_changes(raw)==1);
+    sqlite3_finalize(nul_timestamp_update);
+    assert(capri_session_integrity_check(store)==CAPRI_SESSION_OK);
+    capri_session_free(&nul_json_session);
     sqlite3_close(raw);
     struct stat database_mode;assert(stat(path,&database_mode)==0&&(database_mode.st_mode&0777u)==0600u);
     assert(chmod(path,0644)==0);
