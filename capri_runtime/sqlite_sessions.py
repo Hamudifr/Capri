@@ -542,8 +542,20 @@ class SQLiteSessionStore(SessionStore):
         owner_token: str,
         lease_seconds: float = 30.0,
     ) -> str:
+        return self._claim_turn_lease(session_id, owner_token, lease_seconds)
+
+    def _claim_turn_lease(
+        self,
+        session_id: str,
+        owner_token: str,
+        lease_seconds: float = 30.0,
+        *,
+        principal_id: str | None = None,
+    ) -> str:
         """Acquire a durable cross-process session-turn lease or fail if held."""
         owner_token, lease_seconds = self._lease_parameters(owner_token, lease_seconds)
+        if principal_id is not None:
+            principal_id = self._validate_principal_id(principal_id)
         if (
             not isinstance(session_id, str)
             or not session_id.strip()
@@ -557,10 +569,18 @@ class SQLiteSessionStore(SessionStore):
                 connection.execute("BEGIN IMMEDIATE")
                 now = self._lease_now()
                 expires_at = (now + timedelta(seconds=lease_seconds)).isoformat()
-                session = connection.execute(
-                    "SELECT closed FROM sessions WHERE session_id = ?",
-                    (session_id,),
-                ).fetchone()
+                if principal_id is None:
+                    session = connection.execute(
+                        "SELECT closed FROM sessions WHERE session_id = ?",
+                        (session_id,),
+                    ).fetchone()
+                else:
+                    session = connection.execute(
+                        """SELECT s.closed FROM sessions AS s
+                        JOIN session_owners AS o ON o.session_id = s.session_id
+                        WHERE s.session_id = ? AND o.principal_id = ?""",
+                        (session_id, principal_id),
+                    ).fetchone()
                 if session is None:
                     raise SessionNotFoundError("session does not exist")
                 if session[0] == 1:
