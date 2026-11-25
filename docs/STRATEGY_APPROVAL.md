@@ -16,7 +16,7 @@ Pass `authority.verify` as the strategy store's `approval_verifier` callback. Ke
 
 ## Cryptographic binding
 
-The versioned canonical HMAC payload binds the key ID, grant ID, principal, strategy class/ID/version, evaluation fingerprint, config fingerprint, expected active generation, action, issue/expiry timestamps, and authenticated approver. The signature string carries the key ID so retained verification keys can validate grants across key rotation. Unknown keys, malformed tags, callback errors, and non-boolean authorization results fail closed.
+The versioned canonical HMAC payload binds the key ID, grant ID, principal, strategy class/ID/version, evaluation fingerprint, config fingerprint, expected active generation, action, issue/expiry timestamps, and authenticated approver. The signature string carries the key ID using a delimiter that cannot occur in a valid key ID so retained verification keys can validate grants across key rotation. Unknown keys, malformed tags, callback errors, and non-boolean authorization results fail closed.
 
 The grant lifetime is host-bounded to at most 900 seconds and defaults to 300 seconds. The store independently checks timestamps and consumes each grant ID once. This authority does not replace the store's one-use check.
 
