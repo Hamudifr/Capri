@@ -124,7 +124,7 @@ class StrategyEvaluationTests(unittest.TestCase):
 
     def test_cohorts_must_match_exactly(self):
         records = cohort()
-        records.pop()
+        records.pop(-2)  # remove the baseline record, leaving one candidate-only task
         result = evaluate_strategies("baseline", "candidate", records)
         self.assertFalse(result.eligible_for_manual_review)
         self.assertIn("unmatched_cohort", result.blocked_reasons)
