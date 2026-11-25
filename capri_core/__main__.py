@@ -191,8 +191,8 @@ def run_doctor(root: Path, json_output: bool = False) -> int:
 
     checks.append((
         "Python version",
-        sys.version_info[:2] == (3, 15),
-        "Python 3.15.x is required",
+        sys.version_info >= (3, 11),
+        "Python 3.11 or newer is required",
     ))
 
     required = (

@@ -4,7 +4,7 @@
 
 Capri is an experimental, provider-neutral Python runtime with durable state, bounded orchestration, permissioned tool execution, project memory, and optional model-provider integrations. It is designed to make delegated work inspectable and recoverable, not to hide uncertainty behind an autonomous-agent label.
 
-[Repository](https://github.com/Hamudifr/Capri) · [Capability roadmap](docs/CAPABILITY_ROADMAP.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md) · [Security review](docs/SECURITY_REVIEW.md) · [Python support policy](docs/PYTHON_SUPPORT_POLICY.md) · [Operating model](docs/OPERATING_MODEL.md)
+[Repository](https://github.com/Hamudifr/Capri) · [Capability roadmap](docs/CAPABILITY_ROADMAP.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md) · [Security review](docs/SECURITY_REVIEW.md) · [Operating model](docs/OPERATING_MODEL.md)
 
 [![Python quality](https://github.com/Hamudifr/Capri/actions/workflows/quality.yml/badge.svg)](https://github.com/Hamudifr/Capri/actions/workflows/quality.yml)
 [![Rust quality](https://github.com/Hamudifr/Capri/actions/workflows/rust.yml/badge.svg)](https://github.com/Hamudifr/Capri/actions/workflows/rust.yml)
@@ -26,7 +26,7 @@ These are reusable engineering components. Their presence does not mean Capri is
 
 ## Quick start
 
-Capri currently supports Python 3.15.x only. Older and newer Python minor versions are intentionally outside the supported range until the support policy is updated. The Python package declares no runtime dependencies.
+Capri supports Python 3.11 and newer. The Python package declares no runtime dependencies.
 
 Install from a checkout:
 

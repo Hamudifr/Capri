@@ -10,7 +10,7 @@ Use `python -m capri_core doctor --root /path/to/Capri` to inspect another check
 
 ## Checks
 
-- Python 3.15.x only.
+- Python 3.11 or newer.
 - Required non-protected source, test, documentation entry-point, and workflow files.
 - External GitHub Actions references pinned to full 40-character commit SHAs.
 - Explicit least-privilege `contents: read` workflow permissions.

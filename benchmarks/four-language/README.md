@@ -8,12 +8,12 @@ Compares C, C++, Rust and CPython on the same deterministic, single-threaded Con
 - Identical deterministic initial state, two-buffer update model and final FNV-1a checksum
 - C17 and C++23, both compiled with -O3 -march=native
 - Latest stable Rust, edition 2024, opt-level 3, native CPU target
-- CPython 3.15, matching the supported Capri runtime
+- Latest stable CPython selected by setup-python 3.x
 - One warm-up and five measured samples; median kernel time reported
 - Initialization, process startup, compilation and checksum calculation excluded from the timed region
 - Single-threaded, no third-party libraries; mismatched checksums fail the run
 
-Run on Linux with cc, c++, rustc and Python 3.15.x:
+Run on Linux with cc, c++, rustc and Python 3.11+:
 
     python benchmarks/four-language/run.py
 
