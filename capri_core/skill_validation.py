@@ -23,25 +23,25 @@ _LINK_PATTERN = re.compile(r"!?(?:\[[^\]]*\])\(([^)\s]+)(?:\s+[^)]*)?\)")
 
 def _strip_comment(value: str) -> str:
     quote: str | None = None
-    escaped = False
-    for index, char in enumerate(value):
-        if escaped:
-            escaped = False
-            continue
-        if quote == '"' and char == "\\":
-            escaped = True
-            continue
-        if quote and char == quote:
-            if quote == "'" and index + 1 < len(value) and value[index + 1] == "'":
+    index = 0
+    while index < len(value):
+        char = value[index]
+        if quote == "'" and char == "'":
+            if index + 1 < len(value) and value[index + 1] == "'":
+                index += 2
                 continue
             quote = None
+        elif quote == '"' and char == "\\":
+            index += 2
             continue
-        if quote is None and char in {"'", '"'}:
+        elif quote is not None and char == quote:
+            quote = None
+        elif quote is None and char in {"'", '"'}:
             quote = char
         elif quote is None and char == "#" and (index == 0 or value[index - 1].isspace()):
             return value[:index].rstrip()
+        index += 1
     return value.rstrip()
-
 
 def _parse_scalar(raw: str) -> str:
     value = _strip_comment(raw).strip()
@@ -197,6 +197,9 @@ def _validate_skill_directory(skill_dir: Path) -> dict[str, Any]:
         "errors": errors,
         "warnings": warnings,
     }
+    if skill_dir.is_symlink():
+        errors.append("skill package directory must not be a symbolic link")
+        return result
     if not manifest.is_file():
         errors.append("missing required file SKILL.md")
         return result
