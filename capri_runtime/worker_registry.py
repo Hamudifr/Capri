@@ -537,18 +537,26 @@ class InMemoryWorkerRegistry:
         reservation: WorkerReservation,
         *,
         authenticated_worker_id: str,
+        observed_in_flight: int | None = None,
         now_ns: int | None = None,
     ) -> bool:
-        """Release a pending or committed hold after capacity is reflected elsewhere.
+        """Release a pending hold or atomically hand off a committed hold to load.
 
-        Expired, revoked or already released tokens return False. For committed
-        work, update host-observed in-flight load before releasing this hold.
+        Pending holds may be released before dispatch without a load observation.
+        A committed hold can only be released together with the host-observed
+        in-flight count after completion/reconciliation. The load update and
+        token removal occur under the same registry lock, so capacity is never
+        temporarily unaccounted.
         """
         if type(reservation) is not WorkerReservation:
             raise WorkerRegistryError("reservation must be an exact WorkerReservation")
         identity = _identifier(authenticated_worker_id, "authenticated_worker_id")
         if identity != reservation.worker_id:
             raise WorkerRegistryError("authenticated identity does not match reservation worker")
+        if observed_in_flight is not None and (
+            type(observed_in_flight) is not int or observed_in_flight < 0
+        ):
+            raise WorkerRegistryError("observed_in_flight must be a non-negative integer")
         timestamp = _now_ns(now_ns, self._clock_ns)
         with self._lock:
             self._purge_expired_reservations(timestamp)
@@ -557,6 +565,24 @@ class InMemoryWorkerRegistry:
                 return False
             if current != reservation:
                 raise WorkerConflictError("reservation token does not match current reservation")
+            if current.committed:
+                if observed_in_flight is None:
+                    raise WorkerRegistryError(
+                        "committed reservation release requires host-observed in-flight load"
+                    )
+                snapshot = self._workers.get(identity)
+                if snapshot is None:
+                    raise WorkerNotFoundError("worker is not registered")
+                updated_health = replace(
+                    snapshot.health,
+                    in_flight=observed_in_flight,
+                    revision=snapshot.health.revision + 1,
+                )
+                self._workers[identity] = WorkerSnapshot(snapshot.descriptor, updated_health)
+            elif observed_in_flight is not None:
+                raise WorkerRegistryError(
+                    "pending reservation release must not include an in-flight observation"
+                )
             del self._reservations[reservation.token]
             return True
 
