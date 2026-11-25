@@ -732,11 +732,21 @@ class SQLiteSessionStore(SessionStore):
             connection = self._connect()
             try:
                 connection.execute("BEGIN IMMEDIATE")
-                row = connection.execute(
-                    """SELECT session_id, created_at, updated_at, version, closed, messages_json
-                    FROM sessions WHERE session_id = ?""",
-                    (session_id,),
-                ).fetchone()
+                if principal_id is None:
+                    row = connection.execute(
+                        """SELECT session_id, created_at, updated_at, version, closed, messages_json
+                        FROM sessions WHERE session_id = ?""",
+                        (session_id,),
+                    ).fetchone()
+                else:
+                    row = connection.execute(
+                        """SELECT s.session_id, s.created_at, s.updated_at, s.version,
+                        s.closed, s.messages_json
+                        FROM sessions AS s
+                        JOIN session_owners AS o ON o.session_id = s.session_id
+                        WHERE s.session_id = ? AND o.principal_id = ?""",
+                        (session_id, principal_id),
+                    ).fetchone()
                 if row is None:
                     raise SessionNotFoundError("session does not exist")
                 current = self._decode(row)
