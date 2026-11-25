@@ -184,9 +184,9 @@ class SkillValidationTests(unittest.TestCase):
             write_skill(
                 root,
                 "unsafe-link",
-                "name: unsafe-link\\n"
-                "description: Use when validating skill resource links.\\n",
-                "# Unsafe Link\\n\\nOpen [this](javascript:alert(1)).\\n",
+                "name: unsafe-link\n"
+                "description: Use when validating skill resource links.\n",
+                "# Unsafe Link\n\nOpen [this](javascript:alert(1)).\n",
             )
             report = validate_skill_tree(root)
             self.assertTrue(any("unsupported linked resource scheme" in item for item in report["skills"][0]["errors"]))
