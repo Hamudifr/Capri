@@ -17,6 +17,7 @@ from .strategy_store import (
     StrategyActivationGrant,
     StrategyAuthorizationError,
     StrategyStoreError,
+    _grant_payload,
 )
 from .tools import ApprovalMacProvider
 
@@ -160,11 +161,17 @@ class HostStrategyApprovalAuthority:
             raise StrategyAuthorizationError("strategy transition authorization failed") from None
         if authorized is not True:
             raise StrategyAuthorizationError("strategy transition is not authorized")
-        now = self._clock()
+        try:
+            now = self._clock()
+        except Exception:
+            raise StrategyAuthorizationError("host clock is unavailable") from None
         if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
             raise StrategyAuthorizationError("host clock must be timezone-aware")
         now = now.astimezone(timezone.utc)
-        key_id = self._mac.active_key_id
+        try:
+            key_id = self._mac.active_key_id
+        except Exception:
+            raise StrategyAuthorizationError("active MAC key identifier is unavailable") from None
         if not isinstance(key_id, str) or not _KEY_ID.fullmatch(key_id):
             raise StrategyAuthorizationError("active MAC key identifier is invalid")
         unsigned = StrategyActivationGrant(
@@ -182,6 +189,9 @@ class HostStrategyApprovalAuthority:
             approver_id=identity.approver_id,
             signature="pending",
         )
+        # Share the registry's exact grant validation so the host cannot sign a
+        # request that the store will later reject as malformed.
+        _grant_payload(unsigned)
         try:
             tag = self._mac.sign(key_id, _payload(unsigned, key_id))
         except Exception:
