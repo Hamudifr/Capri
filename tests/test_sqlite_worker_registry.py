@@ -1,4 +1,5 @@
 import os
+import json
 import sqlite3
 import tempfile
 import threading
@@ -314,6 +315,42 @@ class SQLiteWorkerRegistryTests(unittest.TestCase):
             (),
         )
 
+
+    def test_worker_descriptor_projection_tampering_fails_closed(self):
+        self.register_healthy()
+        connection = self.store._connect()
+        try:
+            row = connection.execute(
+                "SELECT descriptor_json FROM worker_registry_state WHERE worker_id='worker-1'"
+            ).fetchone()
+            descriptor = json.loads(row[0])
+            descriptor["priority"] += 1
+            connection.execute(
+                "UPDATE worker_registry_state SET descriptor_json=? WHERE worker_id='worker-1'",
+                (json.dumps(descriptor, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False),),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        self.assertEqual(self.registry.integrity_check(), "worker registry validation failed")
+        with self.assertRaises(WorkerRegistryError):
+            self.make_registry(SQLiteTaskStore(self.path))
+
+    def test_worker_health_projection_tampering_fails_closed(self):
+        self.register_healthy()
+        connection = self.store._connect()
+        try:
+            connection.execute(
+                "UPDATE worker_registry_state SET in_flight=1 WHERE worker_id='worker-1'"
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        self.assertEqual(self.registry.integrity_check(), "worker registry validation failed")
+        with self.assertRaises(WorkerRegistryError):
+            self.make_registry(SQLiteTaskStore(self.path))
 
 if __name__ == "__main__":
     unittest.main()
