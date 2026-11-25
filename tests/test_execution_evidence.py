@@ -101,7 +101,7 @@ class SQLiteExecutionEvidenceJournalTests(unittest.TestCase):
             {self.claim.task_id: "research"},
         ))
 
-    def test_task_engine_records_evidence_before_finishing_claim(self):
+    def test_task_engine_atomically_records_evidence_and_finishes_claim(self):
         engine = TaskEngine(
             self.tasks,
             {},
@@ -157,6 +157,32 @@ class SQLiteExecutionEvidenceJournalTests(unittest.TestCase):
         completed = engine.execute_claim(self.claim)
         self.assertEqual(completed.state, "succeeded")
         self.assertEqual(completed.result[-1], self.result)
+
+    def test_task_engine_rolls_back_evidence_if_task_completion_fails(self):
+        def fail_completion(connection, claim, result, stamp):
+            raise RuntimeError("forced task completion failure")
+
+        self.tasks._finish_step_in_transaction = fail_completion
+        engine = TaskEngine(
+            self.tasks,
+            {},
+            "worker-1",
+            principal_handlers={"research": lambda inputs, key, principal: self.result},
+            execution_evidence_journal=self.journal,
+            execution_evidence_credential=lambda claim: "host-credential",
+        )
+        record = engine.execute_claim(self.claim)
+        self.assertEqual(record.state, "reconciliation_required")
+        with self.tasks._lock:
+            connection = self.tasks._connect()
+            try:
+                count = connection.execute(
+                    "SELECT COUNT(*) FROM execution_evidence_events WHERE task_id=?",
+                    (self.claim.task_id,),
+                ).fetchone()[0]
+            finally:
+                connection.close()
+        self.assertEqual(count, 0)
 
     def test_task_engine_quarantines_result_when_evidence_cannot_be_recorded(self):
         journal = self.make_journal(verifier=lambda *args: False)
