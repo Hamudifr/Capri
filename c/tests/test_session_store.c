@@ -42,9 +42,9 @@ int main(void) {
     assert(capri_session_commit_turn_for_principal(store,session_id,"principal-alice",0,turn,NULL,&stale)==CAPRI_SESSION_CONFLICT);
     const char *bad="[{\"role\":\"assistant\",\"content\":\"no user\"}]";
     assert(capri_session_commit_turn_for_principal(store,session_id,"principal-alice",1,bad,NULL,&stale)==CAPRI_SESSION_INVALID);
-    const char *unicode_blank="[{\\"role\\":\\"user\\",\\"content\\":\\"\\\\u00a0\\"},{\\"role\\":\\"assistant\\",\\"content\\":\\"reply\\"}]";
+    const char *unicode_blank="[{\"role\":\"user\",\"content\":\"\\u00a0\"},{\"role\":\"assistant\",\"content\":\"reply\"}]";
     assert(capri_session_commit_turn_for_principal(store,session_id,"principal-alice",1,unicode_blank,NULL,&stale)==CAPRI_SESSION_INVALID);
-    const char *wrong_json_type="[{\\"role\\":\\"user\\",\\"content\\":123},{\\"role\\":\\"assistant\\",\\"content\\":\\"reply\\"}]";
+    const char *wrong_json_type="[{\"role\":\"user\",\"content\":123},{\"role\":\"assistant\",\"content\":\"reply\"}]";
     assert(capri_session_commit_turn_for_principal(store,session_id,"principal-alice",1,wrong_json_type,NULL,&stale)==CAPRI_SESSION_INVALID);
     assert(capri_session_claim_turn_lease_for_principal(store,session_id,"principal-alice","worker-a",30.0)==CAPRI_SESSION_OK);
     assert(capri_session_claim_turn_lease_for_principal(store,session_id,"principal-alice","worker-b",30.0)==CAPRI_SESSION_CONFLICT);
