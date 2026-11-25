@@ -20,7 +20,7 @@ class DomainEventValidationError(ValueError):
 _ALLOWED_DATA_FIELDS = frozenset({
     "state", "status", "version", "step_index", "attempt", "error_code",
     "actor_id", "supersedes_id", "reason_code", "evidence_reference",
-    "evidence_digest", "record_type",
+    "evidence_digest", "derived_from", "record_type",
 })
 _MAX_EVENT_DATA_BYTES = 2048
 
@@ -133,12 +133,15 @@ def task_event(
 def memory_event(
     *, event_id: str, memory_id: str, event_type: str, timestamp: str,
     supersedes_id: str | None = None, status: str | None = None,
+    derived_from: str | None = None,
 ) -> DomainEvent:
     data: list[tuple[str, str | int | None]] = []
     if status is not None:
         data.append(("status", status))
     if supersedes_id is not None:
         data.append(("supersedes_id", supersedes_id))
+    if derived_from is not None:
+        data.append(("derived_from", derived_from))
     return DomainEvent(
         id=event_id, source=f"urn:capri:memory:{memory_id}",
         type=f"com.capri.memory.{event_type}", subject=memory_id,
