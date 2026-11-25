@@ -339,6 +339,7 @@ def validate_worker_registry_snapshot(connection: sqlite3.Connection) -> None:
                 "worker_id": row["worker_id"],
                 "principal_id": row["principal_id"],
                 "task_id": row["task_id"],
+                "timestamp_wall_ns": row["timestamp_wall_ns"],
                 "payload": event_data,
             })
         previous_hash = digest
@@ -431,6 +432,10 @@ def validate_worker_registry_snapshot(connection: sqlite3.Connection) -> None:
             or created_payload.get("descriptor_revision") != reservation.descriptor_revision
             or created_payload.get("committed") is not False
             or created_payload.get("revision") != 1
+            or created["timestamp_wall_ns"] != row["created_at_wall_ns"]
+            or row["expires_at_wall_ns"] != (
+                row["created_at_wall_ns"] + config["reservation_ttl_ms"] * 1_000_000
+            )
         ):
             raise WorkerRegistryError("active reservation does not match its creation audit event")
         commit_events = [
