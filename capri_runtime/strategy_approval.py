@@ -120,7 +120,7 @@ class HostStrategyApprovalAuthority:
     def _validate_request(request: StrategyApprovalRequest) -> None:
         if type(request) is not StrategyApprovalRequest:
             raise StrategyAuthorizationError("a typed strategy approval request is required")
-        _text(request.principal_id, "principal_id")
+        _text(request.principal_id, "principal_id", 256)
         if not _IDENTIFIER.fullmatch(_text(request.strategy_class, "strategy_class", 64)):
             raise StrategyAuthorizationError("strategy_class is invalid")
         if not _IDENTIFIER.fullmatch(_text(request.strategy_id, "strategy_id", 64)):
@@ -156,7 +156,7 @@ class HostStrategyApprovalAuthority:
             raise StrategyAuthorizationError("approver authentication failed") from None
         if type(identity) is not StrategyApprovalIdentity:
             raise StrategyAuthorizationError("approver authentication failed")
-        _text(identity.principal_id, "authenticated principal")
+        _text(identity.principal_id, "authenticated principal", 256)
         _text(identity.approver_id, "approver identity", 128)
         if identity.principal_id != request.principal_id:
             raise StrategyAuthorizationError("authenticated principal does not own this strategy")
