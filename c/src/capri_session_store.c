@@ -99,6 +99,24 @@ static CapriSessionError map_sqlite(int rc) {
     return CAPRI_SESSION_DATABASE;
 }
 static bool exec_sql(sqlite3 *db, const char *sql) { return sqlite3_exec(db,sql,NULL,NULL,NULL)==SQLITE_OK; }
+static bool exec_sql_retry_busy(sqlite3 *db,const char *sql,int timeout_ms) {
+    struct timespec started,now;
+    if(timeout_ms<=0 || clock_gettime(CLOCK_MONOTONIC,&started)!=0)return false;
+    int remaining=timeout_ms;
+    for(;;) {
+        int rc=sqlite3_exec(db,sql,NULL,NULL,NULL);
+        if(rc==SQLITE_OK)return sqlite3_busy_timeout(db,5000)==SQLITE_OK;
+        int primary=rc&0xff;
+        if(primary!=SQLITE_BUSY&&primary!=SQLITE_LOCKED)return false;
+        if(clock_gettime(CLOCK_MONOTONIC,&now)!=0)return false;
+        long long elapsed_ms=(long long)(now.tv_sec-started.tv_sec)*1000LL+
+            (long long)(now.tv_nsec-started.tv_nsec)/1000000LL;
+        if(elapsed_ms<0LL || elapsed_ms>=timeout_ms)return false;
+        remaining=timeout_ms-(int)elapsed_ms;
+        if(sqlite3_busy_timeout(db,remaining)!=SQLITE_OK)return false;
+        (void)sqlite3_sleep(10);
+    }
+}
 static bool utc_now(char out[32]) {
     time_t now=time(NULL); struct tm tmv;
     if (now==(time_t)-1 || gmtime_r(&now,&tmv)==NULL) return false;
@@ -172,7 +190,7 @@ static bool schema(sqlite3 *db) {
       "CREATE TRIGGER IF NOT EXISTS session_owners_immutable_update BEFORE UPDATE ON session_owners BEGIN SELECT RAISE(ABORT,'session owner is immutable'); END;"
       "CREATE TRIGGER IF NOT EXISTS session_owners_immutable_delete BEFORE DELETE ON session_owners BEGIN SELECT RAISE(ABORT,'session owner is immutable'); END;"
       "CREATE TRIGGER IF NOT EXISTS session_owners_immutable_insert BEFORE INSERT ON session_owners WHEN EXISTS(SELECT 1 FROM session_owners WHERE session_id=NEW.session_id) BEGIN SELECT RAISE(ABORT,'session owner is immutable'); END;";
-    return exec_sql(db,sql);
+    return exec_sql_retry_busy(db,sql,5000);
 }
 CapriSessionStore *capri_session_store_open(const char *path,size_t max_messages,size_t max_input,size_t max_output,size_t max_tool,CapriSessionError *error) {
     if(error) *error=CAPRI_SESSION_INVALID;
