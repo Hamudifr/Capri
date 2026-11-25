@@ -2,7 +2,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from capri_runtime import (
     AssistantTurn,
@@ -220,17 +220,17 @@ class ExecutionBudgetIntegrationTests(unittest.TestCase):
             budget_store=self.budgets,
         )
         first = store.create_for_principal("alice", PLAN, "budget-task-1", NOW)
-        second = store.create_for_principal("alice", PLAN, "budget-task-2", NOW)
+        second = store.create_for_principal("alice", PLAN, "budget-task-2", NOW + timedelta(seconds=1))
         completed = engine.run_once(now=NOW)
         self.assertEqual(completed.task_id, first.task_id)
         self.assertEqual(completed.state, "succeeded")
-        deferred = engine.run_once(now=NOW)
+        deferred = engine.run_once(now=NOW + timedelta(seconds=1))
         self.assertEqual(deferred.task_id, second.task_id)
         self.assertEqual(deferred.state, "budget_wait")
         self.assertEqual(deferred.attempts, 0)
         self.assertEqual(len(calls), 1)
-        self.assertIsNone(engine.run_once(now=NOW))
-        reset = self.budgets.usage_for_principal("alice", now=NOW).reset_at
+        self.assertIsNone(engine.run_once(now=NOW + timedelta(seconds=1)))
+        reset = self.budgets.usage_for_principal("alice", now=NOW + timedelta(seconds=1)).reset_at
         self.assertIsNone(store.claim_next(
             "unbudgeted-worker", now=reset, principal_tools=frozenset({"collect"}),
         ))
