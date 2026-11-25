@@ -994,6 +994,7 @@ class SQLiteWorkerRegistry:
         actor_id: str = "host",
         event_context: dict[str, Any] | None = None,
         include_expired: bool = False,
+        on_expired: Callable[[tuple[WorkerReservation, ...]], None] | None = None,
     ) -> Any:
         if now_ns is not None and (type(now_ns) is not int or now_ns < 0):
             raise WorkerRegistryError("monotonic clock must return a non-negative integer")
@@ -1022,7 +1023,12 @@ class SQLiteWorkerRegistry:
                 operation=operation, actor_id=actor_id, wall_now=wall_now,
                 mono_now=mono_now, event_context=event_context,
             )
-            return (result, expired_reservations) if include_expired else result
+        # The registry transaction is committed before the host lifecycle
+        # observer runs. If that observer fails, its durable operation marker
+        # remains pending and startup fails closed rather than losing the event.
+        if on_expired is not None and expired_reservations:
+            on_expired(expired_reservations)
+        return (result, expired_reservations) if include_expired else result
 
     @staticmethod
     def _current_reservation(
@@ -1044,13 +1050,14 @@ class SQLiteWorkerRegistry:
     def register(
         self, descriptor: WorkerDescriptor, *, authenticated_worker_id: str,
         now_ns: int | None = None,
+        on_expired: Callable[[tuple[WorkerReservation, ...]], None] | None = None,
     ) -> WorkerSnapshot:
         return self._run(
             "register",
             lambda memory, timestamp: memory.register(
                 descriptor, authenticated_worker_id=authenticated_worker_id, now_ns=timestamp,
             ),
-            now_ns=now_ns, actor_id=authenticated_worker_id,
+            now_ns=now_ns, actor_id=authenticated_worker_id, on_expired=on_expired,
         )
 
     def get(self, worker_id: str) -> WorkerSnapshot:
@@ -1100,6 +1107,7 @@ class SQLiteWorkerRegistry:
     def heartbeat(
         self, worker_id: str, *, authenticated_worker_id: str,
         in_flight: int, now_ns: int | None = None,
+        on_expired: Callable[[tuple[WorkerReservation, ...]], None] | None = None,
     ) -> WorkerSnapshot:
         return self._run(
             "heartbeat",
@@ -1107,7 +1115,7 @@ class SQLiteWorkerRegistry:
                 worker_id, authenticated_worker_id=authenticated_worker_id,
                 in_flight=in_flight, now_ns=timestamp,
             ),
-            now_ns=now_ns, actor_id=authenticated_worker_id,
+            now_ns=now_ns, actor_id=authenticated_worker_id, on_expired=on_expired,
         )
 
     def heartbeat_with_load_resolver(
@@ -1117,6 +1125,7 @@ class SQLiteWorkerRegistry:
         authenticated_worker_id: str,
         in_flight_resolver: Callable[[str], int],
         now_ns: int | None = None,
+        on_expired: Callable[[tuple[WorkerReservation, ...]], None] | None = None,
     ) -> WorkerSnapshot:
         """Sample host load only after the durable write lock has been acquired."""
         if not callable(in_flight_resolver):
@@ -1138,18 +1147,19 @@ class SQLiteWorkerRegistry:
             "heartbeat_with_load_resolver",
             heartbeat,
             now_ns=now_ns,
-            actor_id=authenticated_worker_id,
+            actor_id=authenticated_worker_id, on_expired=on_expired,
         )
 
     def record_failure(
         self, worker_id: str, *, authenticated_worker_id: str,
+        on_expired: Callable[[tuple[WorkerReservation, ...]], None] | None = None,
     ) -> WorkerSnapshot:
         return self._run(
             "record_failure",
             lambda memory, timestamp: memory.record_failure(
                 worker_id, authenticated_worker_id=authenticated_worker_id,
             ),
-            actor_id=authenticated_worker_id,
+            actor_id=authenticated_worker_id, on_expired=on_expired,
         )
 
     def quarantine(self, worker_id: str, *, expected_health_revision: int) -> WorkerSnapshot:
@@ -1185,6 +1195,7 @@ class SQLiteWorkerRegistry:
         principal_id: str,
         task_id: str,
         now_ns: int | None = None,
+        on_expired: Callable[[tuple[WorkerReservation, ...]], None] | None = None,
     ) -> WorkerReservation | None:
         return self._run(
             "reserve_eligible",
@@ -1193,12 +1204,13 @@ class SQLiteWorkerRegistry:
                 authorized_worker_ids=authorized_worker_ids,
                 principal_id=principal_id, task_id=task_id, now_ns=timestamp,
             ),
-            now_ns=now_ns,
+            now_ns=now_ns, on_expired=on_expired,
         )
 
     def commit_reservation(
         self, reservation: WorkerReservation, *, authenticated_worker_id: str,
         now_ns: int | None = None,
+        on_expired: Callable[[tuple[WorkerReservation, ...]], None] | None = None,
     ) -> WorkerReservation | None:
         def commit(memory: InMemoryWorkerRegistry, timestamp: int):
             current = self._current_reservation(memory, reservation)
@@ -1209,6 +1221,7 @@ class SQLiteWorkerRegistry:
             )
         return self._run(
             "commit_reservation", commit, now_ns=now_ns, actor_id=authenticated_worker_id,
+            on_expired=on_expired,
         )
 
     def release_reservation(
@@ -1219,6 +1232,7 @@ class SQLiteWorkerRegistry:
         observed_unreserved_in_flight: int | None = None,
         observed_in_flight: int | None = None,
         now_ns: int | None = None,
+        on_expired: Callable[[tuple[WorkerReservation, ...]], None] | None = None,
     ) -> bool:
         if observed_unreserved_in_flight is not None and observed_in_flight is not None:
             raise WorkerRegistryError("supply only one observed in-flight load value")
@@ -1239,6 +1253,7 @@ class SQLiteWorkerRegistry:
             "release_reservation", release, now_ns=now_ns,
             actor_id=authenticated_worker_id,
             event_context={"observed_unreserved_in_flight": observed_unreserved_in_flight},
+            on_expired=on_expired,
         )
 
     def expire_reservations(self, *, now_ns: int | None = None) -> tuple[WorkerReservation, ...]:
@@ -1261,6 +1276,7 @@ class SQLiteWorkerRegistry:
         authorized_worker_ids: set[str] | frozenset[str],
         now_ns: int | None = None,
         limit: int = 20,
+        on_expired: Callable[[tuple[WorkerReservation, ...]], None] | None = None,
     ) -> tuple[WorkerSnapshot, ...]:
         return self._run(
             "eligible",
@@ -1269,7 +1285,7 @@ class SQLiteWorkerRegistry:
                 authorized_worker_ids=authorized_worker_ids,
                 now_ns=timestamp, limit=limit,
             ),
-            now_ns=now_ns,
+            now_ns=now_ns, on_expired=on_expired,
         )
 
     def events_for_worker(self, worker_id: str) -> tuple[dict[str, Any], ...]:
