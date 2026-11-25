@@ -382,5 +382,22 @@ class SQLiteWorkerRegistryTests(unittest.TestCase):
         self.assertEqual(after[-1]["event_type"], "worker_heartbeat_state_changed")
         self.assertEqual(self.registry.integrity_check(), "ok")
 
+    def test_reservation_expiry_projection_tampering_fails_closed(self):
+        self.register_healthy()
+        pending = self.reserve(self.registry, "task-expiry")
+        connection = self.store._connect()
+        try:
+            connection.execute(
+                "UPDATE worker_registry_reservations SET expires_at_wall_ns=expires_at_wall_ns+1 WHERE token=?",
+                (pending.token,),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        self.assertEqual(self.registry.integrity_check(), "worker registry validation failed")
+        with self.assertRaises(WorkerRegistryError):
+            self.make_registry(SQLiteTaskStore(self.path))
+
 if __name__ == "__main__":
     unittest.main()
