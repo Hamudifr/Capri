@@ -2,6 +2,7 @@
 
 import os
 import tempfile
+import threading
 import unittest
 
 from capri_runtime import (
@@ -48,7 +49,7 @@ class DurableWorkerRestartTests(unittest.TestCase):
         )
 
     @staticmethod
-    def _host(task_store, audit_store, registry=None):
+    def _host(task_store, audit_store, registry=None, load_resolver=None):
         if registry is None:
             registry = SQLiteWorkerRegistry(task_store)
         sessions = SQLiteSessionStore(
@@ -75,7 +76,7 @@ class DurableWorkerRestartTests(unittest.TestCase):
             worker_observer_authorizer=lambda credential, worker_id: (
                 credential == "monitor-token" and worker_id == "worker-1"
             ),
-            worker_unreserved_in_flight_resolver=lambda worker_id: 0,
+            worker_unreserved_in_flight_resolver=load_resolver or (lambda worker_id: 0),
             worker_policy_resolver=lambda principal_id, task_id, capability: {"worker-1"},
             worker_lifecycle_audit_sink=audit_store,
         )
@@ -141,6 +142,70 @@ class DurableWorkerRestartTests(unittest.TestCase):
         self.assertIn("worker.reservation.committed", event_types)
         self.assertIn("worker.reservation.released", event_types)
 
+
+    def test_heartbeat_samples_host_load_after_sqlite_writer_lock_wait(self):
+        task_store = SQLiteTaskStore(self.tasks_path)
+        audit_store = SQLiteSecurityStore(self.audit_path)
+        registry = SQLiteWorkerRegistry(task_store)
+        load_samples = 0
+        sampled_after_lock = threading.Event()
+        blocker_acquired = threading.Event()
+        release_blocker = threading.Event()
+        blocker = task_store._connect()
+
+        def load_resolver(worker_id):
+            nonlocal load_samples
+            load_samples += 1
+            if load_samples >= 2:
+                sampled_after_lock.set()
+            return 0
+
+        host = self._host(
+            task_store, audit_store, registry=registry, load_resolver=load_resolver,
+        )
+        host.register_worker(
+            "worker-token",
+            WorkerDescriptor("worker-1", (1,), ("math.factorial",), max_concurrency=1),
+        )
+        host.heartbeat_worker("monitor-token", "worker-1")
+        original_sweep = registry.active_reservations_with_expired
+
+        def sweep_then_hold_writer():
+            result = original_sweep()
+            blocker.execute("BEGIN IMMEDIATE")
+            blocker_acquired.set()
+            if not release_blocker.wait(timeout=3):
+                raise RuntimeError("test did not release the SQLite writer lock")
+            return result
+
+        registry.active_reservations_with_expired = sweep_then_hold_writer
+        errors = []
+
+        def heartbeat():
+            try:
+                host.heartbeat_worker("monitor-token", "worker-1")
+            except Exception as exc:
+                errors.append(exc)
+
+        worker = threading.Thread(target=heartbeat)
+        worker.start()
+        try:
+            self.assertTrue(blocker_acquired.wait(timeout=2))
+            self.assertFalse(
+                sampled_after_lock.wait(timeout=0.15),
+                "host load was sampled before the registry acquired its write lock",
+            )
+        finally:
+            release_blocker.set()
+        worker.join(timeout=3)
+        blocker.close()
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(errors, [])
+        self.assertTrue(sampled_after_lock.is_set())
+        self.assertEqual(load_samples, 2)
+        self.assertEqual(registry.get("worker-1").health.in_flight, 0)
+        self.assertEqual(registry.integrity_check(), "ok")
+        self.assertFalse(audit_store.worker_lifecycle_reconciliation_required())
 
     def test_candidate_lookup_audits_expired_reservation_with_local_context(self):
         now = {"value": 1_000_000_000}
