@@ -92,7 +92,7 @@ python -m compileall -q capri_core capri_runtime tests
 python -m unittest discover -s tests -v
 ```
 
-The quality workflow validates Python 3.11, 3.12, and 3.13. Commit-specific counts and outcomes belong to exact-head GitHub Actions evidence, not a hard-coded claim in this document.
+The quality workflow validates Python 3.11 through 3.15. Commit-specific counts and outcomes belong to exact-head GitHub Actions evidence, not a hard-coded claim in this document.
 
 ## Release position
 
