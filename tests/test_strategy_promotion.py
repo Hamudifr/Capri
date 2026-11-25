@@ -152,5 +152,27 @@ class StrategyPromotionTests(unittest.TestCase):
             self.assess(make_cohorts(), task_family="trading")
 
 
+    def test_cohort_iterable_is_bounded(self):
+        def unbounded_cohorts():
+            index = 0
+            while True:
+                yield PromotionCohort(f"cohort-{index}", ())
+                index += 1
+
+        with self.assertRaisesRegex(StrategyPromotionError, "bounded maximum of 4"):
+            self.assess(unbounded_cohorts())
+
+    def test_oversized_cohort_is_rejected_before_preprocessing(self):
+        cohort = make_cohorts(cohort_count=1)[0]
+        oversized = PromotionCohort(
+            cohort.cohort_id,
+            cohort.observations + (cohort.observations[0],) * (
+                20_001 - len(cohort.observations)
+            ),
+        )
+        with self.assertRaisesRegex(StrategyPromotionError, "bounded maximum of 20000"):
+            self.assess((oversized,))
+
+
 if __name__ == "__main__":
     unittest.main()
