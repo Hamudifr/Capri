@@ -554,6 +554,45 @@ class SQLiteExecutionEvidenceJournal:
         except Exception:
             return False
 
+    def get_completed_event_ref(
+        self,
+        principal_id: str,
+        task_id: str,
+        step_index: int,
+        attempt: int,
+    ) -> str | None:
+        """Return the verified evidence reference for one completed task attempt."""
+        principal_id = _text(principal_id, "principal_id", 128)
+        task_id = _text(task_id, "task_id", 64)
+        if type(step_index) is not int or step_index < 0:
+            raise StrategyAuthorizationError("step_index is invalid")
+        if type(attempt) is not int or attempt < 1:
+            raise StrategyAuthorizationError("attempt is invalid")
+        with self._tasks._lock:
+            connection = self._tasks._connect()
+            try:
+                row = connection.execute(
+                    """SELECT event_id FROM execution_evidence_events
+                    WHERE principal_id=? AND task_id=? AND step_index=? AND attempt=?""",
+                    (principal_id, task_id, step_index, attempt),
+                ).fetchone()
+            finally:
+                connection.close()
+        if row is None:
+            return None
+        event_id = row[0]
+        payload = self._read_verified_event(event_id)
+        if payload is None or not self._completed_task_result_matches(payload):
+            return None
+        if (
+            payload.get("principal_id") != principal_id
+            or payload.get("task_id") != task_id
+            or payload.get("step_index") != step_index
+            or payload.get("attempt") != attempt
+        ):
+            return None
+        return f"host-execution-event:{event_id}"
+
     def validate_source_events(
         self,
         principal_id: str,
