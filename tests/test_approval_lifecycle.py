@@ -193,10 +193,14 @@ class ApprovalLifecycleTests(unittest.TestCase):
             )
             for store in stores
         ]
+        concurrent_context = ExecutionContext(
+            "alice", frozenset({"records:delete"}),
+            operation_id="session-1:concurrent-call",
+        )
         with ThreadPoolExecutor(max_workers=4) as pool:
             results = list(pool.map(
                 lambda service: service.create_challenge(
-                    self.context, self.outcome, "session-1:concurrent-call"
+                    concurrent_context, self.outcome, "session-1:concurrent-call"
                 ),
                 services,
             ))
