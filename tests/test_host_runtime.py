@@ -10,6 +10,7 @@ from capri_runtime import (
     HostStrategyEvidenceAuthority,
     SQLiteExecutionEvidenceJournal,
     SQLiteStrategyEvidenceManifestStore,
+    SQLiteStrategyStore,
     StrategyApprovalIdentity,
     StrategyApprovalRequest,
     StrategyBinding,
@@ -844,6 +845,22 @@ class CapriHostRuntimeTests(unittest.TestCase):
                 and request.principal_id == principal_id
             ),
         )
+        untrusted_store = SQLiteStrategyStore(
+            self.task_store,
+            approval_verifier=lambda grant: True,
+            evidence_verifier=lambda context: True,
+        )
+        with self.assertRaises(HostRuntimeError):
+            CapriHostRuntime(
+                authority,
+                self.store,
+                self.orchestrator,
+                task_store=self.task_store,
+                strategy_store=untrusted_store,
+                strategy_approval_authority=approval_authority,
+                strategy_evidence_authority=evidence_authority,
+            )
+
         host = CapriHostRuntime(
             authority,
             self.store,
