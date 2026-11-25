@@ -71,3 +71,30 @@ candidates = registry.eligible(
 ## Next integration boundary
 
 Before connecting this catalogue to a dispatcher, implement host-authenticated transport/supervisor identity, durable audit integration, and an atomic host-owned capacity reservation. Keep dispatch policy and worker execution separate from this registry.
+
+
+## Trusted host runtime gateway
+
+`CapriHostRuntime` can optionally expose the registry through three injected host callbacks:
+
+- `worker_identity_resolver(credential)`: authenticates a supervisor/worker transport credential and returns the worker ID bound to that authenticated channel. It must not read an ID from an unauthenticated worker payload.
+- `worker_policy_resolver(principal_id, task_id, capability)`: returns a set/frozenset of worker IDs authorized by the host for this exact principal, task and capability. The embedding host must include all applicable resource, approval, budget and policy checks; the registry does not infer them.
+- `worker_registry`: the process-local catalogue instance.
+
+The runtime gateway exposes registration, heartbeat, host-observed failure recording and principal/task-scoped candidate lookup. Registration and heartbeat require the worker identity resolver. Candidate lookup first verifies that the task belongs to the authenticated principal, then calls the separate host policy resolver, then applies registry compatibility/health filters.
+
+The gateway returns candidate snapshots only. It does not dispatch, reserve capacity, run a process, or accept a worker response. A dispatcher must re-evaluate policy and identity immediately before use. Callback exceptions and invalid policy results fail closed and are surfaced as redacted host errors.
+
+Example composition:
+
+```python
+host = CapriHostRuntime(
+    authority,
+    session_store,
+    orchestrator,
+    task_store=task_store,
+    worker_registry=registry,
+    worker_identity_resolver=authenticate_worker_transport,
+    worker_policy_resolver=authorized_workers_for_task,
+)
+```
