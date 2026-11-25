@@ -260,9 +260,17 @@ static CapriSessionError validate_history(CapriSessionStore *store,sqlite3 *db,c
 static CapriSessionError read_row(CapriSessionStore *store,sqlite3 *db,sqlite3_stmt *st,CapriSession *out) {
     memset(out,0,sizeof *out);
     const unsigned char *sid=sqlite3_column_text(st,0),*created=sqlite3_column_text(st,1),*updated=sqlite3_column_text(st,2),*json=sqlite3_column_text(st,5);
-    if(!sid||!created||!updated||!json) return CAPRI_SESSION_CORRUPT;
-    if(strlen((const char*)sid)>=sizeof out->session_id || !text_ok((const char*)sid,36u,true) || !text_ok((const char*)created,64u,true) || !text_ok((const char*)updated,64u,true)) return CAPRI_SESSION_CORRUPT;
-    if(strlen((const char*)created)>=sizeof out->created_at || strlen((const char*)updated)>=sizeof out->updated_at) return CAPRI_SESSION_CORRUPT;
+    /* SQLite text values can contain embedded NUL bytes. Never validate a
+       persisted field through strlen() alone: JSON1 may accept a valid JSON
+       prefix before NUL and C string APIs would silently discard the suffix. */
+    if(!sid||!created||!updated||!json
+       ||!sqlite_text_ok(st,0,36u,true)
+       ||!sqlite_text_ok(st,1,64u,true)
+       ||!sqlite_text_ok(st,2,64u,true)
+       ||!sqlite_text_ok(st,5,(size_t)INT_MAX,false)) return CAPRI_SESSION_CORRUPT;
+    if(strlen((const char*)sid)>=sizeof out->session_id
+       ||strlen((const char*)created)>=sizeof out->created_at
+       ||strlen((const char*)updated)>=sizeof out->updated_at) return CAPRI_SESSION_CORRUPT;
     strcpy(out->session_id,(const char*)sid);strcpy(out->created_at,(const char*)created);strcpy(out->updated_at,(const char*)updated);
     out->version=sqlite3_column_int64(st,3);out->closed=sqlite3_column_int(st,4);
     if(out->version<0||(out->closed!=0&&out->closed!=1))return CAPRI_SESSION_CORRUPT;
