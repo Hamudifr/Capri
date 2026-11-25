@@ -55,16 +55,26 @@ static bool utf8_valid(const unsigned char *s, size_t n, size_t *characters) {
     if (characters) *characters=count;
     return true;
 }
+static bool unicode_space(uint32_t cp) {
+    return (cp>=0x09u&&cp<=0x0Du)||cp==0x20u||cp==0x85u||cp==0xA0u||cp==0x1680u||
+      (cp>=0x2000u&&cp<=0x200Au)||cp==0x2028u||cp==0x2029u||cp==0x202Fu||cp==0x205Fu||cp==0x3000u;
+}
+static bool has_non_whitespace(const unsigned char *s,size_t n) {
+    size_t i=0u;
+    while(i<n){uint32_t cp=s[i];size_t width=1u;
+        if(s[i]>=0xF0u){width=4u;cp=((uint32_t)(s[i]&0x07u)<<18u)|((uint32_t)(s[i+1u]&0x3Fu)<<12u)|((uint32_t)(s[i+2u]&0x3Fu)<<6u)|(uint32_t)(s[i+3u]&0x3Fu);}
+        else if(s[i]>=0xE0u){width=3u;cp=((uint32_t)(s[i]&0x0Fu)<<12u)|((uint32_t)(s[i+1u]&0x3Fu)<<6u)|(uint32_t)(s[i+2u]&0x3Fu);}
+        else if(s[i]>=0xC2u){width=2u;cp=((uint32_t)(s[i]&0x1Fu)<<6u)|(uint32_t)(s[i+1u]&0x3Fu);}
+        if(!unicode_space(cp)) return true;
+        i+=width;
+    }
+    return false;
+}
 static bool text_ok(const char *s, size_t max, bool nonblank) {
     if (!s) return false;
     size_t n=strlen(s), chars=0u;
     if (n==0u || n>max || !utf8_valid((const unsigned char *)s,n,&chars)) return false;
-    if (nonblank) {
-        bool visible=false;
-        for (size_t i=0u;i<n;++i) if (s[i]!=' ' && s[i]!='\t' && s[i]!='\n' && s[i]!='\r' && s[i]!='\f' && s[i]!='\v') { visible=true; break; }
-        if (!visible) return false;
-    }
-    return true;
+    return !nonblank || has_non_whitespace((const unsigned char *)s,n);
 }
 static CapriSessionError map_sqlite(int rc) {
     if (rc==SQLITE_NOMEM) return CAPRI_SESSION_NO_MEMORY;
@@ -180,7 +190,7 @@ static CapriSessionError validate_history(CapriSessionStore *store,const char *j
         else if(strcmp(r,"tool")==0){if(!in_turn||(strcmp(previous,"assistant")!=0&&strcmp(previous,"tool")!=0)){result=CAPRI_SESSION_CORRUPT;break;}limit=store->max_tool;}
         else if(strcmp(r,"assistant")==0){if(!in_turn){result=CAPRI_SESSION_CORRUPT;break;}limit=store->max_output;}
         else {result=CAPRI_SESSION_CORRUPT;break;}
-        bool nonblank=false;for(int j=0;j<cb;++j)if(content[j]!=' '&&content[j]!='\t'&&content[j]!='\n'&&content[j]!='\r'&&content[j]!='\f'&&content[j]!='\v'){nonblank=true;break;}
+        bool nonblank=has_non_whitespace(content,(size_t)cb);
         if(!nonblank||cchars>limit){result=CAPRI_SESSION_CORRUPT;break;}
         memset(previous,0,sizeof previous);memcpy(previous,r,rchars);++count;
         if(count>store->max_messages){result=CAPRI_SESSION_CORRUPT;break;}
@@ -229,7 +239,7 @@ CapriSessionError capri_session_get_for_principal(CapriSessionStore *s,const cha
     RETURN_UNLOCK(s,result);
 }
 static CapriSessionError validate_turn(CapriSessionStore *s,const char *json,size_t *count) {
-    if(!json||strlen(json)>2u*(s->max_input+s->max_output+s->max_tool+128u))return CAPRI_SESSION_INVALID;
+    if(!json||strlen(json)>8u*(s->max_input+s->max_output+s->max_tool+128u))return CAPRI_SESSION_INVALID;
     sqlite3_stmt *st=NULL;int rc=sqlite3_prepare_v2(s->db,"SELECT json_valid(?1),json_type(?1)",-1,&st,NULL);if(rc!=SQLITE_OK)return map_sqlite(rc);
     sqlite3_bind_text(st,1,json,-1,SQLITE_TRANSIENT);rc=sqlite3_step(st);bool valid=rc==SQLITE_ROW&&sqlite3_column_int(st,0)==1&&sqlite3_column_type(st,1)==SQLITE_TEXT&&strcmp((const char*)sqlite3_column_text(st,1),"array")==0;sqlite3_finalize(st);if(!valid)return CAPRI_SESSION_INVALID;
     rc=sqlite3_prepare_v2(s->db,"SELECT CAST(msg.key AS INTEGER),json_type(msg.value),json_extract(msg.value,'$.role'),json_extract(msg.value,'$.content'),(SELECT count(*) FROM json_each(msg.value)),json_type(msg.value,'$.role'),json_type(msg.value,'$.content') FROM json_each(?1) AS msg ORDER BY CAST(msg.key AS INTEGER)",-1,&st,NULL);if(rc!=SQLITE_OK)return map_sqlite(rc);
@@ -244,7 +254,7 @@ static CapriSessionError validate_turn(CapriSessionStore *s,const char *json,siz
         else if(strcmp(r,"tool")==0){if(previous[0]==0 || (strcmp(previous,"assistant")!=0&&strcmp(previous,"tool")!=0)){result=CAPRI_SESSION_INVALID;break;}limit=s->max_tool;}
         else if(strcmp(r,"assistant")==0)limit=s->max_output;
         else {result=CAPRI_SESSION_INVALID;break;}
-        bool nonblank=false;for(int j=0;j<content_bytes;++j)if(content[j]!=' '&&content[j]!='\t'&&content[j]!='\n'&&content[j]!='\r'&&content[j]!='\f'&&content[j]!='\v'){nonblank=true;break;}
+        bool nonblank=has_non_whitespace(content,(size_t)content_bytes);
         if(!nonblank){result=CAPRI_SESSION_INVALID;break;}if(content_chars>limit){result=CAPRI_SESSION_LIMIT;break;}
         memset(previous,0,sizeof previous);memcpy(previous,r,role_chars);first=false;++n;
     }
