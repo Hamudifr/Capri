@@ -7,7 +7,10 @@ from .budgets import (
 from .domain_events import (
     DomainEvent, DomainEventValidationError, project_domain_events,
 )
-from .worker_protocol import (\n    WorkerProtocolError, WorkerRequest, WorkerResponse,\n)\nfrom .runtime import (
+from .worker_protocol import (
+    WorkerProtocolError, WorkerRequest, WorkerResponse,
+)
+from .runtime import (
     Message,
     ModelAdapter,
     Runtime,
