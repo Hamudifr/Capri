@@ -1015,48 +1015,58 @@ class SQLiteTaskStore:
             finally:
                 connection.close()
 
+    def _finish_step_in_transaction(
+        self, connection: sqlite3.Connection, claim: TaskClaim,
+        result: Any, stamp: str,
+    ) -> None:
+        """Apply a task result using the caller's already-open write transaction."""
+        if type(claim) is not TaskClaim:
+            raise TaskValidationError("claim must be a TaskClaim")
+        _, decoded = _json(result, label="step result")
+        row = connection.execute(
+            """SELECT tasks.state,tasks.lease_owner,tasks.lease_until,
+            tasks.current_step,tasks.attempts,tasks.plan_json,
+            task_owners.principal_id,tasks.cancel_requested,tasks.results_json
+            FROM tasks LEFT JOIN task_owners
+            ON task_owners.task_id=tasks.task_id WHERE tasks.task_id=?""",
+            (claim.task_id,),
+        ).fetchone()
+        if not row:
+            raise TaskNotFoundError("task does not exist")
+        plan = self._assert_claim_matches(claim, row[:7], stamp)
+        cancel, results_json = row[7], row[8]
+        index = claim.step_index
+        results = json.loads(results_json)
+        results.append(decoded)
+        next_index = index + 1
+        if cancel:
+            next_state = "cancelled"
+        elif next_index >= len(plan):
+            next_state = "succeeded"
+        else:
+            next_state = "queued"
+        connection.execute(
+            """UPDATE tasks SET state=?,current_step=?,attempts=0,results_json=?,updated_at=?,
+            available_at=?,lease_owner=NULL,lease_until=NULL,error_code=NULL WHERE task_id=?""",
+            (next_state, next_index, json.dumps(results, ensure_ascii=False, allow_nan=False,
+             sort_keys=True, separators=(",", ":")), stamp, stamp, claim.task_id),
+        )
+        connection.execute(
+            "INSERT INTO task_events(task_id,timestamp,state,step_index,attempt) VALUES(?,?,?,?,?)",
+            (claim.task_id, stamp, next_state, index, claim.attempt),
+        )
+
     def finish_step(self, claim: TaskClaim, result: Any,
                     now: datetime | None = None) -> TaskRecord:
         if type(claim) is not TaskClaim:
             raise TaskValidationError("claim must be a TaskClaim")
-        result_json, decoded = _json(result, label="step result")
+        _, decoded = _json(result, label="step result")
         stamp = _iso(now or _now())
         with self._lock:
             connection = self._connect()
             try:
                 connection.execute("BEGIN IMMEDIATE")
-                row = connection.execute(
-                    """SELECT tasks.state,tasks.lease_owner,tasks.lease_until,
-                    tasks.current_step,tasks.attempts,tasks.plan_json,
-                    task_owners.principal_id,tasks.cancel_requested,tasks.results_json
-                    FROM tasks LEFT JOIN task_owners
-                    ON task_owners.task_id=tasks.task_id WHERE tasks.task_id=?""",
-                    (claim.task_id,),
-                ).fetchone()
-                if not row:
-                    raise TaskNotFoundError("task does not exist")
-                plan = self._assert_claim_matches(claim, row[:7], stamp)
-                cancel, results_json = row[7], row[8]
-                index = claim.step_index
-                results = json.loads(results_json)
-                results.append(decoded)
-                next_index = index + 1
-                if cancel:
-                    next_state = "cancelled"
-                elif next_index >= len(plan):
-                    next_state = "succeeded"
-                else:
-                    next_state = "queued"
-                connection.execute(
-                    """UPDATE tasks SET state=?,current_step=?,attempts=0,results_json=?,updated_at=?,
-                    available_at=?,lease_owner=NULL,lease_until=NULL,error_code=NULL WHERE task_id=?""",
-                    (next_state, next_index, json.dumps(results, ensure_ascii=False, allow_nan=False,
-                     sort_keys=True, separators=(",", ":")), stamp, stamp, claim.task_id),
-                )
-                connection.execute(
-                    "INSERT INTO task_events(task_id,timestamp,state,step_index,attempt) VALUES(?,?,?,?,?)",
-                    (claim.task_id, stamp, next_state, index, claim.attempt),
-                )
+                self._finish_step_in_transaction(connection, claim, decoded, stamp)
                 connection.execute("COMMIT")
                 return self.get(claim.task_id)
             except Exception:
@@ -1379,6 +1389,16 @@ class SQLiteTaskStore:
                 raise TaskValidationError(
                     "task store contains invalid provider usage events"
                 ) from None
+        if connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='execution_evidence_events'"
+        ).fetchone() is not None:
+            try:
+                from .execution_evidence import validate_execution_evidence_snapshot
+                validate_execution_evidence_snapshot(connection)
+            except Exception:
+                raise TaskValidationError(
+                    "task store contains invalid execution evidence events"
+                ) from None
 
     def backup_to(self, destination_path: str) -> str:
         """Create a private, consistent task-state snapshot without overwriting."""
@@ -1431,6 +1451,8 @@ class TaskEngine:
         *,
         principal_handlers: Mapping[str, Callable[[dict[str, Any], str, str], Any]] | None = None,
         budget_store: SQLiteBudgetStore | None = None,
+        execution_evidence_journal: Any | None = None,
+        execution_evidence_credential: Callable[[TaskClaim], Any] | None = None,
     ) -> None:
         if not isinstance(store, SQLiteTaskStore):
             raise TaskValidationError("store must be a SQLiteTaskStore")
@@ -1463,6 +1485,21 @@ class TaskEngine:
         self.executor_id = executor_id
         self.lease_seconds = lease_seconds
         self.budget_store = budget_store
+        if (execution_evidence_journal is None) != (execution_evidence_credential is None):
+            raise TaskValidationError(
+                "execution evidence journal and credential resolver must be configured together"
+            )
+        if execution_evidence_journal is not None:
+            if (
+                getattr(execution_evidence_journal, "_tasks", None) is not store
+                or not callable(getattr(execution_evidence_journal, "record_execution_and_finish", None))
+                or not callable(execution_evidence_credential)
+            ):
+                raise TaskValidationError(
+                    "execution evidence must use this task store and a trusted credential resolver"
+                )
+        self.execution_evidence_journal = execution_evidence_journal
+        self.execution_evidence_credential = execution_evidence_credential
 
     def set_budget_store(self, budget_store: SQLiteBudgetStore) -> None:
         if not isinstance(budget_store, SQLiteBudgetStore):
@@ -1551,12 +1588,26 @@ class TaskEngine:
                 claim, "handler_outcome_uncertain", now=now
             )
         try:
-            _json(result, label="handler result")
+            _, result_snapshot = _json(result, label="handler result")
         except Exception:
             return self.store.require_reconciliation(
                 claim, "handler_result_invalid", now=now
             )
-        return self.store.finish_step(claim, result, now=now)
+        if self.execution_evidence_journal is not None and claim.principal_id is not None:
+            try:
+                credential = self.execution_evidence_credential(claim)
+                self.execution_evidence_journal.record_execution_and_finish(
+                    credential, claim, result_snapshot, now=now,
+                )
+            except Exception:
+                # Evidence and task completion share one transaction. If either
+                # fails after a handler may have caused side effects, quarantine
+                # the still-live claim for explicit reconciliation.
+                return self.store.require_reconciliation(
+                    claim, "execution_evidence_unavailable", now=now,
+                )
+            return self.store.get(claim.task_id)
+        return self.store.finish_step(claim, result_snapshot, now=now)
 
     def run_once(self, now: datetime | None = None) -> TaskRecord | None:
         claim = self.store.claim_next(
