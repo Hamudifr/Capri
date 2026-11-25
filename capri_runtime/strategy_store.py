@@ -1100,6 +1100,38 @@ class SQLiteStrategyStore:
             ).encode("utf-8")).hexdigest()
             if digest != row[15]:
                 raise StrategyIntegrityError("strategy event hash does not match")
+            if row[16] is not None:
+                promotion_row = connection.execute(
+                    """SELECT assessment_id,principal_id,strategy_class,baseline_id,baseline_version,
+                    candidate_id,candidate_version,policy_version,task_family,assessment_sha256,
+                    summary_json,evidence_manifest_refs_json,cohort_sha256s_json,primary_metric,created_at
+                    FROM strategy_promotion_assessments
+                    WHERE principal_id=? AND strategy_class=? AND candidate_id=?
+                    AND candidate_version=? AND assessment_sha256=?""",
+                    (row[1], row[2], row[7], row[8], row[16]),
+                ).fetchone()
+                evaluation_row = connection.execute(
+                    """SELECT baseline_id,candidate_id,cohort_sha256,evidence_verified,summary_json
+                    FROM strategy_evaluations WHERE evaluation_id=?""",
+                    (row[10],),
+                ).fetchone()
+                if promotion_row is None or evaluation_row is None or evaluation_row[3] != 1:
+                    raise StrategyIntegrityError("strategy event references missing or unverified promotion evidence")
+                promotion_record = _promotion_record_from_row(promotion_row)
+                try:
+                    evaluation_summary = json.loads(evaluation_row[4])
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    raise StrategyIntegrityError("strategy event evaluation summary is corrupt") from None
+                if type(evaluation_summary) is not dict or not _promotion_record_matches(
+                    promotion_record,
+                    strategy_class=row[2],
+                    baseline_id=evaluation_row[0],
+                    candidate_id=evaluation_row[1],
+                    baseline_version=evaluation_summary.get("baseline_version"),
+                    candidate_version=evaluation_summary.get("candidate_version"),
+                    cohort_sha256=evaluation_row[2],
+                ):
+                    raise StrategyIntegrityError("strategy event promotion assessment binding is invalid")
             previous_hash = digest
             expected_generation += 1
 
