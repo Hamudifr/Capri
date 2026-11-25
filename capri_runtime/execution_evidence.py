@@ -382,16 +382,30 @@ class SQLiteExecutionEvidenceJournal:
         except Exception:
             return None
 
-    def _read_verified_event(self, event_id: str) -> dict[str, Any] | None:
+    def _read_verified_event(
+        self, event_id: str, *, require_completed: bool = True
+    ) -> dict[str, Any] | None:
         with self._tasks._lock:
             connection = self._tasks._connect()
             try:
                 row = connection.execute(
-                    """SELECT payload_json,event_sha256,key_id,signature,principal_id,task_id,
-                    step_index,attempt,claim_sha256,strategy_class,strategy_id,strategy_version,
-                    task_family,scenario,outcome,safety_violation,tool_calls,context_tokens,
-                    estimated_cost_units,latency_ms,result_sha256,created_at
-                    FROM execution_evidence_events WHERE event_id=?""",
+                    """SELECT e.payload_json,e.event_sha256,e.key_id,e.signature,
+                    e.principal_id,e.task_id,e.step_index,e.attempt,e.claim_sha256,
+                    e.strategy_class,e.strategy_id,e.strategy_version,e.task_family,
+                    e.scenario,e.outcome,e.safety_violation,e.tool_calls,e.context_tokens,
+                    e.estimated_cost_units,e.latency_ms,e.result_sha256,e.created_at,
+                    t.state,t.results_json,o.principal_id,
+                    EXISTS(
+                        SELECT 1 FROM task_events te
+                        WHERE te.task_id=e.task_id
+                          AND te.step_index=e.step_index
+                          AND te.attempt=e.attempt
+                          AND te.state IN ('queued','succeeded')
+                    )
+                    FROM execution_evidence_events e
+                    LEFT JOIN tasks t ON t.task_id=e.task_id
+                    LEFT JOIN task_owners o ON o.task_id=e.task_id
+                    WHERE e.event_id=?""",
                     (event_id,),
                 ).fetchone()
             finally:
@@ -402,7 +416,8 @@ class SQLiteExecutionEvidenceJournal:
             payload_json, event_sha, key_id, signature_hex, principal_id, task_id,
             step_index, attempt, claim_sha, strategy_class, strategy_id, strategy_version,
             task_family, scenario, outcome, safety_violation, tool_calls, context_tokens,
-            estimated_cost_units, latency_ms, result_sha, created_at,
+            estimated_cost_units, latency_ms, result_sha, created_at, task_state,
+            task_results_json, task_owner, step_completed,
         ) = row
         try:
             encoded = payload_json.encode("utf-8", errors="strict")
@@ -437,6 +452,29 @@ class SQLiteExecutionEvidenceJournal:
             verified = self._mac.verify(key_id, bytes.fromhex(event_sha), bytes.fromhex(signature_hex))
             if verified is not True:
                 return None
+            if require_completed:
+                # A valid MAC authenticates the collector, not successful task
+                # completion. Admit an event only after the authoritative task
+                # reached success, its immutable event history records this exact
+                # step attempt as completed, and the persisted result at this
+                # step hashes to the event's result digest.
+                if (
+                    task_state != "succeeded"
+                    or task_owner != principal_id
+                    or type(step_index) is not int
+                    or step_index < 0
+                    or step_completed != 1
+                    or type(task_results_json) is not str
+                ):
+                    return None
+                persisted_results = json.loads(task_results_json)
+                if type(persisted_results) is not list or step_index >= len(persisted_results):
+                    return None
+                persisted_digest = hashlib.sha256(
+                    _canonical(persisted_results[step_index]).encode("utf-8")
+                ).hexdigest()
+                if persisted_digest != result_sha:
+                    return None
             return payload
         except Exception:
             return None
@@ -505,7 +543,7 @@ class SQLiteExecutionEvidenceJournal:
             ):
                 return "append-only protections missing"
             for (event_id,) in rows:
-                if self._read_verified_event(event_id) is None:
+                if self._read_verified_event(event_id, require_completed=False) is None:
                     return "execution evidence integrity failed"
             return "ok"
         except Exception:
