@@ -162,8 +162,9 @@ class ActionCapsuleTests(unittest.TestCase):
         with self.assertRaises(CapsuleIntegrityError):
             verify_action_capsule_history(self.capsule, unbounded_events())
 
+        forged = replace(self.capsule, event_sequence=6)
         with self.assertRaises(ActionCapsuleError):
-            replace(self.capsule, event_sequence=6)
+            verify_action_capsule_history(forged, ())
 
     def test_authorized_capsule_expires_only_at_or_after_deadline(self):
         authorized, auth_event = self.step(
