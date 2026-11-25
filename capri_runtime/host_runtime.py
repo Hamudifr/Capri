@@ -707,6 +707,15 @@ class CapriHostRuntime:
                 or current.worker_id != reservation.reservation.worker_id
             ):
                 return None
+            if (
+                current.principal_id != reservation.principal_id
+                or current.task_id != reservation.task_id
+                or current.capability != reservation.capability
+                or current.protocol_version != reservation.protocol_version
+            ):
+                raise HostRuntimeError(
+                    "worker reservation context does not match the durable registry record"
+                )
             return HostWorkerReservation(
                 reservation.principal_id, reservation.task_id,
                 reservation.capability, reservation.protocol_version, current,
