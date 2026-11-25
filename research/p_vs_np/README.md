@@ -7,7 +7,8 @@ This directory contains a deliberately isolated research experiment. It is not i
 - A finite zero-sum payoff LP for direct input-example games.
 - The identity-matrix transcript counterexample: pointwise coverage alone can have value 1/M.
 - Mutual information for deterministic finite response maps.
-- A synthetic constant-round causal KPT game. Following an evading challenge at each stage must terminate at a package covering the entire finite challenge universe if the all-sequences KPT property holds.
+- A synthetic constant-round causal KPT game.
+- Exhaustive enumeration of all 16,384 three-round causal package strategies over a two-element challenge universe. Every strategy satisfying the all-sequences KPT property has a terminal package covering the whole universe.
 
 ## Run
 
