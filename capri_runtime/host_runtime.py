@@ -843,14 +843,24 @@ class CapriHostRuntime:
         allowed = self._worker_policy_allowlist(context.principal_id, task_id, capability)
         with self._worker_reservation_lock:
             self._purge_worker_reservation_contexts()
+            self._begin_worker_audit_operation()
             try:
-                return self._worker_registry.eligible(
-                    capability,
-                    protocol_version=protocol_version,
-                    authorized_worker_ids=allowed,
+                candidates, expired = self._run_worker_registry_operation(
+                    lambda: self._worker_registry.eligible(
+                        capability,
+                        protocol_version=protocol_version,
+                        authorized_worker_ids=allowed,
+                    )
                 )
             except WorkerRegistryError:
+                self._finish_worker_audit_operation()
                 raise HostRuntimeError("host worker candidate lookup was rejected") from None
+            except Exception:
+                self._worker_audit_healthy = False
+                raise HostRuntimeError("host worker candidate lookup failed; reconciliation is required") from None
+            self._record_expired_worker_reservations(expired)
+            self._finish_worker_audit_operation()
+            return candidates
 
     def get_worker_reservation_for_task(
         self, credential: Any, task_id: str,
@@ -866,12 +876,21 @@ class CapriHostRuntime:
             raise HostRuntimeError("task is unavailable to the authenticated principal") from None
         with self._worker_reservation_lock:
             self._purge_worker_reservation_contexts()
+            self._begin_worker_audit_operation()
             try:
-                reservation = self._worker_registry.get_reservation_for_task(
-                    context.principal_id, task_id,
+                reservation, expired = self._run_worker_registry_operation(
+                    lambda: self._worker_registry.get_reservation_for_task(
+                        context.principal_id, task_id,
+                    )
                 )
-            except Exception:
+            except WorkerRegistryError:
+                self._finish_worker_audit_operation()
                 raise HostRuntimeError("durable worker reservation recovery failed") from None
+            except Exception:
+                self._worker_audit_healthy = False
+                raise HostRuntimeError("durable worker reservation recovery failed; reconciliation is required") from None
+            self._record_expired_worker_reservations(expired)
+            self._finish_worker_audit_operation()
             if reservation is None:
                 return None
             if (
