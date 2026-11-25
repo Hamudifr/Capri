@@ -7,6 +7,10 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from capri_core.strategy import StrategyObservation, evaluate_strategies
+from capri_runtime.approval import HostApprovalService, SQLiteApprovalChallengeStore
+from capri_runtime.security_store import SQLiteSecurityStore
+from capri_runtime.strategy_approvals import StrategyApprovalBridge
+from capri_runtime.tools import HmacApprovalAuthority
 from capri_runtime.tasks import SQLiteTaskStore
 from capri_runtime.strategy_store import (
     SQLiteStrategyStore,
@@ -96,6 +100,92 @@ class SQLiteStrategyStoreTests(unittest.TestCase):
         return self.store.activate_for_principal(
             "alice", self.grant(),
         )
+
+    def test_strategy_activation_uses_durable_hmac_host_approval(self):
+        now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        security = SQLiteSecurityStore(os.path.join(self.temp.name, "approvals.sqlite3"))
+        challenge_store = SQLiteApprovalChallengeStore(security)
+        signer = HmacApprovalAuthority(b"k" * 32, clock=lambda: now)
+        approval_service = HostApprovalService(
+            challenge_store,
+            signer,
+            lambda credential: "reviewer" if credential == "reviewer-token" else None,
+            lambda approver, challenge: (
+                approver == "reviewer"
+                and challenge.principal_id == "alice"
+                and challenge.tool_name in {"strategy.activate", "strategy.rollback"}
+            ),
+            clock=lambda: now,
+        )
+        bridge = StrategyApprovalBridge(approval_service)
+        store = SQLiteStrategyStore(
+            self.task_store, approval_verifier=bridge.verify, clock=lambda: now
+        )
+
+        request = bridge.request(
+            principal_id="alice",
+            strategy_class="reasoning",
+            strategy_id="baseline",
+            version="1.0",
+            evaluation_sha256=None,
+            config_sha256=self.baseline.config_sha256,
+            expected_generation=0,
+            operation_id="strategy-baseline-activate-001",
+        )
+        retry = bridge.request(
+            principal_id="alice",
+            strategy_class="reasoning",
+            strategy_id="baseline",
+            version="1.0",
+            evaluation_sha256=None,
+            config_sha256=self.baseline.config_sha256,
+            expected_generation=0,
+            operation_id="strategy-baseline-activate-001",
+        )
+        self.assertEqual(request.challenge_id, retry.challenge_id)
+        with self.assertRaises(StrategyAuthorizationError):
+            bridge.approve("reviewer-token", replace(request, strategy_id="candidate"))
+
+        baseline_grant = bridge.approve("reviewer-token", request)
+        self.assertIsNotNone(baseline_grant.key_id)
+        self.assertIsNotNone(baseline_grant.operation_id)
+        self.assertTrue(bridge.verify(baseline_grant))
+        baseline = store.activate_for_principal("alice", baseline_grant)
+        self.assertEqual((baseline.strategy_id, baseline.generation), ("baseline", 1))
+
+        candidate_request = bridge.request(
+            principal_id="alice",
+            strategy_class="reasoning",
+            strategy_id="candidate",
+            version="1.0",
+            evaluation_sha256=self.evaluation.cohort_sha256,
+            config_sha256=self.candidate.config_sha256,
+            expected_generation=1,
+            operation_id="strategy-candidate-activate-001",
+        )
+        candidate_grant = bridge.approve("reviewer-token", candidate_request)
+        self.assertTrue(bridge.verify(candidate_grant))
+        self.assertFalse(bridge.verify(replace(candidate_grant, approver_id="attacker")))
+        self.assertFalse(bridge.verify(replace(candidate_grant, expected_generation=2)))
+        candidate = store.activate_for_principal("alice", candidate_grant)
+        self.assertEqual((candidate.strategy_id, candidate.generation), ("candidate", 2))
+        with self.assertRaises(StrategyConflictError):
+            store.activate_for_principal("alice", candidate_grant)
+
+    def test_strategy_approval_bridge_rejects_excessive_combined_lifetime(self):
+        now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        security = SQLiteSecurityStore(os.path.join(self.temp.name, "long-approvals.sqlite3"))
+        service = HostApprovalService(
+            SQLiteApprovalChallengeStore(security),
+            HmacApprovalAuthority(b"z" * 32, clock=lambda: now),
+            lambda credential: "reviewer",
+            lambda approver, challenge: True,
+            clock=lambda: now,
+            challenge_ttl_seconds=600,
+            grant_ttl_seconds=600,
+        )
+        with self.assertRaises(StrategyAuthorizationError):
+            StrategyApprovalBridge(service)
 
     def test_candidate_registration_is_not_activation_and_activation_is_reversible(self):
         self.assertIsNone(self.store.get_active_for_principal("alice", "reasoning"))
