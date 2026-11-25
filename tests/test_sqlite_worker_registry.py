@@ -459,5 +459,33 @@ class SQLiteWorkerRegistryTests(unittest.TestCase):
             self.make_registry(SQLiteTaskStore(self.path))
 
 
+    def test_read_only_lookup_does_not_rewrite_worker_state(self):
+        self.register_healthy()
+        connection = self.store._connect()
+        try:
+            before = connection.execute(
+                "SELECT updated_at_wall_ns FROM worker_registry_state WHERE worker_id='worker-1'"
+            ).fetchone()[0]
+        finally:
+            connection.close()
+        self.clock.advance_ms(5)
+        self.assertEqual(
+            len(self.registry.eligible(
+                "math.factorial",
+                protocol_version=1,
+                authorized_worker_ids={"worker-1"},
+            )),
+            1,
+        )
+        connection = self.store._connect()
+        try:
+            after = connection.execute(
+                "SELECT updated_at_wall_ns FROM worker_registry_state WHERE worker_id='worker-1'"
+            ).fetchone()[0]
+        finally:
+            connection.close()
+        self.assertEqual(after, before)
+        self.assertEqual(self.registry.integrity_check(), "ok")
+
 if __name__ == "__main__":
     unittest.main()
