@@ -57,10 +57,10 @@ class DomainEvent:
         _plain_text(self.source, "event source", 256)
         _plain_text(self.type, "event type", 128)
         _plain_text(self.subject, "event subject", 128)
-        if self.specversion != "1.0":
+        if type(self.specversion) is not str or self.specversion != "1.0":
             raise DomainEventValidationError("only CloudEvents specversion 1.0 is supported")
-        if not self.source.startswith("urn:capri:"):
-            raise DomainEventValidationError("event source must use the Capri URN namespace")
+        if re.fullmatch(r"urn:capri:[a-z0-9-]+:[A-Za-z0-9._:-]+", self.source) is None:
+            raise DomainEventValidationError("event source must use a bounded Capri URN")
         if re.fullmatch(r"com\\.capri\\.[a-z0-9]+(?:[.-][a-z0-9]+)*", self.type) is None:
             raise DomainEventValidationError("event type must use a bounded com.capri name")
         if type(self.time) is not str:
