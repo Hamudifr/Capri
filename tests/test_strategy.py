@@ -273,5 +273,76 @@ class StrategyEvaluationTests(unittest.TestCase):
                     evaluate_strategies("baseline", "candidate", records)
 
 
+    def test_legacy_positional_observation_constructor_remains_compatible(self):
+        records = []
+        for index in range(2):
+            task_id = f"legacy-{index}"
+            records.extend((
+                StrategyObservation(
+                    task_id, "research", "baseline", "verified_success",
+                    f"fixture:baseline:{task_id}", False, 5, 1000, 100, 2000,
+                ),
+                StrategyObservation(
+                    task_id, "research", "candidate", "verified_success",
+                    f"fixture:candidate:{task_id}", False, 4, 900, 90, 1800,
+                ),
+            ))
+        result = evaluate_strategies("baseline", "candidate", records)
+        self.assertEqual(records[0].safety_violation, False)
+        self.assertEqual(records[0].tool_calls, 5)
+        self.assertEqual(records[0].strategy_version, "unversioned")
+        self.assertEqual(result.baseline_version, "unversioned")
+        self.assertEqual(result.candidate_version, "unversioned")
+
+    def test_legacy_positional_evaluation_constructor_remains_compatible(self):
+        from capri_core.strategy import StrategyEvaluation, StrategyMetrics
+
+        metrics = StrategyMetrics(1, 1.0, 0, 5.0, 1000.0, 100.0, 2000.0)
+        result = StrategyEvaluation(
+            "baseline", "candidate", "0" * 64, 1, 0, 0,
+            metrics, metrics, (), (), False,
+        )
+        self.assertEqual(result.interpretation[:14], "Descriptive ev")
+        self.assertEqual(result.baseline_version, "unversioned")
+        self.assertEqual(result.candidate_version, "unversioned")
+        self.assertEqual(result.cohort_schema, "unversioned")
+
+    def test_v2_cohort_fingerprint_has_a_known_vector_and_binds_versions(self):
+        records = [
+            StrategyObservation(
+                task_id="task-001", scenario="research", strategy_id="baseline",
+                outcome="verified_success", evidence_ref="fixture:baseline:001",
+                safety_violation=False, tool_calls=5, context_tokens=1000,
+                estimated_cost_units=100, latency_ms=2000, strategy_version="1.0",
+            ),
+            StrategyObservation(
+                task_id="task-001", scenario="research", strategy_id="candidate",
+                outcome="verified_success", evidence_ref="fixture:candidate:001",
+                safety_violation=False, tool_calls=4, context_tokens=900,
+                estimated_cost_units=90, latency_ms=1800, strategy_version="2.0",
+            ),
+        ]
+        result = evaluate_strategies("baseline", "candidate", records)
+        self.assertEqual(result.cohort_schema, "capri.strategy-cohort.v2")
+        self.assertEqual(
+            result.cohort_sha256,
+            "f0485420a49f75e5208fefb40c1cc49986c12f75763816b10047ff745b14cae1",
+        )
+        changed = [
+            records[0],
+            StrategyObservation(
+                task_id="task-001", scenario="research", strategy_id="candidate",
+                outcome="verified_success", evidence_ref="fixture:candidate:001",
+                safety_violation=False, tool_calls=4, context_tokens=900,
+                estimated_cost_units=90, latency_ms=1800, strategy_version="2.1",
+            ),
+        ]
+        self.assertNotEqual(
+            result.cohort_sha256,
+            evaluate_strategies("baseline", "candidate", changed).cohort_sha256,
+        )
+
+
+
 if __name__ == "__main__":
     unittest.main()

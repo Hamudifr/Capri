@@ -1,4 +1,4 @@
-# X8.4 strategy evaluation: offline comparison v1
+# X8.4 strategy evaluation: offline comparison v2
 
 ## Status
 
@@ -16,9 +16,10 @@ Import `StrategyObservation` and `evaluate_strategies` from `capri_core`.
 
 Each observation contains:
 - task ID and scenario label;
-- strategy ID and explicit strategy version;
+- strategy ID;
 - outcome: `verified_success`, `verified_failure`, or `unverified`;
 - a non-empty evidence reference;
+- an explicit strategy version (keyword-only in the public constructor, defaulting to `unversioned` for legacy positional callers);
 - safety-violation flag;
 - tool-call count, context-token count, estimated-cost units, and latency in milliseconds.
 
@@ -41,7 +42,9 @@ Estimated-cost units are abstract owner-defined integers, not currency, and the 
 
 ## Cohort fingerprint
 
-Each evaluation returns `cohort_sha256`, a lowercase SHA-256 digest over a canonical JSON manifest containing schema version `capri.strategy-cohort.v1`, the baseline and candidate IDs, and every validated observation (including unmatched observations). Records are sorted by strategy ID and task ID, and JSON keys/separators are canonicalized, so input iteration order does not change the digest.
+Version 2 explicitly includes the exact strategy version in every observation. This corrects the earlier mislabeled-v1 change: v1 represented the pre-versioned observation schema, while v2 represents version-bound observations. Never relabel or recompute historical v1 digests as v2; preserve old records with their original schema identifier.
+
+Each evaluation returns `cohort_sha256`, a lowercase SHA-256 digest over a canonical JSON manifest containing schema version `capri.strategy-cohort.v2`, the baseline and candidate IDs, and every validated observation (including unmatched observations). Records are sorted by strategy ID and task ID, and JSON keys/separators are canonicalized, so input iteration order does not change the digest.
 
 The fingerprint lets a caller bind a saved evaluation result to the exact input values later presented for verification. A changed evidence reference or metric changes the digest. The digest is not a signature, does not prove that evidence references are genuine or immutable, and does not replace preservation/readback of the referenced evidence. The module still does not persist the manifest or observations.
 
@@ -50,7 +53,7 @@ The fingerprint lets a caller bind a saved evaluation result to the exact input 
 - This is descriptive evidence from a matched cohort, not a causal proof, confidence interval, statistical significance test, or independent review.
 - A 20-pair floor is not enough to establish broad generalization. Evaluate representative scenario classes and repeat the comparison before any production change.
 - Evidence references are locators. The caller must preserve and verify the referenced records.
-- The module does not persist observations, create a strategy registry, select an active strategy, execute tools, or implement rollback. The result is only eligibility for a human-controlled next stage.
+- The module does not persist observations, create a strategy registry, select an active strategy, execute tools, or implement rollback. Its v2 fingerprint is a deterministic integrity identifier, not an authenticated evidence claim. The result is only eligibility for a human-controlled next stage.
 - The module does not infer a utility weighting between quality and resource use. It uses explicit non-inferiority gates and Pareto-style dominance to avoid hidden trade-offs.
 - Do not use self-reported model confidence as an outcome. Record independently verifiable task results and the evidence supporting them.
 - Do not include prompts, conversation bodies, secrets, or personal data in strategy observations or evidence references.
@@ -63,7 +66,7 @@ Before wiring this into a runtime selector:
 3. Collect consent-appropriate, privacy-screened, evidence-backed outcomes.
 4. Add a shadow evaluator that records what it would choose without changing execution.
 5. Evaluate across multiple representative cohorts and include uncertainty estimates and safety-specific scenarios.
-6. Require explicit owner/host approval for activation; preserve the previous strategy and a tested rollback path.
+6. Follow the owner-delegated staged autonomy policy in Capri — Capability Growth & Benchmarking: automatic canary/promotion is permitted only after trusted evidence collection, paired uncertainty estimates, non-authority-changing strategy configs, hard gates, monitoring and tested automatic rollback are implemented end to end.
 7. Keep authorization, tool allowlists, approvals, spend limits, and safety policy outside the adaptation mechanism and immutable to it.
 
 ## Tests
