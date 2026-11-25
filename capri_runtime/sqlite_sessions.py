@@ -267,7 +267,7 @@ class SQLiteSessionStore(SessionStore):
                     "SELECT count(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"
                 ).fetchone()[0]
                 if schema_object_count == 0 and fresh_database:
-                    connection.execute("PRAGMA journal_mode=WAL")
+                    self._set_wal_mode(connection)
                     connection.execute("BEGIN IMMEDIATE")
                     try:
                         # Recheck after acquiring the cross-process writer lock.
@@ -346,7 +346,7 @@ class SQLiteSessionStore(SessionStore):
                     # Existing snapshots are validation-only. Never recreate a
                     # missing ownership table or immutable trigger on reopen.
                     self._validate_schema(connection)
-                    connection.execute("PRAGMA journal_mode=WAL")
+                    self._set_wal_mode(connection)
                 else:
                     # A non-empty database file with no application schema is
                     # not a fresh database. This also catches dropped schemas.
