@@ -690,6 +690,7 @@ class LearningStore:
 
     def _validate_backup_snapshot(self, connection: sqlite3.Connection) -> None:
         """Validate all four Learning Engine tables before a backup is published."""
+        connection.row_factory = sqlite3.Row
         required_columns = {
             "learning_examples": {
                 "example_id", "task_id", "capability", "prompt", "completion",
