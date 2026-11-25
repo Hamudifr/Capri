@@ -70,8 +70,6 @@ _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 _OPERATION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 
 
-
-
 def _canonical_json(value: Any, *, max_bytes: int, label: str) -> tuple[str, bytes]:
     try:
         encoded = json.dumps(
