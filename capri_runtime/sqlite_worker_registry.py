@@ -1211,11 +1211,16 @@ class SQLiteWorkerRegistry:
         )
 
     def expire_reservations(self, *, now_ns: int | None = None) -> tuple[WorkerReservation, ...]:
-        return self._run(
+        # _run performs the expiry sweep before invoking the callback so that
+        # every operation observes a clean reservation set. Capture and return
+        # that first sweep's expired rows rather than sweeping a second time.
+        _, expired = self._run(
             "expire_reservations",
-            lambda memory, timestamp: memory.expire_reservations(now_ns=timestamp),
+            lambda memory, timestamp: None,
             now_ns=now_ns,
+            include_expired=True,
         )
+        return expired
 
     def eligible(
         self,
