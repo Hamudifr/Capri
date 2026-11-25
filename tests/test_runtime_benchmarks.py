@@ -6,7 +6,7 @@ from benchmarks.runtime.run import run_benchmarks
 class RuntimeBenchmarkTests(unittest.TestCase):
     def test_small_offline_run_reports_all_workloads_and_valid_statistics(self):
         report = run_benchmarks(warmup=1, samples=5)
-        self.assertEqual(report["schema_version"], 1)
+        self.assertEqual(report["schema_version"], 2)
         self.assertEqual(report["configuration"]["external_provider_calls"], 0)
         self.assertEqual(report["configuration"]["external_network_calls"], 0)
         self.assertEqual(
