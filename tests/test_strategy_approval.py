@@ -47,7 +47,7 @@ class HostStrategyApprovalAuthorityTests(unittest.TestCase):
         self.assertTrue(self.authority.verify(grant))
         self.assertEqual(grant.principal_id, "alice")
         self.assertEqual(grant.approver_id, "owner-1")
-        self.assertEqual(grant.signature.split(".", 1)[0], "k1")
+        self.assertEqual(grant.signature.split(":", 1)[0], "k1")
 
     def test_every_bound_field_is_authenticated(self):
         grant = self.authority.issue_grant("valid", self.request)
@@ -99,12 +99,12 @@ class HostStrategyApprovalAuthorityTests(unittest.TestCase):
         )
         self.assertTrue(authority.verify(grant))
         newer = authority.issue_grant("valid", self.request)
-        self.assertEqual(newer.signature.split(".", 1)[0], "k2")
+        self.assertEqual(newer.signature.split(":", 1)[0], "k2")
         self.assertTrue(authority.verify(newer))
 
     def test_tampered_signature_is_rejected(self):
         grant = self.authority.issue_grant("valid", self.request)
-        self.assertFalse(self.authority.verify(replace(grant, signature="k1." + "0" * 64)))
+        self.assertFalse(self.authority.verify(replace(grant, signature="k1:" + "0" * 64)))
 
     def test_grant_is_accepted_by_strategy_store(self):
         with tempfile.TemporaryDirectory() as directory:
