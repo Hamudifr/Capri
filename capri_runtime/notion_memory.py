@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import threading
+import weakref
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from datetime import date, datetime, time, timezone
@@ -16,6 +17,7 @@ from urllib.parse import urlsplit
 from uuid import UUID
 
 from .memory import (
+    MemoryConflictError,
     MemoryErrorBase,
     MemoryNotFoundError,
     MemoryRecord,
@@ -73,6 +75,24 @@ def _validate_memory_id(value: object, field: str = "memory_id") -> str:
     return value
 
 
+_TRANSPORT_LOCKS: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+_TRANSPORT_LOCKS_GUARD = threading.RLock()
+
+
+def _shared_transport_lock(transport: object) -> threading.RLock:
+    try:
+        with _TRANSPORT_LOCKS_GUARD:
+            lock = _TRANSPORT_LOCKS.get(transport)
+            if lock is None:
+                lock = threading.RLock()
+                _TRANSPORT_LOCKS[transport] = lock
+            return lock
+    except TypeError:
+        # Unhashable/non-weak-referenceable transports must inject a shared
+        # correction_lock when multiple adapter instances can write concurrently.
+        return threading.RLock()
+
+
 class MemorySyncError(MemoryErrorBase):
     """A multi-page Notion correction stopped in a recoverable partial state."""
 
@@ -113,15 +133,23 @@ class NotionMemoryAdapter:
     serializes local operations; hosts must serialize cross-process writes.
     """
 
-    def __init__(self, transport: NotionMemoryTransport, *, max_records: int = _MAX_RECORDS) -> None:
+    def __init__(
+        self, transport: NotionMemoryTransport, *, max_records: int = _MAX_RECORDS,
+        correction_lock: object | None = None,
+    ) -> None:
         if type(max_records) is not int or not 1 <= max_records <= _MAX_RECORDS:
             raise MemoryValidationError("max_records must be between 1 and 10000")
         for name in ("create_page", "get_page", "list_pages", "update_page", "delete_page"):
             if not callable(getattr(transport, name, None)):
                 raise MemoryValidationError(f"transport is missing {name}")
+        if correction_lock is not None and not (
+            callable(getattr(correction_lock, "acquire", None))
+            and callable(getattr(correction_lock, "release", None))
+        ):
+            raise MemoryValidationError("correction_lock must provide acquire/release")
         self._transport = transport
         self._max_records = max_records
-        self._lock = threading.RLock()
+        self._lock = correction_lock or _shared_transport_lock(transport)
 
     @staticmethod
     def _timestamp(value: object, field: str) -> str:
@@ -422,7 +450,42 @@ class NotionMemoryAdapter:
                 "retention": old.retention, "tags": old.tags, "expires_at": old.expires_at,
             }
             values.update(changes)
-            new = self._create(**values, status="review", supersedes_id=old.memory_id)
+            expected = {
+                "title": _validate_transport_text(values["title"], "title", 200),
+                "content": _validate_transport_text(values["content"], "content", 20_000),
+                "record_type": values["record_type"],
+                "scope": _validate_transport_text(values["scope"], "scope", 100),
+                "source": self._source(values["source"]),
+                "confidence": values["confidence"],
+                "retention": values["retention"],
+                "tags": _validate_tags(values["tags"]),
+                "expires_at": self._expiry(values["expires_at"]),
+            }
+            children = tuple(
+                record for record in self._list_all()
+                if record.supersedes_id == old.memory_id
+            )
+            if len(children) > 1:
+                raise MemoryConflictError("predecessor already has competing correction successors")
+            if children:
+                child = children[0]
+                matches = (
+                    child.title == expected["title"]
+                    and child.content == expected["content"]
+                    and child.record_type == expected["record_type"]
+                    and child.scope == expected["scope"]
+                    and child.source == expected["source"]
+                    and child.confidence == expected["confidence"]
+                    and child.retention == expected["retention"]
+                    and child.tags == expected["tags"]
+                    and child.expires_at == expected["expires_at"]
+                )
+                if not matches:
+                    raise MemoryConflictError("predecessor already has a different correction successor")
+                return self.reconcile_correction(child.memory_id)
+            if old.status != "active":
+                raise MemoryConflictError("only the active Notion memory head can be corrected")
+            new = self._create(**expected, status="review", supersedes_id=old.memory_id)
             try:
                 archived = self._record_from_page(
                     self._transport.update_page(old.memory_id, {"Status": "Archived"})
@@ -464,6 +527,70 @@ class NotionMemoryAdapter:
                     new.memory_id,
                 ) from exc
             return persisted_new
+
+    def reconcile_correction(self, replacement_id: str) -> MemoryRecord:
+        """Idempotently finish a Review → archive predecessor → activate replacement flow."""
+        _validate_memory_id(replacement_id, "replacement_id")
+        with self._lock:
+            replacement = self.get(replacement_id)
+            if replacement.supersedes_id is None:
+                raise MemoryConflictError("replacement has no predecessor")
+            predecessor = self.get(replacement.supersedes_id)
+            children = tuple(
+                record for record in self._list_all()
+                if record.supersedes_id == predecessor.memory_id
+            )
+            if len(children) != 1 or children[0].memory_id != replacement.memory_id:
+                raise MemoryConflictError("correction lineage is missing or has competing successors")
+            if predecessor.status == "active" and replacement.status == "review":
+                self.archive(predecessor.memory_id)
+                predecessor = self.get(predecessor.memory_id)
+            if predecessor.status == "archived" and replacement.status == "review":
+                activated = self._record_from_page(
+                    self._transport.update_page(replacement.memory_id, {"Status": "Active"})
+                )
+                if (
+                    activated.memory_id != replacement.memory_id
+                    or activated.status != "active"
+                    or not self._same_memory_payload(activated, replacement)
+                ):
+                    raise MemorySyncError(
+                        "Notion replacement activation is uncertain; reconcile again",
+                        replacement.memory_id,
+                    )
+                replacement = self.get(replacement.memory_id)
+            if (
+                predecessor.status == "archived"
+                and replacement.status == "active"
+                and self._same_memory_payload(self.get(predecessor.memory_id), predecessor)
+                and self._same_memory_payload(self.get(replacement.memory_id), replacement)
+            ):
+                return replacement
+            raise MemorySyncError(
+                "Notion correction remains incomplete or ambiguous; reconcile again",
+                replacement.memory_id,
+            )
+
+    def domain_events(self) -> tuple[DomainEvent, ...]:
+        """Project immutable record identity and supersession links from Notion pages.
+
+        Notion page snapshots are not a durable event log; status changes and actor
+        attribution are intentionally not fabricated as historical events.
+        """
+        events = []
+        for record in self._list_all():
+            data = ()
+            if record.supersedes_id is not None:
+                data = (("supersedes_id", record.supersedes_id),)
+            events.append(DomainEvent(
+                id=record.memory_id,
+                source=f"urn:capri:notion-memory:{record.memory_id}",
+                type="com.capri.memory.record_created",
+                subject=record.memory_id,
+                time=record.created_at,
+                data=data,
+            ))
+        return tuple(sorted(events, key=lambda item: (item.time, item.source, item.id)))
 
     def archive(self, memory_id: str) -> MemoryRecord:
         _validate_memory_id(memory_id)
