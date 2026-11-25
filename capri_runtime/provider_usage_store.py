@@ -16,7 +16,6 @@ from .tasks import SQLiteTaskStore
 
 _PROVIDER_RE = re.compile(r"^[a-z][a-z0-9._-]{0,31}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-_TABLE = "provider_usage_events"
 _COLUMNS = {
     "provider", "response_id", "principal_id", "session_id", "model",
     "input_tokens", "output_tokens", "total_tokens", "cached_input_tokens",
