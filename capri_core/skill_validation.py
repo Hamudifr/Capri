@@ -60,6 +60,13 @@ def _parse_scalar(raw: str) -> str:
         raise ValueError("unsupported YAML anchor, tag, alias, or flow collection")
     if value in {"|", "|-", "|+", ">", ">-", ">+"}:
         raise ValueError("block scalar must be parsed with its following lines")
+    if value.startswith(("|", ">")):
+        raise ValueError("unsupported YAML block scalar indicator")
+    if value.casefold() in {"null", "true", "false", "~"} or re.fullmatch(
+        r"[-+]?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][-+]?[0-9]+)?",
+        value,
+    ):
+        raise ValueError("plain YAML scalar is not a string; quote string values")
     return value
 
 
