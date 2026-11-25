@@ -10,6 +10,16 @@ from .strategy import (
     StrategyObservation,
     evaluate_strategies,
 )
+from .action_capsule import (
+    ActionCapsule,
+    ActionCapsuleError,
+    CapsuleEvent,
+    CapsuleIntegrityError,
+    CapsuleState,
+    create_action_capsule,
+    transition_action_capsule,
+    verify_action_capsule_history,
+)
 from .validation import RecordValidationError, contains_surrogate, validate_record
 
 __all__ = [
@@ -17,5 +27,7 @@ __all__ = [
     "RecordValidationError", "contains_surrogate", "validate_record", "HashChainLedger",
     "LedgerIntegrityError", "HealthState", "build_health_report",
     "StrategyEvaluation", "StrategyEvaluationError", "StrategyMetrics",
-    "StrategyObservation", "evaluate_strategies",
+    "StrategyObservation", "evaluate_strategies", "ActionCapsule",
+    "ActionCapsuleError", "CapsuleEvent", "CapsuleIntegrityError", "CapsuleState",
+    "create_action_capsule", "transition_action_capsule", "verify_action_capsule_history",
 ]
