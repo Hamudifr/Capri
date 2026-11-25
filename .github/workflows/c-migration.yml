@@ -2,7 +2,7 @@ name: Native C migration checks
 
 on:
   push:
-    branches: ["migration/gnu11-posix-runtime-2026-11-25"]
+    branches: ["main", "migration/gnu11-posix-runtime-2026-11-25"]
   pull_request:
     branches: ["main"]
     paths:
