@@ -13,7 +13,7 @@ import json
 import math
 import os
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -65,6 +65,23 @@ def evaluate() -> dict[str, Any]:
             )
             identifiers[document["id"]] = record.memory_id
             records.append((document, record))
+
+        # Make the old freshness-first baseline deterministic across runners.
+        with store._lock:
+            connection = store._connect()
+            try:
+                for index, (_, record) in enumerate(records):
+                    timestamp = datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=index)
+                    connection.execute(
+                        "UPDATE memories SET updated_at=? WHERE memory_id=?",
+                        (timestamp.isoformat(), record.memory_id),
+                    )
+            finally:
+                connection.close()
+        records = [
+            (document, store.get(record.memory_id))
+            for document, record in records
+        ]
 
         per_query: list[dict[str, Any]] = []
         for query_case in dataset["queries"]:
