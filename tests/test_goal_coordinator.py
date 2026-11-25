@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -233,6 +234,34 @@ class GoalCoordinatorTests(unittest.TestCase):
             goal.goal_id, "alice", expected_version=execution.goal.version, now=NOW,
         )
         self.assertEqual(retried.goal.state, "cancelled")
+
+    def test_goal_events_and_evidence_are_append_only(self):
+        goal = self.planned_goal()
+        execution = self.coordinator.prepare(
+            goal.goal_id, "alice", expected_version=goal.version, now=NOW,
+        )
+        self.goal_store.record_evidence_for_principal(
+            goal.goal_id, "alice", "test_digest", "f" * 64, 0, now=NOW,
+        )
+        connection = sqlite3.connect(self.goal_store.path)
+        try:
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    "UPDATE goal_events SET event_type='rewritten' WHERE goal_id=?",
+                    (goal.goal_id,),
+                )
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    "DELETE FROM goal_evidence WHERE goal_id=?",
+                    (goal.goal_id,),
+                )
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    "UPDATE goal_task_links SET task_id='replacement' WHERE goal_id=?",
+                    (goal.goal_id,),
+                )
+        finally:
+            connection.close()
 
     def test_link_and_evidence_are_owner_scoped_and_backup_safe(self):
         goal = self.planned_goal()
