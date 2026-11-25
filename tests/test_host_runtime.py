@@ -21,6 +21,7 @@ from capri_runtime import (
     HostAuthorityResolver,
     InMemoryAuditSink,
     InMemoryWorkerRegistry,
+    SQLiteWorkerRegistry,
     WorkerDescriptor,
     SessionClosedError,
     SessionNotFoundError,
@@ -129,7 +130,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
             worker_observer_authorizer=lambda credential, worker_id: (
                 credential == "monitor-token" and worker_id in known_ids
             ),
-            worker_in_flight_resolver=lambda worker_id: 0,
+            worker_unreserved_in_flight_resolver=lambda worker_id: 0,
             worker_policy_resolver=policy,
         )
 
@@ -308,7 +309,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
             worker_observer_authorizer=lambda credential, worker_id: (
                 credential == "monitor-token" and worker_id == "worker-1"
             ),
-            worker_in_flight_resolver=lambda worker_id: load[worker_id],
+            worker_unreserved_in_flight_resolver=lambda worker_id: load[worker_id],
             worker_policy_resolver=lambda *args: {"worker-1"},
         )
         host.register_worker(
@@ -462,7 +463,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
             worker_observer_authorizer=lambda credential, worker_id: (
                 credential == "monitor-token" and worker_id == "worker-1"
             ),
-            worker_in_flight_resolver=lambda worker_id: True,
+            worker_unreserved_in_flight_resolver=lambda worker_id: True,
             worker_policy_resolver=lambda *args: set(),
         )
         host.register_worker(
@@ -1130,6 +1131,43 @@ class CapriHostRuntimeTests(unittest.TestCase):
 
         with self.assertRaises(HostRuntimeError):
             self.make_host(task_store=self.task_store, task_worker=worker)
+
+    def test_sqlite_worker_reservation_recovers_after_host_runtime_recreation(self):
+        registry = SQLiteWorkerRegistry(self.task_store)
+        host = self.make_worker_host(
+            registry, {"worker-token": "worker-1"}, lambda *args: {"worker-1"},
+        )
+        host.register_worker(
+            "worker-token",
+            WorkerDescriptor("worker-1", (1,), ("math.factorial",), max_concurrency=1),
+        )
+        host.heartbeat_worker("monitor-token", "worker-1")
+        task = self.task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {"scope": "durable"}}],
+        )
+        pending = host.reserve_worker_candidate(
+            "alice-token", task.task_id, "math.factorial", 1,
+        )
+        self.assertIsNotNone(pending)
+
+        # A new registry/runtime over the same task database recovers the task hold.
+        reopened_registry = SQLiteWorkerRegistry(self.task_store)
+        reopened_host = self.make_worker_host(
+            reopened_registry, {"worker-token": "worker-1"}, lambda *args: {"worker-1"},
+        )
+        recovered = reopened_host.get_worker_reservation_for_task(
+            "alice-token", task.task_id,
+        )
+        self.assertEqual(recovered.reservation.token, pending.reservation.token)
+        committed = reopened_host.commit_worker_reservation(
+            "alice-token", "monitor-token", recovered,
+        )
+        self.assertTrue(committed.reservation.committed)
+        self.assertTrue(reopened_host.release_worker_reservation(
+            "monitor-token", committed,
+        ))
+        self.assertEqual(reopened_host.storage_health()["worker_registry"], "healthy")
+
 
 if __name__ == "__main__":
     unittest.main()
