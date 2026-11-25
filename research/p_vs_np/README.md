@@ -40,14 +40,14 @@ The Python tests are finite sanity checks only. They do not prove the asymptotic
 
 ## Additional artifacts
 
-- `OPS_SELECTOR_ROUTE.md`: OPS Lemma 4.1 / Theorem 1.4 hardness-magnification route, the fixed-family versus input-dependent anti-checker distinction, the APC₁ relative-counting obstruction, and the soft-weight floor experiment.
-- `ops_selector_toy.py` and `test_ops_selector_toy.py`: finite adaptive-selector example; 3 tests.
-- `soft_weights_floor_test.py` and `test_soft_weights_floor_test.py`: finite counterexample to naive raw per-expert polynomial floors in multiplicative weights; 2 tests.
-- `formalization/`: Lean 4.24.0 proof of the abstract finite causal-game terminal-package lemma. GitHub Actions run 45696083281 passed; axiom audit checked five declarations under the allowlist `propext`, `Classical.choice`, `Quot.sound`.
+- OPS_SELECTOR_ROUTE.md: OPS Lemma 4.1 / Theorem 1.4 hardness-magnification route, the fixed-family versus input-dependent anti-checker distinction, the APC1 relative-counting obstruction, and the soft-weight floor experiment.
+- ops_selector_toy.py and test_ops_selector_toy.py: finite adaptive-selector example; 3 tests.
+- soft_weights_floor_test.py and test_soft_weights_floor_test.py: finite counterexample to naive raw per-expert polynomial floors in multiplicative weights; 2 tests.
+- formalization/: Lean 4.24.0 proof of the abstract finite causal-game terminal-package lemma. GitHub Actions run 45696083281 passed; axiom audit checked five declarations under the allowlist propext, Classical.choice, Quot.sound.
 
 ## R37 mathematical status
 
-OPS gives a near-linear-in-truth-table-length selector under NP ⊆ Circuit[poly]. Its construction uses relative approximate counting of the circuits still consistent with the growing sample. This does not directly transfer to APC₁'s polynomial-precision additive counting, because late survivor sets can be exponentially sparse. A naive raw-weight floor also fails in a finite expert game: a polynomial floor destroys concentration, while a normalized floor is exponentially small per expert.
+OPS gives a near-linear-in-truth-table-length selector under NP ⊆ Circuit[poly]. Its construction uses relative approximate counting of the circuits still consistent with the growing sample. This does not directly transfer to APC1's polynomial-precision additive counting, because late survivor sets can be exponentially sparse. A naive raw-weight floor also fails in a finite expert game: a polynomial floor destroys concentration, while a normalized floor is exponentially small per expert.
 
 The Lean result formalizes only the abstract causal-game terminal lemma. It does not formalize the bounded-arithmetic KPT theorem, SAT-specific package predicates, the search-circuit branch, or EF translation. No P-vs-NP proof is claimed.
 
@@ -60,4 +60,13 @@ See [R40–R41 conditional KPT selector analysis](R40_KPT_COLLAPSE_CONDITIONAL.m
 
 The new note proves a conditional implication: if the existential SAT-antichecker statements are provable in PV1 (or, separately, APX1) for every sufficiently large fixed circuit exponent, then P != NP. The proof uses a constant-round KPT path selector in FP^NP; under P = NP, this selector becomes uniform polynomial time and yields the witness functions required by Pich–Santhanam Corollary 1.
 
-This is **not** an unconditional P-vs-NP proof. The main open obligation remains proving the existential antichecker statement in the required bounded-arithmetic theory. The APX1 Refuter(Yao) theorem does not directly witness the higher-quantifier selector.
+This is not an unconditional P-vs-NP proof. The main open obligation remains proving the existential antichecker statement in the required bounded-arithmetic theory. The APX1 Refuter(Yao) theorem does not directly witness the higher-quantifier selector.
+
+
+# R42: certificate-lifted canonical-pair MinMax
+
+See [certificate-lifted canonical-pair MinMax analysis](R42_CERTIFICATE_LIFTED_MINMAX.md).
+
+The key representation change is to use certified encodings z=(formula, label, witness-or-refutation) as the MinMax column domain. The payoff valid(z) AND (C(formula) != label) is a total PV predicate, unlike the direct SAT-disagreement payoff. Under canonical-pair hardness, majority amplification gives a constant game value and a polynomial-size certificate-carrying antichecker support.
+
+This is a formalization route, not a proof of canonical-pair hardness or of the APC1/APX1 MinMax theorem. The universal antichecker proof and full KPS transfer implication remain open.
