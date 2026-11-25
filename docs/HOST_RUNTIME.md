@@ -24,7 +24,7 @@ When a `SQLiteTaskStore` is configured, `create_task()`, `get_task()`, and `canc
 
 The task worker may share the same task database. Principal-owned claims carry the owner ID and are dispatched only through `TaskEngine(principal_handlers=...)`; the generic legacy handler map is never used for an owned task. Principal-aware handlers must independently enforce resource ACLs. Task ownership is not a substitute for an identity provider, resource authorization, or complete tenant isolation.
 
-`SQLiteSessionStore.backup_to()` creates a consistent private snapshot that includes ownership records and triggers. The backup is also plaintext; see [SQLITE_SESSION_BACKUP.md](SQLITE_SESSION_BACKUP.md). Task, memory, security, and session stores now expose private consistent backup methods; the backups remain plaintext and no scheduler, retention policy, or automated restore workflow is provided. See [SQLITE_STORE_BACKUP.md](SQLITE_STORE_BACKUP.md).
+`SQLiteSessionStore.backup_to()` creates a consistent private snapshot that includes ownership records, immutable-owner triggers, and semantically validated durable turn leases. The backup is also plaintext; see [SQLITE_SESSION_BACKUP.md](SQLITE_SESSION_BACKUP.md). Task, memory, security, and session stores now expose private consistent backup methods; the backups remain plaintext and no scheduler, retention policy, or automated restore workflow is provided. See [SQLITE_STORE_BACKUP.md](SQLITE_STORE_BACKUP.md).
 
 ## Composition
 
