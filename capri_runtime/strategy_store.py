@@ -924,6 +924,8 @@ class SQLiteStrategyStore:
             cohort_id: evaluation.cohort_sha256
             for cohort_id, evaluation in sorted(cohort_evaluations.items())
         }
+        if len(set(cohort_hashes.values())) != len(cohort_hashes):
+            raise StrategyStoreError("promotion cohorts must have distinct evidence fingerprints")
         hashes_json = _promotion_json(cohort_hashes, field="promotion cohort fingerprints", maximum=2_048)
         assessment_hash = _promotion_record_digest(summary_json, refs_json, hashes_json)
         now = self._now()
