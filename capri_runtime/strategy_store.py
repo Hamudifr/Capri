@@ -136,8 +136,8 @@ def _identifier(value: object, field: str) -> str:
 
 def _version(value: object) -> str:
     result = _text(value, "version", 64)
-    if not _VERSION.fullmatch(result):
-        raise StrategyStoreError("version must be a bounded version identifier")
+    if not _VERSION.fullmatch(result) or result == "unversioned":
+        raise StrategyStoreError("version must be an explicit bounded version identifier")
     return result
 
 
