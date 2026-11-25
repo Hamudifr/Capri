@@ -407,6 +407,14 @@ class HostApprovalService:
         self._challenge_ttl, self._grant_ttl = challenge_ttl_seconds, grant_ttl_seconds
         self._allow_self_approval = allow_self_approval
 
+    @property
+    def challenge_ttl_seconds(self) -> int:
+        return self._challenge_ttl
+
+    @property
+    def grant_ttl_seconds(self) -> int:
+        return self._grant_ttl
+
     def create_action_challenge(
         self, principal_id: str, action_name: str, argument_digest: str, operation_id: str,
     ) -> ApprovalChallenge:
