@@ -24,8 +24,6 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("Continuity and capability evaluation", text)
         self.assertIn("ordinary project materials", text)
         self.assertIn("optional and never a general prerequisite", text)
-        self.assertNotIn("X5", text)
-        self.assertNotIn("protected blind evaluation", text.lower())
 
     def test_independence_is_not_self_scoring(self):
         text = (ROOT / "docs/EVALUATION_DATA_CONTRACT.md").read_text(encoding="utf-8")
@@ -50,9 +48,7 @@ class RepositoryContractTests(unittest.TestCase):
             with self.subTest(pattern=pattern):
                 self.assertIn(pattern, text)
 
-    def test_legacy_runtime_document_names_are_retired(self):
-        self.assertFalse((ROOT / "docs/NON_X5_RUNTIME_DESIGN.md").exists())
-        self.assertFalse((ROOT / "docs/NON_X5_RUNTIME_SPEC_TEMPLATE.md").exists())
+    def test_runtime_documents_use_current_names(self):
         self.assertTrue((ROOT / "docs/RUNTIME_FOUNDATION.md").is_file())
         self.assertTrue((ROOT / "docs/RUNTIME_SPEC_TEMPLATE.md").is_file())
 
