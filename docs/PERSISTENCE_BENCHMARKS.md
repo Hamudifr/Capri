@@ -11,7 +11,7 @@ The harness is offline and standard-library-only. It creates private temporary d
 ## Measurements
 
 - Goal create API (includes the store's readback) and principal-scoped goal reads.
-- Task create, unscoped task reads, and principal-scoped task reads (including owner authorization).
+- Task create, unscoped task reads, and principal-scoped task/event reads (including owner authorization and event projection).
 - Plan JSON encode/decode cost, measured separately from database calls.
 - A controlled SQLite insert probe with statement execution and COMMIT wall time reported separately. It uses WAL and `synchronous=FULL`; it does not weaken durability.
 - Concurrent task claims from multiple `SQLiteTaskStore` instances sharing one database. Every queued task must be claimed exactly once; duplicate or missing claims fail the run.
