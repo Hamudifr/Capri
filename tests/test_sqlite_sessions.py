@@ -149,6 +149,26 @@ class SQLiteSessionStoreTests(unittest.TestCase):
         finally:
             connection.close()
 
+    def test_backup_preserves_expired_turn_lease_as_reclaimable_state(self):
+        session = self.store.create()
+        self.store.claim_turn_lease(session.session_id, "expired-worker", 3600)
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute(
+                "UPDATE session_turn_leases SET expires_at=? WHERE session_id=?",
+                ("2000-01-01T00:00:00+00:00", session.session_id),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        backup_path = os.path.join(self.temp.name, "expired-lease-backup.sqlite3")
+        self.store.backup_to(backup_path)
+        restored = SQLiteSessionStore(backup_path)
+        self.assertEqual(restored.integrity_check(), "ok")
+        self.assertTrue(
+            restored.claim_turn_lease(session.session_id, "new-worker", 3600)
+        )
+
     def test_backup_rejects_malformed_persisted_turn_lease_expiry(self):
         session = self.store.create()
         self.store.claim_turn_lease(session.session_id, "worker-token", 3600)
