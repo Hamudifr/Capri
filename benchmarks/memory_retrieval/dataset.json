@@ -123,8 +123,8 @@
       "content": "The lease heartbeat contract records worker ownership and prevents stale claims from being renewed.",
       "scope": "Runtime Operations",
       "tags": [
-        "lease",
-        "heartbeat"
+        "security",
+        "delivery"
       ]
     },
     {
@@ -133,8 +133,8 @@
       "content": "The lease heartbeat recovery protocol detects missed pulses and safely fences expired workers.",
       "scope": "Runtime Operations",
       "tags": [
-        "lease",
-        "heartbeat"
+        "security",
+        "delivery"
       ]
     },
     {
@@ -143,8 +143,8 @@
       "content": "Lease heartbeat signals are observed alongside worker liveness and task completion.",
       "scope": "Runtime Operations",
       "tags": [
-        "operations",
-        "reference"
+        "security",
+        "delivery"
       ]
     },
     {
@@ -153,8 +153,8 @@
       "content": "A lease heartbeat can accompany task claims but does not replace claim fencing.",
       "scope": "Runtime Operations",
       "tags": [
-        "operations",
-        "reference"
+        "security",
+        "delivery"
       ]
     },
     {
@@ -163,8 +163,8 @@
       "content": "Lease heartbeat checks are considered before a worker retry is allowed.",
       "scope": "Runtime Operations",
       "tags": [
-        "operations",
-        "reference"
+        "security",
+        "delivery"
       ]
     },
     {
@@ -173,8 +173,8 @@
       "content": "Session maintenance records lease heartbeat observations for diagnosis.",
       "scope": "Runtime Operations",
       "tags": [
-        "operations",
-        "reference"
+        "security",
+        "delivery"
       ]
     },
     {
@@ -183,8 +183,8 @@
       "content": "The coordinator may inspect lease heartbeat age when scheduling a worker.",
       "scope": "Runtime Operations",
       "tags": [
-        "operations",
-        "reference"
+        "security",
+        "delivery"
       ]
     },
     {
@@ -193,8 +193,8 @@
       "content": "Lease heartbeat latency is recorded as one worker execution metric.",
       "scope": "Runtime Operations",
       "tags": [
-        "operations",
-        "reference"
+        "security",
+        "delivery"
       ]
     },
     {
@@ -203,8 +203,8 @@
       "content": "Approval replay protection binds each signed grant to one exact operation and principal.",
       "scope": "Security Engineering",
       "tags": [
-        "approval",
-        "replay"
+        "security",
+        "architecture"
       ]
     },
     {
@@ -213,8 +213,8 @@
       "content": "Approval replay audit records consumed grant identifiers and rejects duplicate operations.",
       "scope": "Security Engineering",
       "tags": [
-        "approval",
-        "replay"
+        "security",
+        "architecture"
       ]
     },
     {
@@ -223,8 +223,8 @@
       "content": "Approval replay checks complement tool approval and host-side execution controls.",
       "scope": "Security Engineering",
       "tags": [
-        "operations",
-        "reference"
+        "security",
+        "architecture"
       ]
     },
     {
@@ -233,8 +233,8 @@
       "content": "Approval replay signals are reviewed with principal identity and session ownership.",
       "scope": "Security Engineering",
       "tags": [
-        "operations",
-        "reference"
+        "security",
+        "architecture"
       ]
     },
     {
@@ -243,8 +243,8 @@
       "content": "Approval replay prevention is checked during the signed grant lifecycle.",
       "scope": "Security Engineering",
       "tags": [
-        "operations",
-        "reference"
+        "security",
+        "architecture"
       ]
     },
     {
@@ -253,8 +253,8 @@
       "content": "Approval replay evidence is retained when an execution challenge is resolved.",
       "scope": "Security Engineering",
       "tags": [
-        "operations",
-        "reference"
+        "security",
+        "architecture"
       ]
     },
     {
@@ -263,8 +263,8 @@
       "content": "Approval replay events are represented in the security audit schema.",
       "scope": "Security Engineering",
       "tags": [
-        "operations",
-        "reference"
+        "security",
+        "architecture"
       ]
     },
     {
@@ -273,8 +273,8 @@
       "content": "Approval replay is one control in the broader host authorization boundary.",
       "scope": "Security Engineering",
       "tags": [
-        "operations",
-        "reference"
+        "security",
+        "architecture"
       ]
     },
     {
@@ -283,8 +283,8 @@
       "content": "Backup validation checks SQLite integrity, foreign keys, schema semantics, and private publication.",
       "scope": "Storage Reliability",
       "tags": [
-        "backup",
-        "validation"
+        "security",
+        "tooling"
       ]
     },
     {
@@ -293,8 +293,8 @@
       "content": "Backup validation recovery rejects corrupt snapshots and preserves the last verified source database.",
       "scope": "Storage Reliability",
       "tags": [
-        "backup",
-        "validation"
+        "security",
+        "tooling"
       ]
     },
     {
@@ -303,8 +303,8 @@
       "content": "Backup validation is performed after a SQLite snapshot has been written.",
       "scope": "Storage Reliability",
       "tags": [
-        "operations",
-        "reference"
+        "security",
+        "tooling"
       ]
     },
     {
@@ -313,8 +313,8 @@
       "content": "Backup validation results are reviewed during a restore rehearsal.",
       "scope": "Storage Reliability",
       "tags": [
-        "operations",
-        "reference"
+        "security",
+        "tooling"
       ]
     },
     {
@@ -323,8 +323,8 @@
       "content": "Backup validation follows atomic publication and directory synchronization.",
       "scope": "Storage Reliability",
       "tags": [
-        "operations",
-        "reference"
+        "security",
+        "tooling"
       ]
     },
     {
@@ -333,8 +333,8 @@
       "content": "Backup validation is one step in the database integrity checklist.",
       "scope": "Storage Reliability",
       "tags": [
-        "operations",
-        "reference"
+        "security",
+        "tooling"
       ]
     },
     {
@@ -343,8 +343,8 @@
       "content": "Backup validation evidence informs recovery retention decisions.",
       "scope": "Storage Reliability",
       "tags": [
-        "operations",
-        "reference"
+        "security",
+        "tooling"
       ]
     },
     {
@@ -353,8 +353,8 @@
       "content": "Backup validation status is attached to each snapshot operation.",
       "scope": "Storage Reliability",
       "tags": [
-        "operations",
-        "reference"
+        "security",
+        "tooling"
       ]
     },
     {
@@ -363,8 +363,8 @@
       "content": "Tool routing selects native connectors or execution languages according to the requested operation and verification path.",
       "scope": "Engineering Practices",
       "tags": [
-        "tool",
-        "routing"
+        "tooling",
+        "architecture"
       ]
     },
     {
@@ -373,8 +373,8 @@
       "content": "Tool routing verification measures correctness, end-to-end cost, and recovery rather than language reputation.",
       "scope": "Engineering Practices",
       "tags": [
-        "tool",
-        "routing"
+        "tooling",
+        "architecture"
       ]
     },
     {
@@ -383,8 +383,8 @@
       "content": "Tool routing decisions consider the available connector capability surface.",
       "scope": "Engineering Practices",
       "tags": [
-        "operations",
-        "reference"
+        "tooling",
+        "architecture"
       ]
     },
     {
@@ -393,8 +393,8 @@
       "content": "Tool routing can choose Python for substantial numerical and scientific workloads.",
       "scope": "Engineering Practices",
       "tags": [
-        "operations",
-        "reference"
+        "tooling",
+        "architecture"
       ]
     },
     {
@@ -403,8 +403,8 @@
       "content": "Tool routing may use browser search and extraction for current public information.",
       "scope": "Engineering Practices",
       "tags": [
-        "operations",
-        "reference"
+        "tooling",
+        "architecture"
       ]
     },
     {
@@ -413,8 +413,8 @@
       "content": "Tool routing uses SQL for relational queries and database-native operations.",
       "scope": "Engineering Practices",
       "tags": [
-        "operations",
-        "reference"
+        "tooling",
+        "architecture"
       ]
     },
     {
@@ -423,8 +423,8 @@
       "content": "Tool routing can use JavaScript for lightweight orchestration and JSON transformation.",
       "scope": "Engineering Practices",
       "tags": [
-        "operations",
-        "reference"
+        "tooling",
+        "architecture"
       ]
     },
     {
@@ -433,8 +433,8 @@
       "content": "Tool routing reserves shell execution for suitable system-level tasks.",
       "scope": "Engineering Practices",
       "tags": [
-        "operations",
-        "reference"
+        "tooling",
+        "architecture"
       ]
     },
     {
@@ -443,8 +443,8 @@
       "content": "Event provenance records actor, source, derivation, and revision metadata without creating a global transaction.",
       "scope": "Data Architecture",
       "tags": [
-        "event",
-        "provenance"
+        "architecture",
+        "memory"
       ]
     },
     {
@@ -453,8 +453,8 @@
       "content": "Event provenance projection preserves domain-local histories and deterministic source identifiers.",
       "scope": "Data Architecture",
       "tags": [
-        "event",
-        "provenance"
+        "architecture",
+        "memory"
       ]
     },
     {
@@ -463,8 +463,8 @@
       "content": "Event provenance uses CloudEvents identity conventions for read-only projection.",
       "scope": "Data Architecture",
       "tags": [
-        "operations",
-        "reference"
+        "architecture",
+        "memory"
       ]
     },
     {
@@ -473,8 +473,8 @@
       "content": "Event provenance can expose goal history without changing its source of truth.",
       "scope": "Data Architecture",
       "tags": [
-        "operations",
-        "reference"
+        "architecture",
+        "memory"
       ]
     },
     {
@@ -483,8 +483,8 @@
       "content": "Event provenance links task audit records to bounded evidence references.",
       "scope": "Data Architecture",
       "tags": [
-        "operations",
-        "reference"
+        "architecture",
+        "memory"
       ]
     },
     {
@@ -493,8 +493,8 @@
       "content": "Event provenance helps explain memory correction and supersession.",
       "scope": "Data Architecture",
       "tags": [
-        "operations",
-        "reference"
+        "architecture",
+        "memory"
       ]
     },
     {
@@ -503,8 +503,8 @@
       "content": "Event provenance does not imply a cross-store causal order.",
       "scope": "Data Architecture",
       "tags": [
-        "operations",
-        "reference"
+        "architecture",
+        "memory"
       ]
     },
     {
@@ -513,8 +513,8 @@
       "content": "Event provenance metadata excludes raw prompts and private payloads.",
       "scope": "Data Architecture",
       "tags": [
-        "operations",
-        "reference"
+        "architecture",
+        "memory"
       ]
     },
     {
@@ -523,8 +523,8 @@
       "content": "Strategy evaluation compares matched cohorts against a fixed baseline using verified outcomes and resource metrics.",
       "scope": "Adaptive Intelligence",
       "tags": [
-        "strategy",
-        "evaluation"
+        "autonomy",
+        "delivery"
       ]
     },
     {
@@ -533,8 +533,8 @@
       "content": "Strategy evaluation gates reject per-task safety, success, and resource regressions before manual review.",
       "scope": "Adaptive Intelligence",
       "tags": [
-        "strategy",
-        "evaluation"
+        "autonomy",
+        "delivery"
       ]
     },
     {
@@ -543,8 +543,8 @@
       "content": "Strategy evaluation is informed by evidence-backed outcome learning and correction history.",
       "scope": "Adaptive Intelligence",
       "tags": [
-        "operations",
-        "reference"
+        "autonomy",
+        "delivery"
       ]
     },
     {
@@ -553,8 +553,8 @@
       "content": "Strategy evaluation can compare different task planning approaches.",
       "scope": "Adaptive Intelligence",
       "tags": [
-        "operations",
-        "reference"
+        "autonomy",
+        "delivery"
       ]
     },
     {
@@ -563,8 +563,8 @@
       "content": "Strategy evaluation records tool calls, context tokens, estimated cost units, and latency.",
       "scope": "Adaptive Intelligence",
       "tags": [
-        "operations",
-        "reference"
+        "autonomy",
+        "delivery"
       ]
     },
     {
@@ -573,8 +573,8 @@
       "content": "Strategy evaluation results may be recorded in shadow mode without changing execution.",
       "scope": "Adaptive Intelligence",
       "tags": [
-        "operations",
-        "reference"
+        "autonomy",
+        "delivery"
       ]
     },
     {
@@ -583,8 +583,8 @@
       "content": "Strategy evaluation must remain separate from host approval and tool authority.",
       "scope": "Adaptive Intelligence",
       "tags": [
-        "operations",
-        "reference"
+        "autonomy",
+        "delivery"
       ]
     },
     {
@@ -593,8 +593,8 @@
       "content": "Strategy evaluation evidence can inform a later reversible strategy decision.",
       "scope": "Adaptive Intelligence",
       "tags": [
-        "operations",
-        "reference"
+        "autonomy",
+        "delivery"
       ]
     }
   ],
