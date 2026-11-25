@@ -35,20 +35,39 @@ def _reject_constant(value: str) -> None:
     raise WorkerProtocolError(f"non-standard JSON constant: {value}")
 
 
-def _depth(value: Any, level: int = 0) -> int:
-    if level > MAX_JSON_DEPTH:
-        raise WorkerProtocolError("JSON nesting exceeds the protocol limit")
-    if type(value) is dict:
-        for key, child in value.items():
-            if type(key) is not str:
-                raise WorkerProtocolError("JSON object keys must be strings")
-            _depth(child, level + 1)
-    elif type(value) is list:
-        for child in value:
-            _depth(child, level + 1)
-    elif value is not None and type(value) not in (str, int, float, bool):
-        raise WorkerProtocolError("unsupported JSON value")
-    return level
+def _depth(value: Any) -> int:
+    """Validate JSON-shaped data iteratively, including cycles and nesting depth."""
+    maximum = 0
+    active: set[int] = set()
+    stack: list[tuple[Any, int, bool]] = [(value, 0, False)]
+    while stack:
+        current, level, exiting = stack.pop()
+        if level > MAX_JSON_DEPTH:
+            raise WorkerProtocolError("JSON nesting exceeds the protocol limit")
+        maximum = max(maximum, level)
+        kind = type(current)
+        if kind in (dict, list):
+            identity = id(current)
+            if exiting:
+                active.remove(identity)
+                continue
+            if identity in active:
+                raise WorkerProtocolError("cyclic values are not valid JSON data")
+            active.add(identity)
+            stack.append((current, level, True))
+            if kind is dict:
+                children = []
+                for key, child in current.items():
+                    if type(key) is not str:
+                        raise WorkerProtocolError("JSON object keys must be strings")
+                    children.append(child)
+            else:
+                children = current
+            for child in reversed(children):
+                stack.append((child, level + 1, False))
+        elif current is not None and kind not in (str, int, float, bool):
+            raise WorkerProtocolError("unsupported JSON value")
+    return maximum
 
 
 def _json_object(value: Any, field: str) -> dict[str, Any]:
@@ -220,7 +239,19 @@ class WorkerResponse:
         response.to_json()
         return response
 
-    def validate_for(self, request: WorkerRequest, *, expected_worker_id: str) -> None:
+    def validate_for(
+        self,
+        request: WorkerRequest,
+        *,
+        expected_worker_id: str,
+        elapsed_ms: int | None = None,
+    ) -> None:
+        """Validate correlation and a deadline measured by the trusted host.
+
+        elapsed_ms must be measured by the host with a monotonic clock from
+        dispatch until response acceptance. Worker-reported duration_ms is
+        telemetry only and is never sufficient to establish deadline compliance.
+        """
         if type(request) is not WorkerRequest:
             raise WorkerProtocolError("request must be a validated WorkerRequest")
         if type(self) is not WorkerResponse:
@@ -229,12 +260,14 @@ class WorkerResponse:
         request.to_json()
         self.to_json()
         _identifier(expected_worker_id, "expected_worker_id")
+        if type(elapsed_ms) is not int or elapsed_ms < 0:
+            raise WorkerProtocolError("elapsed_ms must be a non-negative host-measured integer")
         if self.request_id != request.request_id:
             raise WorkerProtocolError("response request_id does not match the request")
         if self.worker_id != expected_worker_id:
             raise WorkerProtocolError("response worker_id does not match the selected worker")
-        if self.duration_ms > request.deadline_ms:
-            raise WorkerProtocolError("response duration exceeds the request deadline")
+        if elapsed_ms > request.deadline_ms:
+            raise WorkerProtocolError("host-measured response time exceeds the request deadline")
 
 
 __all__ = [
