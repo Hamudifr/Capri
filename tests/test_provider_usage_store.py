@@ -72,7 +72,7 @@ class SQLiteProviderUsageJournalTests(unittest.TestCase):
 
     def test_invalid_session_identity_is_rejected(self):
         with self.assertRaises(ProviderUsageJournalError):
-            self.journal.record_usage("session-1\\nforged", "principal-1", self.usage)
+            self.journal.record_usage("session-1\nforged", "principal-1", self.usage)
 
     def test_reused_response_id_with_different_usage_is_rejected(self):
         self.journal.record_usage("session-1", "principal-1", self.usage)
