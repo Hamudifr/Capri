@@ -16,7 +16,7 @@ The harness is offline and standard-library-only. It creates private temporary d
 - A controlled SQLite insert probe with statement execution and COMMIT wall time reported separately. It uses WAL and `synchronous=FULL`; it does not weaken durability.
 - Concurrent task claims from multiple `SQLiteTaskStore` instances sharing one database. Every queued task must be claimed exactly once; duplicate or missing claims fail the run.
 
-Each latency workload reports sample count, min, median, p95, p99, max and individual samples. The concurrency workload reports elapsed time, throughput, worker count, and uniqueness checks.
+Each latency workload reports sample count, min, median, p95, p99, max and individual samples. For API/codec workloads, throughput uses the measured wall-clock duration of the complete sample batch, while aggregate operation time is reported separately. The isolated SQL-statement and COMMIT phase samples intentionally omit throughput because their timings are interleaved in one transaction loop and do not have independent wall-clock batch durations. The concurrency workload reports elapsed wall time, throughput, worker count, and uniqueness checks.
 
 ## Interpretation
 
