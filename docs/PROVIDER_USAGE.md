@@ -15,3 +15,9 @@ Missing provider usage is represented as unavailable (no record), never as zero.
 The OpenAI Responses API documents the optional usage object with input/output/total tokens and token-detail breakdowns: [Responses API create reference](https://developers.openai.com/api/reference/resources/responses/methods/create).
 
 No network request is made by tests; all usage responses are fixtures.
+
+## Durable SQLite usage journal
+
+A host can pass <code>SQLiteProviderUsageJournal.record_usage</code> directly as the orchestrator's <code>usage_observer</code>. The journal shares the private SQLiteTaskStore database, binds each provider response to its authenticated principal and session, and uses the provider/response ID pair as an idempotency key. Replaying an identical record is a no-op; reusing the same response ID with different metadata or counts is rejected.
+
+The journal is append-only, stores no prompt or response content, and exposes per-session records plus per-principal/model token aggregates. Task-store integrity and backup validation verify its schema, append-only triggers, event hashes, token invariants and UTC timestamps. It still records token counts and latency only: it does not calculate currency cost or enforce spend limits.

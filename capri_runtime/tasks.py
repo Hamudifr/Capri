@@ -1339,6 +1339,16 @@ class SQLiteTaskStore:
                 raise TaskValidationError(
                     "task store contains invalid strategy evidence manifests"
                 ) from None
+        if connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='provider_usage_events'"
+        ).fetchone() is not None:
+            try:
+                from .provider_usage_store import validate_provider_usage_snapshot
+                validate_provider_usage_snapshot(connection)
+            except Exception:
+                raise TaskValidationError(
+                    "task store contains invalid provider usage events"
+                ) from None
 
     def backup_to(self, destination_path: str) -> str:
         """Create a private, consistent task-state snapshot without overwriting."""
