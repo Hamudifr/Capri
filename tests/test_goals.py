@@ -209,13 +209,27 @@ class SQLiteGoalStoreTests(unittest.TestCase):
         from capri_runtime.domain_events import project_domain_events
 
         goal = self.create()
-        self.store.transition_for_principal(
+        planning = self.store.transition_for_principal(
             goal.goal_id, "alice", "planning", expected_version=1, now=NOW,
+        )
+        planned = self.store.save_plan_for_principal(
+            goal.goal_id, "alice", PLAN, frozenset({"collect", "summarize"}),
+            expected_version=planning.version, now=NOW,
+        )
+        running = self.store.transition_for_principal(
+            goal.goal_id, "alice", "running", expected_version=planned.version, now=NOW,
+        )
+        self.store.record_evidence_for_principal(
+            goal.goal_id, "alice", "task_result", "sha256:" + "a" * 64, 0, now=NOW,
         )
         events = self.store.domain_events_for_principal(goal.goal_id, "alice")
         self.assertEqual(events[0].specversion, "1.0")
         self.assertTrue(all(event.source == f"urn:capri:goal:{goal.goal_id}" for event in events))
         self.assertEqual(dict(events[0].data)["actor_id"], "alice")
+        evidence = next(event for event in events if event.type == "com.capri.goal.evidence_recorded")
+        self.assertEqual(dict(evidence.data)["evidence_type"], "task_result")
+        self.assertEqual(dict(evidence.data)["actor_id"], "alice")
+        self.assertNotIn("content", evidence.as_dict()["data"])
         self.assertEqual(
             project_domain_events(events),
             tuple(sorted(events, key=lambda event: (event.time, event.source, event.id))),
