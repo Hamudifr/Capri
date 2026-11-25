@@ -1462,7 +1462,7 @@ class TaskEngine:
         if execution_evidence_journal is not None:
             if (
                 getattr(execution_evidence_journal, "_tasks", None) is not store
-                or not callable(getattr(execution_evidence_journal, "record_execution", None))
+                or not callable(getattr(execution_evidence_journal, "record_execution_and_finish", None))
                 or not callable(execution_evidence_credential)
             ):
                 raise TaskValidationError(
@@ -1566,15 +1566,17 @@ class TaskEngine:
         if self.execution_evidence_journal is not None and claim.principal_id is not None:
             try:
                 credential = self.execution_evidence_credential(claim)
-                self.execution_evidence_journal.record_execution(
-                    credential, claim, result_snapshot,
+                self.execution_evidence_journal.record_execution_and_finish(
+                    credential, claim, result_snapshot, now=now,
                 )
             except Exception:
-                # The handler may already have caused an external side effect.
-                # Do not mark the task successful without its required evidence.
+                # Evidence and task completion share one transaction. If either
+                # fails after a handler may have caused side effects, quarantine
+                # the still-live claim for explicit reconciliation.
                 return self.store.require_reconciliation(
                     claim, "execution_evidence_unavailable", now=now,
                 )
+            return self.store.get(claim.task_id)
         return self.store.finish_step(claim, result_snapshot, now=now)
 
     def run_once(self, now: datetime | None = None) -> TaskRecord | None:
