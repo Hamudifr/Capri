@@ -56,6 +56,8 @@ class GoalCoordinator:
         self, goal_id: str, principal_id: str, *,
         expected_version: int, now: datetime | None = None,
     ) -> GoalExecution:
+        if type(expected_version) is not int or expected_version < 1:
+            raise GoalValidationError("expected_version must be a positive integer")
         goal = self.goal_store.get_for_principal(goal_id, principal_id)
         if goal.task_id is not None:
             task = self.task_store.get_for_principal(goal.task_id, principal_id)
@@ -162,6 +164,8 @@ class GoalCoordinator:
         """
         if type(accepted) is not bool:
             raise GoalValidationError("accepted must be a boolean")
+        if type(expected_version) is not int or expected_version < 1:
+            raise GoalValidationError("expected_version must be a positive integer")
         goal = self.goal_store.get_for_principal(goal_id, principal_id)
         if goal.state != "awaiting_verification" or goal.version != expected_version:
             raise GoalConflictError("goal is not awaiting verification at the expected version")
@@ -179,6 +183,8 @@ class GoalCoordinator:
         self, goal_id: str, principal_id: str, *,
         expected_version: int, now: datetime | None = None,
     ) -> GoalExecution | GoalRecord:
+        if type(expected_version) is not int or expected_version < 1:
+            raise GoalValidationError("expected_version must be a positive integer")
         goal = self.goal_store.get_for_principal(goal_id, principal_id)
         if goal.state in {"succeeded", "failed", "cancelled"}:
             if goal.task_id is None:
