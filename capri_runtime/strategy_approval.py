@@ -48,6 +48,7 @@ class StrategyApprovalRequest:
     config_sha256: str
     expected_generation: int
     action: str
+    promotion_assessment_sha256: str | None = None
 
 
 def _text(value: object, label: str, limit: int = 128) -> str:
@@ -75,6 +76,8 @@ def _payload(grant: StrategyActivationGrant, key_id: str) -> bytes:
         "expires_at": grant.expires_at,
         "approver_id": grant.approver_id,
     }
+    if grant.promotion_assessment_sha256 is not None:
+        data["promotion_assessment_sha256"] = grant.promotion_assessment_sha256
     return json.dumps(
         data, ensure_ascii=False, sort_keys=True,
         separators=(",", ":"), allow_nan=False,
@@ -138,6 +141,11 @@ class HostStrategyApprovalAuthority:
             raise StrategyAuthorizationError("expected_generation is invalid")
         if type(request.action) is not str or request.action not in {"activate", "rollback"}:
             raise StrategyAuthorizationError("action must be activate or rollback")
+        if request.promotion_assessment_sha256 is not None and (
+            type(request.promotion_assessment_sha256) is not str
+            or not _SHA256.fullmatch(request.promotion_assessment_sha256)
+        ):
+            raise StrategyAuthorizationError("promotion assessment fingerprint is invalid")
 
     def issue_grant(
         self,
@@ -193,6 +201,7 @@ class HostStrategyApprovalAuthority:
             expires_at=(now + timedelta(seconds=ttl_seconds)).isoformat(),
             approver_id=identity.approver_id,
             signature="pending",
+            promotion_assessment_sha256=request.promotion_assessment_sha256,
         )
         # Share the registry's exact grant validation so the host cannot sign a
         # request that the store will later reject as malformed.
@@ -218,6 +227,7 @@ class HostStrategyApprovalAuthority:
             expires_at=unsigned.expires_at,
             approver_id=unsigned.approver_id,
             signature=signature,
+            promotion_assessment_sha256=unsigned.promotion_assessment_sha256,
         )
 
     def verify(self, grant: StrategyActivationGrant) -> bool:
@@ -239,15 +249,6 @@ class HostStrategyApprovalAuthority:
                 return False
             key_id, separator, encoded_tag = grant.signature.partition(":")
             if not separator or not _KEY_ID.fullmatch(key_id) or not re.fullmatch(r"[0-9a-f]{64}", encoded_tag):
-                return False
-            issued = datetime.fromisoformat(grant.issued_at.replace("Z", "+00:00"))
-            expires = datetime.fromisoformat(grant.expires_at.replace("Z", "+00:00"))
-            if (
-                issued.tzinfo is None or issued.utcoffset() is None
-                or expires.tzinfo is None or expires.utcoffset() is None
-            ):
-                return False
-            if expires <= issued or (expires - issued).total_seconds() > self._max_ttl:
                 return False
             tag = bytes.fromhex(encoded_tag)
             result = self._mac.verify(key_id, _payload(grant, key_id), tag)
