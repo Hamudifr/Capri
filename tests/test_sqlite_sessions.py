@@ -655,6 +655,55 @@ class SQLiteSessionStoreTests(unittest.TestCase):
         with self.assertRaises(SessionLimitError):
             limited.commit_turn(session.session_id, 1, "x", "y")
 
+    def test_reopen_rejects_missing_ownership_table_without_recreating_it(self):
+        session = self.store.create_for_principal("principal-owner")
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute("PRAGMA foreign_keys=OFF")
+            connection.execute("DROP TABLE session_owners")
+            connection.commit()
+        finally:
+            connection.close()
+
+        with self.assertRaisesRegex(ValidationError, "schema objects are incomplete"):
+            SQLiteSessionStore(self.path)
+
+        connection = sqlite3.connect(self.path)
+        try:
+            row = connection.execute(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='session_owners'"
+            ).fetchone()
+            self.assertEqual(row[0], 0)
+            persisted = connection.execute(
+                "SELECT count(*) FROM sessions WHERE session_id = ?",
+                (session.session_id,),
+            ).fetchone()
+            self.assertEqual(persisted[0], 1)
+        finally:
+            connection.close()
+
+    def test_reopen_rejects_missing_owner_trigger_without_recreating_it(self):
+        self.store.create_for_principal("principal-owner")
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute("DROP TRIGGER session_owners_immutable_update")
+            connection.commit()
+        finally:
+            connection.close()
+
+        with self.assertRaisesRegex(ValidationError, "schema objects are incomplete"):
+            SQLiteSessionStore(self.path)
+
+        connection = sqlite3.connect(self.path)
+        try:
+            row = connection.execute(
+                "SELECT count(*) FROM sqlite_master WHERE type='trigger' "
+                "AND name='session_owners_immutable_update'"
+            ).fetchone()
+            self.assertEqual(row[0], 0)
+        finally:
+            connection.close()
+
     def test_rejects_symlink_database_path(self):
         target = os.path.join(self.temp.name, "target.sqlite3")
         with open(target, "wb") as handle:
