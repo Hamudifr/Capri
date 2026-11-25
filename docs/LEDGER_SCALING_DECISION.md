@@ -1,7 +1,7 @@
 # Ledger scaling architecture decision
 
 **Status: PROPOSED — NOT IMPLEMENTED**  
-**Scope: non-X5 execution metadata only**
+**Scope: Capri execution and evaluation metadata**
 
 ## Context
 

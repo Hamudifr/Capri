@@ -26,7 +26,7 @@ def passing(run_id="r1", parent=None):
         run_id=run_id, scenario_id="scenario-a", dimension="Agency",
         status=Status.PASS, evaluator_type=EvaluatorType.SELF,
         evidence_stage=EvidenceStage.SELF_SCORED,
-        evidence_ref="evidence://non-x5/example", run_at="2026-11-05T08:00:00Z",
+        evidence_ref="evidence://continuity/example", run_at="2026-11-05T08:00:00Z",
         parent_run_id=parent,
     )
 
@@ -350,7 +350,7 @@ class DoctorTests(unittest.TestCase):
             "  push:\n"
             '    branches: ["main"]\n'
             "  pull_request:\n"
-            '    branches: ["main", "recovery/non-x5-foundation"]\n'
+            '    branches: ["main"]\n'
             "permissions:\n"
             "  contents: read\n"
             "jobs:\n"
@@ -371,37 +371,37 @@ class DoctorTests(unittest.TestCase):
                 code = cli_main(["doctor", "--root", str(root)])
             self.assertEqual(code, 0, output.getvalue())
             self.assertIn("Capri Doctor:", output.getvalue())
-            self.assertIn("Recovery CI coverage: push includes main", output.getvalue())
+            self.assertIn("Pull-request CI coverage: push includes main", output.getvalue())
 
-    def test_doctor_accepts_main_push_and_recovery_pull_request_coverage(self):
+    def test_doctor_accepts_main_push_and_pull_request_coverage(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self._make_repository(root)
             workflow = root / ".github/workflows/quality.yml"
             content = workflow.read_text(encoding="utf-8")
             self.assertIn('branches: ["main"]', content)
-            self.assertIn('branches: ["main", "recovery/non-x5-foundation"]', content)
+            self.assertIn('branches: ["main"]', content)
             output = io.StringIO()
             with redirect_stdout(output):
                 code = cli_main(["doctor", "--root", str(root)])
             self.assertEqual(code, 0, output.getvalue())
 
-    def test_doctor_fails_when_recovery_pull_request_coverage_is_missing(self):
+    def test_doctor_fails_when_main_pull_request_coverage_is_missing(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self._make_repository(root)
             workflow = root / ".github/workflows/quality.yml"
             content = workflow.read_text(encoding="utf-8")
             content = content.replace(
-                'branches: ["main", "recovery/non-x5-foundation"]',
-                'branches: ["main"]',
+                '  pull_request:\n    branches: ["main"]\n',
+                '  pull_request:\\n',
             )
             workflow.write_text(content, encoding="utf-8")
             output = io.StringIO()
             with redirect_stdout(output):
                 code = cli_main(["doctor", "--root", str(root)])
             self.assertEqual(code, 1)
-            self.assertIn("[FAIL] Recovery CI coverage", output.getvalue())
+            self.assertIn("[FAIL] Pull-request CI coverage", output.getvalue())
 
     def test_doctor_json_report_has_stable_schema_and_exit_code(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -424,7 +424,7 @@ class DoctorTests(unittest.TestCase):
                     "ci_workflow_readable",
                     "ci_actions_pinned",
                     "ci_permissions",
-                    "recovery_ci_coverage",
+                    "pull_request_ci_coverage",
                 ],
             )
             self.assertTrue(all(item["status"] == "pass" for item in report["checks"]))
@@ -473,22 +473,22 @@ class DoctorTests(unittest.TestCase):
             self._make_repository(root)
             workflow = root / ".github/workflows/quality.yml"
             content = workflow.read_text(encoding="utf-8").replace(
-                'branches: ["main", "recovery/non-x5-foundation"]',
-                'branches: ["main"]',
+                '  pull_request:\n    branches: ["main"]\n',
+                '  pull_request:\\n',
             )
             content += (
                 "    strategy:\n"
                 "      matrix:\n"
                 "        include:\n"
-                '          - branches: ["main", "recovery/non-x5-foundation"]\n'
-                '          - branches: ["main", "recovery/non-x5-foundation"]\n'
+                '          - branches: ["main"]\n'
+                '          - branches: ["main"]\n'
             )
             workflow.write_text(content, encoding="utf-8")
             output = io.StringIO()
             with redirect_stdout(output):
                 code = cli_main(["doctor", "--root", str(root)])
             self.assertEqual(code, 1)
-            self.assertIn("[FAIL] Recovery CI coverage", output.getvalue())
+            self.assertIn("[FAIL] Pull-request CI coverage", output.getvalue())
 
     def test_doctor_accepts_block_style_event_branch_lists(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -496,17 +496,17 @@ class DoctorTests(unittest.TestCase):
             self._make_repository(root)
             workflow = root / ".github/workflows/quality.yml"
             content = workflow.read_text(encoding="utf-8").replace(
-                'branches: ["main", "recovery/non-x5-foundation"]',
+                'branches: ["main"]',
                 'branches:\n'
                 '      - "main"\n'
-                '      - "recovery/non-x5-foundation"',
+                '      - "main"',
             )
             workflow.write_text(content, encoding="utf-8")
             output = io.StringIO()
             with redirect_stdout(output):
                 code = cli_main(["doctor", "--root", str(root)])
             self.assertEqual(code, 0, output.getvalue())
-            self.assertIn("[PASS] Recovery CI coverage", output.getvalue())
+            self.assertIn("[PASS] Pull-request CI coverage", output.getvalue())
 
 
     def test_doctor_ignores_nested_event_names_and_branch_lists(self):
@@ -522,16 +522,16 @@ class DoctorTests(unittest.TestCase):
                 "  workflow_dispatch:\n"
                 "    inputs:\n"
                 '      push:\n'
-                '        branches: ["main", "recovery/non-x5-foundation"]\n'
+                '        branches: ["main"]\n'
                 '      pull_request:\n'
-                '        branches: ["main", "recovery/non-x5-foundation"]\n'
+                '        branches: ["main"]\n'
             )
             workflow.write_text(content[:start] + nested + content[end:], encoding="utf-8")
             output = io.StringIO()
             with redirect_stdout(output):
                 code = cli_main(["doctor", "--root", str(root)])
             self.assertEqual(code, 1)
-            self.assertIn("[FAIL] Recovery CI coverage", output.getvalue())
+            self.assertIn("[FAIL] Pull-request CI coverage", output.getvalue())
 
 
     def test_doctor_rejects_job_level_permissions_as_workflow_policy(self):
@@ -710,18 +710,18 @@ class DoctorTests(unittest.TestCase):
             self._make_repository(root)
             workflow = root / ".github/workflows/quality.yml"
             content = workflow.read_text(encoding="utf-8").replace(
-                'branches: ["main", "recovery/non-x5-foundation"]',
+                'branches: ["main"]',
                 "branches:\n"
                 "      - include:\n"
                 "          - main\n"
-                "          - recovery/non-x5-foundation",
+                "          - main",
             )
             workflow.write_text(content, encoding="utf-8")
             output = io.StringIO()
             with redirect_stdout(output):
                 code = cli_main(["doctor", "--root", str(root)])
             self.assertEqual(code, 1)
-            self.assertIn("[FAIL] Recovery CI coverage", output.getvalue())
+            self.assertIn("[FAIL] Pull-request CI coverage", output.getvalue())
 
 
     def test_doctor_rejects_duplicate_top_level_on_blocks(self):
@@ -738,7 +738,7 @@ class DoctorTests(unittest.TestCase):
             with redirect_stdout(output):
                 code = cli_main(["doctor", "--root", str(root)])
             self.assertEqual(code, 1)
-            self.assertIn("[FAIL] Recovery CI coverage", output.getvalue())
+            self.assertIn("[FAIL] Pull-request CI coverage", output.getvalue())
 
     def test_doctor_rejects_duplicate_push_event_mappings(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -748,14 +748,14 @@ class DoctorTests(unittest.TestCase):
             content = workflow.read_text(encoding="utf-8")
             duplicate = (
                 "  push:\n"
-                '    branches: ["main", "recovery/non-x5-foundation"]\n'
+                '    branches: ["main"]\n'
             )
             workflow.write_text(content.replace("  pull_request:\n", duplicate + "  pull_request:\n"), encoding="utf-8")
             output = io.StringIO()
             with redirect_stdout(output):
                 code = cli_main(["doctor", "--root", str(root)])
             self.assertEqual(code, 1)
-            self.assertIn("[FAIL] Recovery CI coverage", output.getvalue())
+            self.assertIn("[FAIL] Pull-request CI coverage", output.getvalue())
 
 
 

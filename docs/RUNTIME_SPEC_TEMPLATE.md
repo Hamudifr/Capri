@@ -1,21 +1,21 @@
-# Capri non-X5 runtime specification — approval template
+# Capri runtime runtime specification — approval template
 
 **Status: DRAFT / NOT APPROVED / NOT IMPLEMENTATION AUTHORITY**
 
 This document is a decision template. It records the minimum product decisions required before implementing a runtime. Blank or unresolved fields are blockers, not permission for implementers to choose defaults.
 
-This template is for non-protected Capri behavior only. Do not paste X5 instructions, hidden criteria, rubrics, expected answers, scoring keys, or protected evidence here.
+This template describes ordinary Capri runtime behavior and evaluation requirements. Include the scenarios, criteria, expected outcomes, and evidence needed to make the specification reproducible. Do not include credentials, private user data, or customer-confidential information.
 
 ## 1. Ownership and approval
 
 - Product owner:
 - Specification author:
-- Approver with authority to define non-X5 behavior:
+- Approver with authority to define runtime behavior:
 - Specification version:
 - Approval date:
 - Related requirements or design documents:
 
-Approval statement: "I authorize implementation of the non-X5 behaviors defined in this specification and confirm this document contains no protected blind-evaluation material."
+Approval statement: "I authorize implementation of the runtime behaviors defined in this specification."
 
 ## 2. Purpose and boundaries
 
@@ -128,7 +128,7 @@ For each model/provider/tool, define:
 
 ## 10. Acceptance criteria
 
-Every acceptance criterion must be testable without protected X5 material.
+Every acceptance criterion must be testable without protected continuity benchmark material.
 
 | ID | Scenario | Given | When | Then / observable result | Test owner |
 |---|---|---|---|---|---|
@@ -157,8 +157,8 @@ Every acceptance criterion must be testable without protected X5 material.
 - [ ] All required sections completed or explicitly marked not applicable with rationale.
 - [ ] All unresolved decisions have named owners and due dates.
 - [ ] Privacy/security requirements reviewed.
-- [ ] Acceptance criteria are testable and non-X5.
-- [ ] No protected X5 material is included.
+- [ ] Acceptance criteria are testable and reproducible.
+- [ ] No credentials, private user data, or customer-confidential information is included.
 - [ ] Authorized product owner approved this exact version.
 
 **Implementation gate:** no session orchestration, durable memory policy, model/tool adapter, or deployment behavior may be represented as product-correct until this specification is approved. The existing ledger prototype may be reused only within its documented limitations.

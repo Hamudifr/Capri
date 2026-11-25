@@ -11,7 +11,7 @@ def checks():
         {"id": "ci_workflow_readable", "status": "pass"},
         {"id": "ci_actions_pinned", "status": "pass"},
         {"id": "ci_permissions", "status": "pass"},
-        {"id": "recovery_ci_coverage", "status": "pass"},
+        {"id": "pull_request_ci_coverage", "status": "pass"},
     ]
 
 
@@ -29,7 +29,7 @@ class HealthModelTests(unittest.TestCase):
         ]
         report = build_health_report(observations)
         states = {item["id"]: item["status"] for item in report["components"]}
-        for component in ("ci_workflow", "ci_actions", "ci_permissions", "recovery_ci", "developer_baseline"):
+        for component in ("ci_workflow", "ci_actions", "ci_permissions", "pull_request_ci", "developer_baseline"):
             self.assertEqual(states[component], "degraded")
 
     def test_missing_observation_stays_unknown_and_propagates(self):
