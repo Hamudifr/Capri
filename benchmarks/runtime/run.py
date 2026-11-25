@@ -150,7 +150,7 @@ def run_benchmarks(*, warmup: int = 50, samples: int = 250) -> dict[str, Any]:
     base_time = datetime.now(timezone.utc).replace(microsecond=0)
 
     with _private_tempdir() as temp:
-        root = Path(temp.name)
+        root = Path(temp)
 
         goals = SQLiteGoalStore(str(root / "goals.sqlite3"))
         goal_counter = 0
