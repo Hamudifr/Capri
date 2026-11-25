@@ -27,6 +27,7 @@ def make_observations(count=20):
             "task_id": task_id,
             "scenario": "research",
             "evidence_ref": f"test://evidence/{task_id}",
+            "strategy_version": "1.0",
             "tool_calls": 5,
             "context_tokens": 1000,
             "estimated_cost_units": 100,
