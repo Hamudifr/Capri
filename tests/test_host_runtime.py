@@ -24,6 +24,7 @@ from capri_runtime.host_runtime import CapriHostRuntime, HostRuntimeError
 from capri_runtime.tasks import TaskNotFoundError, TaskValidationError
 from capri_runtime.goals import GoalNotFoundError, GoalPlanProposal, GoalValidationError, SQLiteGoalStore
 from capri_runtime.budgets import BudgetExceededError, BudgetPolicy, SQLiteBudgetStore
+from capri_runtime.outcomes import OutcomeNotFoundError, SQLiteOutcomeStore
 
 
 class RecordingAdapter:
@@ -469,6 +470,56 @@ class CapriHostRuntimeTests(unittest.TestCase):
                 "invalid-token", "outcome", acceptance_criteria=["done"],
             )
 
+
+    def test_outcome_journal_api_is_authenticated_owner_scoped_and_correctable(self):
+        outcome_store = SQLiteOutcomeStore(
+            os.path.join(self.temp.name, "host-outcomes.sqlite3")
+        )
+        host = self.make_host(outcome_store=outcome_store)
+        original = host.record_outcome(
+            "alice-token",
+            subject_type="goal",
+            subject_id="goal-123",
+            outcome_type="execution",
+            status="succeeded",
+            summary="The goal's task completed.",
+            source_type="host_observation",
+            confidence="medium",
+            idempotency_key="host-outcome-1",
+        )
+        self.assertEqual(host.get_outcome("alice-token", original.outcome_id), original)
+        with self.assertRaises(OutcomeNotFoundError):
+            host.get_outcome("bob-token", original.outcome_id)
+        with self.assertRaises(OutcomeNotFoundError):
+            host.correct_outcome(
+                "bob-token", original.outcome_id,
+                status="failed", summary="Cross-owner edit.",
+                reason="Should be rejected.",
+            )
+        corrected = host.correct_outcome(
+            "alice-token", original.outcome_id,
+            status="partial",
+            summary="Completion is awaiting owner verification.",
+            reason="Task completion was incorrectly equated with acceptance.",
+            idempotency_key="host-outcome-correction-1",
+        )
+        self.assertEqual(corrected.supersedes_id, original.outcome_id)
+        self.assertEqual(host.list_outcomes("alice-token"), (corrected,))
+        self.assertEqual(
+            len(host.list_outcomes("alice-token", include_superseded=True)), 2,
+        )
+        self.assertEqual(host.storage_health()["outcomes"], "healthy")
+
+    def test_outcome_journal_requires_authentication_and_explicit_store(self):
+        host = self.make_host()
+        with self.assertRaises(HostRuntimeError):
+            host.record_outcome(
+                "alice-token", subject_type="goal", subject_id="goal-1",
+                outcome_type="execution", status="observation",
+                summary="A bounded observation.", source_type="user_report",
+            )
+        with self.assertRaises(HostAuthorityError):
+            host.list_outcomes("invalid-token")
 
     def test_goal_report_is_read_only_owner_scoped_and_redacts_task_results(self):
         goal_store = SQLiteGoalStore(

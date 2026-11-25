@@ -25,6 +25,7 @@ from .goals import (
 from .goal_coordinator import GoalCoordinator, GoalExecution
 from .goal_reports import GoalReport, build_goal_report
 from .budgets import BudgetUsage, SQLiteBudgetStore
+from .outcomes import OutcomeRecord, SQLiteOutcomeStore
 from .tools import ExecutionContext, HostAuthorityResolver
 
 
@@ -130,6 +131,7 @@ class CapriHostRuntime:
         task_store: SQLiteTaskStore | None = None,
         goal_store: SQLiteGoalStore | None = None,
         budget_store: SQLiteBudgetStore | None = None,
+        outcome_store: SQLiteOutcomeStore | None = None,
     ) -> None:
         if not isinstance(authority, HostAuthorityResolver):
             raise HostRuntimeError("a trusted HostAuthorityResolver is required")
@@ -165,6 +167,8 @@ class CapriHostRuntime:
             raise HostRuntimeError("goal_store must be a SQLiteGoalStore")
         if budget_store is not None and not isinstance(budget_store, SQLiteBudgetStore):
             raise HostRuntimeError("budget_store must be a SQLiteBudgetStore")
+        if outcome_store is not None and not isinstance(outcome_store, SQLiteOutcomeStore):
+            raise HostRuntimeError("outcome_store must be a SQLiteOutcomeStore")
         if (
             task_store is not None and task_worker is not None
             and task_store.path != task_worker.engine.store.path
@@ -182,6 +186,7 @@ class CapriHostRuntime:
             else (task_worker.engine.store if task_worker is not None else None)
         )
         self._goal_store = goal_store
+        self._outcome_store = outcome_store
         configured_budgets = [
             item for item in (
                 budget_store, orchestrator.budget_store,
@@ -445,6 +450,59 @@ class CapriHostRuntime:
         """Whether this host has an explicitly configured task worker."""
         return self._task_worker is not None
 
+    def record_outcome(
+        self, credential: Any, *, subject_type: str, subject_id: str,
+        outcome_type: str, status: str, summary: str, source_type: str,
+        source_reference: str | None = None, confidence: str = "unverified",
+        idempotency_key: str | None = None,
+    ) -> OutcomeRecord:
+        """Append an authenticated principal-owned observation to the outcome journal."""
+        context = self._context(credential)
+        if self._outcome_store is None:
+            raise HostRuntimeError("no outcome store is configured")
+        return self._outcome_store.append_for_principal(
+            context.principal_id, subject_type=subject_type, subject_id=subject_id,
+            outcome_type=outcome_type, status=status, summary=summary,
+            source_type=source_type, source_reference=source_reference,
+            confidence=confidence, idempotency_key=idempotency_key,
+        )
+
+    def correct_outcome(
+        self, credential: Any, outcome_id: str, *, status: str, summary: str,
+        reason: str, source_reference: str | None = None,
+        confidence: str = "unverified", idempotency_key: str | None = None,
+    ) -> OutcomeRecord:
+        """Append a correction without altering the original historical record."""
+        context = self._context(credential)
+        if self._outcome_store is None:
+            raise HostRuntimeError("no outcome store is configured")
+        return self._outcome_store.correct_for_principal(
+            context.principal_id, outcome_id, status=status, summary=summary,
+            reason=reason, source_reference=source_reference,
+            confidence=confidence, idempotency_key=idempotency_key,
+        )
+
+    def get_outcome(self, credential: Any, outcome_id: str) -> OutcomeRecord:
+        """Read one outcome only when it belongs to the authenticated principal."""
+        context = self._context(credential)
+        if self._outcome_store is None:
+            raise HostRuntimeError("no outcome store is configured")
+        return self._outcome_store.get_for_principal(outcome_id, context.principal_id)
+
+    def list_outcomes(
+        self, credential: Any, *, subject_type: str | None = None,
+        subject_id: str | None = None, include_superseded: bool = False,
+        limit: int = 50, offset: int = 0,
+    ) -> tuple[OutcomeRecord, ...]:
+        """List current outcomes or full correction history for the authenticated owner."""
+        context = self._context(credential)
+        if self._outcome_store is None:
+            raise HostRuntimeError("no outcome store is configured")
+        return self._outcome_store.list_for_principal(
+            context.principal_id, subject_type=subject_type, subject_id=subject_id,
+            include_superseded=include_superseded, limit=limit, offset=offset,
+        )
+
     def storage_health(self) -> dict[str, str]:
         """Return redacted integrity states for configured durable stores."""
         stores = {
@@ -452,6 +510,7 @@ class CapriHostRuntime:
             "tasks": self._task_store,
             "goals": self._goal_store,
             "budgets": self._budget_store,
+            "outcomes": self._outcome_store,
         }
         health: dict[str, str] = {}
         for name, store in stores.items():

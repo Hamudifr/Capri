@@ -38,6 +38,12 @@ Authenticated hosts can call `get_goal_report(credential, goal_id)` for a read-o
 
 The report is a status projection, not an independent verification of external evidence. A durable evidence reference records what the owner supplied; the host remains responsible for checking that reference before accepting the outcome.
 
+## Outcome journal
+
+An optional `SQLiteOutcomeStore` can be injected into `CapriHostRuntime`. The authenticated host exposes `record_outcome()`, `correct_outcome()`, `get_outcome()`, and `list_outcomes()`; all operations use the principal resolved from the credential, never a caller-supplied owner ID. Corrections append a linked replacement and preserve the original row. The default list returns only unsuperseded outcomes; request `include_superseded=True` for the full history. The store is included in `storage_health()` when configured.
+
+Outcome summaries and source references are bounded but remain caller-supplied data. Do not store secrets or sensitive personal information. The journal does not automatically reconcile goals, infer truth, train models, or change execution policy. See [OUTCOME_JOURNAL.md](OUTCOME_JOURNAL.md) for the storage and correction contract.
+
 ## Composition
 
 The host supplies:
