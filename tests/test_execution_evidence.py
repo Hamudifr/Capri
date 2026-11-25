@@ -205,9 +205,12 @@ class SQLiteExecutionEvidenceJournalTests(unittest.TestCase):
 
     def test_claim_is_revalidated_inside_evidence_write_transaction(self):
         def complete_during_classification(principal, task_id):
-            # Simulate another worker/process completing the lease after the
-            # journal's initial authentication/claim check but before append.
-            self.tasks.finish_step(self.claim, {"status": "concurrent completion"})
+            # Use a second store instance with an independent process-local lock
+            # to simulate a competing host writer after initial validation.
+            competing_store = SQLiteTaskStore(self.tasks.path)
+            competing_store.finish_step(
+                self.claim, {"status": "concurrent completion"},
+            )
             return self.classification
 
         journal = self.make_journal(classifier=complete_during_classification)
