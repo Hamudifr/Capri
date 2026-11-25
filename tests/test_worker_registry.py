@@ -7,6 +7,7 @@ from capri_runtime.worker_registry import (
     WorkerDescriptor,
     WorkerNotFoundError,
     WorkerRegistryError,
+    WorkerReservation,
 )
 
 
@@ -419,6 +420,11 @@ class WorkerRegistryTests(unittest.TestCase):
                 InMemoryWorkerRegistry(reservation_ttl_ms=value)
         with self.assertRaises(WorkerRegistryError):
             InMemoryWorkerRegistry(max_reservations=4097)
+        with self.assertRaises(WorkerRegistryError):
+            WorkerReservation(
+                token="not-a-valid-token", worker_id="worker-1",
+                expires_at_ns=0, descriptor_revision=1,
+            )
 
     def test_concurrent_duplicate_registration_has_one_winner(self):
         registry = InMemoryWorkerRegistry(clock_ns=lambda: self.now)
