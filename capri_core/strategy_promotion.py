@@ -190,6 +190,7 @@ def assess_strategy_canary(
         raise StrategyPromotionError("cohorts must be iterable") from None
     if any(type(item) is not PromotionCohort for item in cohort_list):
         raise StrategyPromotionError("cohorts must contain PromotionCohort records")
+    cohort_list = tuple(sorted(cohort_list, key=lambda item: item.cohort_id))
 
     blocked: list[str] = []
     if len(cohort_list) < _MIN_COHORTS:
@@ -228,7 +229,7 @@ def assess_strategy_canary(
             evaluation = evaluate_strategies(
                 baseline_id, candidate_id, cohort.observations, min_pairs=_MIN_PAIRS,
             )
-        except StrategyEvaluationError as exc:
+        except StrategyEvaluationError:
             results.append(CohortPromotionResult(
                 cohort_id, 0, 0, primary_metric, None, None, None,
                 ("invalid_or_inconsistent_cohort",),
