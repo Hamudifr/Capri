@@ -920,6 +920,7 @@ class CapriHostRuntime:
             self._purge_worker_reservation_contexts()
             stored = self._worker_reservation_contexts.get(reservation.reservation.token)
             if stored is None:
+                self._begin_worker_audit_operation()
                 self._record_worker_lifecycle_event(
                     "worker.reservation.release_missing",
                     worker_id,
@@ -931,13 +932,16 @@ class CapriHostRuntime:
                     status="not_found",
                     error_code="reservation_missing_or_expired",
                 )
+                self._finish_worker_audit_operation()
                 return False
             if not self._same_host_reservation_context(stored, reservation):
                 raise HostRuntimeError("worker reservation belongs to another task")
             observed_in_flight = None
+            if stored.reservation.committed:
+                observed_in_flight = self._worker_in_flight(worker_id)
+            self._begin_worker_audit_operation()
             try:
                 if stored.reservation.committed:
-                    observed_in_flight = self._worker_in_flight(worker_id)
                     released = self._worker_registry.release_reservation(
                         stored.reservation,
                         authenticated_worker_id=worker_id,
@@ -948,6 +952,7 @@ class CapriHostRuntime:
                         stored.reservation, authenticated_worker_id=worker_id,
                     )
             except WorkerRegistryError:
+                self._finish_worker_audit_operation()
                 raise HostRuntimeError("worker reservation release was rejected") from None
             self._worker_reservation_contexts.pop(stored.reservation.token, None)
             self._record_worker_lifecycle_event(
@@ -962,6 +967,7 @@ class CapriHostRuntime:
                 observed_in_flight=observed_in_flight,
                 status="success" if released else "not_found",
             )
+            self._finish_worker_audit_operation()
             return released
 
     def get_budget_usage(self, credential: Any) -> BudgetUsage:
