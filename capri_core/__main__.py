@@ -324,8 +324,9 @@ def run_skill_validation(root: Path, *, json_output: bool = False) -> int:
         for error in report["errors"]:
             print(f"ERROR: {error}")
         summary = report["summary"]
+        print()
         print(
-            f"\\nCapri Skills: {summary['valid']}/{summary['skills']} valid; "
+            f"Capri Skills: {summary['valid']}/{summary['skills']} valid; "
             f"{summary['errors']} errors; {summary['warnings']} warnings"
         )
     return 0 if report["status"] == "pass" else 1
