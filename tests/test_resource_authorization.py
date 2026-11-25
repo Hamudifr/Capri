@@ -53,8 +53,12 @@ class ResourceAuthorizationTests(unittest.TestCase):
             "update_resource",
             digest(authorized_arguments),
             (now + timedelta(minutes=2)).isoformat(),
+            operation_id="session-1:resource-update-1",
         )
-        context = ExecutionContext("user-1", frozenset({"resources:update"}), (grant,))
+        context = ExecutionContext(
+            "user-1", frozenset({"resources:update"}), (grant,),
+            operation_id="session-1:resource-update-1",
+        )
 
         with self.assertRaises(PermissionDeniedError):
             executor.execute("update_resource", {"resource_id": "resource-2"}, context)
