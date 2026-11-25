@@ -70,6 +70,10 @@ class SQLiteProviderUsageJournalTests(unittest.TestCase):
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0].recorded_at, "2026-11-25T17:00:00+00:00")
 
+    def test_invalid_session_identity_is_rejected(self):
+        with self.assertRaises(ProviderUsageJournalError):
+            self.journal.record_usage("session-1\\nforged", "principal-1", self.usage)
+
     def test_reused_response_id_with_different_usage_is_rejected(self):
         self.journal.record_usage("session-1", "principal-1", self.usage)
         conflicting = ProviderUsage(
