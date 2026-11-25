@@ -630,6 +630,38 @@ class CapriHostRuntimeTests(unittest.TestCase):
         self.assertTrue(stored.descriptor.enabled)
         self.assertEqual(stored.descriptor.revision, 1)
 
+    def test_sqlite_worker_failure_audits_revoked_pending_reservation(self):
+        audit = SQLiteSecurityStore(os.path.join(self.temp.name, "worker-failure-audit.sqlite3"))
+        registry = SQLiteWorkerRegistry(self.task_store)
+        host = self.make_worker_host(
+            registry, {"worker-token": "worker-1"}, lambda *args: {"worker-1"},
+            audit_sink=audit,
+        )
+        host.register_worker(
+            "worker-token",
+            WorkerDescriptor("worker-1", (1,), ("math.factorial",), max_concurrency=1),
+        )
+        host.heartbeat_worker("monitor-token", "worker-1")
+        task = self.task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {"scope": "failure-revocation"}}],
+        )
+        pending = host.reserve_worker_candidate(
+            "alice-token", task.task_id, "math.factorial", 1,
+        )
+        self.assertIsNotNone(pending)
+        self.assertTrue(audit.worker_lifecycle_reconciliation_required())
+
+        failed = host.record_worker_failure("monitor-token", "worker-1")
+        self.assertEqual(failed.health.state, "degraded")
+        self.assertIsNone(registry.get_reservation(pending.reservation.token))
+        self.assertNotIn(pending.reservation.token, host._worker_reservation_contexts)
+        events = audit.events()
+        self.assertIn("worker.reservation.revoked", [event.tool_name for event in events])
+        self.assertFalse(audit.worker_lifecycle_reconciliation_required())
+        self.assertEqual(host.get_worker_candidates(
+            "alice-token", task.task_id, "math.factorial", 1,
+        ), ())
+
     def test_worker_failure_observation_requires_host_supervisor_identity(self):
         registry = InMemoryWorkerRegistry()
         host = self.make_worker_host(
