@@ -1110,6 +1110,37 @@ class SQLiteWorkerRegistry:
             now_ns=now_ns, actor_id=authenticated_worker_id,
         )
 
+    def heartbeat_with_load_resolver(
+        self,
+        worker_id: str,
+        *,
+        authenticated_worker_id: str,
+        in_flight_resolver: Callable[[str], int],
+        now_ns: int | None = None,
+    ) -> WorkerSnapshot:
+        """Sample host load only after the durable write lock has been acquired."""
+        if not callable(in_flight_resolver):
+            raise WorkerRegistryError("in_flight_resolver must be callable")
+
+        def heartbeat(memory: InMemoryWorkerRegistry, timestamp: int) -> WorkerSnapshot:
+            # _run has already acquired BEGIN IMMEDIATE and sampled its clocks.
+            # This avoids persisting a load observation made stale while waiting
+            # for another process to release the SQLite writer lock.
+            in_flight = in_flight_resolver(worker_id)
+            return memory.heartbeat(
+                worker_id,
+                authenticated_worker_id=authenticated_worker_id,
+                in_flight=in_flight,
+                now_ns=timestamp,
+            )
+
+        return self._run(
+            "heartbeat_with_load_resolver",
+            heartbeat,
+            now_ns=now_ns,
+            actor_id=authenticated_worker_id,
+        )
+
     def record_failure(
         self, worker_id: str, *, authenticated_worker_id: str,
     ) -> WorkerSnapshot:
