@@ -152,14 +152,14 @@ class GoalCoordinator:
         expected_version: int, now: datetime | None = None,
     ) -> GoalExecution | GoalRecord:
         goal = self.goal_store.get_for_principal(goal_id, principal_id)
-        if goal.version != expected_version:
-            raise GoalConflictError("goal version changed")
         if goal.state in {"succeeded", "failed", "cancelled"}:
             if goal.task_id is None:
                 return goal
             return GoalExecution(
                 goal, self.task_store.get_for_principal(goal.task_id, principal_id)
             )
+        if goal.version != expected_version and goal.state != "cancelling":
+            raise GoalConflictError("goal version changed")
         if goal.task_id is None:
             return self.goal_store.transition_for_principal(
                 goal_id, principal_id, "cancelled",
