@@ -161,7 +161,7 @@ class SQLiteProviderUsageJournal:
         with self._tasks._lock:
             connection = self._tasks._connect()
             try:
-                validate_provider_usage_snapshot(connection)
+                _validate_provider_usage_schema(connection)
             except Exception:
                 raise ProviderUsageJournalError(
                     "provider usage journal failed integrity validation"
@@ -320,7 +320,6 @@ class SQLiteProviderUsageJournal:
         with self._tasks._lock:
             connection = self._tasks._connect()
             try:
-                validate_provider_usage_snapshot(connection)
                 rows = connection.execute(
                     """SELECT provider,model,COUNT(*),SUM(input_tokens),SUM(output_tokens),
                     SUM(total_tokens),SUM(cached_input_tokens),SUM(cache_write_tokens),
@@ -343,13 +342,13 @@ class SQLiteProviderUsageJournal:
         )
 
 
-def validate_provider_usage_snapshot(connection: sqlite3.Connection) -> None:
-    """Validate the optional provider usage journal during task-store backup/integrity checks."""
+def _validate_provider_usage_schema(connection: sqlite3.Connection) -> None:
+    """Validate provider usage table shape and append-only protections without scanning rows."""
     table = connection.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='provider_usage_events'"
     ).fetchone()
     if table is None:
-        return
+        raise ProviderUsageJournalError("provider usage journal table is missing")
     column_info = connection.execute("PRAGMA table_info(provider_usage_events)").fetchall()
     columns = {row[1] for row in column_info}
     if columns != _COLUMNS:
@@ -406,6 +405,16 @@ def validate_provider_usage_snapshot(connection: sqlite3.Connection) -> None:
             break
     if not index_found:
         raise ProviderUsageJournalError("provider usage owner/session index is missing")
+
+
+def validate_provider_usage_snapshot(connection: sqlite3.Connection) -> None:
+    """Validate every provider usage row during task-store backup/integrity checks."""
+    table = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='provider_usage_events'"
+    ).fetchone()
+    if table is None:
+        return
+    _validate_provider_usage_schema(connection)
     rows = connection.execute(
         """SELECT provider,response_id,principal_id,session_id,model,input_tokens,
         output_tokens,total_tokens,cached_input_tokens,cache_write_tokens,reasoning_tokens,
