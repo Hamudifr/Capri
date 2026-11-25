@@ -188,7 +188,7 @@ class SQLiteGoalStoreTests(unittest.TestCase):
         self.assertEqual(restored.integrity_check(), "ok")
         self.assertEqual(restored.get_for_principal(goal.goal_id, "alice"), planned)
         self.assertEqual(restored.events_for_principal(goal.goal_id, "alice"), events)
-        with self.assertRaises(FileExistsError):
+        with self.assertRaises(GoalValidationError):
             self.store.backup_to(backup)
 
     def test_goal_database_rejects_symlink_path(self):
