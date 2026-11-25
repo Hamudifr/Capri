@@ -2,7 +2,7 @@
   "version": "1.1.0",
   "packagesDir": ".lake/packages",
   "packages": [],
-  "name": "capri-pvnp-formalization",
+  "name": "«capri-pvnp-formalization»",
   "lakeDir": ".lake",
   "fixedToolchain": false
 }
