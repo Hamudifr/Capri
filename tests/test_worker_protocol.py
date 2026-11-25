@@ -115,5 +115,31 @@ class WorkerProtocolTests(unittest.TestCase):
             WorkerRequest.from_json(json.dumps(data))
 
 
+    def test_validate_for_rejects_malformed_direct_instances(self):
+        malformed_request = WorkerRequest("bad id", "math.factorial", {}, 100)
+        response = WorkerResponse("bad id", "worker-1", "succeeded", 1, output={"value": 1})
+        with self.assertRaises(WorkerProtocolError):
+            response.validate_for(malformed_request, expected_worker_id="worker-1")
+
+        valid_request = WorkerRequest("req-17", "math.factorial", {}, 100)
+        malformed_response = WorkerResponse("req-17", "worker-1", "succeeded", True, output={"value": 1})
+        with self.assertRaises(WorkerProtocolError):
+            malformed_response.validate_for(valid_request, expected_worker_id="worker-1")
+
+    def test_validate_for_rejects_reported_duration_over_deadline(self):
+        short_request = WorkerRequest("req-17", "math.factorial", {}, 10)
+        late_response = WorkerResponse("req-17", "worker-1", "succeeded", 11, output={"value": 1})
+        with self.assertRaises(WorkerProtocolError):
+            late_response.validate_for(short_request, expected_worker_id="worker-1")
+
+    def test_worker_protocol_types_are_package_exports(self):
+        from capri_runtime import WorkerProtocolError as ExportedError
+        from capri_runtime import WorkerRequest as ExportedRequest
+        from capri_runtime import WorkerResponse as ExportedResponse
+        self.assertIs(ExportedError, WorkerProtocolError)
+        self.assertIs(ExportedRequest, WorkerRequest)
+        self.assertIs(ExportedResponse, WorkerResponse)
+
+
 if __name__ == "__main__":
     unittest.main()
