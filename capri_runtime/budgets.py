@@ -377,6 +377,12 @@ class SQLiteBudgetStore:
 
     @staticmethod
     def _validate_backup_snapshot(connection: sqlite3.Connection) -> None:
+        meta = connection.execute(
+            "SELECT value FROM budget_meta WHERE key='default_policy'"
+        ).fetchone()
+        if not meta:
+            raise BudgetValidationError("budget backup is missing its default policy")
+        SQLiteBudgetStore._policy_from_json(meta[0])
         for principal_id, policy_json in connection.execute(
             "SELECT principal_id,policy_json FROM budget_policies"
         ).fetchall():
@@ -394,6 +400,7 @@ class SQLiteBudgetStore:
                 raise BudgetValidationError("budget backup contains invalid window start") from None
             if parsed.tzinfo is None or parsed.utcoffset() is None:
                 raise BudgetValidationError("budget backup window start must be timezone-aware")
+        expected_usage: dict[tuple[str, str, str], int] = {}
         for reservation_id, principal_id, window_start, amounts_json, created_at in connection.execute(
             "SELECT reservation_id,principal_id,window_start,amounts_json,created_at FROM budget_reservations"
         ).fetchall():
@@ -412,6 +419,16 @@ class SQLiteBudgetStore:
             for dimension, amount in amounts.items():
                 if dimension not in _DIMENSIONS or type(amount) is not int or amount < 1:
                     raise BudgetValidationError("budget backup contains invalid reservation amount")
+                key = (principal_id, window_start, dimension)
+                expected_usage[key] = expected_usage.get(key, 0) + amount
+        actual_usage = {
+            (principal_id, window_start, dimension): used
+            for principal_id, window_start, dimension, used in connection.execute(
+                "SELECT principal_id,window_start,dimension,used FROM budget_usage"
+            ).fetchall()
+        }
+        if expected_usage != actual_usage:
+            raise BudgetValidationError("budget backup reservation totals do not match usage")
 
     def backup_to(self, destination_path: str) -> str:
         return backup_sqlite_database(
