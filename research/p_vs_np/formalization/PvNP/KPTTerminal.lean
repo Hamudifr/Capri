@@ -36,7 +36,7 @@ theorem wins_has_terminal (Q : List α → α → Prop) :
   | succ n ih =>
       intro h hwin
       by_cases hroot : ∀ x, Q h x
-      · exact ⟨[], by simp, hroot⟩
+      · exact ⟨[], by simp, by simpa using hroot⟩
       · obtain ⟨x, hx⟩ := Classical.not_forall.mp hroot
         have hnext : Wins Q n (h ++ [x]) := (hwin x).resolve_left hx
         obtain ⟨p, hp, hterm⟩ := ih (h ++ [x]) hnext
