@@ -80,6 +80,31 @@ class WorkerProtocolTests(unittest.TestCase):
                 with self.assertRaises(WorkerProtocolError):
                     WorkerRequest("req-1", "math.factorial", payload, 100).to_json()
 
+    def test_numeric_values_have_protocol_owned_bounds(self):
+        huge_integer = "9" * 65
+        envelope = (
+            '{"protocol_version":1,"message_type":"request",'
+            '"request_id":"req-1","capability":"math.factorial",'
+            '"deadline_ms":100,"input":{"value":' + huge_integer + '}}'
+        )
+        with self.assertRaises(WorkerProtocolError):
+            WorkerRequest.from_json(envelope)
+
+        overflow_float = self.request.to_json().replace('"number":12', '"number":1e9999')
+        with self.assertRaises(WorkerProtocolError):
+            WorkerRequest.from_json(overflow_float)
+
+        with self.assertRaises(WorkerProtocolError):
+            WorkerRequest(
+                "req-1", "math.factorial", {"value": 1 << 300}, 100,
+            ).to_json()
+
+        # Ordinary signed integers and finite floats remain valid.
+        valid = WorkerRequest(
+            "req-1", "math.factorial", {"integer": -(1 << 200), "ratio": 1.25}, 100,
+        )
+        self.assertEqual(WorkerRequest.from_json(valid.to_json()), valid)
+
     def test_rejects_deeply_nested_payload(self):
         payload = {}
         cursor = payload
