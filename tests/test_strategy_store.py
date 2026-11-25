@@ -172,7 +172,7 @@ class SQLiteStrategyStoreTests(unittest.TestCase):
         with self.assertRaises(StrategyConflictError):
             store.activate_for_principal("alice", candidate_grant)
 
-    def test_strategy_approval_bridge_rejects_excessive_combined_lifetime(self):
+    def test_strategy_approval_bridge_rejects_excessive_grant_lifetime(self):
         now = datetime(2026, 1, 1, tzinfo=timezone.utc)
         security = SQLiteSecurityStore(os.path.join(self.temp.name, "long-approvals.sqlite3"))
         service = HostApprovalService(
@@ -182,7 +182,7 @@ class SQLiteStrategyStoreTests(unittest.TestCase):
             lambda approver, challenge: True,
             clock=lambda: now,
             challenge_ttl_seconds=600,
-            grant_ttl_seconds=600,
+            grant_ttl_seconds=901,
         )
         with self.assertRaises(StrategyAuthorizationError):
             StrategyApprovalBridge(service)
