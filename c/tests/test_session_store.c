@@ -86,6 +86,17 @@ int main(void) {
     assert(capri_session_release_turn_lease_for_principal(store,corrupt_session.session_id,"principal-corrupt","worker-corrupt",&released)==CAPRI_SESSION_CORRUPT);
     assert(capri_session_commit_turn_for_principal(store,corrupt_session.session_id,"principal-corrupt",0,turn,NULL,&committed)==CAPRI_SESSION_CORRUPT);
     capri_session_free(&corrupt_session); capri_session_free(&committed);
+    CapriSession nul_owner_session={0};
+    assert(capri_session_create_for_principal(store,"principal-nul-owner",&nul_owner_session)==CAPRI_SESSION_OK);
+    sqlite3_stmt *nul_insert=NULL;
+    assert(sqlite3_prepare_v2(raw,"INSERT INTO session_turn_leases(session_id,owner_token,expires_at) VALUES(?1,CAST('worker-corrupt' || char(0) || 'tail' AS TEXT),'2099-01-01T00:00:00Z')",-1,&nul_insert,NULL)==SQLITE_OK);
+    sqlite3_bind_text(nul_insert,1,nul_owner_session.session_id,-1,SQLITE_TRANSIENT);
+    assert(sqlite3_step(nul_insert)==SQLITE_DONE); sqlite3_finalize(nul_insert);
+    assert(capri_session_claim_turn_lease_for_principal(store,nul_owner_session.session_id,"principal-nul-owner","worker-new",30.0)==CAPRI_SESSION_CORRUPT);
+    assert(capri_session_renew_turn_lease_for_principal(store,nul_owner_session.session_id,"principal-nul-owner","worker-corrupt",30.0)==CAPRI_SESSION_CORRUPT);
+    assert(capri_session_release_turn_lease_for_principal(store,nul_owner_session.session_id,"principal-nul-owner","worker-corrupt",&released)==CAPRI_SESSION_CORRUPT);
+    assert(capri_session_commit_turn_for_principal(store,nul_owner_session.session_id,"principal-nul-owner",0,turn,NULL,&committed)==CAPRI_SESSION_CORRUPT);
+    capri_session_free(&nul_owner_session); capri_session_free(&committed);
     sqlite3_close(raw);
     capri_session_store_close(store);
     char linkpath[512]; snprintf(linkpath,sizeof linkpath,"%s/symlink.sqlite3",dir);
