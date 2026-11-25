@@ -613,6 +613,12 @@ class CapriHostRuntime:
                     snapshot = self._worker_registry.heartbeat(
                         worker_id, authenticated_worker_id=worker_id, in_flight=in_flight,
                     )
+            except HostRuntimeError:
+                # A rejected host load observation happens before the registry
+                # callback mutates state; close the operation marker and retain
+                # the specific validation error for the caller.
+                self._finish_worker_audit_operation()
+                raise
             except WorkerRegistryError:
                 self._finish_worker_audit_operation()
                 raise HostRuntimeError("worker heartbeat was rejected") from None
