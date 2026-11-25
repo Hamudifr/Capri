@@ -66,7 +66,7 @@ The parameter-free (T^0_{APC_1}) nonuniform-advice construction is unnecessary f
 - This is conditional on APC1 proving (S_K) for all sufficiently large K.
 - It does not prove (S_K), the canonical-pair hardness premise, or an unconditional P != NP result.
 - It does not produce short EF proofs of the selected package's universal antichecker property.
-- The R42 certificate-lifted PV MinMax game is a candidate route to formalizing (S_K) in APC1, but the APC1 MinMax proof and proof-system translation remain open.
+- R42 is a separate KPS route for the length-bounded canonical pair (SAT, short-P-refutable UNSAT). It does not directly prove the unconditional Pich–Santhanam S_K, because unsatisfiable formulas without short P-refutations are not represented. The direct S_K route still needs to handle all negative SAT labels; its APC1 MinMax proof remains open.
 - The KPT path selector is not a deterministic P-time selector without the temporary assumption P=NP.
 
 ## Sources
