@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import tempfile
+import threading
 import unittest
 from dataclasses import replace
 
@@ -126,7 +127,9 @@ class CapriHostRuntimeTests(unittest.TestCase):
             revision=1,
         )
 
-    def make_worker_host(self, registry, identities, policy, audit_sink=None):
+    def make_worker_host(
+        self, registry, identities, policy, audit_sink=None, load_resolver=None,
+    ):
         known_ids = frozenset(identities.values())
         options = {
             "task_store": self.task_store,
@@ -136,12 +139,71 @@ class CapriHostRuntimeTests(unittest.TestCase):
             "worker_observer_authorizer": lambda credential, worker_id: (
                 credential == "monitor-token" and worker_id in known_ids
             ),
-            "worker_unreserved_in_flight_resolver": lambda worker_id: 0,
+            "worker_unreserved_in_flight_resolver": load_resolver or (lambda worker_id: 0),
             "worker_policy_resolver": policy,
         }
         if audit_sink is not None:
             options["worker_lifecycle_audit_sink"] = audit_sink
         return self.make_host(**options)
+
+    def test_concurrent_worker_heartbeats_serialize_host_load_sampling(self):
+        registry = InMemoryWorkerRegistry()
+        first_entered = threading.Event()
+        release_first = threading.Event()
+        second_entered = threading.Event()
+        counter_lock = threading.Lock()
+        calls = 0
+
+        def load_resolver(worker_id):
+            nonlocal calls
+            with counter_lock:
+                calls += 1
+                call_number = calls
+            if call_number == 1:
+                first_entered.set()
+                if not release_first.wait(timeout=3):
+                    raise RuntimeError("test did not release first load sample")
+            else:
+                second_entered.set()
+            return 0
+
+        host = self.make_worker_host(
+            registry,
+            {"worker-token": "worker-1"},
+            lambda *args: {"worker-1"},
+            load_resolver=load_resolver,
+        )
+        host.register_worker(
+            "worker-token",
+            WorkerDescriptor("worker-1", (1,), ("math.factorial",)),
+        )
+        errors = []
+
+        def heartbeat():
+            try:
+                host.heartbeat_worker("monitor-token", "worker-1")
+            except Exception as exc:
+                errors.append(exc)
+
+        first = threading.Thread(target=heartbeat)
+        second = threading.Thread(target=heartbeat)
+        first.start()
+        self.assertTrue(first_entered.wait(timeout=2))
+        second.start()
+        try:
+            self.assertFalse(
+                second_entered.wait(timeout=0.15),
+                "a second heartbeat sampled host load before acquiring the reservation lock",
+            )
+        finally:
+            release_first.set()
+        first.join(timeout=3)
+        second.join(timeout=3)
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(calls, 2)
+        self.assertEqual(registry.get("worker-1").health.in_flight, 0)
 
     def test_worker_registry_rejects_placeholder_audit_sink(self):
         with self.assertRaisesRegex(HostRuntimeError, "trusted AuditSink"):
