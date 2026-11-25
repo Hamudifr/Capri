@@ -21,7 +21,7 @@ Already present in the repository:
 - Optional OpenAI Responses API adapter with offline tests and separate memory/knowledge context inputs.
 - Private consistent no-replace backups for the four local SQLite stores; backups remain plaintext and require host-managed protection.
 
-This is a strong component foundation. It is not yet a complete autonomous agent: natural-language goal planning, a durable goal record/coordinator, a supervised host service, real identity-provider integration, complete memory/graph ACL enforcement, hard per-principal budgets, an owner-facing task reconciliation workflow, and production observability remain incomplete.
+This is a strong component foundation, not yet a complete autonomous agent. The durable goal contract/coordinator, principal-scoped execution budgets, and in-process supervised host lifecycle are now implemented. Remaining gaps include a natural-language planner adapter, real identity-provider integration, complete memory/graph ACL enforcement, an owner-facing reconciliation experience, production metrics/alerts, and deployment-level process supervision.
 
 ## X7 — Autonomous Operations
 
@@ -54,9 +54,9 @@ This is a strong component foundation. It is not yet a complete autonomous agent
    - Route actions requiring approval to a host-controlled approval experience.
 
 5. **Supervised host lifecycle**
-   - Provide a host service entry point with graceful startup/shutdown, health/readiness probes, and worker supervision.
-   - Keep authentication, secret custody, scheduling, and process supervision in the trusted host.
-   - Make background execution explicit and inspectable; never imply that Capri works between sessions without a running host or automation.
+   - **Implemented in PR #169:** `CapriHostService` provides explicit start/stop, cooperative worker-thread supervision, bounded shutdown waits, redacted health snapshots, and integrity checks for configured durable stores.
+   - Keep authentication, secret custody, scheduling, and process-level supervision in the trusted host; an external supervisor remains responsible for process restart and OS-level limits.
+   - Background execution remains opt-in and inspectable; constructing a runtime/service starts no thread.
 
 6. **Completion verification**
    - Define an acceptance check for each goal and step.
@@ -126,7 +126,7 @@ This is a strong component foundation. It is not yet a complete autonomous agent
 | 2 | Durable goal record and goal planner protocol | X7 | **Implemented in PR #162:** principal-owned SQLite goal contracts, constraints/deadline/acceptance criteria, versioned lifecycle, data-only planner protocol and allowlist validator; five-version CI passed |
 | 3 | Deterministic goal-plan validator and coordinator linking planner, task engine, session, and evidence | X7 | **Implemented in PR #163:** deferred task activation, immutable goal-task links, idempotent crash recovery, cancellation coordination, hashed step evidence, terminal outcome reconciliation, and explicit acceptance verification; five-version CI passed |
 | 4 | Execution and provider request budget guard | X7 | **Implemented in PR #164:** persistent per-principal quotas for provider calls/input bytes, tool calls, task steps/input bytes; atomic pre-invocation reservations; budget-wait recovery; fail-closed provider/tool/task enforcement; exact-head and post-merge CI passed on Python 3.11–3.15. Exact provider tokens/cost and synchronous handler preemption remain explicitly out of scope. |
-| 5 | Supervised host service and health lifecycle | X7 | Startup/shutdown, health, worker recovery tests |
+| 5 | Supervised host service and health lifecycle | X7 | **Implemented in PR #169:** explicit start/stop, cooperative worker shutdown, timeout/retry semantics, redacted health snapshots, store integrity checks, and worker failure recovery tests; OS process supervision remains external |
 | 6 | Goal acceptance and evidence report | X7 | Read-back verification and partial/uncertain outcome tests |
 | 7 | Outcome journal and correction/supersession workflow | X8 | Provenance, correction, retention, and conflict tests |
 | 8 | Memory retrieval evaluation and ranking | X8 | Labelled benchmark and regression threshold |
@@ -145,4 +145,4 @@ This is a strong component foundation. It is not yet a complete autonomous agent
 
 ## Immediate next engineering action
 
-X7.2 (PR #162), X7.3 (PR #163), and X7.4 (PR #164) are merged; exact-head and post-merge CI passed on Python 3.11–3.15. X7.5 is implemented in PR #168: an offline benchmark harness covers goal/task persistence, task-claim throughput, tool validation/dispatch, and orchestration overhead. Exact-head quality CI run `45560504042` and dedicated benchmark run `45560504118` passed. The first provisional baseline is recorded in `docs/RUNTIME_BENCHMARKS.md` for source commit `6918360c6018e5c5bb11073a062a9c8e02bcd8b7`. Repeat on the same runner class and profile real workloads before any optimization; this single run does not justify Rust/C migration. No paid provider calls were used. A small post-merge review also identified a SQLite durability and semantic-integrity hardening slice; it is isolated from the benchmark work and is being validated as a follow-up before X7.5 begins.
+X7.2 (PR #162), X7.3 (PR #163), X7.4 (PR #164), and the X7.5 offline benchmark baseline (PR #168) are merged. Budget-ledger durability hardening is merged in PR #167. X7.6 supervised host lifecycle and runtime health reporting is implemented in PR #169; exact-head CI is pending. After X7.6 is merged and verified, the next work package is X7.7: owner-facing goal acceptance and evidence-backed completion reports, including partial and uncertain outcomes. Keep the Python baseline and do not port to Rust/C until repeated same-runner measurements plus profiling identify a material hotspot. No paid provider calls were used.
