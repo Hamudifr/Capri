@@ -195,6 +195,7 @@ class CapriHostRuntime:
         worker_identity_resolver: Callable[[Any], str | None] | None = None,
         worker_descriptor_resolver: Callable[[str, WorkerDescriptor], WorkerDescriptor] | None = None,
         worker_observer_authorizer: Callable[[Any, str], bool] | None = None,
+        worker_unreserved_in_flight_resolver: Callable[[str], int] | None = None,
         worker_in_flight_resolver: Callable[[str], int] | None = None,
         worker_policy_resolver: Callable[[str, str, str], set[str] | frozenset[str]] | None = None,
         worker_lifecycle_audit_sink: AuditSink | None = None,
@@ -264,8 +265,17 @@ class CapriHostRuntime:
             raise HostRuntimeError("worker_descriptor_resolver must be callable")
         if worker_observer_authorizer is not None and not callable(worker_observer_authorizer):
             raise HostRuntimeError("worker_observer_authorizer must be callable")
+        if worker_unreserved_in_flight_resolver is not None and not callable(worker_unreserved_in_flight_resolver):
+            raise HostRuntimeError("worker_unreserved_in_flight_resolver must be callable")
         if worker_in_flight_resolver is not None and not callable(worker_in_flight_resolver):
             raise HostRuntimeError("worker_in_flight_resolver must be callable")
+        if worker_unreserved_in_flight_resolver is not None and worker_in_flight_resolver is not None:
+            raise HostRuntimeError("configure only worker_unreserved_in_flight_resolver; the legacy alias cannot be combined")
+        worker_load_resolver = (
+            worker_unreserved_in_flight_resolver
+            if worker_unreserved_in_flight_resolver is not None
+            else worker_in_flight_resolver
+        )
         if worker_policy_resolver is not None and not callable(worker_policy_resolver):
             raise HostRuntimeError("worker_policy_resolver must be callable")
         audit_contract_methods = (
@@ -289,7 +299,7 @@ class CapriHostRuntime:
             worker_identity_resolver is not None,
             worker_descriptor_resolver is not None,
             worker_observer_authorizer is not None,
-            worker_in_flight_resolver is not None,
+            worker_load_resolver is not None,
             worker_policy_resolver is not None,
         )):
             raise HostRuntimeError("worker registry callbacks require a configured worker_registry")
@@ -297,7 +307,7 @@ class CapriHostRuntime:
             worker_identity_resolver is None,
             worker_descriptor_resolver is None,
             worker_observer_authorizer is None,
-            worker_in_flight_resolver is None,
+            worker_load_resolver is None,
             worker_policy_resolver is None,
         )):
             raise HostRuntimeError(
@@ -401,7 +411,7 @@ class CapriHostRuntime:
         self._worker_identity_resolver = worker_identity_resolver
         self._worker_descriptor_resolver = worker_descriptor_resolver
         self._worker_observer_authorizer = worker_observer_authorizer
-        self._worker_in_flight_resolver = worker_in_flight_resolver
+        self._worker_in_flight_resolver = worker_load_resolver
         self._worker_policy_resolver = worker_policy_resolver
         self._worker_lifecycle_audit_sink = worker_lifecycle_audit_sink
         self._worker_audit_healthy = True
@@ -577,13 +587,13 @@ class CapriHostRuntime:
 
     def _worker_in_flight(self, worker_id: str) -> int:
         if self._worker_registry is None or self._worker_in_flight_resolver is None:
-            raise HostRuntimeError("no host worker load resolver is configured")
+            raise HostRuntimeError("no host unreserved-load resolver is configured")
         try:
             in_flight = self._worker_in_flight_resolver(worker_id)
         except Exception:
-            raise HostRuntimeError("host worker load observation failed") from None
+            raise HostRuntimeError("host unreserved-load observation failed") from None
         if type(in_flight) is not int or in_flight < 0:
-            raise HostRuntimeError("host worker load observation is invalid")
+            raise HostRuntimeError("host unreserved-load observation is invalid")
         return in_flight
 
     def heartbeat_worker(
