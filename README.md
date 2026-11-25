@@ -106,6 +106,8 @@ Read [`docs/SECURITY_REVIEW.md`](docs/SECURITY_REVIEW.md), [`docs/TOOL_EXECUTION
 The capability roadmap separates implemented foundations from work still required for reliable autonomous operations and evidence-based adaptation.
 
 - [Capability roadmap](docs/CAPABILITY_ROADMAP.md)
+- [Hybrid language decision](docs/ADR-0001-hybrid-language-strategy.md)
+- [Polyglot performance architecture and migration plan](docs/POLYGLOT_PERFORMANCE_ARCHITECTURE.md)
 - [Runtime architecture](docs/RUNTIME_CORE.md)
 - [Host runtime contract](docs/HOST_RUNTIME.md)
 - [Task execution semantics](docs/TASK_EXECUTION.md)
