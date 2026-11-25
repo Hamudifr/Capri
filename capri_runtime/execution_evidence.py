@@ -562,7 +562,7 @@ class SQLiteExecutionEvidenceJournal:
         attempt: int,
     ) -> str | None:
         """Return the verified evidence reference for one completed task attempt."""
-        principal_id = _text(principal_id, "principal_id", 128)
+        principal_id = _text(principal_id, "principal_id", 256)
         task_id = _text(task_id, "task_id", 64)
         if type(step_index) is not int or step_index < 0:
             raise StrategyAuthorizationError("step_index is invalid")
