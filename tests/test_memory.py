@@ -463,6 +463,25 @@ class SQLiteMemoryStoreTests(unittest.TestCase):
         )
         self.assertEqual(self.store.integrity_check(), "ok")
 
+    def test_integrity_check_detects_missing_event_triggers_or_successor_index(self):
+        self.create()
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute("DROP TRIGGER memory_event_immutable_delete")
+            connection.commit()
+        finally:
+            connection.close()
+        self.assertEqual(self.store.integrity_check(), "memory store validation failed")
+        reopened = SQLiteMemoryStore(os.path.join(self.temp.name, "second.sqlite3"))
+        reopened.create(title="Independent memory")
+        connection = sqlite3.connect(reopened.path)
+        try:
+            connection.execute("DROP INDEX memories_single_successor")
+            connection.commit()
+        finally:
+            connection.close()
+        self.assertEqual(reopened.integrity_check(), "memory store validation failed")
+
     def test_memory_events_are_immutable_and_project_without_content(self):
         original = self.create()
         corrected = self.store.correct(original.memory_id, content="Corrected content.")
