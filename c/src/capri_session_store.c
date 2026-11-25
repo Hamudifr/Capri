@@ -332,7 +332,7 @@ CapriSessionError capri_session_backup_to(CapriSessionStore *s,const char *desti
       |O_DIRECTORY
 #endif
     );if(dirfd<0||fsync(dirfd)!=0)result=CAPRI_SESSION_IO;if(dirfd>=0)close(dirfd);}
-    if(!published){unlink(temporary);}else if(result!=CAPRI_SESSION_OK){/* Keep a published complete snapshot if only directory durability failed. */}
+    if(!published){unlink(temporary);}else if(result!=CAPRI_SESSION_OK){/* Keep the complete destination after post-link cleanup or durability failure. */}
     free(temporary);free(parent);free(absolute);return result;
 }
 CapriSessionError capri_session_create_for_principal(CapriSessionStore *s,const char *principal,CapriSession *out) {
