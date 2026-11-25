@@ -473,7 +473,7 @@ class HostApprovalService:
             if (
                 challenge.grant != grant
                 or challenge.approver_id is None
-                or grant.approver_id != challenge.approver_id
+                or (grant.approver_id is not None and grant.approver_id != challenge.approver_id)
             ):
                 return False
             if (
