@@ -76,9 +76,11 @@ def _canonical(value: object) -> str:
 
 
 def _event_payload(
-    principal_id: str, session_id: str, usage: ProviderUsage,
+    principal_id: str, session_id: str, usage: ProviderUsage, recorded_at: str,
 ) -> dict[str, object]:
     return {
+        "event_schema": "capri.provider-usage-event.v1",
+        "recorded_at": recorded_at,
         "provider": usage.provider,
         "response_id": usage.response_id,
         "principal_id": principal_id,
@@ -94,10 +96,26 @@ def _event_payload(
     }
 
 
-def _event_digest(principal_id: str, session_id: str, usage: ProviderUsage) -> str:
+def _event_digest(
+    principal_id: str, session_id: str, usage: ProviderUsage, recorded_at: str,
+) -> str:
     return hashlib.sha256(
-        _canonical(_event_payload(principal_id, session_id, usage)).encode("utf-8")
+        _canonical(_event_payload(principal_id, session_id, usage, recorded_at)).encode("utf-8")
     ).hexdigest()
+
+
+def _validate_recorded_at(value: object) -> str:
+    timestamp = _safe_text(value, "recorded_at", 64)
+    try:
+        parsed = datetime.fromisoformat(timestamp)
+    except ValueError:
+        raise ProviderUsageJournalError("provider usage timestamp is invalid") from None
+    if (
+        parsed.tzinfo is None or parsed.utcoffset() is None
+        or parsed.astimezone(timezone.utc).isoformat() != timestamp
+    ):
+        raise ProviderUsageJournalError("provider usage timestamp is invalid")
+    return timestamp
 
 
 def _validate_provider_usage_identity(
@@ -207,8 +225,8 @@ class SQLiteProviderUsageJournal:
         principal, session, validated = _validate_provider_usage_identity(
             principal_id, session_id, usage,
         )
-        digest = _event_digest(principal, session, validated)
         recorded_at = _utc_timestamp(self._clock())
+        digest = _event_digest(principal, session, validated, recorded_at)
         values = (
             validated.provider, validated.response_id, principal, session,
             validated.model, validated.input_tokens, validated.output_tokens,
@@ -233,7 +251,7 @@ class SQLiteProviderUsageJournal:
                     existing = connection.execute(
                         """SELECT principal_id,session_id,model,input_tokens,output_tokens,
                         total_tokens,cached_input_tokens,cache_write_tokens,reasoning_tokens,
-                        provider_latency_ms,event_sha256
+                        provider_latency_ms,recorded_at,event_sha256
                         FROM provider_usage_events WHERE provider=? AND response_id=?""",
                         (validated.provider, validated.response_id),
                     ).fetchone()
@@ -241,11 +259,16 @@ class SQLiteProviderUsageJournal:
                         principal, session, validated.model, validated.input_tokens,
                         validated.output_tokens, validated.total_tokens,
                         validated.cached_input_tokens, validated.cache_write_tokens,
-                        validated.reasoning_tokens, validated.provider_latency_ms, digest,
+                        validated.reasoning_tokens, validated.provider_latency_ms,
                     )
-                    if existing is None or tuple(existing) != expected:
+                    if existing is None or tuple(existing[:10]) != expected:
                         raise ProviderUsageConflictError(
                             "provider response ID conflicts with an existing immutable usage record"
+                        )
+                    existing_timestamp = _validate_recorded_at(existing[10])
+                    if _event_digest(principal, session, validated, existing_timestamp) != existing[11]:
+                        raise ProviderUsageJournalError(
+                            "existing provider usage record integrity check failed"
                         )
                 connection.commit()
             except ProviderUsageConflictError:
@@ -284,17 +307,8 @@ class SQLiteProviderUsageJournal:
                 cached_input_tokens=row[6], cache_write_tokens=row[7],
                 reasoning_tokens=row[8], provider_latency_ms=row[9],
             )
-            timestamp = _safe_text(row[10], "recorded_at", 64)
-            try:
-                parsed = datetime.fromisoformat(timestamp)
-            except ValueError:
-                raise ProviderUsageJournalError("provider usage timestamp is invalid") from None
-            if (
-                parsed.tzinfo is None or parsed.utcoffset() is None
-                or parsed.astimezone(timezone.utc).isoformat() != timestamp
-            ):
-                raise ProviderUsageJournalError("provider usage timestamp is invalid")
-            if _event_digest(principal, session, usage) != row[11]:
+            timestamp = _validate_recorded_at(row[10])
+            if _event_digest(principal, session, usage, timestamp) != row[11]:
                 raise ProviderUsageJournalError("provider usage record integrity check failed")
             records.append(ProviderUsageRecord(principal, session, usage, timestamp, row[11]))
         return tuple(records)
@@ -408,17 +422,8 @@ def validate_provider_usage_snapshot(connection: sqlite3.Connection) -> None:
             raise ProviderUsageJournalError("provider identifier is invalid")
         _safe_text(usage.model, "model", 128)
         _safe_text(usage.response_id, "response_id", 128)
-        timestamp = _safe_text(row[12], "recorded_at", 64)
-        try:
-            parsed = datetime.fromisoformat(timestamp)
-        except ValueError:
-            raise ProviderUsageJournalError("provider usage timestamp is invalid") from None
-        if (
-            parsed.tzinfo is None or parsed.utcoffset() is None
-            or parsed.astimezone(timezone.utc).isoformat() != timestamp
-        ):
-            raise ProviderUsageJournalError("provider usage timestamp is invalid")
+        timestamp = _validate_recorded_at(row[12])
         if type(row[13]) is not str or not _SHA256_RE.fullmatch(row[13]):
             raise ProviderUsageJournalError("provider usage event digest is invalid")
-        if _event_digest(principal, session, usage) != row[13]:
+        if _event_digest(principal, session, usage, timestamp) != row[13]:
             raise ProviderUsageJournalError("provider usage event digest does not match")
