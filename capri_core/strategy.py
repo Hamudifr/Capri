@@ -187,12 +187,6 @@ def evaluate_strategies(
     candidate_records = by_strategy[candidate_id]
     if not baseline_records or not candidate_records:
         raise StrategyEvaluationError("both baseline and candidate need observations")
-    baseline_versions = {record.strategy_version for record in baseline_records.values()}
-    candidate_versions = {record.strategy_version for record in candidate_records.values()}
-    if len(baseline_versions) != 1 or len(candidate_versions) != 1:
-        raise StrategyEvaluationError("each strategy must use exactly one version in a cohort")
-    baseline_version = next(iter(baseline_versions))
-    candidate_version = next(iter(candidate_versions))
 
     baseline_tasks = set(baseline_records)
     candidate_tasks = set(candidate_records)
@@ -200,6 +194,13 @@ def evaluate_strategies(
     for task_id in common_tasks:
         if baseline_records[task_id].scenario != candidate_records[task_id].scenario:
             raise StrategyEvaluationError("matched task records must have the same scenario")
+
+    baseline_versions = {record.strategy_version for record in baseline_records.values()}
+    candidate_versions = {record.strategy_version for record in candidate_records.values()}
+    if len(baseline_versions) != 1 or len(candidate_versions) != 1:
+        raise StrategyEvaluationError("each strategy must use exactly one version in a cohort")
+    baseline_version = next(iter(baseline_versions))
+    candidate_version = next(iter(candidate_versions))
 
     baseline_matched = [baseline_records[key] for key in common_tasks]
     candidate_matched = [candidate_records[key] for key in common_tasks]

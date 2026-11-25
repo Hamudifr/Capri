@@ -29,7 +29,7 @@ The store persists only the evaluation summary and fingerprint, not raw observat
 
 Activation and rollback are denied by default unless the store is constructed with a trusted host-owned `approval_verifier`. There is no caller-supplied `approved=True` switch and the model never receives the verifier.
 
-A host-issued `StrategyActivationGrant` binds:
+A host-issued `StrategyActivationGrant` binds the exact strategy version measured in the cohort. Each observation carries a version; mixed versions within a strategy cohort are rejected; the registry requires the candidate and registered baseline versions to match the evaluated versions. The grant binds:
 - principal;
 - strategy class, ID and version;
 - evaluation fingerprint (or null for a baseline);

@@ -199,6 +199,21 @@ class SQLiteStrategyStoreTests(unittest.TestCase):
         with self.assertRaises(StrategyConflictError):
             self.store.rollback_for_principal("alice", grant)
 
+    def test_registry_rejects_candidate_version_not_used_in_evaluation(self):
+        observations = make_observations()
+        changed = tuple(
+            replace(record, strategy_version="2.0")
+            if record.strategy_id == "candidate" else record
+            for record in observations
+        )
+        evaluation = evaluate_strategies("baseline", "candidate", changed)
+        with self.assertRaises(StrategyStoreError):
+            self.store.register_candidate_for_principal(
+                "alice", "reasoning", "candidate", "1.0", {"mode": "other"},
+                evaluation, observations=changed,
+                evidence_manifest_ref="test://manifests/wrong-version",
+            )
+
     def test_candidate_evaluation_is_recomputed_from_exact_observations(self):
         forged = replace(self.evaluation, eligible_for_manual_review=False)
         with self.assertRaises(StrategyStoreError):
