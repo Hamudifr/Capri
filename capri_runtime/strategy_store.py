@@ -990,7 +990,7 @@ class SQLiteStrategyStore:
                 if row is None:
                     raise StrategyNotFoundError("promotion assessment is not registered for this candidate")
                 record = _promotion_record_from_row(row)
-                cohort_results = record.summary.get("cohorts")
+                cohort_results = record.summary.get("cohort_results")
                 cohort_ids = {
                     item.get("cohort_id") for item in cohort_results
                     if type(item) is dict and type(item.get("cohort_id")) is str
