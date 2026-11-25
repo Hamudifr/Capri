@@ -121,6 +121,7 @@ from .strategy_store import (
     StrategyNotFoundError,
     StrategyStoreError,
     StrategyVersionRecord,
+    StrategyPromotionRecord,
 )
 from .tasks import (
     SQLiteTaskStore,
