@@ -321,10 +321,10 @@ class CapriHostRuntime:
         context = self._context(credential)
         if self._goal_store is None:
             raise HostRuntimeError("no goal store is configured")
-        if new_state == "cancelled":
+        if new_state in {"cancelled", "paused"}:
             current = self._goal_store.get_for_principal(goal_id, context.principal_id)
             if current.task_id is not None:
-                raise HostRuntimeError("use cancel_goal so linked task cancellation is coordinated")
+                raise HostRuntimeError("use the goal coordinator; direct pause/cancel would leave a linked task active")
         return self._goal_store.transition_for_principal(
             goal_id, context.principal_id, new_state,
             expected_version=expected_version,
