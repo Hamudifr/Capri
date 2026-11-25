@@ -540,7 +540,7 @@ static bool sessions_constraints_valid(sqlite3 *db) {
         "CREATE TABLE sessions(session_id TEXT PRIMARY KEY,created_at TEXT NOT NULL,"
         "updated_at TEXT NOT NULL,version INTEGER NOT NULL,"
         "closed INTEGER NOT NULL CHECK(closed IN(0,1)),messages_json TEXT NOT NULL)";
-    const legacy_checked_sql=
+    const char *legacy_checked_sql=
         "CREATE TABLE sessions(session_id TEXT PRIMARY KEY,created_at TEXT NOT NULL,"
         "updated_at TEXT NOT NULL,version INTEGER NOT NULL CHECK(version>=0),"
         "closed INTEGER NOT NULL CHECK(closed IN(0,1)),messages_json TEXT NOT NULL)";
