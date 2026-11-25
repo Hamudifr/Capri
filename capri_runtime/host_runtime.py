@@ -31,6 +31,9 @@ from .strategy_store import (
     StrategyActivationGrant, StrategyVersionRecord,
 )
 from .tools import ExecutionContext, HostAuthorityResolver
+from .worker_registry import (
+    InMemoryWorkerRegistry, WorkerDescriptor, WorkerRegistryError, WorkerSnapshot,
+)
 
 
 class HostRuntimeError(Exception):
@@ -116,6 +119,9 @@ class CapriHostRuntime:
     principal-scoped access. TaskWorker remains opt-in; CapriHostService provides
     cooperative in-process lifecycle management, while an external process
     supervisor remains responsible for process restart and OS-level limits.
+    The optional Nexus registry gateway requires separate worker-identity,
+    descriptor, supervisor-observation, host-load and task-policy resolvers.
+    It returns advisory candidates only and never dispatches work or grants permissions.
     """
 
     def __init__(
@@ -136,6 +142,12 @@ class CapriHostRuntime:
         goal_store: SQLiteGoalStore | None = None,
         budget_store: SQLiteBudgetStore | None = None,
         strategy_store: SQLiteStrategyStore | None = None,
+        worker_registry: InMemoryWorkerRegistry | None = None,
+        worker_identity_resolver: Callable[[Any], str | None] | None = None,
+        worker_descriptor_resolver: Callable[[str, WorkerDescriptor], WorkerDescriptor] | None = None,
+        worker_observer_authorizer: Callable[[Any, str], bool] | None = None,
+        worker_in_flight_resolver: Callable[[str], int] | None = None,
+        worker_policy_resolver: Callable[[str, str, str], set[str] | frozenset[str]] | None = None,
     ) -> None:
         if not isinstance(authority, HostAuthorityResolver):
             raise HostRuntimeError("a trusted HostAuthorityResolver is required")
@@ -173,6 +185,36 @@ class CapriHostRuntime:
             raise HostRuntimeError("budget_store must be a SQLiteBudgetStore")
         if strategy_store is not None and not isinstance(strategy_store, SQLiteStrategyStore):
             raise HostRuntimeError("strategy_store must be a SQLiteStrategyStore")
+        if worker_registry is not None and not isinstance(worker_registry, InMemoryWorkerRegistry):
+            raise HostRuntimeError("worker_registry must be an InMemoryWorkerRegistry")
+        if worker_identity_resolver is not None and not callable(worker_identity_resolver):
+            raise HostRuntimeError("worker_identity_resolver must be callable")
+        if worker_descriptor_resolver is not None and not callable(worker_descriptor_resolver):
+            raise HostRuntimeError("worker_descriptor_resolver must be callable")
+        if worker_observer_authorizer is not None and not callable(worker_observer_authorizer):
+            raise HostRuntimeError("worker_observer_authorizer must be callable")
+        if worker_in_flight_resolver is not None and not callable(worker_in_flight_resolver):
+            raise HostRuntimeError("worker_in_flight_resolver must be callable")
+        if worker_policy_resolver is not None and not callable(worker_policy_resolver):
+            raise HostRuntimeError("worker_policy_resolver must be callable")
+        if worker_registry is None and any((
+            worker_identity_resolver is not None,
+            worker_descriptor_resolver is not None,
+            worker_observer_authorizer is not None,
+            worker_in_flight_resolver is not None,
+            worker_policy_resolver is not None,
+        )):
+            raise HostRuntimeError("worker registry callbacks require a configured worker_registry")
+        if worker_registry is not None and any((
+            worker_identity_resolver is None,
+            worker_descriptor_resolver is None,
+            worker_observer_authorizer is None,
+            worker_in_flight_resolver is None,
+            worker_policy_resolver is None,
+        )):
+            raise HostRuntimeError(
+                "worker_registry requires identity, descriptor, supervisor-observer, host-load and policy resolvers"
+            )
         if (
             task_store is not None and task_worker is not None
             and task_store.path != task_worker.engine.store.path
@@ -194,6 +236,12 @@ class CapriHostRuntime:
         ):
             raise HostRuntimeError("strategy_store must share the exact configured task store")
         self._strategy_store = strategy_store
+        self._worker_registry = worker_registry
+        self._worker_identity_resolver = worker_identity_resolver
+        self._worker_descriptor_resolver = worker_descriptor_resolver
+        self._worker_observer_authorizer = worker_observer_authorizer
+        self._worker_in_flight_resolver = worker_in_flight_resolver
+        self._worker_policy_resolver = worker_policy_resolver
         self._goal_store = goal_store
         configured_budgets = [
             item for item in (
@@ -215,6 +263,109 @@ class CapriHostRuntime:
 
     def _context(self, credential: Any) -> ExecutionContext:
         return self._authority.resolve(credential)
+
+    def _worker_identity(self, credential: Any) -> str:
+        if self._worker_registry is None or self._worker_identity_resolver is None:
+            raise HostRuntimeError("no host worker registry is configured")
+        try:
+            identity = self._worker_identity_resolver(credential)
+        except Exception:
+            raise HostRuntimeError("worker transport authentication failed") from None
+        if type(identity) is not str:
+            raise HostRuntimeError("worker transport identity is invalid")
+        return identity
+
+    def register_worker(self, credential: Any, descriptor: WorkerDescriptor) -> WorkerSnapshot:
+        """Register a worker only after the trusted host transport resolves its identity."""
+        identity = self._worker_identity(credential)
+        try:
+            approved = self._worker_descriptor_resolver(identity, descriptor)
+        except Exception:
+            raise HostRuntimeError("host worker descriptor approval failed") from None
+        if type(approved) is not WorkerDescriptor or approved.worker_id != identity:
+            raise HostRuntimeError("host worker descriptor approval returned an invalid identity")
+        try:
+            return self._worker_registry.register(
+                approved, authenticated_worker_id=identity,
+            )
+        except WorkerRegistryError:
+            raise HostRuntimeError("worker registration was rejected") from None
+
+    def _authorize_worker_observer(self, credential: Any, worker_id: str) -> None:
+        if self._worker_registry is None or self._worker_observer_authorizer is None:
+            raise HostRuntimeError("no host worker observer is configured")
+        try:
+            authorized = self._worker_observer_authorizer(credential, worker_id)
+        except Exception:
+            raise HostRuntimeError("host worker observer authentication failed") from None
+        if authorized is not True:
+            raise HostRuntimeError("host worker observer is not authorized")
+
+    def _worker_in_flight(self, worker_id: str) -> int:
+        if self._worker_registry is None or self._worker_in_flight_resolver is None:
+            raise HostRuntimeError("no host worker load resolver is configured")
+        try:
+            in_flight = self._worker_in_flight_resolver(worker_id)
+        except Exception:
+            raise HostRuntimeError("host worker load observation failed") from None
+        if type(in_flight) is not int or in_flight < 0:
+            raise HostRuntimeError("host worker load observation is invalid")
+        return in_flight
+
+    def heartbeat_worker(
+        self, observer_credential: Any, worker_id: str,
+    ) -> WorkerSnapshot:
+        """Record liveness only from a trusted supervisor and host-derived load."""
+        self._authorize_worker_observer(observer_credential, worker_id)
+        in_flight = self._worker_in_flight(worker_id)
+        try:
+            return self._worker_registry.heartbeat(
+                worker_id, authenticated_worker_id=worker_id, in_flight=in_flight,
+            )
+        except WorkerRegistryError:
+            raise HostRuntimeError("worker heartbeat was rejected") from None
+
+    def record_worker_failure(
+        self, observer_credential: Any, worker_id: str,
+    ) -> WorkerSnapshot:
+        """Record failure only from a trusted host supervisor/monitor."""
+        self._authorize_worker_observer(observer_credential, worker_id)
+        try:
+            return self._worker_registry.record_failure(
+                worker_id, authenticated_worker_id=worker_id,
+            )
+        except WorkerRegistryError:
+            raise HostRuntimeError("worker failure observation was rejected") from None
+
+    def get_worker_candidates(
+        self, credential: Any, task_id: str, capability: str, protocol_version: int,
+    ) -> tuple[WorkerSnapshot, ...]:
+        """Return advisory candidates filtered by a separate host task-policy decision."""
+        context = self._context(credential)
+        if self._worker_registry is None or self._worker_policy_resolver is None:
+            raise HostRuntimeError("no host worker registry is configured")
+        if self._task_store is None:
+            raise HostRuntimeError("worker selection requires a configured task store")
+        try:
+            self._task_store.get_for_principal(task_id, context.principal_id)
+        except Exception:
+            raise HostRuntimeError("task is unavailable to the authenticated principal") from None
+        try:
+            allowed = self._worker_policy_resolver(
+                context.principal_id, task_id, capability,
+            )
+        except Exception:
+            raise HostRuntimeError("host worker policy resolution failed") from None
+        if type(allowed) not in (set, frozenset):
+            raise HostRuntimeError("host worker policy returned an invalid allow-list")
+        try:
+            return self._worker_registry.eligible(
+                capability,
+                protocol_version=protocol_version,
+                authorized_worker_ids=allowed,
+            )
+        except WorkerRegistryError:
+            raise HostRuntimeError("host worker candidate lookup was rejected") from None
 
     def get_budget_usage(self, credential: Any) -> BudgetUsage:
         """Return only the authenticated principal's current budget-window usage."""
