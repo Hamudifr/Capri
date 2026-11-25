@@ -372,19 +372,33 @@ class SQLiteBudgetStore:
     ) -> BudgetUsage:
         principal_id = _identity(principal_id)
         current = _utc(now)
-        policy = self.get_policy_for_principal(principal_id)
-        window_epoch = int(current.timestamp()) // policy.window_seconds * policy.window_seconds
-        window_start = datetime.fromtimestamp(window_epoch, timezone.utc).isoformat()
-        reset_at = datetime.fromtimestamp(window_epoch + policy.window_seconds, timezone.utc)
         with self._lock:
             connection = self._connect()
             try:
+                # Keep policy and usage on one SQLite snapshot. A concurrent policy
+                # update must not make the returned window disagree with its policy.
+                connection.execute("BEGIN")
+                policy_row = connection.execute(
+                    "SELECT policy_json FROM budget_policies WHERE principal_id=?",
+                    (principal_id,),
+                ).fetchone()
+                policy = self._policy_from_json(policy_row[0]) if policy_row else self.default_policy
+                window_epoch = int(current.timestamp()) // policy.window_seconds * policy.window_seconds
+                window_start = datetime.fromtimestamp(window_epoch, timezone.utc).isoformat()
+                reset_at = datetime.fromtimestamp(window_epoch + policy.window_seconds, timezone.utc)
                 rows = connection.execute(
                     """SELECT dimension,used FROM budget_usage
                     WHERE principal_id=? AND window_start=?""",
                     (principal_id, window_start),
                 ).fetchall()
                 used = {dimension: amount for dimension, amount in rows}
+                connection.execute("COMMIT")
+            except Exception:
+                try:
+                    connection.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+                raise
             finally:
                 connection.close()
         complete_usage = {dimension: used.get(dimension, 0) for dimension in _DIMENSIONS}
