@@ -364,6 +364,61 @@ int main(void) {
     CapriSessionStore *schema_reopen=capri_session_store_open(schema_path,200,16000,64000,131072,&error);
     assert(schema_reopen==NULL && error==CAPRI_SESSION_DATABASE);
 
+    /* Missing owner and lease foreign keys must fail startup, integrity and backup. */
+    char owner_fk_schema_path[512],owner_fk_backup_path[512];
+    snprintf(owner_fk_schema_path,sizeof owner_fk_schema_path,"%s/owner-fk-tampered.sqlite3",dir);
+    snprintf(owner_fk_backup_path,sizeof owner_fk_backup_path,"%s/owner-fk-backup.sqlite3",dir);
+    CapriSessionStore *owner_fk_store=capri_session_store_open(owner_fk_schema_path,200,16000,64000,131072,&error);
+    assert(owner_fk_store!=NULL && error==CAPRI_SESSION_OK);
+    sqlite3 *owner_fk_tamper=NULL;
+    assert(sqlite3_open(owner_fk_schema_path,&owner_fk_tamper)==SQLITE_OK);
+    assert(sqlite3_exec(
+        owner_fk_tamper,
+        "PRAGMA foreign_keys=OFF;"
+        "DROP TRIGGER session_owners_immutable_insert;"
+        "DROP TRIGGER session_owners_immutable_update;"
+        "DROP TRIGGER session_owners_immutable_delete;"
+        "DROP INDEX session_owners_principal_id;"
+        "DROP TABLE session_owners;"
+        "CREATE TABLE session_owners(session_id TEXT PRIMARY KEY,principal_id TEXT NOT NULL,created_at TEXT NOT NULL);"
+        "CREATE INDEX session_owners_principal_id ON session_owners(principal_id);"
+        "CREATE TRIGGER session_owners_immutable_update BEFORE UPDATE ON session_owners BEGIN SELECT RAISE(ABORT,'session owner is immutable'); END;"
+        "CREATE TRIGGER session_owners_immutable_delete BEFORE DELETE ON session_owners BEGIN SELECT RAISE(ABORT,'session owner is immutable'); END;"
+        "CREATE TRIGGER session_owners_immutable_insert BEFORE INSERT ON session_owners WHEN EXISTS(SELECT 1 FROM session_owners WHERE session_id=NEW.session_id) BEGIN SELECT RAISE(ABORT,'session owner is immutable'); END;",
+        NULL,NULL,NULL
+    )==SQLITE_OK);
+    sqlite3_close(owner_fk_tamper);
+    assert(capri_session_integrity_check(owner_fk_store)==CAPRI_SESSION_CORRUPT);
+    assert(capri_session_backup_to(owner_fk_store,owner_fk_backup_path)==CAPRI_SESSION_CORRUPT);
+    struct stat owner_fk_backup_missing;
+    assert(lstat(owner_fk_backup_path,&owner_fk_backup_missing)!=0);
+    capri_session_store_close(owner_fk_store);
+    CapriSessionStore *owner_fk_reopen=capri_session_store_open(owner_fk_schema_path,200,16000,64000,131072,&error);
+    assert(owner_fk_reopen==NULL && error==CAPRI_SESSION_DATABASE);
+
+    char lease_fk_schema_path[512],lease_fk_backup_path[512];
+    snprintf(lease_fk_schema_path,sizeof lease_fk_schema_path,"%s/lease-fk-tampered.sqlite3",dir);
+    snprintf(lease_fk_backup_path,sizeof lease_fk_backup_path,"%s/lease-fk-backup.sqlite3",dir);
+    CapriSessionStore *lease_fk_store=capri_session_store_open(lease_fk_schema_path,200,16000,64000,131072,&error);
+    assert(lease_fk_store!=NULL && error==CAPRI_SESSION_OK);
+    sqlite3 *lease_fk_tamper=NULL;
+    assert(sqlite3_open(lease_fk_schema_path,&lease_fk_tamper)==SQLITE_OK);
+    assert(sqlite3_exec(
+        lease_fk_tamper,
+        "PRAGMA foreign_keys=OFF;"
+        "DROP TABLE session_turn_leases;"
+        "CREATE TABLE session_turn_leases(session_id TEXT PRIMARY KEY,owner_token TEXT NOT NULL,expires_at TEXT NOT NULL);",
+        NULL,NULL,NULL
+    )==SQLITE_OK);
+    sqlite3_close(lease_fk_tamper);
+    assert(capri_session_integrity_check(lease_fk_store)==CAPRI_SESSION_CORRUPT);
+    assert(capri_session_backup_to(lease_fk_store,lease_fk_backup_path)==CAPRI_SESSION_CORRUPT);
+    struct stat lease_fk_backup_missing;
+    assert(lstat(lease_fk_backup_path,&lease_fk_backup_missing)!=0);
+    capri_session_store_close(lease_fk_store);
+    CapriSessionStore *lease_fk_reopen=capri_session_store_open(lease_fk_schema_path,200,16000,64000,131072,&error);
+    assert(lease_fk_reopen==NULL && error==CAPRI_SESSION_DATABASE);
+
     unlink(backup_path); unlink(restored_path); unlink(corrupt_backup_path); unlink(corrupt_restore_path); unlink(path); unlink(schema_path); char wal[520],shm[520],schema_wal[540],schema_shm[540];snprintf(wal,sizeof wal,"%s-wal",path);snprintf(shm,sizeof shm,"%s-shm",path);snprintf(schema_wal,sizeof schema_wal,"%s-wal",schema_path);snprintf(schema_shm,sizeof schema_shm,"%s-shm",schema_path);unlink(wal);unlink(shm);unlink(schema_wal);unlink(schema_shm);rmdir(dir);
     puts("native SQLite session tests: ok"); return 0;
 }
