@@ -12,7 +12,7 @@ from .worker_protocol import (
 )
 from .worker_registry import (
     InMemoryWorkerRegistry, WorkerConflictError, WorkerDescriptor,
-    WorkerHealth, WorkerNotFoundError, WorkerRegistryError, WorkerSnapshot,
+    WorkerHealth, WorkerNotFoundError, WorkerRegistryError, WorkerReservation, WorkerSnapshot,
 )
 from .runtime import (
     Message,
@@ -176,6 +176,7 @@ __all__ = [
     "WorkerHealth",
     "WorkerNotFoundError",
     "WorkerRegistryError",
+    "WorkerReservation",
     "WorkerSnapshot",
     "ToolBudgetExceededError",
     "GoalCoordinator",

@@ -8,6 +8,7 @@ supervisor/transport and must re-check policy immediately before dispatch.
 from __future__ import annotations
 
 import re
+import secrets
 import threading
 import time
 from dataclasses import dataclass, replace
@@ -18,6 +19,7 @@ _CAPABILITY = re.compile(r"^[a-z][a-z0-9_.:-]{0,127}$")
 _MAX_WORKERS = 1024
 _MAX_CAPABILITIES = 64
 _MAX_PROTOCOL_VERSIONS = 16
+_MAX_RESERVATIONS = 4096
 
 
 class WorkerRegistryError(ValueError):
@@ -97,6 +99,25 @@ class WorkerHealth:
 
 
 @dataclass(frozen=True, slots=True)
+class WorkerReservation:
+    """Opaque, short-lived host reservation for one worker capacity slot."""
+
+    token: str
+    worker_id: str
+    expires_at_ns: int
+    descriptor_revision: int
+
+    def __post_init__(self) -> None:
+        if type(self.token) is not str or re.fullmatch(r"[A-Za-z0-9_-]{32,128}", self.token) is None:
+            raise WorkerRegistryError("reservation token is invalid")
+        _identifier(self.worker_id, "worker_id")
+        if type(self.expires_at_ns) is not int or self.expires_at_ns < 0:
+            raise WorkerRegistryError("reservation expiry must be a non-negative integer")
+        if type(self.descriptor_revision) is not int or self.descriptor_revision < 1:
+            raise WorkerRegistryError("reservation descriptor revision must be positive")
+
+
+@dataclass(frozen=True, slots=True)
 class WorkerSnapshot:
     descriptor: WorkerDescriptor
     health: WorkerHealth
@@ -119,6 +140,8 @@ class InMemoryWorkerRegistry:
         failure_threshold: int = 3,
         clock_ns: Callable[[], int] = time.monotonic_ns,
         max_workers: int = _MAX_WORKERS,
+        reservation_ttl_ms: int = 10_000,
+        max_reservations: int = _MAX_RESERVATIONS,
     ) -> None:
         if type(heartbeat_ttl_ms) is not int or not 1_000 <= heartbeat_ttl_ms <= 300_000:
             raise WorkerRegistryError("heartbeat_ttl_ms must be from 1000 through 300000")
@@ -128,11 +151,18 @@ class InMemoryWorkerRegistry:
             raise WorkerRegistryError("clock_ns must be callable")
         if type(max_workers) is not int or not 1 <= max_workers <= _MAX_WORKERS:
             raise WorkerRegistryError(f"max_workers must be from 1 through {_MAX_WORKERS}")
+        if type(reservation_ttl_ms) is not int or not 1_000 <= reservation_ttl_ms <= 60_000:
+            raise WorkerRegistryError("reservation_ttl_ms must be from 1000 through 60000")
+        if type(max_reservations) is not int or not 1 <= max_reservations <= _MAX_RESERVATIONS:
+            raise WorkerRegistryError(f"max_reservations must be from 1 through {_MAX_RESERVATIONS}")
         self._ttl_ns = heartbeat_ttl_ms * 1_000_000
         self._failure_threshold = failure_threshold
         self._clock_ns = clock_ns
         self._max_workers = max_workers
+        self._reservation_ttl_ns = reservation_ttl_ms * 1_000_000
+        self._max_reservations = max_reservations
         self._workers: dict[str, WorkerSnapshot] = {}
+        self._reservations: dict[str, WorkerReservation] = {}
         self._lock = threading.RLock()
 
     def register(
@@ -194,6 +224,7 @@ class InMemoryWorkerRegistry:
                 raise WorkerConflictError("retired workers cannot be updated or re-enabled")
             if descriptor.revision != expected_revision + 1:
                 raise WorkerRegistryError("new descriptor revision must increment exactly once")
+            self._revoke_worker_reservations(identity)
             updated = WorkerSnapshot(descriptor, current.health)
             self._workers[identity] = updated
             return updated
@@ -251,6 +282,7 @@ class InMemoryWorkerRegistry:
                 raise WorkerConflictError("quarantined or retired worker state is terminal here")
             failures = current.health.consecutive_failures + 1
             state = "unavailable" if failures >= self._failure_threshold else "degraded"
+            self._revoke_worker_reservations(identity)
             health = replace(
                 current.health,
                 state=state,
@@ -286,6 +318,7 @@ class InMemoryWorkerRegistry:
                 raise WorkerNotFoundError("worker is not registered")
             if current.health.revision != expected_health_revision:
                 raise WorkerConflictError("worker health revision changed")
+            self._revoke_worker_reservations(identity)
             descriptor = replace(
                 current.descriptor, enabled=False, revision=current.descriptor.revision + 1,
             )
@@ -341,6 +374,7 @@ class InMemoryWorkerRegistry:
                 raise WorkerConflictError("worker health revision changed")
             if current.health.state == "retired":
                 raise WorkerConflictError("retired workers cannot change health state")
+            self._revoke_worker_reservations(identity)
             health = replace(
                 current.health, state=state,
                 revision=current.health.revision + 1,
@@ -348,6 +382,121 @@ class InMemoryWorkerRegistry:
             updated = WorkerSnapshot(current.descriptor, health)
             self._workers[identity] = updated
             return updated
+
+
+    def _purge_expired_reservations(self, now_ns: int) -> None:
+        """Remove expired capacity holds. Caller must hold _lock."""
+        expired = [
+            token for token, reservation in self._reservations.items()
+            if now_ns >= reservation.expires_at_ns
+        ]
+        for token in expired:
+            del self._reservations[token]
+
+    def _revoke_worker_reservations(self, worker_id: str) -> None:
+        """Invalidate all pending holds for a worker. Caller must hold _lock."""
+        revoked = [
+            token for token, reservation in self._reservations.items()
+            if reservation.worker_id == worker_id
+        ]
+        for token in revoked:
+            del self._reservations[token]
+
+    def reserve_eligible(
+        self,
+        capability: str,
+        *,
+        protocol_version: int,
+        authorized_worker_ids: set[str] | frozenset[str],
+        now_ns: int | None = None,
+    ) -> WorkerReservation | None:
+        """Atomically select and reserve one eligible worker capacity slot.
+
+        The caller must independently authorize the task and re-check policy at
+        dispatch. Reservations are process-local, expire lazily on subsequent selection/release operations, and are
+        invalidated by worker failure, quarantine, retirement or descriptor change.
+        """
+        if type(capability) is not str or _CAPABILITY.fullmatch(capability) is None:
+            raise WorkerRegistryError("capability is invalid")
+        if type(protocol_version) is not int or not 1 <= protocol_version <= 255:
+            raise WorkerRegistryError("protocol_version is invalid")
+        if type(authorized_worker_ids) not in (set, frozenset):
+            raise WorkerRegistryError("authorized_worker_ids must be a host policy set")
+        if len(authorized_worker_ids) > self._max_workers:
+            raise WorkerRegistryError("authorized worker set exceeds the registry bound")
+        allowed = frozenset(
+            _identifier(item, "authorized worker ID") for item in authorized_worker_ids
+        )
+        timestamp = _now_ns(now_ns, self._clock_ns)
+        with self._lock:
+            self._purge_expired_reservations(timestamp)
+            reserved_counts: dict[str, int] = {}
+            for reservation in self._reservations.values():
+                reserved_counts[reservation.worker_id] = (
+                    reserved_counts.get(reservation.worker_id, 0) + 1
+                )
+            candidates = []
+            for snapshot in self._workers.values():
+                descriptor, health = snapshot.descriptor, snapshot.health
+                heartbeat = health.last_heartbeat_ns
+                reserved = reserved_counts.get(descriptor.worker_id, 0)
+                fresh = (
+                    heartbeat is not None and heartbeat <= timestamp
+                    and timestamp - heartbeat <= self._ttl_ns
+                )
+                if (
+                    descriptor.worker_id in allowed
+                    and descriptor.enabled
+                    and capability in descriptor.capabilities
+                    and protocol_version in descriptor.protocol_versions
+                    and health.state == "healthy"
+                    and fresh
+                    and health.in_flight + reserved < descriptor.max_concurrency
+                ):
+                    candidates.append((snapshot, reserved))
+            candidates.sort(key=lambda item: (
+                -item[0].descriptor.priority,
+                item[0].health.in_flight + item[1],
+                item[0].descriptor.worker_id,
+            ))
+            if not candidates:
+                return None
+            if len(self._reservations) >= self._max_reservations:
+                raise WorkerRegistryError("worker reservation capacity is exhausted")
+            snapshot = candidates[0][0]
+            token = secrets.token_urlsafe(32)
+            reservation = WorkerReservation(
+                token=token,
+                worker_id=snapshot.descriptor.worker_id,
+                expires_at_ns=timestamp + self._reservation_ttl_ns,
+                descriptor_revision=snapshot.descriptor.revision,
+            )
+            self._reservations[token] = reservation
+            return reservation
+
+    def release_reservation(
+        self,
+        reservation: WorkerReservation,
+        *,
+        authenticated_worker_id: str,
+        now_ns: int | None = None,
+    ) -> bool:
+        """Release one pending hold; expired or already released tokens return False."""
+        if type(reservation) is not WorkerReservation:
+            raise WorkerRegistryError("reservation must be an exact WorkerReservation")
+        identity = _identifier(authenticated_worker_id, "authenticated_worker_id")
+        if identity != reservation.worker_id:
+            raise WorkerRegistryError("authenticated identity does not match reservation worker")
+        timestamp = _now_ns(now_ns, self._clock_ns)
+        with self._lock:
+            self._purge_expired_reservations(timestamp)
+            current = self._reservations.get(reservation.token)
+            if current is None:
+                return False
+            if current != reservation:
+                raise WorkerConflictError("reservation token does not match current reservation")
+            del self._reservations[reservation.token]
+            return True
 
     def eligible(
         self,
@@ -373,10 +522,15 @@ class InMemoryWorkerRegistry:
             raise WorkerRegistryError("limit must be from 1 through 100")
         timestamp = _now_ns(now_ns, self._clock_ns)
         with self._lock:
+            self._purge_expired_reservations(timestamp)
+            reserved_counts: dict[str, int] = {}
+            for reservation in self._reservations.values():
+                reserved_counts[reservation.worker_id] = reserved_counts.get(reservation.worker_id, 0) + 1
             candidates = []
             for snapshot in self._workers.values():
                 descriptor, health = snapshot.descriptor, snapshot.health
                 heartbeat = health.last_heartbeat_ns
+                reserved = reserved_counts.get(descriptor.worker_id, 0)
                 fresh = (
                     heartbeat is not None and heartbeat <= timestamp
                     and timestamp - heartbeat <= self._ttl_ns
@@ -388,12 +542,12 @@ class InMemoryWorkerRegistry:
                     and protocol_version in descriptor.protocol_versions
                     and health.state == "healthy"
                     and fresh
-                    and health.in_flight < descriptor.max_concurrency
+                    and health.in_flight + reserved < descriptor.max_concurrency
                 ):
                     candidates.append(snapshot)
             candidates.sort(key=lambda item: (
                 -item.descriptor.priority,
-                item.health.in_flight,
+                item.health.in_flight + reserved_counts.get(item.descriptor.worker_id, 0),
                 item.descriptor.worker_id,
             ))
             return tuple(candidates[:limit])
