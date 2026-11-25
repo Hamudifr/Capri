@@ -674,9 +674,66 @@ class CapriHostRuntime:
             self._worker_reservation_contexts.clear()
             return
         if isinstance(self._worker_registry, SQLiteWorkerRegistry):
-            # SQLite rehydrates monotonic expiry projections on every operation.
-            # Compare stable reservation identity inside the registry transaction,
-            # not full dataclass equality across separately materialized snapshots.
+            if not self._worker_reservation_contexts:
+                return
+            self._begin_worker_audit_operation()
+            try:
+                active, expired = self._worker_registry.active_reservations_with_expired()
+                active_by_token = {item.token: item for item in active}
+                expired_by_token = {item.token: item for item in expired}
+                for token, context in tuple(self._worker_reservation_contexts.items()):
+                    current = active_by_token.get(token)
+                    if current is not None:
+                        current_context = HostWorkerReservation(
+                            context.principal_id, context.task_id,
+                            context.capability, context.protocol_version, current,
+                        )
+                        if not self._same_host_reservation_context(context, current_context):
+                            self._worker_audit_healthy = False
+                            raise HostRuntimeError(
+                                "worker reservation context changed outside the trusted host gateway; reconciliation is required"
+                            )
+                        continue
+                    self._worker_reservation_contexts.pop(token, None)
+                    if token in expired_by_token:
+                        self._record_worker_lifecycle_event(
+                            "worker.reservation.expired",
+                            context.reservation.worker_id,
+                            principal_id=context.principal_id,
+                            task_id=context.task_id,
+                            capability=context.capability,
+                            protocol_version=context.protocol_version,
+                            descriptor_revision=context.reservation.descriptor_revision,
+                            reservation_token=token,
+                            status="expired",
+                            error_code="reservation_ttl_elapsed",
+                        )
+                    else:
+                        self._record_worker_lifecycle_event(
+                            "worker.reservation.context_missing",
+                            context.reservation.worker_id,
+                            principal_id=context.principal_id,
+                            task_id=context.task_id,
+                            capability=context.capability,
+                            protocol_version=context.protocol_version,
+                            descriptor_revision=context.reservation.descriptor_revision,
+                            reservation_token=token,
+                            status="not_found",
+                            error_code="reservation_missing_or_revoked",
+                        )
+                        self._worker_audit_healthy = False
+                        self._finish_worker_audit_operation()
+                        raise HostRuntimeError(
+                            "worker reservation expired or disappeared outside the trusted host gateway; reconciliation is required"
+                        )
+                self._finish_worker_audit_operation()
+            except HostRuntimeError:
+                raise
+            except Exception:
+                self._worker_audit_healthy = False
+                raise HostRuntimeError(
+                    "worker reservation context reconciliation failed; reconciliation is required"
+                ) from None
             return
         for token, context in tuple(self._worker_reservation_contexts.items()):
             current = self._worker_registry.get_reservation(token)
