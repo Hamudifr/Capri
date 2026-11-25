@@ -4,6 +4,9 @@ from .budgets import (
     BudgetError, BudgetExceededError, BudgetPolicy, BudgetReservation,
     BudgetUsage, BudgetValidationError, SQLiteBudgetStore,
 )
+from .domain_events import (
+    DomainEvent, DomainEventValidationError, project_domain_events,
+)
 from .runtime import (
     Message,
     ModelAdapter,
@@ -120,6 +123,9 @@ __all__ = [
     "BudgetUsage",
     "BudgetValidationError",
     "SQLiteBudgetStore",
+    "DomainEvent",
+    "DomainEventValidationError",
+    "project_domain_events",
     "ToolBudgetExceededError",
     "GoalCoordinator",
     "GoalExecution",
