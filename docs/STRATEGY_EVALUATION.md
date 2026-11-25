@@ -12,7 +12,7 @@ This first vertical slice establishes the evaluation contract before any strateg
 
 ## API
 
-Import `StrategyObservation` and `evaluate_strategies` from `capri_core`.
+Import `StrategyObservation`, `evaluate_strategies`, and `verify_strategy_evaluation` from `capri_core`.
 
 Each observation contains:
 - task ID and scenario label;
@@ -35,7 +35,7 @@ A candidate is eligible for manual review only when all conditions hold:
 4. On every matched task, candidate safety must not regress, a baseline verified success must not become a candidate failure/unverified outcome, and none of the four resource metrics may worsen. This paired non-regression rule prevents aggregate averages from hiding a harmful regression on an individual task.
 5. At least one of verified-success outcome, safety outcome, or a resource metric strictly improves on at least one matched task.
 
-Any per-task safety, success, or resource regression blocks eligibility, even if aggregate averages look better. Equal outcomes with no strict improvement do not justify changing strategy. The result includes matched/unmatched counts, both metric summaries, improved dimensions, and stable block reasons. It also includes a SHA-256 fingerprint of the complete validated input cohort.
+Any per-task safety, success, or resource regression blocks eligibility, even if aggregate averages look better. Equal outcomes with no strict improvement do not justify changing strategy. The result includes the configured `min_pairs` floor, matched/unmatched counts, both metric summaries, improved dimensions, and stable block reasons. It also includes a SHA-256 fingerprint of the complete validated input cohort.
 
 Estimated-cost units are abstract owner-defined integers, not currency, and the evaluator does not spend money or call a provider. Latency is supplied by the caller; this module does not measure it.
 
@@ -44,6 +44,12 @@ Estimated-cost units are abstract owner-defined integers, not currency, and the 
 Each evaluation returns `cohort_sha256`, a lowercase SHA-256 digest over a canonical JSON manifest containing schema version `capri.strategy-cohort.v1`, the baseline and candidate IDs, and every validated observation (including unmatched observations). Records are sorted by strategy ID and task ID, and JSON keys/separators are canonicalized, so input iteration order does not change the digest.
 
 The fingerprint lets a caller bind a saved evaluation result to the exact input values later presented for verification. A changed evidence reference or metric changes the digest. The digest is not a signature, does not prove that evidence references are genuine or immutable, and does not replace preservation/readback of the referenced evidence. The module still does not persist the manifest or observations.
+
+## Rechecking a saved result
+
+`verify_strategy_evaluation(evaluation, observations, expected_min_pairs=None)` reruns the deterministic evaluator over the supplied observations and compares the complete derived result, including the cohort fingerprint, metrics, block reasons, eligibility flag, and stored sample floor. This detects a changed observation or an altered saved result. Supply `expected_min_pairs` from the caller's independent policy when the sample floor itself must be fixed; otherwise the verifier uses the floor stored in the evaluation.
+
+This is a consistency check, not an authenticity mechanism. It does not sign the record, identify its author, establish evidence-source integrity, or prevent an attacker from changing both inputs and result. Preserve evidence separately and use a trusted signature or protected audit store if authenticity is required.
 
 ## Interpretation and limits
 
