@@ -50,7 +50,7 @@ The first C persistence slice now covers:
 - SQLite foreign keys, recursive triggers, trusted-schema restrictions, WAL, FULL synchronous commits, a busy timeout, and defensive mode where supported.
 - Atomic creation of a session with an immutable principal-owner row.
 - Principal-scoped reads and close operations that hide foreign and legacy-unowned sessions as not found.
-- Legacy create/get/commit/close compatibility for unowned sessions only; these APIs cannot read or mutate principal-owned sessions.
+- Legacy create/get/commit/close and turn-lease compatibility for unowned sessions only; these APIs cannot read or mutate principal-owned sessions.
 - Strict JSON message-shape, role-order, UTF-8, per-message size, transcript-version, and history validation.
 - Optimistic version-checked turn commits in BEGIN IMMEDIATE transactions.
 - Durable claim, renew, and release operations for principal-bound turn leases, with active lease fencing on commits and corruption detection for malformed persisted lease timestamps/owner tokens.
