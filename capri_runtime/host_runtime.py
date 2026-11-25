@@ -1063,6 +1063,7 @@ class CapriHostRuntime:
                 try:
                     self._worker_registry.release_reservation(
                         stored.reservation, authenticated_worker_id=worker_id,
+                        **self._worker_registry_expiry_kwargs(),
                     )
                 except WorkerRegistryError:
                     self._worker_audit_healthy = False
@@ -1186,6 +1187,11 @@ class CapriHostRuntime:
                 self._worker_audit_healthy = False
                 raise HostRuntimeError("worker reservation release failed; reconciliation is required") from None
             self._worker_reservation_contexts.pop(stored.reservation.token, None)
+            if not released and stored.reservation.token not in self._worker_reservation_contexts:
+                # The registry's operation-local expiry callback already emitted
+                # the authoritative expiry event for this token.
+                self._finish_worker_audit_operation()
+                return False
             self._record_worker_lifecycle_event(
                 "worker.reservation.released",
                 worker_id,
