@@ -1246,13 +1246,13 @@ class SQLiteStrategyStore:
                         type(evaluation_summary) is not dict
                         or evaluation_summary.get("candidate_version") != grant.version
                         or not _promotion_record_matches(
-                        promotion_record,
-                        strategy_class=grant.strategy_class,
-                        baseline_id=evaluation_baseline_id,
-                        candidate_id=evaluation_candidate_id,
-                        baseline_version=evaluation_summary.get("baseline_version"),
-                        candidate_version=evaluation_summary.get("candidate_version"),
-                        cohort_sha256=cohort_hash,
+                            promotion_record,
+                            strategy_class=grant.strategy_class,
+                            baseline_id=evaluation_baseline_id,
+                            candidate_id=evaluation_candidate_id,
+                            baseline_version=evaluation_summary.get("baseline_version"),
+                            candidate_version=evaluation_summary.get("candidate_version"),
+                            cohort_sha256=cohort_hash,
                             require_current_policy=True,
                         )
                     ):
