@@ -112,6 +112,7 @@ class HostStrategyApprovalAuthorityTests(unittest.TestCase):
             store = SQLiteStrategyStore(
                 task_store, approval_verifier=self.authority.verify,
                 evidence_verifier=lambda context: True,
+                clock=lambda: self.now,
             )
             baseline = store.register_baseline_for_principal(
                 "alice", "reasoning", "baseline", "1.0", {"mode": "standard"},
