@@ -22,7 +22,7 @@ from .tasks import SQLiteTaskStore, TaskRecord, TaskWorker
 from .goals import (
     GoalPlanProposal, GoalRecord, SQLiteGoalStore,
 )
-from .goal_coordinator import GoalCoordinator, GoalExecution
+from .goal_coordinator import GoalCompletionReport, GoalCoordinator, GoalExecution
 from .budgets import BudgetUsage, SQLiteBudgetStore
 from .tools import ExecutionContext, HostAuthorityResolver
 
@@ -303,14 +303,16 @@ class CapriHostRuntime:
             expected_version=expected_version,
         )
 
-    def _goal_coordinator(self) -> GoalCoordinator:
-        if self._goal_store is None or self._task_store is None or self._task_worker is None:
-            raise HostRuntimeError("goal coordination requires goal and principal task stores plus a task worker")
-        return GoalCoordinator(
-            self._goal_store,
-            self._task_store,
-            frozenset(self._task_worker.engine.principal_handlers),
+    def _goal_coordinator(self, *, require_worker: bool = True) -> GoalCoordinator:
+        if self._goal_store is None or self._task_store is None:
+            raise HostRuntimeError("goal coordination requires goal and task stores")
+        if require_worker and self._task_worker is None:
+            raise HostRuntimeError("goal execution requires a configured principal task worker")
+        allowed_tools = (
+            frozenset(self._task_worker.engine.principal_handlers)
+            if self._task_worker is not None else frozenset()
         )
+        return GoalCoordinator(self._goal_store, self._task_store, allowed_tools)
 
     def prepare_goal(
         self, credential: Any, goal_id: str, *, expected_version: int,
@@ -345,6 +347,15 @@ class CapriHostRuntime:
         context = self._context(credential)
         return self._goal_coordinator().cancel(
             goal_id, context.principal_id, expected_version=expected_version,
+        )
+
+    def get_goal_report(
+        self, credential: Any, goal_id: str,
+    ) -> GoalCompletionReport:
+        """Return a stable completion/evidence report only to the goal owner."""
+        context = self._context(credential)
+        return self._goal_coordinator(require_worker=False).completion_report(
+            goal_id, context.principal_id,
         )
 
     def get_goal_events(self, credential: Any, goal_id: str) -> tuple[dict[str, Any], ...]:
