@@ -82,7 +82,7 @@ def _validate_backup_semantics(connection: sqlite3.Connection) -> None:
             try:
                 metadata = json.loads(metadata_json)
                 canonical_metadata = json.dumps(
-                    metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
+                    metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False, allow_nan=False,
                 )
             except (TypeError, ValueError, json.JSONDecodeError):
                 raise ToolValidationError("security backup contains invalid audit metadata JSON") from None
@@ -387,7 +387,7 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
             try:
                 metadata = json.loads(event.metadata_json)
                 canonical_metadata = json.dumps(
-                    metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+                    metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
                 )
             except (TypeError, ValueError, json.JSONDecodeError):
                 raise ToolValidationError("audit event metadata JSON is invalid") from None
