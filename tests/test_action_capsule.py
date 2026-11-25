@@ -317,5 +317,19 @@ class ActionCapsuleTests(unittest.TestCase):
             )
 
 
+    def test_expired_draft_can_be_rejected_after_deadline(self):
+        late = self.deadline + timedelta(seconds=1)
+        rejected, event = transition_action_capsule(
+            self.capsule,
+            CapsuleState.REJECTED,
+            occurred_at=late.isoformat(),
+            actor="host-1",
+            reason_code="deadline_passed",
+        )
+        self.assertEqual(rejected.state, CapsuleState.REJECTED)
+        self.assertEqual(rejected.event_sequence, 1)
+        verify_action_capsule_history(rejected, (event,))
+
+
 if __name__ == "__main__":
     unittest.main()

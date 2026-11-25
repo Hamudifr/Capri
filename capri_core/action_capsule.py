@@ -447,7 +447,10 @@ def transition_action_capsule(
             raise ActionCapsuleError("only an authorized capsule may expire at or after its deadline")
     elif when >= deadline and not (
         target_state is CapsuleState.INDETERMINATE
-        or (current.state is CapsuleState.DRAFT and target_state is CapsuleState.CANCELLED)
+        or (
+            current.state is CapsuleState.DRAFT
+            and target_state in {CapsuleState.REJECTED, CapsuleState.CANCELLED}
+        )
     ):
         raise ActionCapsuleError("an overdue action must expire, close an undispatched draft, or be reconciled as indeterminate")
 
@@ -603,7 +606,10 @@ def verify_action_capsule_history(
                 raise CapsuleIntegrityError("expiry event is inconsistent with the capsule deadline")
         elif event_time >= deadline and not (
             event.to_state is CapsuleState.INDETERMINATE
-            or (state is CapsuleState.DRAFT and event.to_state is CapsuleState.CANCELLED)
+            or (
+                state is CapsuleState.DRAFT
+                and event.to_state in {CapsuleState.REJECTED, CapsuleState.CANCELLED}
+            )
         ):
             raise CapsuleIntegrityError("overdue action must expire, close an undispatched draft, or be indeterminate")
         if event.previous_event_hash != previous_hash:
