@@ -10,7 +10,7 @@ Run from the repository root:
 python -m benchmarks.memory_retrieval.run
 ```
 
-The versioned labelled corpus is `benchmarks/memory_retrieval/dataset.json`. It contains 12 synthetic records, three queries, and explicit relevant-record labels. For each query, relevant records are inserted before hard negatives so the previous freshness-first tie-breaker is tested rather than accidentally rewarded.
+The versioned labelled corpus is `benchmarks/memory_retrieval/dataset.json`. It contains 60 synthetic records, nine queries, and explicit relevant-record labels. Six additional query classes (lease heartbeat, approval replay, backup validation, tool routing, event provenance, and strategy evaluation) each include two title/tag-rich relevant records followed by six newer body-only hard negatives. This deliberately tests whether relevance outranks freshness without relying on private user data. The corpus remains a regression fixture, not a representative sample of owner queries.
 
 ## Metrics and regression gate
 
@@ -43,6 +43,6 @@ The scorer is intentionally lexical and explainable. It adds no dependency, mode
 
 ## Interpretation and limitations
 
-This initial corpus is a regression fixture, not a statistically representative sample of real owner queries. Passing it proves the implementation behaves as labelled on these hard-negative cases; it does not prove semantic understanding, production retrieval quality, or end-to-end prompt-injection resistance. Before considering semantic retrieval, collect a privacy-screened, owner-labelled query set with explicit relevance grades and measure it separately. Do not place secrets or sensitive personal data in the benchmark.
+This synthetic corpus is a regression fixture, not a statistically representative sample of real owner queries. Passing it proves the implementation behaves as labelled on these hard-negative cases; it does not prove semantic understanding, production retrieval quality, or end-to-end prompt-injection resistance. The expanded corpus improves query-class and hard-negative coverage but does not change that limitation. Before considering semantic retrieval, collect a privacy-screened, owner-labelled query set with explicit relevance grades and measure it separately. Do not place secrets or sensitive personal data in the benchmark.
 
 No Rust/C port is justified by this work. Measure realistic retrieval latency and profile a stable hotspot before considering a native slice.
