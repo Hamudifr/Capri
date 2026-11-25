@@ -390,8 +390,10 @@ class CapriHostRuntimeTests(unittest.TestCase):
 
     def test_host_worker_reservation_is_principal_task_scoped_and_supervisor_committed(self):
         registry = InMemoryWorkerRegistry()
+        audit = InMemoryAuditSink()
         host = self.make_worker_host(
             registry, {"worker-token": "worker-1"}, lambda *args: {"worker-1"},
+            audit_sink=audit,
         )
         host.register_worker(
             "worker-token",
@@ -1397,7 +1399,13 @@ class CapriHostRuntimeTests(unittest.TestCase):
         self.assertNotIn(first.reservation.token, host._worker_reservation_contexts)
         self.assertIn(second.reservation.token, host._worker_reservation_contexts)
         self.assertIsNone(registry.get_reservation(first.reservation.token))
+        self.assertTrue(any(
+            event.tool_name == "worker.reservation.expired"
+            for event in audit._events
+        ))
         self.assertEqual(registry.integrity_check(), "ok")
+        self.assertTrue(host.release_worker_reservation("monitor-token", second))
+        self.assertFalse(audit.worker_lifecycle_reconciliation_required())
 
     def test_sqlite_worker_registry_must_share_exact_host_task_store(self):
         other_store = SQLiteTaskStore(
