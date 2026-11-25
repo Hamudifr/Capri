@@ -1,4 +1,4 @@
-# Capri runtime runtime specification — approval template
+# Capri runtime specification — approval template
 
 **Status: DRAFT / NOT APPROVED / NOT IMPLEMENTATION AUTHORITY**
 
