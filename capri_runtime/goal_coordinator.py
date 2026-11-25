@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 from .goals import (
     GoalConflictError,
@@ -25,6 +25,117 @@ from .tasks import (
 class GoalExecution:
     goal: GoalRecord
     task: TaskRecord
+
+
+@dataclass(frozen=True, slots=True)
+class GoalEvidenceSummary:
+    evidence_type: str
+    reference: str
+    step_index: int
+    created_at: str
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "evidence_type": self.evidence_type,
+            "reference": self.reference,
+            "step_index": self.step_index,
+            "created_at": self.created_at,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class GoalEventSummary:
+    timestamp: str
+    state: str
+    version: int
+    event_type: str
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "timestamp": self.timestamp,
+            "state": self.state,
+            "version": self.version,
+            "event_type": self.event_type,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class TaskEventSummary:
+    timestamp: str
+    state: str
+    step_index: int
+    attempt: int
+    error_code: str | None
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "timestamp": self.timestamp,
+            "state": self.state,
+            "step_index": self.step_index,
+            "attempt": self.attempt,
+            "error_code": self.error_code,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class GoalCompletionReport:
+    """Owner-scoped completion summary; raw task results are deliberately omitted."""
+
+    goal_id: str
+    outcome: str
+    goal_state: str
+    goal_version: int
+    goal_created_at: str
+    goal_updated_at: str
+    acceptance_criteria: tuple[str, ...]
+    acceptance_status: str
+    completion_status: str
+    next_action: str
+    owner_action_required: bool
+    task_id: str | None
+    task_state: str | None
+    task_current_step: int | None
+    task_total_steps: int
+    task_completed_steps: int
+    task_attempts: int
+    task_cancel_requested: bool
+    task_failure_code: str | None
+    task_created_at: str | None
+    task_updated_at: str | None
+    evidence: tuple[GoalEvidenceSummary, ...]
+    goal_events: tuple[GoalEventSummary, ...]
+    task_events: tuple[TaskEventSummary, ...]
+    generated_at: str
+
+    def as_dict(self) -> dict[str, object]:
+        """Return JSON-safe owner-facing data without raw tool outputs or plan inputs."""
+        return {
+            "goal_id": self.goal_id,
+            "outcome": self.outcome,
+            "goal_state": self.goal_state,
+            "goal_version": self.goal_version,
+            "goal_created_at": self.goal_created_at,
+            "goal_updated_at": self.goal_updated_at,
+            "acceptance_criteria": list(self.acceptance_criteria),
+            "acceptance_status": self.acceptance_status,
+            "completion_status": self.completion_status,
+            "next_action": self.next_action,
+            "owner_action_required": self.owner_action_required,
+            "task_id": self.task_id,
+            "task_state": self.task_state,
+            "task_current_step": self.task_current_step,
+            "task_total_steps": self.task_total_steps,
+            "task_completed_steps": self.task_completed_steps,
+            "task_attempts": self.task_attempts,
+            "task_cancel_requested": self.task_cancel_requested,
+            "task_failure_code": self.task_failure_code,
+            "task_created_at": self.task_created_at,
+            "task_updated_at": self.task_updated_at,
+            "evidence": [item.as_dict() for item in self.evidence],
+            "goal_events": [item.as_dict() for item in self.goal_events],
+            "task_events": [item.as_dict() for item in self.task_events],
+            "generated_at": self.generated_at,
+        }
 
 
 class GoalCoordinator:
@@ -150,6 +261,145 @@ class GoalCoordinator:
                 expected_version=goal.version, now=now,
             )
         return GoalExecution(goal, task)
+
+    def completion_report(
+        self, goal_id: str, principal_id: str,
+    ) -> GoalCompletionReport:
+        """Build a stable owner-scoped report without returning raw task results.
+
+        Goal and task data live in separate SQLite stores, so this method checks
+        both records again after reading their event/evidence histories. If either
+        record changes during report construction, the caller must retry.
+        """
+        goal = self.goal_store.get_for_principal(goal_id, principal_id)
+        task = (
+            self.task_store.get_for_principal(goal.task_id, principal_id)
+            if goal.task_id is not None else None
+        )
+        goal_events_raw = self.goal_store.events_for_principal(goal_id, principal_id)
+        task_events_raw = (
+            self.task_store.events_for_principal(task.task_id, principal_id)
+            if task is not None else ()
+        )
+
+        latest_goal = self.goal_store.get_for_principal(goal_id, principal_id)
+        latest_task = (
+            self.task_store.get_for_principal(task.task_id, principal_id)
+            if task is not None else None
+        )
+        if goal != latest_goal or task != latest_task:
+            raise GoalConflictError("goal or task changed while the completion report was being built")
+
+        evidence = tuple(
+            GoalEvidenceSummary(
+                item["evidence_type"], item["reference"],
+                item["step_index"], item["created_at"],
+            )
+            for item in goal.evidence
+        )
+        goal_events = tuple(
+            GoalEventSummary(
+                item["timestamp"], item["state"],
+                item["version"], item["event_type"],
+            )
+            for item in goal_events_raw
+        )
+        task_events = tuple(
+            TaskEventSummary(
+                item["timestamp"], item["state"],
+                item["step_index"], item["attempt"], item["error_code"],
+            )
+            for item in task_events_raw
+        )
+
+        total_steps = len(goal.plan)
+        completed_steps = min(len(task.result), total_steps) if task is not None else 0
+        evidence_types = {item.evidence_type for item in evidence}
+        if "acceptance_accepted" in evidence_types:
+            acceptance_status = "accepted"
+        elif "acceptance_rejected" in evidence_types:
+            acceptance_status = "rejected"
+        elif goal.state == "awaiting_verification":
+            acceptance_status = "pending"
+        else:
+            acceptance_status = "not_requested"
+
+        if goal.state == "succeeded":
+            completion_status = (
+                "accepted" if acceptance_status == "accepted" else "inconsistent"
+            )
+        elif goal.state == "failed":
+            if acceptance_status == "rejected":
+                completion_status = "rejected"
+            elif completed_steps:
+                completion_status = "partial"
+            else:
+                completion_status = "failed"
+        elif goal.state == "reconciliation_required" or (
+            task is not None and task.state == "reconciliation_required"
+        ):
+            completion_status = "uncertain"
+        elif goal.state == "awaiting_verification":
+            completion_status = "awaiting_owner_acceptance"
+        elif goal.state == "cancelling":
+            completion_status = "cancellation_pending"
+        elif goal.state == "cancelled":
+            completion_status = "cancelled"
+        elif goal.state == "paused":
+            completion_status = "paused"
+        elif task is not None and task.state in {"succeeded", "failed", "cancelled"}:
+            completion_status = "reconciliation_pending"
+        elif task is not None:
+            completion_status = "in_progress"
+        else:
+            completion_status = "not_started"
+
+        next_action = {
+            "awaiting_owner_acceptance": "owner_acceptance_required",
+            "uncertain": "owner_or_host_reconciliation_required",
+            "reconciliation_pending": "host_reconciliation_required",
+            "partial": "owner_review_required",
+            "failed": "owner_review_required",
+            "inconsistent": "owner_review_required",
+            "cancellation_pending": "cancellation_reconciliation_required",
+            "paused": "owner_resume_or_cancel",
+            "in_progress": "execution_in_progress",
+        }.get(completion_status, "none")
+        owner_action_required = next_action in {
+            "owner_acceptance_required",
+            "owner_or_host_reconciliation_required",
+            "owner_review_required",
+            "cancellation_reconciliation_required",
+            "owner_resume_or_cancel",
+        }
+
+        return GoalCompletionReport(
+            goal_id=goal.goal_id,
+            outcome=goal.outcome,
+            goal_state=goal.state,
+            goal_version=goal.version,
+            goal_created_at=goal.created_at,
+            goal_updated_at=goal.updated_at,
+            acceptance_criteria=goal.acceptance_criteria,
+            acceptance_status=acceptance_status,
+            completion_status=completion_status,
+            next_action=next_action,
+            owner_action_required=owner_action_required,
+            task_id=goal.task_id,
+            task_state=task.state if task is not None else None,
+            task_current_step=task.current_step if task is not None else None,
+            task_total_steps=total_steps,
+            task_completed_steps=completed_steps,
+            task_attempts=task.attempts if task is not None else 0,
+            task_cancel_requested=task.cancel_requested if task is not None else False,
+            task_failure_code=task.error_code if task is not None else None,
+            task_created_at=task.created_at if task is not None else None,
+            task_updated_at=task.updated_at if task is not None else None,
+            evidence=evidence,
+            goal_events=goal_events,
+            task_events=task_events,
+            generated_at=datetime.now(timezone.utc).isoformat(),
+        )
 
     def verify(
         self, goal_id: str, principal_id: str, *, accepted: bool,
