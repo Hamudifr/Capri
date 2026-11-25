@@ -7,6 +7,7 @@ from capri_core.strategy import StrategyObservation
 from capri_core.strategy import evaluate_strategies
 from capri_runtime.strategy_evidence import HostStrategyEvidenceAuthority
 from capri_runtime.strategy_evidence_store import SQLiteStrategyEvidenceManifestStore
+from capri_runtime import SQLiteStrategyEvidenceManifestStore as ExportedManifestStore
 from capri_runtime.strategy_store import SQLiteStrategyStore, StrategyAuthorizationError
 from capri_runtime.tasks import SQLiteTaskStore
 from capri_runtime.tools import HmacApprovalKeyRing
@@ -94,6 +95,19 @@ class SQLiteStrategyEvidenceManifestStoreTests(unittest.TestCase):
                     )
             finally:
                 connection.close()
+
+    def test_manifest_store_is_a_public_package_export(self):
+        self.assertIs(ExportedManifestStore, SQLiteStrategyEvidenceManifestStore)
+
+    def test_duplicate_source_reference_is_rejected(self):
+        duplicate = list(self.observations)
+        duplicate[2] = replace(duplicate[2], evidence_ref=duplicate[0].evidence_ref)
+        with self.assertRaises(StrategyAuthorizationError):
+            self.store.register_manifest(
+                "host-credential", strategy_class="reasoning",
+                baseline_id="baseline", candidate_id="candidate",
+                observations=tuple(duplicate),
+            )
 
     def test_invalid_collector_is_rejected(self):
         with self.assertRaises(StrategyAuthorizationError):
