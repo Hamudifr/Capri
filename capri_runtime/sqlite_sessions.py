@@ -130,7 +130,7 @@ class SQLiteSessionStore(SessionStore):
         deadline = time.monotonic() + 5.0
         while True:
             try:
-                mode = self._set_wal_mode(connection).fetchone()
+                mode = connection.execute("PRAGMA journal_mode=WAL").fetchone()
                 if mode is None or str(mode[0]).casefold() != "wal":
                     raise ValidationError("SQLite session database could not enter WAL mode")
                 return
