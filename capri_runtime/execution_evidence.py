@@ -301,6 +301,22 @@ class SQLiteExecutionEvidenceJournal:
             connection = self._tasks._connect()
             try:
                 connection.execute("BEGIN IMMEDIATE")
+                # Revalidate the lease inside the same SQLite write transaction
+                # as the append. The earlier callback-time validation is not
+                # sufficient: another process may reclaim or finish the task
+                # while classification/result verification is running.
+                live_claim = connection.execute(
+                    """SELECT tasks.state,tasks.lease_owner,tasks.lease_until,
+                    tasks.current_step,tasks.attempts,tasks.plan_json,
+                    task_owners.principal_id
+                    FROM tasks LEFT JOIN task_owners
+                    ON task_owners.task_id=tasks.task_id
+                    WHERE tasks.task_id=?""",
+                    (claim.task_id,),
+                ).fetchone()
+                if live_claim is None:
+                    raise StrategyAuthorizationError("task claim is no longer valid")
+                self._tasks._assert_claim_matches(claim, live_claim, created_at)
                 existing = connection.execute(
                     """SELECT event_id,claim_sha256,result_sha256,principal_id,
                     strategy_class,strategy_version,task_family,scenario,outcome,
