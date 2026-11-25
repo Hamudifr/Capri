@@ -11,7 +11,7 @@ from capri_runtime.execution_evidence import (
     TaskClassification,
     VerifiedExecutionResult,
 )
-from capri_runtime.tasks import SQLiteTaskStore
+from capri_runtime.tasks import SQLiteTaskStore, TaskEngine
 from capri_runtime.tools import HmacApprovalKeyRing
 
 
@@ -82,6 +82,42 @@ class SQLiteExecutionEvidenceJournalTests(unittest.TestCase):
         ))
         self.assertEqual(self.journal.integrity_check(), "ok")
         self.assertEqual(self.tasks.integrity_check(), "ok")
+
+    def test_task_engine_records_evidence_before_finishing_claim(self):
+        engine = TaskEngine(
+            self.tasks,
+            {},
+            "worker-1",
+            principal_handlers={"research": lambda inputs, key, principal: self.result},
+            execution_evidence_journal=self.journal,
+            execution_evidence_credential=lambda claim: "host-credential",
+        )
+        completed = engine.execute_claim(self.claim)
+        self.assertEqual(completed.state, "succeeded")
+        with self.tasks._lock:
+            connection = self.tasks._connect()
+            try:
+                count = connection.execute(
+                    "SELECT COUNT(*) FROM execution_evidence_events WHERE task_id=?",
+                    (self.claim.task_id,),
+                ).fetchone()[0]
+            finally:
+                connection.close()
+        self.assertEqual(count, 1)
+
+    def test_task_engine_quarantines_result_when_evidence_cannot_be_recorded(self):
+        journal = self.make_journal(verifier=lambda *args: False)
+        engine = TaskEngine(
+            self.tasks,
+            {},
+            "worker-1",
+            principal_handlers={"research": lambda inputs, key, principal: self.result},
+            execution_evidence_journal=journal,
+            execution_evidence_credential=lambda claim: "host-credential",
+        )
+        record = engine.execute_claim(self.claim)
+        self.assertEqual(record.state, "reconciliation_required")
+        self.assertEqual(record.error_code, "execution_evidence_unavailable")
 
     def test_execution_record_is_idempotent_for_same_claim_and_result(self):
         first = self.journal.record_execution("host-credential", self.claim, self.result)
