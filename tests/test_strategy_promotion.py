@@ -69,6 +69,7 @@ class StrategyPromotionTests(unittest.TestCase):
     def assess(self, cohorts, **overrides):
         args = {
             "strategy_class": "reasoning",
+            "task_family": "research",
             "baseline_id": "baseline",
             "candidate_id": "candidate",
             "primary_metric": "estimated_cost_units",
@@ -81,6 +82,8 @@ class StrategyPromotionTests(unittest.TestCase):
         cohorts = make_cohorts()
         first = self.assess(cohorts)
         second = self.assess(cohorts)
+        reversed_order = self.assess(tuple(reversed(cohorts)))
+        self.assertEqual(first, reversed_order)
         self.assertTrue(first.eligible_for_canary)
         self.assertEqual(first, second)
         self.assertEqual(first.policy_version, "capri.strategy-promotion.v1")
@@ -142,9 +145,11 @@ class StrategyPromotionTests(unittest.TestCase):
             "strategy_versions_differ_between_cohorts", result.blocked_reasons,
         )
 
-    def test_primary_metric_is_allowlisted(self):
+    def test_primary_metric_and_task_family_are_allowlisted(self):
         with self.assertRaises(StrategyPromotionError):
             self.assess(make_cohorts(), primary_metric="prompt_tokens")
+        with self.assertRaises(StrategyPromotionError):
+            self.assess(make_cohorts(), task_family="trading")
 
 
 if __name__ == "__main__":
