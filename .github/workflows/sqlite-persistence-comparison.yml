@@ -1,0 +1,137 @@
+name: SQLite persistence before-and-after comparison
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "benchmarks/persistence/**"
+      - "tests/test_persistence_comparison.py"
+      - ".github/workflows/sqlite-persistence-comparison.yml"
+  workflow_dispatch:
+    inputs:
+      baseline_sha:
+        description: "Baseline commit SHA"
+        required: true
+        default: "5de569a3ed061f3eda7509420ef74a8aabb3ce89"
+        type: string
+      candidate_sha:
+        description: "Candidate commit SHA (defaults to this workflow revision)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sqlite-persistence-comparison-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    name: Same-runner SQLite comparison (Python 3.13)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DEFAULT_BASELINE_SHA: "5de569a3ed061f3eda7509420ef74a8aabb3ce89"
+      PR_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      DISPATCH_BASELINE_SHA: ${{ inputs.baseline_sha || '' }}
+      DISPATCH_CANDIDATE_SHA: ${{ inputs.candidate_sha || '' }}
+    steps:
+      - name: Check out candidate revision
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_sha || github.event.pull_request.head.sha || github.sha }}
+          path: candidate
+
+      - name: Check out baseline revision
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.baseline_sha || '5de569a3ed061f3eda7509420ef74a8aabb3ce89' }}
+          path: baseline
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.13"
+
+      - name: Record and validate comparison environment
+        run: |
+          uname -a
+          lscpu
+          python --version
+          python -c "import sqlite3; print('SQLite', sqlite3.sqlite_version)"
+          test -f baseline/capri_runtime/__init__.py
+          test -f candidate/capri_runtime/__init__.py
+          mkdir -p "$RUNNER_TEMP/capri-persistence-harness/benchmarks/persistence" results
+          cp candidate/benchmarks/persistence/run.py "$RUNNER_TEMP/capri-persistence-harness/benchmarks/persistence/run.py"
+          cp candidate/benchmarks/persistence/compare.py "$RUNNER_TEMP/capri-persistence-harness/benchmarks/persistence/compare.py"
+          BASELINE_SHA="$(git -C baseline rev-parse HEAD)"
+          CANDIDATE_SHA="$(git -C candidate rev-parse HEAD)"
+          EXPECTED_BASELINE="${DISPATCH_BASELINE_SHA:-$DEFAULT_BASELINE_SHA}"
+          EXPECTED_CANDIDATE="${DISPATCH_CANDIDATE_SHA:-$PR_CANDIDATE_SHA}"
+          test "$BASELINE_SHA" = "$EXPECTED_BASELINE"
+          test "$CANDIDATE_SHA" = "$EXPECTED_CANDIDATE"
+          {
+            echo "BASELINE_SHA=$BASELINE_SHA"
+            echo "CANDIDATE_SHA=$CANDIDATE_SHA"
+          } >> "$GITHUB_ENV"
+
+      - name: Run alternating baseline and candidate samples
+        shell: bash
+        run: |
+          set -euo pipefail
+          HARNESS="$RUNNER_TEMP/capri-persistence-harness/benchmarks/persistence/run.py"
+          run_profile() {
+            local revision="$1"
+            local round="$2"
+            local source="$3"
+            echo "Running $revision round $round at $(git -C "$source" rev-parse HEAD)"
+            CAPRI_BENCHMARK_HEAD_SHA="$(git -C "$source" rev-parse HEAD)" \
+              PYTHONPATH="$GITHUB_WORKSPACE/$source" \
+              python "$HARNESS" --warmup 20 --samples 100 --workers 4 --queue-size 100 \
+              --output "results/$revision-$round.json"
+          }
+          run_profile baseline 1 baseline
+          run_profile candidate 1 candidate
+          run_profile candidate 2 candidate
+          run_profile baseline 2 baseline
+          run_profile baseline 3 baseline
+          run_profile candidate 3 candidate
+
+      - name: Validate and summarize comparison
+        run: |
+          python "$RUNNER_TEMP/capri-persistence-harness/benchmarks/persistence/compare.py" \
+            --input-dir results --baseline-sha "$BASELINE_SHA" \
+            --candidate-sha "$CANDIDATE_SHA" --rounds 3 --output results/comparison.json
+          cat results/comparison.json
+          python - <<'PY'
+          import json, os
+          with open("results/comparison.json", encoding="utf-8") as source:
+              report = json.load(source)
+          lines = [
+              "## SQLite persistence comparison", "",
+              f"- Baseline: `{report['baseline_sha']}`",
+              f"- Candidate: `{report['candidate_sha']}`",
+              f"- Repeated runs: {report['rounds_per_revision']} per revision",
+              f"- Python: {report['environment']['python']}; SQLite: {report['environment']['sqlite']}",
+              f"- Runner: {report['environment']['os']} / {report['environment']['machine']}", "",
+              "| Workload | Baseline median µs | Candidate median µs | Change | Baseline p95 µs | Candidate p95 µs |",
+              "|---|---:|---:|---:|---:|---:|",
+          ]
+          for item in report["workloads"]:
+              change = item["median_change_percent"]
+              label = "n/a" if change is None else f"{change:+.2f}%"
+              lines.append(f"| {item['name']} | {item['baseline_median_us']} | {item['candidate_median_us']} | {label} | {item['baseline_p95_us']} | {item['candidate_p95_us']} |")
+          lines.extend(["", f"Concurrent task-claim throughput change: {report['concurrency']['throughput_change_percent']:+.2f}%", "",
+                        "Negative latency change means faster candidate latency. Three rounds are directional evidence, not a formal significance test. No performance threshold gates CI."])
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("\n".join(lines) + "\n")
+          PY
+
+      - name: Preserve raw samples and comparison
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sqlite-persistence-comparison
+          path: results/*.json
+          if-no-files-found: error
+          retention-days: 30
