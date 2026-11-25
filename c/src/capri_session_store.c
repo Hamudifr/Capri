@@ -425,4 +425,109 @@ CapriSessionError capri_session_close_for_principal(CapriSessionStore *s,const c
     if(!current.closed){char now[32];if(!utc_now(now)){capri_session_free(&current);exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,CAPRI_SESSION_IO);}sqlite3_stmt *st=NULL;int rc=sqlite3_prepare_v2(s->db,"UPDATE sessions SET closed=1,updated_at=?1 WHERE session_id=?2",-1,&st,NULL);if(rc==SQLITE_OK){sqlite3_bind_text(st,1,now,-1,SQLITE_TRANSIENT);sqlite3_bind_text(st,2,id,-1,SQLITE_TRANSIENT);rc=sqlite3_step(st);}sqlite3_finalize(st);if(rc!=SQLITE_DONE){capri_session_free(&current);exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,map_sqlite(rc));}current.closed=1;strcpy(current.updated_at,now);}
     if(!exec_sql(s->db,"COMMIT")){capri_session_free(&current);exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,CAPRI_SESSION_DATABASE);}*out=current;RETURN_UNLOCK(s,CAPRI_SESSION_OK);
 }
+CapriSessionError capri_session_restore_to(CapriSessionStore *s,const char *backup_path,const char *destination_path) {
+    if(!s||!text_ok(backup_path,PATH_MAX-1u,true)||!text_ok(destination_path,PATH_MAX-1u,true))return CAPRI_SESSION_INVALID;
+    char *source_path=NULL,*target_path=NULL;
+    if(!safe_path(backup_path,&source_path))return CAPRI_SESSION_IO;
+    if(!safe_path(destination_path,&target_path)){free(source_path);return CAPRI_SESSION_IO;}
+    if(strcmp(source_path,target_path)==0||strcmp(source_path,s->path)==0||strcmp(target_path,s->path)==0){free(source_path);free(target_path);return CAPRI_SESSION_INVALID;}
+    struct stat target_stat;
+    if(lstat(target_path,&target_stat)==0){free(source_path);free(target_path);return CAPRI_SESSION_INVALID;}
+    if(errno!=ENOENT){free(source_path);free(target_path);return CAPRI_SESSION_IO;}
+    char *slash=strrchr(target_path,'/');
+    if(!slash){free(source_path);free(target_path);return CAPRI_SESSION_INVALID;}
+    size_t parent_len=(size_t)(slash-target_path);
+    char *parent=malloc(parent_len+1u);
+    if(!parent){free(source_path);free(target_path);return CAPRI_SESSION_NO_MEMORY;}
+    memcpy(parent,target_path,parent_len);parent[parent_len]='\0';
+    size_t template_len=strlen(parent)+32u;
+    if(template_len>PATH_MAX){free(parent);free(source_path);free(target_path);return CAPRI_SESSION_INVALID;}
+    char *temporary=malloc(template_len);
+    if(!temporary){free(parent);free(source_path);free(target_path);return CAPRI_SESSION_NO_MEMORY;}
+    (void)snprintf(temporary,template_len,"%s/.capri-session-restore-XXXXXX",parent);
+    int temp_fd=mkstemp(temporary);
+    if(temp_fd<0){free(temporary);free(parent);free(source_path);free(target_path);return CAPRI_SESSION_IO;}
+    bool temp_ok=fchmod(temp_fd,0600)==0&&fsync(temp_fd)==0;
+    close(temp_fd);
+    if(!temp_ok){unlink(temporary);free(temporary);free(parent);free(source_path);free(target_path);return CAPRI_SESSION_IO;}
+
+    pthread_mutex_lock(&s->mutex);
+    if(!store_path_safe(s)){pthread_mutex_unlock(&s->mutex);unlink(temporary);free(temporary);free(parent);free(source_path);free(target_path);return CAPRI_SESSION_IO;}
+    int source_fd=open(source_path,O_RDONLY
+#ifdef O_NOFOLLOW
+      |O_NOFOLLOW
+#endif
+    );
+    struct stat opened_source,path_source;
+    bool source_safe=source_fd>=0&&fstat(source_fd,&opened_source)==0&&S_ISREG(opened_source.st_mode)&&opened_source.st_uid==geteuid()&&opened_source.st_nlink==1&&(opened_source.st_mode&0777u)==0600u&&lstat(source_path,&path_source)==0&&opened_source.st_dev==path_source.st_dev&&opened_source.st_ino==path_source.st_ino;
+    if(!source_safe){if(source_fd>=0)close(source_fd);pthread_mutex_unlock(&s->mutex);unlink(temporary);free(temporary);free(parent);free(source_path);free(target_path);return CAPRI_SESSION_IO;}
+    sqlite3 *source=NULL,*destination=NULL;
+    int rc=sqlite3_open_v2(source_path,&source,SQLITE_OPEN_READONLY|SQLITE_OPEN_FULLMUTEX,NULL);
+    struct stat after_open;
+    if(rc==SQLITE_OK&&lstat(source_path,&after_open)==0&&opened_source.st_dev==after_open.st_dev&&opened_source.st_ino==after_open.st_ino){
+        (void)sqlite3_busy_timeout(source,5000);
+        (void)sqlite3_db_config(source,SQLITE_DBCONFIG_DEFENSIVE,1,NULL);
+        (void)exec_sql(source,"PRAGMA query_only=ON; PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF;");
+    } else if(rc==SQLITE_OK)rc=SQLITE_CANTOPEN;
+    CapriSessionError result=rc==SQLITE_OK?validate_backup_snapshot(s,source):map_sqlite(rc);
+    if(result==CAPRI_SESSION_OK){
+        rc=sqlite3_open_v2(temporary,&destination,SQLITE_OPEN_READWRITE|SQLITE_OPEN_FULLMUTEX,NULL);
+        if(rc==SQLITE_OK){
+            (void)sqlite3_busy_timeout(destination,5000);
+            if(!exec_sql(destination,"PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF; PRAGMA synchronous=FULL; PRAGMA journal_mode=DELETE;"))result=CAPRI_SESSION_DATABASE;
+        } else result=map_sqlite(rc);
+    }
+    if(result==CAPRI_SESSION_OK){
+        sqlite3_backup *backup=sqlite3_backup_init(destination,"main",source,"main");
+        if(!backup)result=CAPRI_SESSION_DATABASE;
+        else {
+            unsigned attempts=0u,steps=0u;
+            do {
+                rc=sqlite3_backup_step(backup,256);
+                if(rc==SQLITE_OK){if(++steps<100000u)continue;rc=SQLITE_BUSY;break;}
+                if((rc==SQLITE_BUSY||rc==SQLITE_LOCKED)&&attempts++<500u){sqlite3_sleep(10);continue;}
+                break;
+            } while(true);
+            int finish=sqlite3_backup_finish(backup);
+            if(rc!=SQLITE_DONE||finish!=SQLITE_OK)result=map_sqlite(rc==SQLITE_DONE?finish:rc);
+        }
+    }
+    if(result==CAPRI_SESSION_OK)result=validate_backup_snapshot(s,destination);
+    if(destination){int close_rc=sqlite3_close(destination);if(result==CAPRI_SESSION_OK&&close_rc!=SQLITE_OK)result=map_sqlite(close_rc);}
+    if(source){int close_rc=sqlite3_close(source);if(result==CAPRI_SESSION_OK&&close_rc!=SQLITE_OK)result=map_sqlite(close_rc);}
+    close(source_fd);
+    pthread_mutex_unlock(&s->mutex);
+    if(result!=CAPRI_SESSION_OK){
+        unlink(temporary);char sidecar[PATH_MAX+8u];
+        (void)snprintf(sidecar,sizeof sidecar,"%s-journal",temporary);unlink(sidecar);
+        (void)snprintf(sidecar,sizeof sidecar,"%s-wal",temporary);unlink(sidecar);
+        (void)snprintf(sidecar,sizeof sidecar,"%s-shm",temporary);unlink(sidecar);
+        free(temporary);free(parent);free(source_path);free(target_path);return result;
+    }
+    temp_fd=open(temporary,O_RDONLY
+#ifdef O_NOFOLLOW
+      |O_NOFOLLOW
+#endif
+    );
+    if(temp_fd<0)result=CAPRI_SESSION_IO;
+    else {
+        struct stat st;
+        bool safe=fstat(temp_fd,&st)==0&&S_ISREG(st.st_mode)&&st.st_uid==geteuid()&&st.st_nlink==1&&(st.st_mode&0777u)==0600u&&fsync(temp_fd)==0;
+        close(temp_fd);if(!safe)result=CAPRI_SESSION_IO;
+    }
+    bool published=false;
+    if(result==CAPRI_SESSION_OK){if(link(temporary,target_path)==0){published=true;if(unlink(temporary)!=0)result=CAPRI_SESSION_IO;}else result=CAPRI_SESSION_IO;}
+    if(result==CAPRI_SESSION_OK){
+        int dirfd=open(parent,O_RDONLY
+#ifdef O_DIRECTORY
+          |O_DIRECTORY
+#endif
+        );
+        if(dirfd<0||fsync(dirfd)!=0)result=CAPRI_SESSION_IO;
+        if(dirfd>=0)close(dirfd);
+    }
+    if(!published)unlink(temporary);
+    free(temporary);free(parent);free(source_path);free(target_path);
+    return result;
+}
 const char *capri_session_error_string(CapriSessionError e){static const char *const m[]={"ok","invalid input","filesystem operation failed","SQLite operation failed","session not found","session closed","session conflict","resource limit reached","persisted session is corrupt","out of memory"};return e>=CAPRI_SESSION_OK&&e<=CAPRI_SESSION_NO_MEMORY?m[e]:"unknown session error";}
