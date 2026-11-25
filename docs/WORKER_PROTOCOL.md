@@ -32,7 +32,7 @@ The host owns the deadline. It must:
 4. Pass host-measured elapsed nanoseconds to `WorkerResponse.validate_for(..., elapsed_ns=...)`.
 5. Reject a response when host-measured elapsed time exceeds the request budget.
 
-The worker-reported `duration_ms` is untrusted telemetry. It may be useful for diagnostics, but it is never proof that the deadline was met. A worker cannot grant itself more time by changing the reported duration.
+The worker-reported `duration_ms` is untrusted telemetry. A value above the budget is rejected as an inconsistency, but a value within the budget is never proof that the deadline was met. Only the host's monotonic measurement can establish that. A worker cannot grant itself more time by changing the reported duration.
 
 ## Identity and authority
 
