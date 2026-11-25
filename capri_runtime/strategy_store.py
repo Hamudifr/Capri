@@ -13,7 +13,7 @@ import re
 import sqlite3
 import threading
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Callable, Iterable
 from uuid import uuid4
 
@@ -280,6 +280,7 @@ class SQLiteStrategyStore:
                     candidate_id TEXT NOT NULL,
                     cohort_sha256 TEXT NOT NULL,
                     matched_pairs INTEGER NOT NULL CHECK(matched_pairs >= 20),
+                    eligible INTEGER NOT NULL CHECK(eligible=1),
                     summary_json TEXT NOT NULL,
                     evidence_manifest_ref TEXT NOT NULL,
                     created_at TEXT NOT NULL,
@@ -442,9 +443,10 @@ class SQLiteStrategyStore:
             raise StrategyStoreError("candidate evaluation does not meet the independently recomputed registry admission gate")
         evidence_ref = _text(evidence_manifest_ref, "evidence_manifest_ref", 512)
         config_json, config_hash = _encode_config(config)
-        timestamp = (created_at or datetime.now(timezone.utc)).astimezone(timezone.utc)
-        if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+        timestamp = created_at or datetime.now(timezone.utc)
+        if not isinstance(timestamp, datetime) or timestamp.tzinfo is None or timestamp.utcoffset() is None:
             raise StrategyStoreError("created_at must be timezone-aware")
+        timestamp = timestamp.astimezone(timezone.utc)
         created = timestamp.isoformat()
         summary_json = json.dumps(
             evaluation.to_dict(), ensure_ascii=False, sort_keys=True,
@@ -461,7 +463,7 @@ class SQLiteStrategyStore:
                 baseline = connection.execute(
                     """SELECT 1 FROM strategy_versions WHERE principal_id=?
                     AND strategy_class=? AND strategy_id=? AND is_baseline=1""",
-                    (principal, category, evaluation.baseline_id),
+                    (principal, category, baseline_id),
                 ).fetchone()
                 if baseline is None:
                     raise StrategyNotFoundError("the evaluated baseline is not registered for this principal")
@@ -481,10 +483,10 @@ class SQLiteStrategyStore:
                     connection.execute(
                         """INSERT INTO strategy_evaluations
                         (evaluation_id,principal_id,strategy_class,baseline_id,candidate_id,
-                         cohort_sha256,matched_pairs,summary_json,evidence_manifest_ref,created_at)
-                        VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                        (evaluation_id, principal, category, evaluation.baseline_id,
-                         evaluation.candidate_id, evaluation.cohort_sha256,
+                         cohort_sha256,matched_pairs,eligible,summary_json,evidence_manifest_ref,created_at)
+                        VALUES (?,?,?,?,?,?,?,1,?,?,?)""",
+                        (evaluation_id, principal, category, baseline_id,
+                         candidate_id, evaluation.cohort_sha256,
                          evaluation.matched_pairs, summary_json, evidence_ref, created),
                     )
                 existing_version = connection.execute(
@@ -521,8 +523,8 @@ class SQLiteStrategyStore:
     ) -> tuple[Any, ...] | None:
         rows = connection.execute(
             """SELECT event_id,principal_id,strategy_class,generation,action,
-            from_strategy_id,from_version,to_strategy_id,to_version,evaluation_id,
-            approval_id,approver_id,created_at,previous_hash,event_hash
+            from_strategy_id,from_version,to_strategy_id,to_version,to_config_sha256,
+            evaluation_id,approval_id,approver_id,created_at,previous_hash,event_hash
             FROM strategy_events WHERE principal_id=? AND strategy_class=?
             ORDER BY generation""",
             (principal_id, strategy_class),
@@ -538,7 +540,7 @@ class SQLiteStrategyStore:
                 "approval_id": row[11], "approver_id": row[12],
                 "created_at": row[13], "previous_hash": row[14],
             }
-            if row[3] != expected_generation or row[13] != previous_hash:
+            if row[3] != expected_generation or row[14] != previous_hash:
                 raise StrategyIntegrityError("strategy event sequence or previous hash is invalid")
             digest = hashlib.sha256(json.dumps(
                 payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
@@ -570,7 +572,7 @@ class SQLiteStrategyStore:
         if grant.principal_id != principal or grant.action != required_action:
             raise StrategyAuthorizationError("approval grant is not bound to this principal and action")
         current_time = now or datetime.now(timezone.utc)
-        if current_time.tzinfo is None or current_time.utcoffset() is None:
+        if not isinstance(current_time, datetime) or current_time.tzinfo is None or current_time.utcoffset() is None:
             raise StrategyAuthorizationError("current time must be timezone-aware")
         current_time = current_time.astimezone(timezone.utc)
         issued = _timestamp(grant.issued_at, "issued_at")
@@ -646,7 +648,7 @@ class SQLiteStrategyStore:
                 next_generation = generation + 1
                 event_id = uuid4().hex
                 created = current_time.isoformat()
-                previous_hash = last_event[14] if last_event is not None else ""
+                previous_hash = last_event[15] if last_event is not None else ""
                 payload = {
                     "event_id": event_id, "principal_id": principal,
                     "strategy_class": grant.strategy_class,
