@@ -119,9 +119,9 @@ class CapriHostRuntime:
     principal-scoped access. TaskWorker remains opt-in; CapriHostService provides
     cooperative in-process lifecycle management, while an external process
     supervisor remains responsible for process restart and OS-level limits.
-    The optional Nexus registry gateway requires separate host worker-identity
-    and task-policy resolvers. It returns advisory candidates only and never
-    dispatches work or grants permissions.
+    The optional Nexus registry gateway requires separate worker-identity,
+    descriptor, supervisor-observation, host-load and task-policy resolvers.
+    It returns advisory candidates only and never dispatches work or grants permissions.
     """
 
     def __init__(
@@ -145,6 +145,8 @@ class CapriHostRuntime:
         worker_registry: InMemoryWorkerRegistry | None = None,
         worker_identity_resolver: Callable[[Any], str | None] | None = None,
         worker_descriptor_resolver: Callable[[str, WorkerDescriptor], WorkerDescriptor] | None = None,
+        worker_observer_authorizer: Callable[[Any, str], bool] | None = None,
+        worker_in_flight_resolver: Callable[[str], int] | None = None,
         worker_policy_resolver: Callable[[str, str, str], set[str] | frozenset[str]] | None = None,
     ) -> None:
         if not isinstance(authority, HostAuthorityResolver):
@@ -189,21 +191,29 @@ class CapriHostRuntime:
             raise HostRuntimeError("worker_identity_resolver must be callable")
         if worker_descriptor_resolver is not None and not callable(worker_descriptor_resolver):
             raise HostRuntimeError("worker_descriptor_resolver must be callable")
+        if worker_observer_authorizer is not None and not callable(worker_observer_authorizer):
+            raise HostRuntimeError("worker_observer_authorizer must be callable")
+        if worker_in_flight_resolver is not None and not callable(worker_in_flight_resolver):
+            raise HostRuntimeError("worker_in_flight_resolver must be callable")
         if worker_policy_resolver is not None and not callable(worker_policy_resolver):
             raise HostRuntimeError("worker_policy_resolver must be callable")
         if worker_registry is None and any((
             worker_identity_resolver is not None,
             worker_descriptor_resolver is not None,
+            worker_observer_authorizer is not None,
+            worker_in_flight_resolver is not None,
             worker_policy_resolver is not None,
         )):
             raise HostRuntimeError("worker registry callbacks require a configured worker_registry")
         if worker_registry is not None and any((
             worker_identity_resolver is None,
             worker_descriptor_resolver is None,
+            worker_observer_authorizer is None,
+            worker_in_flight_resolver is None,
             worker_policy_resolver is None,
         )):
             raise HostRuntimeError(
-                "worker_registry requires host identity, descriptor and policy resolvers"
+                "worker_registry requires identity, descriptor, supervisor-observer, host-load and policy resolvers"
             )
         if (
             task_store is not None and task_worker is not None
@@ -229,6 +239,8 @@ class CapriHostRuntime:
         self._worker_registry = worker_registry
         self._worker_identity_resolver = worker_identity_resolver
         self._worker_descriptor_resolver = worker_descriptor_resolver
+        self._worker_observer_authorizer = worker_observer_authorizer
+        self._worker_in_flight_resolver = worker_in_flight_resolver
         self._worker_policy_resolver = worker_policy_resolver
         self._goal_store = goal_store
         configured_budgets = [
@@ -279,24 +291,48 @@ class CapriHostRuntime:
         except WorkerRegistryError:
             raise HostRuntimeError("worker registration was rejected") from None
 
+    def _authorize_worker_observer(self, credential: Any, worker_id: str) -> None:
+        if self._worker_registry is None or self._worker_observer_authorizer is None:
+            raise HostRuntimeError("no host worker observer is configured")
+        try:
+            authorized = self._worker_observer_authorizer(credential, worker_id)
+        except Exception:
+            raise HostRuntimeError("host worker observer authentication failed") from None
+        if authorized is not True:
+            raise HostRuntimeError("host worker observer is not authorized")
+
+    def _worker_in_flight(self, worker_id: str) -> int:
+        if self._worker_registry is None or self._worker_in_flight_resolver is None:
+            raise HostRuntimeError("no host worker load resolver is configured")
+        try:
+            in_flight = self._worker_in_flight_resolver(worker_id)
+        except Exception:
+            raise HostRuntimeError("host worker load observation failed") from None
+        if type(in_flight) is not int or in_flight < 0:
+            raise HostRuntimeError("host worker load observation is invalid")
+        return in_flight
+
     def heartbeat_worker(
-        self, credential: Any, worker_id: str, *, in_flight: int,
+        self, observer_credential: Any, worker_id: str,
     ) -> WorkerSnapshot:
-        """Record host-observed liveness for the worker bound to this credential."""
-        identity = self._worker_identity(credential)
+        """Record liveness only from a trusted supervisor and host-derived load."""
+        self._authorize_worker_observer(observer_credential, worker_id)
+        in_flight = self._worker_in_flight(worker_id)
         try:
             return self._worker_registry.heartbeat(
-                worker_id, authenticated_worker_id=identity, in_flight=in_flight,
+                worker_id, authenticated_worker_id=worker_id, in_flight=in_flight,
             )
         except WorkerRegistryError:
             raise HostRuntimeError("worker heartbeat was rejected") from None
 
-    def record_worker_failure(self, credential: Any, worker_id: str) -> WorkerSnapshot:
-        """Record a host-observed worker failure after transport identity matching."""
-        identity = self._worker_identity(credential)
+    def record_worker_failure(
+        self, observer_credential: Any, worker_id: str,
+    ) -> WorkerSnapshot:
+        """Record failure only from a trusted host supervisor/monitor."""
+        self._authorize_worker_observer(observer_credential, worker_id)
         try:
             return self._worker_registry.record_failure(
-                worker_id, authenticated_worker_id=identity,
+                worker_id, authenticated_worker_id=worker_id,
             )
         except WorkerRegistryError:
             raise HostRuntimeError("worker failure observation was rejected") from None
