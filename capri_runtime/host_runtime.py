@@ -545,27 +545,29 @@ class CapriHostRuntime:
             raise HostRuntimeError("host worker descriptor approval failed") from None
         if type(approved) is not WorkerDescriptor or approved.worker_id != identity:
             raise HostRuntimeError("host worker descriptor approval returned an invalid identity")
-        self._begin_worker_audit_operation()
-        try:
-            snapshot = self._worker_registry.register(
-                approved, authenticated_worker_id=identity,
+        with self._worker_reservation_lock:
+            self._purge_worker_reservation_contexts()
+            self._begin_worker_audit_operation()
+            try:
+                snapshot = self._worker_registry.register(
+                    approved, authenticated_worker_id=identity,
+                )
+            except WorkerRegistryError:
+                self._finish_worker_audit_operation()
+                raise HostRuntimeError("worker registration was rejected") from None
+            except Exception:
+                self._worker_audit_healthy = False
+                raise HostRuntimeError("worker registration failed; reconciliation is required") from None
+            self._record_worker_lifecycle_event(
+                "worker.registered",
+                identity,
+                descriptor_revision=snapshot.descriptor.revision,
+                capabilities=snapshot.descriptor.capabilities,
+                protocol_versions=snapshot.descriptor.protocol_versions,
+                max_concurrency=snapshot.descriptor.max_concurrency,
             )
-        except WorkerRegistryError:
             self._finish_worker_audit_operation()
-            raise HostRuntimeError("worker registration was rejected") from None
-        except Exception:
-            self._worker_audit_healthy = False
-            raise HostRuntimeError("worker registration failed; reconciliation is required") from None
-        self._record_worker_lifecycle_event(
-            "worker.registered",
-            identity,
-            descriptor_revision=snapshot.descriptor.revision,
-            capabilities=snapshot.descriptor.capabilities,
-            protocol_versions=snapshot.descriptor.protocol_versions,
-            max_concurrency=snapshot.descriptor.max_concurrency,
-        )
-        self._finish_worker_audit_operation()
-        return snapshot
+            return snapshot
 
     def _authorize_worker_observer(self, credential: Any, worker_id: str) -> None:
         self._require_worker_audit_healthy()
@@ -595,53 +597,57 @@ class CapriHostRuntime:
         """Record liveness only from a trusted supervisor and host-derived load."""
         self._authorize_worker_observer(observer_credential, worker_id)
         in_flight = self._worker_in_flight(worker_id)
-        self._begin_worker_audit_operation()
-        try:
-            snapshot = self._worker_registry.heartbeat(
-                worker_id, authenticated_worker_id=worker_id, in_flight=in_flight,
+        with self._worker_reservation_lock:
+            self._purge_worker_reservation_contexts()
+            self._begin_worker_audit_operation()
+            try:
+                snapshot = self._worker_registry.heartbeat(
+                    worker_id, authenticated_worker_id=worker_id, in_flight=in_flight,
+                )
+            except WorkerRegistryError:
+                self._finish_worker_audit_operation()
+                raise HostRuntimeError("worker heartbeat was rejected") from None
+            except Exception:
+                self._worker_audit_healthy = False
+                raise HostRuntimeError("worker heartbeat failed; reconciliation is required") from None
+            self._record_worker_lifecycle_event(
+                "worker.heartbeat",
+                worker_id,
+                descriptor_revision=snapshot.descriptor.revision,
+                observed_in_flight=in_flight,
+                health_state=snapshot.health.state,
+                health_revision=snapshot.health.revision,
             )
-        except WorkerRegistryError:
             self._finish_worker_audit_operation()
-            raise HostRuntimeError("worker heartbeat was rejected") from None
-        except Exception:
-            self._worker_audit_healthy = False
-            raise HostRuntimeError("worker heartbeat failed; reconciliation is required") from None
-        self._record_worker_lifecycle_event(
-            "worker.heartbeat",
-            worker_id,
-            descriptor_revision=snapshot.descriptor.revision,
-            observed_in_flight=in_flight,
-            health_state=snapshot.health.state,
-            health_revision=snapshot.health.revision,
-        )
-        self._finish_worker_audit_operation()
-        return snapshot
+            return snapshot
 
     def record_worker_failure(
         self, observer_credential: Any, worker_id: str,
     ) -> WorkerSnapshot:
         """Record failure only from a trusted host supervisor/monitor."""
         self._authorize_worker_observer(observer_credential, worker_id)
-        self._begin_worker_audit_operation()
-        try:
-            snapshot = self._worker_registry.record_failure(
-                worker_id, authenticated_worker_id=worker_id,
+        with self._worker_reservation_lock:
+            self._purge_worker_reservation_contexts()
+            self._begin_worker_audit_operation()
+            try:
+                snapshot = self._worker_registry.record_failure(
+                    worker_id, authenticated_worker_id=worker_id,
+                )
+            except WorkerRegistryError:
+                self._finish_worker_audit_operation()
+                raise HostRuntimeError("worker failure observation was rejected") from None
+            except Exception:
+                self._worker_audit_healthy = False
+                raise HostRuntimeError("worker failure observation failed; reconciliation is required") from None
+            self._record_worker_lifecycle_event(
+                "worker.failure",
+                worker_id,
+                descriptor_revision=snapshot.descriptor.revision,
+                health_state=snapshot.health.state,
+                health_revision=snapshot.health.revision,
             )
-        except WorkerRegistryError:
             self._finish_worker_audit_operation()
-            raise HostRuntimeError("worker failure observation was rejected") from None
-        except Exception:
-            self._worker_audit_healthy = False
-            raise HostRuntimeError("worker failure observation failed; reconciliation is required") from None
-        self._record_worker_lifecycle_event(
-            "worker.failure",
-            worker_id,
-            descriptor_revision=snapshot.descriptor.revision,
-            health_state=snapshot.health.state,
-            health_revision=snapshot.health.revision,
-        )
-        self._finish_worker_audit_operation()
-        return snapshot
+            return snapshot
 
     def _worker_policy_allowlist(
         self, principal_id: str, task_id: str, capability: str,
@@ -674,19 +680,33 @@ class CapriHostRuntime:
             self._worker_reservation_contexts.clear()
             return
         if isinstance(self._worker_registry, SQLiteWorkerRegistry):
-            if not self._worker_reservation_contexts:
-                return
+            # Sweep even when this process has no wrappers: a reservation can
+            # expire after restart and still requires a host lifecycle event.
             self._begin_worker_audit_operation()
             try:
                 active, expired = self._worker_registry.active_reservations_with_expired()
                 active_by_token = {item.token: item for item in active}
                 expired_by_token = {item.token: item for item in expired}
+                for reservation in expired:
+                    self._record_worker_lifecycle_event(
+                        "worker.reservation.expired",
+                        reservation.worker_id,
+                        principal_id=reservation.principal_id or "host",
+                        task_id=reservation.task_id,
+                        capability=reservation.capability,
+                        protocol_version=reservation.protocol_version,
+                        descriptor_revision=reservation.descriptor_revision,
+                        reservation_token=reservation.token,
+                        expires_at_ns=reservation.expires_at_ns,
+                        status="expired",
+                        error_code="reservation_ttl_elapsed",
+                    )
                 for token, context in tuple(self._worker_reservation_contexts.items()):
                     current = active_by_token.get(token)
                     if current is not None:
                         current_context = HostWorkerReservation(
-                            context.principal_id, context.task_id,
-                            context.capability, context.protocol_version, current,
+                            current.principal_id, current.task_id,
+                            current.capability, current.protocol_version, current,
                         )
                         if not self._same_host_reservation_context(context, current_context):
                             self._worker_audit_healthy = False
@@ -696,37 +716,25 @@ class CapriHostRuntime:
                         continue
                     self._worker_reservation_contexts.pop(token, None)
                     if token in expired_by_token:
-                        self._record_worker_lifecycle_event(
-                            "worker.reservation.expired",
-                            context.reservation.worker_id,
-                            principal_id=context.principal_id,
-                            task_id=context.task_id,
-                            capability=context.capability,
-                            protocol_version=context.protocol_version,
-                            descriptor_revision=context.reservation.descriptor_revision,
-                            reservation_token=token,
-                            status="expired",
-                            error_code="reservation_ttl_elapsed",
-                        )
-                    else:
-                        self._record_worker_lifecycle_event(
-                            "worker.reservation.context_missing",
-                            context.reservation.worker_id,
-                            principal_id=context.principal_id,
-                            task_id=context.task_id,
-                            capability=context.capability,
-                            protocol_version=context.protocol_version,
-                            descriptor_revision=context.reservation.descriptor_revision,
-                            reservation_token=token,
-                            status="not_found",
-                            error_code="reservation_missing_or_revoked",
-                        )
-                        self._worker_audit_healthy = False
-                        # Keep the durable operation marker pending until an
-                        # operator reconciles the unexpected disappearance.
-                        raise HostRuntimeError(
-                            "worker reservation expired or disappeared outside the trusted host gateway; reconciliation is required"
-                        )
+                        continue
+                    self._record_worker_lifecycle_event(
+                        "worker.reservation.context_missing",
+                        context.reservation.worker_id,
+                        principal_id=context.principal_id,
+                        task_id=context.task_id,
+                        capability=context.capability,
+                        protocol_version=context.protocol_version,
+                        descriptor_revision=context.reservation.descriptor_revision,
+                        reservation_token=token,
+                        status="not_found",
+                        error_code="reservation_missing_or_revoked",
+                    )
+                    self._worker_audit_healthy = False
+                    # Keep the durable operation marker pending until an
+                    # operator reconciles the unexpected disappearance.
+                    raise HostRuntimeError(
+                        "worker reservation expired or disappeared outside the trusted host gateway; reconciliation is required"
+                    )
                 self._finish_worker_audit_operation()
             except HostRuntimeError:
                 raise
@@ -766,14 +774,16 @@ class CapriHostRuntime:
         except Exception:
             raise HostRuntimeError("task is unavailable to the authenticated principal") from None
         allowed = self._worker_policy_allowlist(context.principal_id, task_id, capability)
-        try:
-            return self._worker_registry.eligible(
-                capability,
-                protocol_version=protocol_version,
-                authorized_worker_ids=allowed,
-            )
-        except WorkerRegistryError:
-            raise HostRuntimeError("host worker candidate lookup was rejected") from None
+        with self._worker_reservation_lock:
+            self._purge_worker_reservation_contexts()
+            try:
+                return self._worker_registry.eligible(
+                    capability,
+                    protocol_version=protocol_version,
+                    authorized_worker_ids=allowed,
+                )
+            except WorkerRegistryError:
+                raise HostRuntimeError("host worker candidate lookup was rejected") from None
 
     def get_worker_reservation_for_task(
         self, credential: Any, task_id: str,
@@ -785,28 +795,32 @@ class CapriHostRuntime:
             raise HostRuntimeError("worker reservation requires the configured host registry and task store")
         try:
             self._task_store.get_for_principal(task_id, context.principal_id)
-            reservation = self._worker_registry.get_reservation_for_task(
-                context.principal_id, task_id,
-            )
         except Exception:
-            raise HostRuntimeError("durable worker reservation recovery failed") from None
-        if reservation is None:
-            return None
-        if (
-            reservation.principal_id != context.principal_id
-            or reservation.task_id != task_id
-            or reservation.capability is None
-            or reservation.protocol_version is None
-        ):
-            self._worker_audit_healthy = False
-            raise HostRuntimeError("durable worker reservation context is invalid; reconciliation is required")
-        wrapped = HostWorkerReservation(
-            context.principal_id, task_id, reservation.capability,
-            reservation.protocol_version, reservation,
-        )
+            raise HostRuntimeError("task is unavailable to the authenticated principal") from None
         with self._worker_reservation_lock:
+            self._purge_worker_reservation_contexts()
+            try:
+                reservation = self._worker_registry.get_reservation_for_task(
+                    context.principal_id, task_id,
+                )
+            except Exception:
+                raise HostRuntimeError("durable worker reservation recovery failed") from None
+            if reservation is None:
+                return None
+            if (
+                reservation.principal_id != context.principal_id
+                or reservation.task_id != task_id
+                or reservation.capability is None
+                or reservation.protocol_version is None
+            ):
+                self._worker_audit_healthy = False
+                raise HostRuntimeError("durable worker reservation context is invalid; reconciliation is required")
+            wrapped = HostWorkerReservation(
+                context.principal_id, task_id, reservation.capability,
+                reservation.protocol_version, reservation,
+            )
             self._worker_reservation_contexts[reservation.token] = wrapped
-        return wrapped
+            return wrapped
 
     def reserve_worker_candidate(
         self, credential: Any, task_id: str, capability: str, protocol_version: int,
