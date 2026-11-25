@@ -249,3 +249,7 @@ Back up the artifact files separately. After restore, consumers must call
 `verify_export(export_id, artifact_path)` against the restored registry before using any
 artifact. Missing or mismatched files fail closed. Do not treat a SQLite backup alone as a
 portable training dataset.
+
+The repository test suite also exercises a separate-process race between pending
+export reconciliation and consent revocation. The invariant is that reconciliation
+must never reactivate an export after its source consent has been revoked.
