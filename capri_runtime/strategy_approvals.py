@@ -18,7 +18,6 @@ from .strategy_store import (
     _grant_payload,
     _identifier,
     _text,
-    _timestamp,
     _version,
 )
 from .tools import ApprovalGrant
@@ -42,7 +41,6 @@ class StrategyApprovalRequest:
     config_sha256: str
     expected_generation: int
     action: str
-    issued_at: str
 
 
 def _validated_fields(
@@ -113,12 +111,9 @@ class StrategyApprovalBridge:
     def __init__(self, approval_service: HostApprovalService) -> None:
         if type(approval_service) is not HostApprovalService:
             raise StrategyAuthorizationError("a trusted HostApprovalService is required")
-        if (
-            approval_service.challenge_ttl_seconds + approval_service.grant_ttl_seconds
-            > _MAX_GRANT_LIFETIME_SECONDS
-        ):
+        if approval_service.grant_ttl_seconds > _MAX_GRANT_LIFETIME_SECONDS:
             raise StrategyAuthorizationError(
-                "strategy challenge and grant lifetimes must total no more than 15 minutes"
+                "strategy approval grants must be no longer than 15 minutes"
             )
         self._service = approval_service
 
@@ -167,20 +162,16 @@ class StrategyApprovalBridge:
             or challenge.status not in {"pending", "approved"}
         ):
             raise StrategyAuthorizationError("stored approval challenge does not match the strategy request")
-        # The immutable challenge creation time is the grant's issued_at. This
-        # binds it through the durable challenge record and bounds total lifetime.
-        _timestamp(challenge.created_at, "challenge created_at")
         return StrategyApprovalRequest(
             challenge.challenge_id, op_id, principal, category, strategy,
             strategy_version, evaluation_hash, config_hash, generation,
-            normalized_action, challenge.created_at,
+            normalized_action,
         )
 
     @staticmethod
     def _request_digest(request: StrategyApprovalRequest) -> str:
         if type(request) is not StrategyApprovalRequest:
             raise StrategyAuthorizationError("a host-owned StrategyApprovalRequest is required")
-        _timestamp(request.issued_at, "request issued_at")
         fields = _validated_fields(
             request.principal_id, request.strategy_class, request.strategy_id,
             request.version, request.evaluation_sha256, request.config_sha256,
@@ -203,7 +194,6 @@ class StrategyApprovalBridge:
         if (
             stored is None
             or stored.challenge_id != request.challenge_id
-            or stored.created_at != request.issued_at
             or stored.argument_digest != digest
             or stored.principal_id != request.principal_id
             or stored.tool_name != f"strategy.{request.action}"
@@ -213,8 +203,8 @@ class StrategyApprovalBridge:
         if approved.status != "approved" or approved.grant is None or approved.approver_id is None:
             raise StrategyAuthorizationError("strategy approval was not granted")
         approval = approved.grant
-        if approval.approver_id != approved.approver_id:
-            raise StrategyAuthorizationError("signed approver identity does not match the approval record")
+        if approval.approver_id != approved.approver_id or approval.issued_at is None:
+            raise StrategyAuthorizationError("signed approver or issuance time is missing")
         grant = StrategyActivationGrant(
             grant_id=approval.grant_id,
             principal_id=request.principal_id,
@@ -225,7 +215,7 @@ class StrategyApprovalBridge:
             config_sha256=request.config_sha256,
             expected_generation=request.expected_generation,
             action=request.action,
-            issued_at=request.issued_at,
+            issued_at=approval.issued_at,
             expires_at=approval.expires_at,
             approver_id=approval.approver_id,
             signature=approval.signature or "",
@@ -251,7 +241,7 @@ class StrategyApprovalBridge:
             approval = ApprovalGrant(
                 grant.grant_id, grant.principal_id, f"strategy.{grant.action}",
                 digest, grant.expires_at, grant.signature, grant.key_id,
-                grant.operation_id, grant.approver_id,
+                grant.operation_id, grant.approver_id, grant.issued_at,
             )
             if self._service.verify_grant(approval) is not True:
                 return False
@@ -260,7 +250,6 @@ class StrategyApprovalBridge:
                 challenge is not None
                 and challenge.status == "approved"
                 and challenge.grant == approval
-                and challenge.created_at == grant.issued_at
                 and challenge.approver_id == grant.approver_id
                 and challenge.principal_id == grant.principal_id
                 and challenge.tool_name == f"strategy.{grant.action}"
