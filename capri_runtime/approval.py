@@ -230,10 +230,12 @@ class SQLiteApprovalChallengeStore:
                 if record.status == "approved":
                     if decision != "approve":
                         raise ToolValidationError("approval challenge is already approved")
-                    if record.grant is None or _utc(
-                        datetime.fromisoformat(record.grant.expires_at.replace("Z", "+00:00")),
-                        "stored grant expiry",
-                    ) <= current:
+                    if (record.grant is None
+                            or record.grant.operation_id != record.operation_id
+                            or _utc(
+                                datetime.fromisoformat(record.grant.expires_at.replace("Z", "+00:00")),
+                                "stored grant expiry",
+                            ) <= current):
                         raise ToolValidationError("approved grant has expired")
                     connection.execute("COMMIT")
                     return record
@@ -261,6 +263,7 @@ class SQLiteApprovalChallengeStore:
                             or grant.principal_id != record.principal_id
                             or grant.tool_name != record.tool_name
                             or grant.argument_digest != record.argument_digest
+                            or grant.operation_id != record.operation_id
                             or not isinstance(grant.signature, str)
                             or not re.fullmatch(r"[0-9a-f]{64}", grant.signature)):
                         raise ToolValidationError("grant factory returned a mismatched or unsigned grant")
@@ -271,7 +274,7 @@ class SQLiteApprovalChallengeStore:
                     "grant_id": grant.grant_id, "principal_id": grant.principal_id,
                     "tool_name": grant.tool_name, "argument_digest": grant.argument_digest,
                     "expires_at": grant.expires_at, "signature": grant.signature,
-                    "key_id": grant.key_id,
+                    "key_id": grant.key_id, "operation_id": grant.operation_id,
                 }, sort_keys=True, separators=(",", ":")) if grant else None
                 connection.execute(
                     """UPDATE approval_challenges SET status=?,approver_id=?,grant_json=?
@@ -339,6 +342,9 @@ class HostApprovalService:
             raise ToolValidationError("trusted execution context and tool outcome are required")
         if outcome.status != "approval_required" or not isinstance(outcome.argument_digest, str):
             raise ToolValidationError("only approval_required outcomes can create challenges")
+        if (not isinstance(operation_id, str) or not _OPERATION.fullmatch(operation_id)
+                or context.operation_id != operation_id):
+            raise ToolValidationError("approval challenge must match the trusted execution operation")
         now = _utc(self._clock(), "host clock")
         return self._store.create(
             operation_id, context.principal_id, outcome.name, outcome.argument_digest,
@@ -369,7 +375,7 @@ class HostApprovalService:
         if decision == "approve":
             factory = lambda item: self._signer.issue(
                 item.principal_id, item.tool_name, item.argument_digest,
-                ttl_seconds=self._grant_ttl,
+                ttl_seconds=self._grant_ttl, operation_id=item.operation_id,
             )
         # Re-read time after authentication/policy callbacks; the store checks it
         # inside its serialized decision transaction, not at challenge display time.

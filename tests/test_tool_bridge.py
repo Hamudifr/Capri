@@ -163,8 +163,12 @@ class ToolExecutionBridgeTests(unittest.TestCase):
         grant = ApprovalGrant(
             "grant-1", "host-user", "delete_item", digest(args),
             (self.now + timedelta(minutes=2)).isoformat(),
+            operation_id="session-1:delete",
         )
-        context = ExecutionContext("host-user", frozenset({"tools:delete"}), (grant,))
+        context = ExecutionContext(
+            "host-user", frozenset({"tools:delete"}), (grant,),
+            operation_id="session-1:delete",
+        )
         outcome = self.bridge.execute_batch(
             [ToolCallRequest("delete", "delete_item", args)], context
         )[0]
