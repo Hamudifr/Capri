@@ -479,6 +479,8 @@ class SQLiteWorkerRegistry:
     ) -> None:
         if not callable(getattr(task_store, "_connect", None)) or not hasattr(task_store, "_lock"):
             raise WorkerRegistryError("SQLiteWorkerRegistry requires a SQLiteTaskStore")
+        if not callable(clock_wall_ns):
+            raise WorkerRegistryError("clock_wall_ns must be callable")
         self.task_store = task_store
         self._tasks = task_store
         self._heartbeat_ttl_ms = heartbeat_ttl_ms
