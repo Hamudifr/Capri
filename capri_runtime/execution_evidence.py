@@ -452,6 +452,7 @@ class SQLiteExecutionEvidenceJournal:
             with self._tasks._lock:
                 connection = self._tasks._connect()
                 try:
+                    validate_execution_evidence_snapshot(connection)
                     rows = connection.execute(
                         "SELECT event_id FROM execution_evidence_events ORDER BY created_at,event_id"
                     ).fetchall()
