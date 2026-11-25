@@ -103,6 +103,18 @@ class SkillValidationTests(unittest.TestCase):
             self.assertEqual(report["status"], "fail")
             self.assertTrue(any("unsupported frontmatter key" in item for item in report["skills"][0]["errors"]))
 
+    def test_rejects_implicit_non_string_required_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_skill(
+                root,
+                "numeric-name",
+                "name: 123\\n"
+                "description: Use when validating scalar types.\\n",
+            )
+            report = validate_skill_tree(root)
+            self.assertTrue(any("not a string" in item for item in report["skills"][0]["errors"]))
+
     def test_rejects_unsupported_yaml_aliases_instead_of_misparsing(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
