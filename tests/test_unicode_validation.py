@@ -1,6 +1,6 @@
 import unittest
 
-from capri_core.validation import contains_surrogate
+from capri_core import contains_surrogate
 
 
 class UnicodeScalarValidationTests(unittest.TestCase):
