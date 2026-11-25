@@ -22,6 +22,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Any
 
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPOSITORY_ROOT))
+
 try:
     import resource
 except ImportError:  # pragma: no cover - Windows
@@ -111,7 +115,7 @@ def _measure(
 
 
 def _cpu_model() -> str | None:
-    processor = platform.processor().strip()
+    processor = (platform.processor() or "").strip()
     if processor:
         return processor
     cpuinfo = Path("/proc/cpuinfo")
