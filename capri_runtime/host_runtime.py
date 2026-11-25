@@ -1401,6 +1401,7 @@ class CapriHostRuntime:
             "execution_evidence": self._execution_evidence_journal,
             "goals": self._goal_store,
             "budgets": self._budget_store,
+            "worker_registry": self._worker_registry,
         }
         health: dict[str, str] = {}
         for name, store in stores.items():
@@ -1412,7 +1413,12 @@ class CapriHostRuntime:
             except Exception:
                 health[name] = "unavailable"
             else:
-                health[name] = "healthy" if result == "ok" else "degraded"
+                if result == "ok":
+                    health[name] = "healthy"
+                elif name == "worker_registry" and result == "ephemeral":
+                    health[name] = "ephemeral"
+                else:
+                    health[name] = "degraded"
         return health
 
     def run_task_worker(self, stop_event: Any) -> None:
