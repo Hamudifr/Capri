@@ -951,8 +951,10 @@ class CapriHostRuntime:
             )
             if reservation.token in self._worker_reservation_contexts:
                 try:
-                    self._worker_registry.release_reservation(
-                        reservation, authenticated_worker_id=reservation.worker_id,
+                    _, expired = self._run_worker_registry_operation(
+                        lambda: self._worker_registry.release_reservation(
+                            reservation, authenticated_worker_id=reservation.worker_id,
+                        )
                     )
                 except WorkerRegistryError:
                     self._worker_audit_healthy = False
@@ -960,6 +962,7 @@ class CapriHostRuntime:
                 except Exception:
                     self._worker_audit_healthy = False
                     raise HostRuntimeError("worker reservation collision cleanup failed") from None
+                self._record_expired_worker_reservations(expired)
                 self._record_worker_lifecycle_event(
                     "worker.reservation.collision_released",
                     reservation.worker_id,
@@ -1039,8 +1042,10 @@ class CapriHostRuntime:
             except HostRuntimeError:
                 self._begin_worker_audit_operation()
                 try:
-                    self._worker_registry.release_reservation(
-                        stored.reservation, authenticated_worker_id=worker_id,
+                    _, expired = self._run_worker_registry_operation(
+                        lambda: self._worker_registry.release_reservation(
+                            stored.reservation, authenticated_worker_id=worker_id,
+                        )
                     )
                 except WorkerRegistryError:
                     self._worker_audit_healthy = False
@@ -1048,6 +1053,7 @@ class CapriHostRuntime:
                 except Exception:
                     self._worker_audit_healthy = False
                     raise HostRuntimeError("worker reservation policy cleanup failed") from None
+                self._record_expired_worker_reservations(expired)
                 self._worker_reservation_contexts.pop(stored.reservation.token, None)
                 self._record_worker_lifecycle_event(
                     "worker.reservation.denied",
@@ -1066,12 +1072,15 @@ class CapriHostRuntime:
             if worker_id not in allowed:
                 self._begin_worker_audit_operation()
                 try:
-                    self._worker_registry.release_reservation(
-                        stored.reservation, authenticated_worker_id=worker_id,
+                    _, expired = self._run_worker_registry_operation(
+                        lambda: self._worker_registry.release_reservation(
+                            stored.reservation, authenticated_worker_id=worker_id,
+                        )
                     )
                 except WorkerRegistryError:
                     self._worker_audit_healthy = False
                     raise HostRuntimeError("worker reservation policy cleanup failed") from None
+                self._record_expired_worker_reservations(expired)
                 self._worker_reservation_contexts.pop(stored.reservation.token, None)
                 self._record_worker_lifecycle_event(
                     "worker.reservation.denied",
