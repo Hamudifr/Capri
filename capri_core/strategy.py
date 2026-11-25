@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from statistics import fmean
 from typing import Iterable, Literal
 
@@ -31,12 +31,13 @@ class StrategyObservation:
     strategy_id: str
     outcome: Outcome
     evidence_ref: str
-    strategy_version: str = "unversioned"
     safety_violation: bool = False
     tool_calls: int = 0
     context_tokens: int = 0
     estimated_cost_units: int = 0
     latency_ms: int = 0
+    # Keyword-only to preserve the original public positional constructor.
+    strategy_version: str = field(default="unversioned", kw_only=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,8 +57,6 @@ class StrategyEvaluation:
 
     baseline_id: str
     candidate_id: str
-    baseline_version: str
-    candidate_version: str
     cohort_sha256: str
     matched_pairs: int
     baseline_unmatched: int
@@ -71,6 +70,10 @@ class StrategyEvaluation:
         "Descriptive evidence from this matched cohort only; not a causal proof, "
         "statistical significance claim, live activation, or independent review."
     )
+    # Keyword-only fields preserve the complete v1 public positional constructor.
+    baseline_version: str = field(default="unversioned", kw_only=True)
+    candidate_version: str = field(default="unversioned", kw_only=True)
+    cohort_schema: str = field(default="capri.strategy-cohort.v2", kw_only=True)
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -172,7 +175,7 @@ def evaluate_strategies(
         for _, record in sorted(by_strategy[strategy_id].items())
     ]
     manifest = {
-        "schema": "capri.strategy-cohort.v1",
+        "schema": "capri.strategy-cohort.v2",
         "baseline_id": baseline_id,
         "candidate_id": candidate_id,
         "observations": canonical_observations,
