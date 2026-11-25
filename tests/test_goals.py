@@ -2,6 +2,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timezone
 
 from capri_runtime.goals import (
@@ -50,6 +51,16 @@ class SQLiteGoalStoreTests(unittest.TestCase):
         self.assertEqual(reopened.version, 1)
         self.assertEqual(reopened.constraints["max_tool_calls"], 8)
         self.assertEqual(reopened.deadline, "2026-11-26T11:00:00+00:00")
+
+    def test_principal_read_reuses_one_connection_without_weakening_owner_scope(self):
+        goal = self.create()
+        original_connect = self.store._connect
+        with patch.object(self.store, "_connect", wraps=original_connect) as connect:
+            reopened = self.store.get_for_principal(goal.goal_id, "alice")
+        self.assertEqual(reopened, goal)
+        self.assertEqual(connect.call_count, 1)
+        with self.assertRaises(GoalNotFoundError):
+            self.store.get_for_principal(goal.goal_id, "bob")
 
     def test_owner_isolation_and_immutable_owner_row(self):
         goal = self.create()
