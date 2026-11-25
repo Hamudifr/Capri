@@ -2,7 +2,7 @@
 
 ## Status
 
-Implemented as a pure offline eligibility evaluator. It does not collect or authenticate evidence, issue activation grants, select a strategy, route live tasks, change permissions, or perform a canary. A positive result means only that supplied records satisfy this assessment contract.
+Implemented as a pure offline eligibility evaluator plus a host-controlled persistence/binding layer. The pure evaluator does not collect or authenticate evidence or issue grants. `SQLiteStrategyStore` can independently recompute and persist eligible multi-cohort assessments after a trusted evidence verifier authenticates every cohort, and a host-issued HMAC grant can bind that exact assessment. Neither component selects a strategy, routes live tasks, changes permissions, or performs a canary. A positive result means only that supplied records satisfy this assessment contract.
 
 ## API
 
@@ -45,3 +45,14 @@ This evaluator does not implement the later full-promotion gate. Full promotion 
 ## Tests
 
 `tests/test_strategy_promotion.py` covers two-cohort eligibility, deterministic order-independent results, minimum cohort/scenario coverage, confidence-interval rejection, per-task resource regression, version consistency, task-family allowlisting, and evidence separation.
+
+
+## Persisted assessment and activation binding (X8.5)
+
+The host may persist an eligible assessment through `SQLiteStrategyStore.register_promotion_assessment_for_principal(...)`. The store does not accept a caller-supplied assessment result: it recomputes the multi-cohort assessment under the exported `STRATEGY_PROMOTION_POLICY_VERSION`, independently evaluates each cohort, and calls the configured host evidence verifier for every cohort. Each verifier context includes the cohort ID and host-classified task family in addition to the baseline/candidate versions, cohort fingerprint/schema, manifest locator, and matched-pair count. Every callback must return exact `True`.
+
+The candidate's already-registered, evidence-verified evaluation cohort must be present in the promotion cohort set, and its manifest locator must match the candidate registration. The remaining cohorts must have distinct task/evidence fingerprints and independently verified manifests. The store persists no raw observations: it records the canonical assessment summary, per-cohort SHA-256 fingerprints, and exact manifest locators in an append-only `strategy_promotion_assessments` table. The record fingerprint covers all three components.
+
+A host can then include that fingerprint as `promotion_assessment_sha256` in `StrategyApprovalRequest`. `HostStrategyApprovalAuthority` includes it in the HMAC-signed `StrategyActivationGrant`. During activation or promotion-bound rollback, the registry verifies that the record exists, remains eligible under the current policy version, matches the exact registered baseline/candidate versions, and contains the target cohort fingerprint. The activation event hash chain includes the assessment fingerprint; active and historical event records expose it. If the promotion policy version is retired, an active strategy using the old assessment is not served until it is reassessed or rolled back.
+
+A grant without a promotion-assessment fingerprint remains a host-approved manual activation path for an individually evidence-verified candidate. It is not evidence of multi-cohort canary eligibility. The registry still does not route traffic or execute strategy code. A future host router must explicitly require the promotion binding before any canary routing and must implement the separate 5% cap, monitoring, and rollback gates.
