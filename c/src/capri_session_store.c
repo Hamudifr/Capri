@@ -158,6 +158,8 @@ static bool store_path_safe(const CapriSessionStore *store) {
     free(resolved);free(copy);return ok;
 }
 
+static CapriSessionError validate_backup_snapshot(CapriSessionStore *store,sqlite3 *db);
+
 static bool schema(sqlite3 *db) {
     const char *sql=
       "PRAGMA foreign_keys=ON; PRAGMA recursive_triggers=ON; PRAGMA trusted_schema=OFF; PRAGMA synchronous=FULL; PRAGMA journal_mode=WAL;"
@@ -194,7 +196,13 @@ CapriSessionStore *capri_session_store_open(const char *path,size_t max_messages
 #ifdef SQLITE_DBCONFIG_DEFENSIVE
     if(rc==SQLITE_OK && sqlite3_db_config(s->db,SQLITE_DBCONFIG_DEFENSIVE,1,NULL)!=SQLITE_OK) rc=SQLITE_ERROR;
 #endif
-    if(rc!=SQLITE_OK || !schema(s->db) || !store_path_safe(s)){ if(s->db)sqlite3_close(s->db);pthread_mutex_destroy(&s->mutex);free(s->path);free(s);if(error)*error=CAPRI_SESSION_DATABASE;return NULL; }
+    if(rc!=SQLITE_OK || !schema(s->db) || !store_path_safe(s) ||
+       validate_backup_snapshot(s,s->db)!=CAPRI_SESSION_OK){
+        if(s->db)sqlite3_close(s->db);
+        pthread_mutex_destroy(&s->mutex);free(s->path);free(s);
+        if(error)*error=CAPRI_SESSION_DATABASE;
+        return NULL;
+    }
     if(error) *error=CAPRI_SESSION_OK;
     return s;
 }
