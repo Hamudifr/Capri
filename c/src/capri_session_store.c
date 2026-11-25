@@ -531,7 +531,21 @@ static bool sessions_constraints_valid(sqlite3 *db) {
     int version_rc=sqlite3_step(version_st);
     int version=version_rc==SQLITE_ROW?sqlite3_column_int(version_st,0):-1;
     sqlite3_finalize(version_st);
-    if(version==0)return true; /* legacy Python schema before versioned CHECK constraints */
+    const char *strict_sql=
+        "CREATE TABLE sessions(session_id TEXT PRIMARY KEY,created_at TEXT NOT NULL,"
+        "updated_at TEXT NOT NULL,version INTEGER NOT NULL CHECK(version>=0),"
+        "closed INTEGER NOT NULL CHECK(closed IN(0,1)),messages_json TEXT NOT NULL "
+        "CHECK(json_valid(messages_json) AND json_type(messages_json)='array'))";
+    const char *legacy_sql=
+        "CREATE TABLE sessions(session_id TEXT PRIMARY KEY,created_at TEXT NOT NULL,"
+        "updated_at TEXT NOT NULL,version INTEGER NOT NULL CHECK(version>=0),"
+        "closed INTEGER NOT NULL CHECK(closed IN(0,1)),messages_json TEXT NOT NULL)";
+    if(version==0){
+        /* Existing Python stores predate the versioned JSON CHECK. Accept that
+           legacy profile without rewriting it, as well as early strict C files. */
+        return table_matches(db,"sessions",legacy_sql)
+            ||table_matches(db,"sessions",strict_sql);
+    }
     if(version!=1)return false;
     if(sqlite3_prepare_v2(
         db,
@@ -539,11 +553,7 @@ static bool sessions_constraints_valid(sqlite3 *db) {
         -1,&table_st,NULL
     )!=SQLITE_OK)return false;
     int rc=sqlite3_step(table_st);
-    const char *expected=
-        "CREATE TABLE sessions(session_id TEXT PRIMARY KEY,created_at TEXT NOT NULL,"
-        "updated_at TEXT NOT NULL,version INTEGER NOT NULL CHECK(version>=0),"
-        "closed INTEGER NOT NULL CHECK(closed IN(0,1)),messages_json TEXT NOT NULL "
-        "CHECK(json_valid(messages_json) AND json_type(messages_json)='array'))";
+    const char *expected=strict_sql;
     bool valid=rc==SQLITE_ROW && sqlite3_column_type(table_st,0)==SQLITE_TEXT
         &&normalized_sql_equal((const char*)sqlite3_column_text(table_st,0),expected);
     sqlite3_finalize(table_st);
@@ -553,8 +563,6 @@ static bool sessions_constraints_valid(sqlite3 *db) {
 static bool session_schema_valid(sqlite3 *db) {
     return schema_objects_valid(db)
         &&sessions_constraints_valid(db)
-        &&table_matches(db,"sessions",
-            "CREATE TABLE sessions(session_id TEXT PRIMARY KEY,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,version INTEGER NOT NULL CHECK(version>=0),closed INTEGER NOT NULL CHECK(closed IN(0,1)),messages_json TEXT NOT NULL CHECK(json_valid(messages_json) AND json_type(messages_json)='array'))")
         &&table_matches(db,"session_owners",
             "CREATE TABLE session_owners(session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,principal_id TEXT NOT NULL,created_at TEXT NOT NULL)")
         &&table_matches(db,"session_turn_leases",
