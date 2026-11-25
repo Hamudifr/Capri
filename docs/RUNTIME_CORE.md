@@ -1,6 +1,6 @@
 # Capri core and runtime architecture
 
-This document summarizes the current non-X5 implementation. Capri is an evolving Python library and host-composition foundation, not a complete autonomous agent, hosted service, or production multi-tenant deployment.
+This document summarizes the current Capri runtime implementation. Capri is an evolving Python library and host-composition foundation, not a complete autonomous agent, hosted service, or production multi-tenant deployment.
 
 ## Core ledger
 

@@ -11,10 +11,10 @@ Use `python -m capri_core doctor --root /path/to/Capri` to inspect another check
 ## Checks
 
 - Python 3.15.x only.
-- Required non-protected source, test, documentation entry-point, and workflow files.
+- Required source, test, documentation entry-point, and workflow files.
 - External GitHub Actions references pinned to full 40-character commit SHAs.
 - Explicit least-privilege `contents: read` workflow permissions.
-- The `push` trigger includes `main`; the `pull_request` trigger includes `main` and `recovery/non-x5-foundation`.
+- The `push` trigger includes `main`; the `pull_request` trigger includes `main`.
 
 The command is read-only and uses only the known paths above. It does not enumerate arbitrary files, inspect transcripts or credentials, contact external services, execute tests, or modify the working tree.
 

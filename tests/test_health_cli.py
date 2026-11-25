@@ -27,8 +27,8 @@ class DoctorHealthIntegrationTests(unittest.TestCase):
             workflow = root / ".github/workflows/quality.yml"
             workflow.parent.mkdir(parents=True, exist_ok=True)
             workflow.write_text(
-                'on:\n  push:\n    branches: ["main", "recovery/non-x5-foundation"]\n'
-                '  pull_request:\n    branches: ["main", "recovery/non-x5-foundation"]\n'
+                'on:\n  push:\n    branches: ["main"]\n'
+                '  pull_request:\n    branches: ["main"]\n'
                 'permissions:\n  contents: read\n'
                 'jobs:\n  test:\n    steps:\n'
                 '      - uses: actions/checkout@' + "a" * 40 + "\n",
