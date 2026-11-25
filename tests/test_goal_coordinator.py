@@ -7,6 +7,7 @@ from capri_runtime.goal_coordinator import GoalCoordinator
 from capri_runtime.goals import (
     GoalConflictError,
     GoalNotFoundError,
+    GoalValidationError,
     GoalPlanProposal,
     SQLiteGoalStore,
 )
@@ -44,6 +45,31 @@ class GoalCoordinatorTests(unittest.TestCase):
             goal.goal_id, "alice", GoalPlanProposal(tuple(PLAN)),
             TOOLS, expected_version=goal.version, now=NOW,
         )
+
+    def test_coordinator_rejects_boolean_versions(self):
+        goal = self.planned_goal()
+        with self.assertRaises(GoalValidationError):
+            self.coordinator.prepare(
+                goal.goal_id, "alice", expected_version=True, now=NOW,
+            )
+        execution = self.coordinator.prepare(
+            goal.goal_id, "alice", expected_version=goal.version, now=NOW,
+        )
+        task_engine = TaskEngine(
+            self.task_store, {}, "worker",
+            principal_handlers={"collect": lambda data, key, principal: {"ok": True}},
+        )
+        task_engine.run_once(now=NOW)
+        awaiting = self.coordinator.reconcile(goal.goal_id, "alice", now=NOW)
+        with self.assertRaises(GoalValidationError):
+            self.coordinator.verify(
+                goal.goal_id, "alice", accepted=True,
+                evidence_reference="e" * 64, expected_version=True, now=NOW,
+            )
+        with self.assertRaises(GoalValidationError):
+            self.coordinator.cancel(
+                goal.goal_id, "alice", expected_version=True, now=NOW,
+            )
 
     def test_prepare_links_before_activation_and_is_idempotent(self):
         goal = self.planned_goal()
