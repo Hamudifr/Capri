@@ -314,11 +314,21 @@ class SQLiteStrategyStore:
                     cohort_sha256 TEXT NOT NULL,
                     matched_pairs INTEGER NOT NULL CHECK(matched_pairs >= 20),
                     eligible INTEGER NOT NULL CHECK(eligible=1),
+                    evidence_verified INTEGER NOT NULL CHECK(evidence_verified IN (0,1)),
                     summary_json TEXT NOT NULL,
                     evidence_manifest_ref TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     UNIQUE(principal_id, strategy_class, cohort_sha256)
                 )""")
+                evaluation_columns = {
+                    row[1] for row in connection.execute("PRAGMA table_info(strategy_evaluations)")
+                }
+                if "evidence_verified" not in evaluation_columns:
+                    connection.execute(
+                        "ALTER TABLE strategy_evaluations ADD COLUMN "
+                        "evidence_verified INTEGER NOT NULL DEFAULT 0 "
+                        "CHECK(evidence_verified IN (0,1))"
+                    )
                 connection.execute("""CREATE TABLE IF NOT EXISTS strategy_versions (
                     principal_id TEXT NOT NULL,
                     strategy_class TEXT NOT NULL,
@@ -526,13 +536,17 @@ class SQLiteStrategyStore:
                 if baseline is None:
                     raise StrategyNotFoundError("the evaluated baseline is not registered for this principal")
                 existing_evaluation = connection.execute(
-                    """SELECT evaluation_id,baseline_id,candidate_id,summary_json,evidence_manifest_ref
+                    """SELECT evaluation_id,baseline_id,candidate_id,summary_json,evidence_manifest_ref,evidence_verified
                     FROM strategy_evaluations WHERE principal_id=? AND strategy_class=? AND cohort_sha256=?""",
                     (principal, category, evaluation.cohort_sha256),
                 ).fetchone()
                 if existing_evaluation is not None:
+                    if existing_evaluation[5] != 1:
+                        raise StrategyAuthorizationError(
+                            "existing cohort evidence is unverified; register a new verified cohort"
+                        )
                     evaluation_id = existing_evaluation[0]
-                    if existing_evaluation[1:] != (
+                    if existing_evaluation[1:5] != (
                         evaluation.baseline_id, evaluation.candidate_id,
                         summary_json, evidence_ref,
                     ):
@@ -541,8 +555,8 @@ class SQLiteStrategyStore:
                     connection.execute(
                         """INSERT INTO strategy_evaluations
                         (evaluation_id,principal_id,strategy_class,baseline_id,candidate_id,
-                         cohort_sha256,matched_pairs,eligible,summary_json,evidence_manifest_ref,created_at)
-                        VALUES (?,?,?,?,?,?,?,1,?,?,?)""",
+                         cohort_sha256,matched_pairs,eligible,evidence_verified,summary_json,evidence_manifest_ref,created_at)
+                        VALUES (?,?,?,?,?,?,?,1,1,?,?,?)""",
                         (evaluation_id, principal, category, baseline_id,
                          candidate_id, evaluation.cohort_sha256,
                          evaluation.matched_pairs, summary_json, evidence_ref, created),
@@ -667,7 +681,7 @@ class SQLiteStrategyStore:
 
                 target = connection.execute(
                     """SELECT v.config_json,v.config_sha256,v.is_baseline,v.evaluation_id,
-                    e.cohort_sha256,e.eligible
+                    e.cohort_sha256,e.eligible,e.evidence_verified
                     FROM strategy_versions v LEFT JOIN strategy_evaluations e
                     ON e.evaluation_id=v.evaluation_id
                     WHERE v.principal_id=? AND v.strategy_class=?
@@ -676,7 +690,7 @@ class SQLiteStrategyStore:
                 ).fetchone()
                 if target is None:
                     raise StrategyNotFoundError("target strategy version is not registered for this principal")
-                config_json, config_hash, is_baseline, evaluation_id, cohort_hash, eligible = target
+                config_json, config_hash, is_baseline, evaluation_id, cohort_hash, eligible, evidence_verified = target
                 expected_hash = None if is_baseline else cohort_hash
                 if grant.config_sha256 != config_hash:
                     raise StrategyAuthorizationError("approval grant config fingerprint does not match target version")
@@ -684,8 +698,8 @@ class SQLiteStrategyStore:
                     if grant.evaluation_sha256 is not None:
                         raise StrategyAuthorizationError("baseline activation must not claim a candidate evaluation")
                 elif (
-                    eligible != 1 or cohort_hash != grant.evaluation_sha256
-                    or evaluation_id is None
+                    eligible != 1 or evidence_verified != 1
+                    or cohort_hash != grant.evaluation_sha256 or evaluation_id is None
                 ):
                     raise StrategyAuthorizationError("candidate is not bound to an eligible evaluation fingerprint")
 

@@ -459,5 +459,103 @@ class SQLiteStrategyStoreTests(unittest.TestCase):
             context.cohort_sha256 = "0" * 64
 
 
+    def test_legacy_strategy_evaluations_migrate_as_unverified(self):
+        legacy_path = os.path.join(self.temp.name, "legacy-strategy.sqlite3")
+        legacy_tasks = SQLiteTaskStore(legacy_path)
+        connection = legacy_tasks._connect()
+        try:
+            connection.execute("""CREATE TABLE strategy_evaluations (
+                evaluation_id TEXT PRIMARY KEY,
+                principal_id TEXT NOT NULL,
+                strategy_class TEXT NOT NULL,
+                baseline_id TEXT NOT NULL,
+                candidate_id TEXT NOT NULL,
+                cohort_sha256 TEXT NOT NULL,
+                matched_pairs INTEGER NOT NULL CHECK(matched_pairs >= 20),
+                eligible INTEGER NOT NULL CHECK(eligible=1),
+                summary_json TEXT NOT NULL,
+                evidence_manifest_ref TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(principal_id, strategy_class, cohort_sha256)
+            )""")
+            connection.execute(
+                """INSERT INTO strategy_evaluations
+                VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                ("legacy-eval", "legacy", "reasoning", "baseline", "candidate",
+                 "a" * 64, 20, 1, "{}", "test://legacy", datetime.now(timezone.utc).isoformat()),
+            )
+        finally:
+            connection.close()
+        SQLiteStrategyStore(legacy_tasks)
+        connection = legacy_tasks._connect()
+        try:
+            row = connection.execute(
+                "SELECT evidence_verified FROM strategy_evaluations WHERE evaluation_id='legacy-eval'"
+            ).fetchone()
+        finally:
+            connection.close()
+        self.assertEqual(row, (0,))
+
+    def test_legacy_unverified_candidate_cannot_be_activated(self):
+        store = SQLiteStrategyStore(
+            self.task_store,
+            approval_verifier=lambda grant: grant.signature == "valid",
+        )
+        store.register_baseline_for_principal(
+            "legacy", "reasoning", "baseline", "1.0", {"mode": "standard"},
+        )
+        import hashlib
+        import json
+        config = {"mode": "candidate"}
+        config_json = json.dumps(config, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        config_hash = hashlib.sha256(config_json.encode("utf-8")).hexdigest()
+        summary_json = json.dumps(
+            self.evaluation.to_dict(), ensure_ascii=False, sort_keys=True,
+            separators=(",", ":"), allow_nan=False,
+        )
+        created = datetime.now(timezone.utc).isoformat()
+        connection = self.task_store._connect()
+        try:
+            connection.execute(
+                """INSERT INTO strategy_evaluations
+                (evaluation_id,principal_id,strategy_class,baseline_id,candidate_id,
+                 cohort_sha256,matched_pairs,eligible,evidence_verified,summary_json,
+                 evidence_manifest_ref,created_at)
+                VALUES(?,?,?,?,?,?,?,1,0,?,?,?)""",
+                ("legacy-eval-activation", "legacy", "reasoning", "baseline", "candidate",
+                 self.evaluation.cohort_sha256, self.evaluation.matched_pairs,
+                 summary_json, "test://legacy/manifest", created),
+            )
+            connection.execute(
+                """INSERT INTO strategy_versions
+                (principal_id,strategy_class,strategy_id,version,config_json,
+                 config_sha256,is_baseline,evaluation_id,created_at)
+                VALUES(?,?,?,?,?,?,0,?,?)""",
+                ("legacy", "reasoning", "candidate", "1.0", config_json,
+                 config_hash, "legacy-eval-activation", created),
+            )
+        finally:
+            connection.close()
+        now = datetime.now(timezone.utc)
+        grant = StrategyActivationGrant(
+            grant_id="legacy-evidence-activation",
+            principal_id="legacy",
+            strategy_class="reasoning",
+            strategy_id="candidate",
+            version="1.0",
+            evaluation_sha256=self.evaluation.cohort_sha256,
+            config_sha256=config_hash,
+            expected_generation=0,
+            action="activate",
+            issued_at=(now - timedelta(seconds=1)).isoformat(),
+            expires_at=(now + timedelta(minutes=5)).isoformat(),
+            approver_id="owner",
+            signature="valid",
+        )
+        with self.assertRaisesRegex(StrategyAuthorizationError, "evidence"):
+            store.activate_for_principal("legacy", grant)
+        self.assertEqual(store.events_for_principal("legacy", "reasoning"), ())
+
+
 if __name__ == "__main__":
     unittest.main()
