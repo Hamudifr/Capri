@@ -54,7 +54,7 @@ def _text(value: object, label: str, maximum: int, *, optional: bool = False) ->
         return None
     if type(value) is not str or not value or value != value.strip():
         raise OutcomeValidationError(f"{label} must be a non-empty plain string")
-    if len(value.encode("utf-8")) > maximum or contains_surrogate(value):
+    if contains_surrogate(value) or len(value.encode("utf-8")) > maximum:
         raise OutcomeValidationError(f"{label} exceeds its bound or contains invalid Unicode")
     return value
 
@@ -242,15 +242,15 @@ class SQLiteOutcomeStore:
         principal = _text(principal_id, "principal_id", 128)
         subject = _text(subject_id, "subject_id", 128)
         summary_text = _text(summary, "summary", 2000)
-        if subject_type not in _ALLOWED_SUBJECTS:
+        if type(subject_type) is not str or subject_type not in _ALLOWED_SUBJECTS:
             raise OutcomeValidationError("unsupported subject_type")
-        if outcome_type not in _ALLOWED_TYPES:
+        if type(outcome_type) is not str or outcome_type not in _ALLOWED_TYPES:
             raise OutcomeValidationError("unsupported outcome_type")
-        if status not in _ALLOWED_STATUSES:
+        if type(status) is not str or status not in _ALLOWED_STATUSES:
             raise OutcomeValidationError("unsupported status")
-        if source_type not in _ALLOWED_SOURCES:
+        if type(source_type) is not str or source_type not in _ALLOWED_SOURCES:
             raise OutcomeValidationError("unsupported source_type")
-        if confidence not in _ALLOWED_CONFIDENCE:
+        if type(confidence) is not str or confidence not in _ALLOWED_CONFIDENCE:
             raise OutcomeValidationError("unsupported confidence")
         reference = _text(source_reference, "source_reference", 512, optional=True)
         key = _text(idempotency_key, "idempotency_key", 128, optional=True)
@@ -346,6 +346,14 @@ class SQLiteOutcomeStore:
         target_id = _text(outcome_id, "outcome_id", 64)
         reason_text = _text(reason, "correction reason", 1000)
         stamp = _stamp(now)
+        if type(status) is not str or status not in _ALLOWED_STATUSES:
+            raise OutcomeValidationError("unsupported status")
+        _text(summary, "summary", 2000)
+        _text(source_reference, "source_reference", 512, optional=True)
+        if type(confidence) is not str or confidence not in _ALLOWED_CONFIDENCE:
+            raise OutcomeValidationError("unsupported confidence")
+        if idempotency_key is not None:
+            _text(idempotency_key, "idempotency_key", 128)
         with self._lock:
             connection = self._connect()
             try:
@@ -433,7 +441,9 @@ class SQLiteOutcomeStore:
         limit: int = 50, offset: int = 0,
     ) -> tuple[OutcomeRecord, ...]:
         _text(principal_id, "principal_id", 128)
-        if subject_type is not None and subject_type not in _ALLOWED_SUBJECTS:
+        if subject_type is not None and (
+            type(subject_type) is not str or subject_type not in _ALLOWED_SUBJECTS
+        ):
             raise OutcomeValidationError("unsupported subject_type")
         if subject_id is not None:
             _text(subject_id, "subject_id", 128)
@@ -468,6 +478,7 @@ class SQLiteOutcomeStore:
 
     @staticmethod
     def _validate_backup_snapshot(connection: sqlite3.Connection) -> None:
+        connection.row_factory = sqlite3.Row
         rows = connection.execute("SELECT * FROM outcomes ORDER BY recorded_at,outcome_id").fetchall()
         if len(rows) > _MAX_RECORDS:
             raise OutcomeValidationError("outcome backup exceeds journal capacity")
@@ -487,6 +498,14 @@ class SQLiteOutcomeStore:
             if record.supersedes_id in successors:
                 raise OutcomeValidationError("outcome backup has competing corrections")
             successors.add(record.supersedes_id)
+        for record in records.values():
+            seen: set[str] = set()
+            current = record
+            while current.supersedes_id is not None:
+                if current.outcome_id in seen:
+                    raise OutcomeValidationError("outcome backup contains a correction cycle")
+                seen.add(current.outcome_id)
+                current = records[current.supersedes_id]
 
     def integrity_check(self) -> str:
         with self._lock:
