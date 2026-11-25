@@ -157,7 +157,10 @@ class SQLiteSessionStore(SessionStore):
     def _schema_foreign_key_matches(
         connection: sqlite3.Connection, table: str,
     ) -> bool:
-        rows = connection.execute(f"PRAGMA foreign_key_list({table})").fetchall()
+        rows = [
+            tuple(row)
+            for row in connection.execute(f"PRAGMA foreign_key_list({table})").fetchall()
+        ]
         expected = [(0, 0, "sessions", "session_id", "session_id", "NO ACTION", "CASCADE", "NONE")]
         return rows == expected
 
@@ -193,10 +196,13 @@ class SQLiteSessionStore(SessionStore):
             ("trigger", "session_owners_immutable_delete", "session_owners"),
             ("trigger", "session_owners_immutable_insert", "session_owners"),
         }
-        actual_objects = set(connection.execute(
-            """SELECT type, name, tbl_name FROM sqlite_master
-            WHERE name NOT LIKE 'sqlite_%'"""
-        ).fetchall())
+        actual_objects = {
+            tuple(row)
+            for row in connection.execute(
+                """SELECT type, name, tbl_name FROM sqlite_master
+                WHERE name NOT LIKE 'sqlite_%'"""
+            ).fetchall()
+        }
         if actual_objects != expected_objects:
             raise ValidationError("SQLite session schema objects are incomplete or unexpected")
 
