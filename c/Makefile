@@ -1,6 +1,6 @@
 CC ?= cc
 AR ?= ar
-CFLAGS ?= -std=c17 -O2 -Wall -Wextra -Wpedantic -Werror
+CFLAGS ?= -std=gnu11 -O2 -Wall -Wextra -Wpedantic -Werror
 CPPFLAGS ?= -Iinclude
 LDLIBS ?= -lm
 

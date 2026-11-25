@@ -4,8 +4,8 @@ This directory is the first native-C port in the staged migration of Capri.
 
 ## Contract
 
-- Language baseline: ISO C17.
-- Portability target: POSIX.1-2024 for host-facing system interfaces; the CCEL library itself uses ISO C and the C math library only.
+- Language baseline: GNU C11.
+- Portability target: POSIX.1-2024 for host-facing system interfaces; the CCEL library itself uses GNU C and the C math library only.
 - No third-party runtime dependency.
 - Public interfaces are declared in `include/ccel.h`; implementation is in `src/ccel.c`.
 - Bounded inputs are validated before processing. Allocation failures are explicit errors.
