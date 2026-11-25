@@ -19,6 +19,7 @@ from uuid import uuid4
 from capri_core.validation import contains_surrogate
 
 from .sqlite_backup import backup_sqlite_database
+from .domain_events import DomainEvent, memory_event
 
 class MemoryErrorBase(Exception):
     """Base class for expected memory failures."""
@@ -28,6 +29,9 @@ class MemoryValidationError(MemoryErrorBase):
 
 class MemoryNotFoundError(MemoryErrorBase):
     """The requested memory record does not exist."""
+
+class MemoryConflictError(MemoryErrorBase):
+    """A memory correction no longer targets the active supersession head."""
 
 class MemoryProvider(Protocol):
     """Provider adapter contract; implementations own credentials and transport."""
@@ -374,10 +378,26 @@ class SQLiteMemoryStore:
                     db.execute("ALTER TABLE memories ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'")
                 db.execute("CREATE INDEX IF NOT EXISTS memories_status_expiry ON memories(status, expires_at)")
                 db.execute("CREATE INDEX IF NOT EXISTS memories_supersedes ON memories(supersedes_id)")
+                duplicate_successor = db.execute(
+                    """SELECT supersedes_id FROM memories WHERE supersedes_id IS NOT NULL
+                    GROUP BY supersedes_id HAVING COUNT(*) > 1 LIMIT 1"""
+                ).fetchone()
+                if duplicate_successor is not None:
+                    raise MemoryConflictError("memory store already contains competing correction successors")
+                db.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS memories_single_successor "
+                    "ON memories(supersedes_id) WHERE supersedes_id IS NOT NULL"
+                )
                 db.execute("""CREATE TABLE IF NOT EXISTS memory_events (
                     event_id TEXT PRIMARY KEY, memory_id TEXT NOT NULL, event_type TEXT NOT NULL,
                     occurred_at TEXT NOT NULL
                 )""")
+                db.execute("""CREATE TRIGGER IF NOT EXISTS memory_event_immutable_update
+                    BEFORE UPDATE ON memory_events
+                    BEGIN SELECT RAISE(ABORT, 'memory events are append-only'); END""")
+                db.execute("""CREATE TRIGGER IF NOT EXISTS memory_event_immutable_delete
+                    BEFORE DELETE ON memory_events
+                    BEGIN SELECT RAISE(ABORT, 'memory events are append-only'); END""")
             finally:
                 db.close()
 
@@ -553,6 +573,12 @@ class SQLiteMemoryStore:
                 current = db.execute("SELECT status FROM memories WHERE memory_id=?", (memory_id,)).fetchone()
                 if current is None:
                     raise MemoryNotFoundError("memory record not found")
+                if current["status"] != "active":
+                    raise MemoryConflictError("only the active memory head can be corrected")
+                if db.execute(
+                    "SELECT 1 FROM memories WHERE supersedes_id=? LIMIT 1", (memory_id,)
+                ).fetchone() is not None:
+                    raise MemoryConflictError("memory predecessor already has a correction successor")
                 count = db.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
                 if count >= _MAX_RECORDS:
                     raise MemoryValidationError("memory record capacity reached")
@@ -660,6 +686,36 @@ class SQLiteMemoryStore:
             finally:
                 db.close()
 
+    def domain_events(self, memory_id: str | None = None) -> tuple[DomainEvent, ...]:
+        """Return a read-only CloudEvents projection of this store's local history."""
+        if memory_id is not None:
+            _validate_text(memory_id, "memory_id", 64)
+        with self._lock:
+            db = self._connect()
+            try:
+                if memory_id is None:
+                    rows = db.execute(
+                        """SELECT e.event_id,e.memory_id,e.event_type,e.occurred_at,
+                        m.supersedes_id,m.status FROM memory_events e
+                        LEFT JOIN memories m ON m.memory_id=e.memory_id
+                        ORDER BY e.rowid"""
+                    ).fetchall()
+                else:
+                    rows = db.execute(
+                        """SELECT e.event_id,e.memory_id,e.event_type,e.occurred_at,
+                        m.supersedes_id,m.status FROM memory_events e
+                        LEFT JOIN memories m ON m.memory_id=e.memory_id
+                        WHERE e.memory_id=? ORDER BY e.rowid""",
+                        (memory_id,),
+                    ).fetchall()
+                return tuple(memory_event(
+                    event_id=row["event_id"], memory_id=row["memory_id"],
+                    event_type=row["event_type"], timestamp=row["occurred_at"],
+                    supersedes_id=row["supersedes_id"], status=row["status"],
+                ) for row in rows)
+            finally:
+                db.close()
+
     def events(self, memory_id: str) -> tuple[tuple[str, str], ...]:
         _validate_text(memory_id, "memory_id", 64)
         with self._lock:
@@ -675,6 +731,29 @@ class SQLiteMemoryStore:
 
     def _validate_backup_snapshot(self, db: sqlite3.Connection) -> None:
         db.row_factory = sqlite3.Row
+        triggers = {
+            row["name"]: (row["sql"] or "").upper()
+            for row in db.execute(
+                "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND tbl_name='memory_events'"
+            ).fetchall()
+        }
+        if (
+            "BEFORE UPDATE ON MEMORY_EVENTS" not in triggers.get("memory_event_immutable_update", "")
+            or "RAISE(ABORT" not in triggers.get("memory_event_immutable_update", "")
+            or "BEFORE DELETE ON MEMORY_EVENTS" not in triggers.get("memory_event_immutable_delete", "")
+            or "RAISE(ABORT" not in triggers.get("memory_event_immutable_delete", "")
+        ):
+            raise MemoryValidationError("memory event append-only protections are missing")
+        index = {
+            row["name"]: row for row in db.execute("PRAGMA index_list(memories)").fetchall()
+        }.get("memories_single_successor")
+        if index is None or index["unique"] != 1 or index["partial"] != 1:
+            raise MemoryValidationError("memory correction single-successor constraint is missing")
+        indexed_columns = [
+            row["name"] for row in db.execute("PRAGMA index_info(memories_single_successor)").fetchall()
+        ]
+        if indexed_columns != ["supersedes_id"]:
+            raise MemoryValidationError("memory correction successor index is invalid")
         allowed_statuses = {"active", "review", "archived"}
         for row in db.execute("SELECT * FROM memories").fetchall():
             record = self._record(row)
@@ -749,6 +828,10 @@ class SQLiteMemoryStore:
                     return str(row[0])
                 if foreign_key_errors:
                     return "foreign key check failed"
+                try:
+                    self._validate_backup_snapshot(db)
+                except MemoryValidationError:
+                    return "memory store validation failed"
                 return "ok"
             finally:
                 db.close()
