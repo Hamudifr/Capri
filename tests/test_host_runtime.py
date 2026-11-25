@@ -1397,5 +1397,40 @@ class CapriHostRuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "actual SQLiteTaskStore"):
             SQLiteWorkerRegistry(DuckTypedStore())
 
+    def test_sqlite_reservation_rejects_forged_capability_and_protocol_context(self):
+        audit = InMemoryAuditSink()
+        registry = SQLiteWorkerRegistry(self.task_store)
+        host = self.make_worker_host(
+            registry, {"worker-token": "worker-1"}, lambda *args: {"worker-1"},
+            audit_sink=audit,
+        )
+        host.register_worker(
+            "worker-token", WorkerDescriptor("worker-1", (1,), ("math.factorial",)),
+        )
+        host.heartbeat_worker("monitor-token", "worker-1")
+        task = self.task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {}}],
+        )
+        pending = host.reserve_worker_candidate(
+            "alice-token", task.task_id, "math.factorial", 1,
+        )
+        self.assertIsNotNone(pending)
+
+        forged = HostWorkerReservation(
+            pending.principal_id,
+            pending.task_id,
+            "admin.override",
+            2,
+            pending.reservation,
+        )
+        with self.assertRaisesRegex(HostRuntimeError, "context"):
+            host.commit_worker_reservation(
+                "alice-token", "monitor-token", forged,
+            )
+
+        persisted = registry.get_reservation_for_task("alice", task.task_id)
+        self.assertIsNotNone(persisted)
+        self.assertFalse(persisted.committed)
+
 if __name__ == "__main__":
     unittest.main()
