@@ -11,6 +11,13 @@ from .strategy import (
     evaluate_strategies,
     verify_strategy_evaluation,
 )
+from .strategy_promotion import (
+    CohortPromotionResult,
+    PromotionCohort,
+    StrategyPromotionAssessment,
+    StrategyPromotionError,
+    assess_strategy_canary,
+)
 from .action_capsule import (
     ActionCapsule,
     ActionCapsuleError,
@@ -30,6 +37,8 @@ __all__ = [
     "LedgerIntegrityError", "HealthState", "build_health_report",
     "StrategyEvaluation", "StrategyEvaluationError", "StrategyMetrics",
     "StrategyObservation", "evaluate_strategies", "verify_strategy_evaluation",
+    "PromotionCohort", "CohortPromotionResult", "StrategyPromotionAssessment",
+    "StrategyPromotionError", "assess_strategy_canary",
     "ActionCapsule", "ActionCapsuleError", "CapsuleEvent", "CapsuleIntegrityError",
     "CapsuleState", "create_action_capsule", "transition_action_capsule",
     "verify_action_capsule_history",
