@@ -1,9 +1,11 @@
 import unittest
+from dataclasses import replace
 
 from capri_core.strategy import (
     StrategyEvaluationError,
     StrategyObservation,
     evaluate_strategies,
+    verify_strategy_evaluation,
 )
 
 
@@ -239,6 +241,51 @@ class StrategyEvaluationTests(unittest.TestCase):
         self.assertFalse(first.eligible_for_manual_review)
         self.assertFalse(second.eligible_for_manual_review)
         self.assertNotEqual(first.cohort_sha256, second.cohort_sha256)
+
+    def test_saved_evaluation_can_be_recomputed_and_verified(self):
+        records = cohort(candidate_overrides={
+            index: {"estimated_cost_units": 90} for index in range(20)
+        })
+        result = evaluate_strategies("baseline", "candidate", records)
+        self.assertEqual(result.min_pairs, 20)
+        self.assertTrue(verify_strategy_evaluation(result, records))
+        self.assertTrue(
+            verify_strategy_evaluation(result, reversed(records), expected_min_pairs=20)
+        )
+        self.assertFalse(
+            verify_strategy_evaluation(result, records, expected_min_pairs=21)
+        )
+
+    def test_saved_evaluation_tampering_is_detected(self):
+        records = cohort(candidate_overrides={
+            index: {"estimated_cost_units": 90} for index in range(20)
+        })
+        result = evaluate_strategies("baseline", "candidate", records)
+        altered_metrics = replace(
+            result,
+            candidate=replace(result.candidate, mean_latency_ms=999_999.0),
+        )
+        altered_fingerprint = replace(result, cohort_sha256="0" * 64)
+        altered_decision = replace(result, eligible_for_manual_review=False)
+        self.assertFalse(verify_strategy_evaluation(altered_metrics, records))
+        self.assertFalse(verify_strategy_evaluation(altered_fingerprint, records))
+        self.assertFalse(verify_strategy_evaluation(altered_decision, records))
+
+    def test_saved_evaluation_rejects_changed_evidence(self):
+        records = cohort(candidate_overrides={
+            index: {"estimated_cost_units": 90} for index in range(20)
+        })
+        result = evaluate_strategies("baseline", "candidate", records)
+        changed = list(records)
+        changed[0] = replace(changed[0], evidence_ref="test://evidence/replaced")
+        self.assertFalse(verify_strategy_evaluation(result, changed))
+
+    def test_expected_sample_floor_validation_is_strict(self):
+        result = evaluate_strategies("baseline", "candidate", cohort())
+        for invalid in (True, 1, 20_001, 2.5):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(StrategyEvaluationError):
+                    verify_strategy_evaluation(result, cohort(), expected_min_pairs=invalid)
 
     def test_result_is_deterministic_and_does_not_activate_strategy(self):
         records = cohort(candidate_overrides={
