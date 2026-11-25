@@ -140,3 +140,14 @@ After a challenge is approved, the host's authority resolver must supply the per
 ## Non-exportable MAC provider boundary — 2026-11-06
 
 The core now defines an ApprovalMacProvider protocol for host integrations with KMS/HSM-backed HMAC operations. It exposes only the active immutable key ID, sign(key_id, payload), and verify(key_id, payload, signature); raw key bytes are not part of the interface. The provider must operate on the exact requested key version, return a 32-byte HMAC-SHA256 tag from signing, return an actual boolean from verification, and fail closed on errors. No vendor adapter or cloud connection is included.
+
+
+## Strategy activation approval authority
+
+Strategy activation uses a separate host-only authority: `HostStrategyApprovalAuthority` in `capri_runtime.strategy_approval`. It accepts a host MAC provider, an approver-authentication callback, and an approver-authorization callback. The model must never receive this authority, its key provider, or credentials accepted by its authenticator. The host must provide the real identity provider, approval UX, and policy; the library does not create those services.
+
+A `StrategyApprovalRequest` binds principal, strategy class/ID/version, evaluation fingerprint, configuration fingerprint, expected active generation, action, and optionally `promotion_assessment_sha256`. The authenticator resolves an opaque credential to a `StrategyApprovalIdentity`; the authorization callback must return exact `True`. The authority issues a short-lived `StrategyActivationGrant` signed by the host MAC provider. The signed payload binds the approver identity and issue/expiry timestamps. The authority enforces its configured maximum lifetime during both issuance and verification; the registry independently checks current expiry, exact target, generation, and one-use consumption.
+
+When a promotion fingerprint is supplied, it is included in the HMAC payload. The strategy registry requires the corresponding immutable, current-policy, eligible multi-cohort assessment record and checks that it matches the candidate's registered evidence and versions. The activation event hash chain also records the fingerprint. A valid HMAC proves grant integrity and origin, not human intent by itself; the host authentication and authorization callbacks are the evidence that an authorized approver approved the exact request.
+
+This authority is not the same as the durable tool-approval challenge service described above. It is a host signing/verification boundary for strategy transitions. A deployment may compose it with an existing authenticated approval workflow, but must keep grant issuance host-only and must not expose it as a model-callable tool. Manual strategy activation without a promotion fingerprint remains possible only through explicit host authorization and an individually evidence-verified candidate; it is not canary eligibility.
