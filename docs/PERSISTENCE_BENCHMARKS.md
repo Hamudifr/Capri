@@ -6,7 +6,7 @@ Run from the repository root:
 python benchmarks/persistence/run.py --warmup 10 --samples 50 --workers 4 --queue-size 100 --output persistence-profile.json
 ```
 
-The harness is offline and standard-library-only. It creates private temporary databases, uses the production `SQLiteGoalStore` and `SQLiteTaskStore` APIs, and makes no provider or network calls.
+The harness is offline and standard-library-only. It creates private temporary databases, uses the production `SQLiteGoalStore`, `SQLiteTaskStore`, and `SQLiteBudgetStore` APIs, and makes no provider or network calls.
 
 ## Measurements
 
@@ -21,7 +21,7 @@ Each latency workload reports sample count, min, median, p95, p99, max and indiv
 
 ## Interpretation
 
-The production API measurements include validation, path-security checks, connection setup/PRAGMAs, SQLite work and Python record materialization. They are end-to-end API costs, not pure SQL timings. The insert/commit probe is a controlled engine-level decomposition, not instrumentation of Capri's production transaction boundaries. The concurrent probe uses threads in one process with separate store instances; it does not establish cross-process or multi-host behavior.
+The production API measurements include validation, path-security checks, connection setup/PRAGMAs, SQLite work and Python record materialization. Budget reservation measurements include durable writes and transaction commit. They are end-to-end API costs, not pure SQL timings. The insert/commit probe is a controlled engine-level decomposition, not instrumentation of Capri's production transaction boundaries. The concurrent probe uses threads in one process with separate store instances; it does not establish cross-process or multi-host behavior.
 
 Run on the same hardware class, filesystem, Python and SQLite versions, with repeated samples before comparing changes. Do not change WAL, synchronous mode, busy timeout, transaction boundaries, ownership checks, append-only event semantics, or backup guarantees solely to improve a benchmark. Any proposed storage optimization must preserve crash durability, principal isolation, idempotency, lease correctness, uncertain-side-effect quarantine and backup/restore behavior.
 
