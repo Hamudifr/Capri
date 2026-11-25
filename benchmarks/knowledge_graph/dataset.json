@@ -273,7 +273,7 @@
       "id": "10000000-0000-4000-8000-000000000008",
       "from": "00000000-0000-4000-8000-000000000009",
       "to": "00000000-0000-4000-8000-000000000010",
-      "relationship": "Explains",
+      "relationship": "Related to",
       "title": "Sequential reads explain mixed-time snapshot risk",
       "rationale": "Two separate reads cannot guarantee one atomic cross-source version.",
       "strength": 0.9,
