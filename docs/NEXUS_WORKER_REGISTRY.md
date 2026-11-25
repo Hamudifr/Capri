@@ -105,7 +105,7 @@ Before connecting either backend to a dispatcher, integrate a trusted host super
 - `worker_identity_resolver(credential)`: authenticates a worker transport and returns the worker ID bound to that authenticated channel. Used for registration; it must not read an ID from an unauthenticated payload.
 - `worker_descriptor_resolver(worker_id, proposed_descriptor)`: returns the exact host-approved `WorkerDescriptor` for that identity. It must derive protocol versions, capabilities, priority and concurrency from host configuration/policy rather than blindly trusting worker self-advertisements.
 - `worker_observer_authorizer(credential, worker_id)`: authenticates a separate host supervisor/monitor credential and authorizes it to report health for that worker. Worker transport credentials must be rejected.
-- `worker_in_flight_resolver(worker_id)`: returns the in-flight count measured by the trusted host supervisor. The heartbeat API accepts no caller-supplied load count; worker payloads cannot claim zero load or otherwise alter capacity.
+- `worker_unreserved_in_flight_resolver(worker_id)`: returns active work not already represented by committed reservations, measured by the trusted host supervisor. `worker_in_flight_resolver` remains a compatibility alias but cannot be supplied at the same time. The heartbeat API accepts no caller-supplied load count; worker payloads cannot claim zero load or otherwise alter capacity.
 - `worker_policy_resolver(principal_id, task_id, capability)`: returns a set/frozenset of worker IDs authorized by the host for this exact principal, task and capability. The embedding host must include all applicable resource, approval, budget and task-state checks; the registry does not infer them.
 - `worker_registry`: an `InMemoryWorkerRegistry` or `SQLiteWorkerRegistry` instance. The SQLite backend must share the exact same `SQLiteTaskStore` object as the host and task worker.
 
@@ -132,7 +132,7 @@ host = CapriHostRuntime(
     worker_identity_resolver=authenticate_worker_transport,
     worker_descriptor_resolver=approve_worker_descriptor_from_host_config,
     worker_observer_authorizer=authenticate_supervisor_for_worker,
-    worker_in_flight_resolver=host_observed_in_flight_count,
+    worker_unreserved_in_flight_resolver=host_observed_unreserved_in_flight_count,
     worker_policy_resolver=authorized_workers_for_task,
 )
 ```
