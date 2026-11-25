@@ -47,12 +47,15 @@ class SignedApprovalTests(unittest.TestCase):
         )
         self.arguments = {"record_id": "record-123"}
 
-    def context_with(self, grant):
-        return ExecutionContext("alice", frozenset({"records:delete"}), (grant,))
+    def context_with(self, grant, operation_id="session-1:call-1"):
+        return ExecutionContext(
+            "alice", frozenset({"records:delete"}), (grant,), operation_id
+        )
 
     def test_signed_grant_is_bound_and_consumed_once(self):
         grant = self.authority.issue(
-            "alice", "delete_record", argument_digest(self.arguments), ttl_seconds=120
+            "alice", "delete_record", argument_digest(self.arguments),
+            ttl_seconds=120, operation_id="session-1:call-1",
         )
         self.assertTrue(self.authority.verify(grant))
         self.assertEqual(self.executor.execute("delete_record", self.arguments, self.context_with(grant)), {"deleted": True})
@@ -60,21 +63,39 @@ class SignedApprovalTests(unittest.TestCase):
             self.executor.execute("delete_record", self.arguments, self.context_with(grant))
         self.assertEqual(self.calls, [self.arguments])
 
-    def test_tampering_principal_tool_digest_or_expiry_invalidates_signature(self):
+    def test_tampering_principal_tool_digest_expiry_or_operation_invalidates_signature(self):
         grant = self.authority.issue(
-            "alice", "delete_record", argument_digest(self.arguments), ttl_seconds=120
+            "alice", "delete_record", argument_digest(self.arguments),
+            ttl_seconds=120, operation_id="session-1:call-1",
         )
         for tampered in (
             replace(grant, principal_id="bob"),
             replace(grant, tool_name="other_tool"),
             replace(grant, argument_digest="f" * 64),
             replace(grant, expires_at="2026-11-06T13:00:00+00:00"),
+            replace(grant, operation_id="session-1:call-2"),
+            replace(grant, operation_id=None),
         ):
             with self.subTest(tampered=tampered):
                 self.assertFalse(self.authority.verify(tampered))
                 with self.assertRaises(ApprovalRequiredError):
                     self.executor.execute("delete_record", self.arguments, self.context_with(tampered))
         self.assertEqual(self.calls, [])
+
+    def test_same_principal_tool_and_arguments_cannot_cross_operations(self):
+        grant = self.authority.issue(
+            "alice", "delete_record", argument_digest(self.arguments),
+            ttl_seconds=120, operation_id="session-1:call-1",
+        )
+        wrong_context = self.context_with(grant, operation_id="session-1:call-2")
+        with self.assertRaises(ApprovalRequiredError):
+            self.executor.execute("delete_record", self.arguments, wrong_context)
+        self.assertEqual(self.calls, [])
+        self.assertEqual(
+            self.executor.execute("delete_record", self.arguments, self.context_with(grant)),
+            {"deleted": True},
+        )
+        self.assertEqual(self.calls, [self.arguments])
 
     def test_unsigned_legacy_grant_is_rejected_when_signed_mode_is_required(self):
         grant = ApprovalGrant(
@@ -89,7 +110,7 @@ class SignedApprovalTests(unittest.TestCase):
         old_ring = HmacApprovalKeyRing({"old-v1": b"o" * 32}, active_key_id="old-v1")
         old_authority = HmacApprovalAuthority(old_ring, clock=lambda: self.now)
         grant = old_authority.issue(
-            "alice", "delete_record", argument_digest(self.arguments), ttl_seconds=120
+            "alice", "delete_record", argument_digest(self.arguments), ttl_seconds=120, operation_id="session-1:call-1"
         )
         self.assertEqual(grant.key_id, "old-v1")
 
@@ -102,7 +123,7 @@ class SignedApprovalTests(unittest.TestCase):
         )
         self.assertTrue(rotated.verify(grant))
         new_grant = rotated.issue(
-            "alice", "delete_record", argument_digest(self.arguments), ttl_seconds=120
+            "alice", "delete_record", argument_digest(self.arguments), ttl_seconds=120, operation_id="session-1:call-1"
         )
         self.assertEqual(new_grant.key_id, "new-v2")
         self.assertTrue(rotated.verify(new_grant))
@@ -119,7 +140,7 @@ class SignedApprovalTests(unittest.TestCase):
         )
         authority = HmacApprovalAuthority(ring, clock=lambda: self.now)
         grant = authority.issue(
-            "alice", "delete_record", argument_digest(self.arguments), ttl_seconds=120
+            "alice", "delete_record", argument_digest(self.arguments), ttl_seconds=120, operation_id="session-1:call-1"
         )
         self.assertFalse(authority.verify(replace(grant, key_id="other")))
         self.assertFalse(authority.verify(replace(grant, key_id="unknown")))
@@ -152,11 +173,11 @@ class SignedApprovalTests(unittest.TestCase):
         provider = RemoteMacProvider()
         authority = HmacApprovalAuthority(provider, clock=lambda: self.now)
         old_grant = authority.issue(
-            "alice", "delete_record", argument_digest(self.arguments), ttl_seconds=120
+            "alice", "delete_record", argument_digest(self.arguments), ttl_seconds=120, operation_id="session-1:call-1"
         )
         provider.active_key_id = "kms-key-version-8"
         new_grant = authority.issue(
-            "alice", "delete_record", argument_digest(self.arguments), ttl_seconds=120
+            "alice", "delete_record", argument_digest(self.arguments), ttl_seconds=120, operation_id="session-1:call-1"
         )
         self.assertEqual(old_grant.key_id, "kms-key-version-7")
         self.assertEqual(new_grant.key_id, "kms-key-version-8")
@@ -177,12 +198,13 @@ class SignedApprovalTests(unittest.TestCase):
         authority = HmacApprovalAuthority(BrokenProvider(), clock=lambda: self.now)
         with self.assertRaises(ToolValidationError) as raised:
             authority.issue(
-                "alice", "delete_record", argument_digest(self.arguments), ttl_seconds=120
+                "alice", "delete_record", argument_digest(self.arguments), ttl_seconds=120, operation_id="session-1:call-1"
             )
         self.assertNotIn("provider detail", str(raised.exception))
         grant = ApprovalGrant(
             "g", "alice", "delete_record", argument_digest(self.arguments),
             "2026-11-06T13:00:00+00:00", "0" * 64, "remote-v1",
+            operation_id="session-1:call-1",
         )
         self.assertFalse(authority.verify(grant))
 
@@ -198,7 +220,7 @@ class SignedApprovalTests(unittest.TestCase):
             ring.other_attribute = "value"
         self.assertEqual(ring.active_key_id, "active")
         authority = HmacApprovalAuthority(ring)
-        grant = authority.issue("alice", "delete_record", "a" * 64)
+        grant = authority.issue("alice", "delete_record", "a" * 64, operation_id="session-1:call-1")
         self.assertTrue(authority.verify(grant))
         self.assertEqual(grant.key_id, "active")
 
@@ -217,10 +239,17 @@ class SignedApprovalTests(unittest.TestCase):
         with self.assertRaises(ToolValidationError):
             HmacApprovalAuthority(b"short")
         with self.assertRaises(ToolValidationError):
-            self.authority.issue("alice", "delete_record", argument_digest(self.arguments), ttl_seconds=3601)
+            self.authority.issue("alice", "delete_record", argument_digest(self.arguments), ttl_seconds=3601, operation_id="session-1:call-1")
         with self.assertRaises(ToolValidationError):
             ToolExecutor(
                 ToolRegistry(), InMemoryAuditSink(), require_signed_approvals=True
+            )
+
+
+        with self.assertRaises(ToolValidationError):
+            self.authority.issue(
+                "alice", "delete_record", argument_digest(self.arguments),
+                ttl_seconds=120, operation_id="invalid operation id",
             )
 
 
