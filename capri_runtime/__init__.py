@@ -116,6 +116,7 @@ from .strategy_store import (
     StrategyStoreError,
     StrategyVersionRecord,
 )
+from .strategy_approvals import StrategyApprovalBridge, StrategyApprovalRequest
 from .tasks import (
     SQLiteTaskStore,
     TaskClaim,
@@ -248,6 +249,8 @@ __all__ = [
     "StrategyNotFoundError",
     "StrategyStoreError",
     "StrategyVersionRecord",
+    "StrategyApprovalBridge",
+    "StrategyApprovalRequest",
     "SQLiteTaskStore",
     "TaskClaim",
     "TaskConflictError",
