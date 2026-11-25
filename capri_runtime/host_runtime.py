@@ -144,6 +144,7 @@ class CapriHostRuntime:
         strategy_store: SQLiteStrategyStore | None = None,
         worker_registry: InMemoryWorkerRegistry | None = None,
         worker_identity_resolver: Callable[[Any], str | None] | None = None,
+        worker_descriptor_resolver: Callable[[str, WorkerDescriptor], WorkerDescriptor] | None = None,
         worker_policy_resolver: Callable[[str, str, str], set[str] | frozenset[str]] | None = None,
     ) -> None:
         if not isinstance(authority, HostAuthorityResolver):
@@ -186,16 +187,24 @@ class CapriHostRuntime:
             raise HostRuntimeError("worker_registry must be an InMemoryWorkerRegistry")
         if worker_identity_resolver is not None and not callable(worker_identity_resolver):
             raise HostRuntimeError("worker_identity_resolver must be callable")
+        if worker_descriptor_resolver is not None and not callable(worker_descriptor_resolver):
+            raise HostRuntimeError("worker_descriptor_resolver must be callable")
         if worker_policy_resolver is not None and not callable(worker_policy_resolver):
             raise HostRuntimeError("worker_policy_resolver must be callable")
-        if worker_registry is None and (
-            worker_identity_resolver is not None or worker_policy_resolver is not None
-        ):
+        if worker_registry is None and any((
+            worker_identity_resolver is not None,
+            worker_descriptor_resolver is not None,
+            worker_policy_resolver is not None,
+        )):
             raise HostRuntimeError("worker registry callbacks require a configured worker_registry")
-        if worker_registry is not None and (
-            worker_identity_resolver is None or worker_policy_resolver is None
-        ):
-            raise HostRuntimeError("worker_registry requires host identity and policy resolvers")
+        if worker_registry is not None and any((
+            worker_identity_resolver is None,
+            worker_descriptor_resolver is None,
+            worker_policy_resolver is None,
+        )):
+            raise HostRuntimeError(
+                "worker_registry requires host identity, descriptor and policy resolvers"
+            )
         if (
             task_store is not None and task_worker is not None
             and task_store.path != task_worker.engine.store.path
@@ -219,6 +228,7 @@ class CapriHostRuntime:
         self._strategy_store = strategy_store
         self._worker_registry = worker_registry
         self._worker_identity_resolver = worker_identity_resolver
+        self._worker_descriptor_resolver = worker_descriptor_resolver
         self._worker_policy_resolver = worker_policy_resolver
         self._goal_store = goal_store
         configured_budgets = [
@@ -257,8 +267,14 @@ class CapriHostRuntime:
         """Register a worker only after the trusted host transport resolves its identity."""
         identity = self._worker_identity(credential)
         try:
+            approved = self._worker_descriptor_resolver(identity, descriptor)
+        except Exception:
+            raise HostRuntimeError("host worker descriptor approval failed") from None
+        if type(approved) is not WorkerDescriptor or approved.worker_id != identity:
+            raise HostRuntimeError("host worker descriptor approval returned an invalid identity")
+        try:
             return self._worker_registry.register(
-                descriptor, authenticated_worker_id=identity,
+                approved, authenticated_worker_id=identity,
             )
         except WorkerRegistryError:
             raise HostRuntimeError("worker registration was rejected") from None
