@@ -20,7 +20,7 @@ from .runtime import Message, Session, SessionClosedError, SessionStore
 from .sqlite_sessions import SQLiteSessionStore
 from .tasks import SQLiteTaskStore, TaskRecord, TaskWorker
 from .goals import (
-    GoalPlanProposal, GoalRecord, GoalPlanner, SQLiteGoalStore,
+    GoalPlanProposal, GoalRecord, SQLiteGoalStore,
 )
 from .tools import ExecutionContext, HostAuthorityResolver
 
