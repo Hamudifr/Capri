@@ -255,6 +255,56 @@ class ActionCapsuleTests(unittest.TestCase):
                 verifier_id="verifier-1", verifier_version="v1",
             )
 
+    def test_unbounded_resource_scope_is_rejected_without_full_consumption(self):
+        def unbounded_scope():
+            index = 0
+            while True:
+                yield f"resource-{index}"
+                index += 1
+
+        with self.assertRaises(ActionCapsuleError):
+            create_action_capsule(
+                capsule_id="bounded-scope", intent_digest="a" * 64,
+                principal_id="principal-1", capability="file.read",
+                resource_scope=unbounded_scope(), policy_version="policy-v1",
+                budgets={"max_calls": 1}, deadline_at=self.deadline.isoformat(),
+                idempotency_key="idem", input_digest="b" * 64,
+                created_at=self.created.isoformat(),
+            )
+
+    def test_unbounded_evidence_iterable_is_rejected_without_hanging(self):
+        def unbounded_evidence():
+            index = 0
+            while True:
+                yield f"evidence-{index}"
+                index += 1
+
+        with self.assertRaises(ActionCapsuleError):
+            self.step(
+                self.capsule, CapsuleState.AUTHORIZED, 1,
+                approval_ref="approval-1", evidence_refs=unbounded_evidence(),
+            )
+
+        authorized, auth_event = self.step(
+            self.capsule, CapsuleState.AUTHORIZED, 1, approval_ref="approval-1"
+        )
+        dispatched, dispatch_event = self.step(
+            authorized, CapsuleState.DISPATCHED, 2,
+            history=(auth_event,), worker_binding="worker-1",
+        )
+        received, received_event = self.step(
+            dispatched, CapsuleState.RECEIVED, 3,
+            history=(auth_event, dispatch_event), result_digest="c" * 64,
+        )
+        with self.assertRaises(ActionCapsuleError):
+            transition_action_capsule(
+                received, CapsuleState.VERIFIED,
+                history=(auth_event, dispatch_event, received_event),
+                occurred_at=(self.created + timedelta(seconds=4)).isoformat(),
+                actor="host-1", evidence_refs=unbounded_evidence(),
+                verifier_id="verifier-1", verifier_version="v1",
+            )
+
     def test_invalid_budget_types_and_duplicate_scope_are_normalized_or_rejected(self):
         with self.assertRaises(ActionCapsuleError):
             create_action_capsule(
