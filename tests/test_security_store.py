@@ -45,6 +45,82 @@ class SQLiteSecurityStoreTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def test_enriched_audit_metadata_roundtrips_with_digest_binding(self):
+        store = SQLiteSecurityStore(self.path)
+        metadata = {
+            "event_type": "worker.reservation.committed",
+            "worker_id": "worker-1",
+            "reservation_token_sha256": "a" * 64,
+            "observed_in_flight": 1,
+        }
+        metadata_json = json.dumps(
+            metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        )
+        digest = hashlib.sha256(metadata_json.encode("utf-8")).hexdigest()
+        event = AuditEvent(
+            "worker-event-1", self.now.isoformat(), "alice",
+            "worker.reservation.committed", digest, "success", None,
+            "worker", "worker-1", "task-1", metadata_json,
+        )
+        store.write(event)
+        self.assertEqual(store.events(), (event,))
+
+    def test_enriched_audit_metadata_rejects_digest_mismatch(self):
+        store = SQLiteSecurityStore(self.path)
+        metadata_json = json.dumps(
+            {"event_type": "worker.heartbeat"}, sort_keys=True, separators=(",", ":"),
+        )
+        event = AuditEvent(
+            "worker-event-2", self.now.isoformat(), "host",
+            "worker.heartbeat", "0" * 64, "success", None,
+            "worker", "worker-1", None, metadata_json,
+        )
+        with self.assertRaises(ToolValidationError):
+            store.write(event)
+        self.assertEqual(store.events(), ())
+
+    def test_audit_events_are_append_only(self):
+        store = SQLiteSecurityStore(self.path)
+        event = AuditEvent(
+            "audit-immutable", self.now.isoformat(), "principal-1",
+            "search", argument_digest({"item": "item-1"}), "succeeded",
+        )
+        store.write(event)
+        for statement in (
+            "UPDATE audit_events SET status='tampered' WHERE event_id='audit-immutable'",
+            "DELETE FROM audit_events WHERE event_id='audit-immutable'",
+        ):
+            connection = sqlite3.connect(self.path)
+            try:
+                with self.assertRaises(sqlite3.IntegrityError):
+                    connection.execute(statement)
+            finally:
+                connection.close()
+        self.assertEqual(store.events(), (event,))
+
+    def test_legacy_audit_schema_is_migrated_with_resource_columns(self):
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute(
+                """CREATE TABLE audit_events (
+                    event_id TEXT PRIMARY KEY, timestamp TEXT NOT NULL,
+                    principal_id TEXT NOT NULL, tool_name TEXT NOT NULL,
+                    argument_digest TEXT NOT NULL, status TEXT NOT NULL,
+                    error_code TEXT
+                )"""
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        store = SQLiteSecurityStore(self.path)
+        connection = sqlite3.connect(self.path)
+        try:
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(audit_events)")}
+        finally:
+            connection.close()
+        self.assertTrue({"resource_type", "resource_id", "task_id", "metadata_json"}.issubset(columns))
+        self.assertEqual(store.events(), ())
+
     def grant(self, grant_id="grant-1"):
         args = {"item": "item-1"}
         return ApprovalGrant(
@@ -302,6 +378,7 @@ class SQLiteSecurityStoreTests(unittest.TestCase):
         ))
         connection = sqlite3.connect(self.path)
         try:
+            connection.execute("DROP TRIGGER audit_events_immutable_update")
             connection.execute(
                 "UPDATE audit_events SET argument_digest = ? WHERE event_id = ?",
                 ("not-a-sha256-digest", "corrupt-audit"),
