@@ -164,6 +164,115 @@ class GoalCoordinatorTests(unittest.TestCase):
                 expected_version=again.goal.version, now=NOW,
             )
 
+    def test_completion_report_requires_owner_acceptance_and_never_returns_raw_results(self):
+        goal = self.planned_goal()
+        self.coordinator.prepare(
+            goal.goal_id, "alice", expected_version=goal.version, now=NOW,
+        )
+        engine = TaskEngine(
+            self.task_store, {}, "worker",
+            principal_handlers={
+                "collect": lambda data, key, principal: {
+                    "private": "raw provider/tool output must not appear",
+                },
+            },
+        )
+        task = engine.run_once(now=NOW)
+        self.assertEqual(task.state, "succeeded")
+        awaiting = self.coordinator.reconcile(goal.goal_id, "alice", now=NOW)
+
+        report = self.coordinator.completion_report(goal.goal_id, "alice")
+        self.assertEqual(report.completion_status, "awaiting_owner_acceptance")
+        self.assertEqual(report.acceptance_status, "pending")
+        self.assertTrue(report.owner_action_required)
+        self.assertEqual(report.task_state, "succeeded")
+        self.assertEqual(report.task_total_steps, 1)
+        self.assertEqual(report.task_completed_steps, 1)
+        self.assertEqual(report.evidence[0].evidence_type, "task_step_result_sha256")
+        self.assertTrue(report.evidence[0].reference.startswith("sha256:"))
+        self.assertNotIn("raw provider/tool output", str(report.as_dict()))
+        self.assertIn("awaiting_verification", [event.state for event in report.goal_events])
+        self.assertTrue(report.task_events)
+        with self.assertRaises(GoalNotFoundError):
+            self.coordinator.completion_report(goal.goal_id, "bob")
+
+        self.coordinator.verify(
+            goal.goal_id, "alice", accepted=True,
+            evidence_reference="owner-proof://acceptance-1",
+            expected_version=awaiting.goal.version, now=NOW,
+        )
+        accepted = self.coordinator.completion_report(goal.goal_id, "alice")
+        self.assertEqual(accepted.completion_status, "accepted")
+        self.assertEqual(accepted.acceptance_status, "accepted")
+        self.assertFalse(accepted.owner_action_required)
+        self.assertEqual(
+            accepted.evidence[-1].evidence_type, "acceptance_accepted",
+        )
+        self.assertEqual(accepted.as_dict()["goal_id"], goal.goal_id)
+
+    def test_completion_report_distinguishes_partial_failure_and_uncertain_side_effects(self):
+        goal = self.goal_store.create_for_principal(
+            "alice", "Complete two bounded steps",
+            acceptance_criteria=["Both steps completed"],
+            now=NOW,
+        )
+        plan = (
+            {"tool": "collect", "input": {"step": 1}, "max_attempts": 1},
+            {"tool": "collect", "input": {"step": 2}, "max_attempts": 1},
+        )
+        goal = self.goal_store.save_plan_for_principal(
+            goal.goal_id, "alice", GoalPlanProposal(plan),
+            TOOLS, expected_version=goal.version, now=NOW,
+        )
+        self.coordinator.prepare(
+            goal.goal_id, "alice", expected_version=goal.version, now=NOW,
+        )
+        calls = {"count": 0}
+
+        def fail_second_step(data, key, principal):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                return {"private": "first step raw output"}
+            raise RetryableTaskError("known no-side-effect failure")
+
+        engine = TaskEngine(
+            self.task_store, {}, "worker",
+            principal_handlers={"collect": fail_second_step},
+        )
+        engine.run_once(now=NOW)
+        failed = engine.run_once(now=NOW)
+        self.assertEqual(failed.state, "failed")
+        self.coordinator.reconcile(goal.goal_id, "alice", now=NOW)
+        partial = self.coordinator.completion_report(goal.goal_id, "alice")
+        self.assertEqual(partial.completion_status, "partial")
+        self.assertEqual(partial.task_completed_steps, 1)
+        self.assertEqual(partial.task_total_steps, 2)
+        self.assertTrue(partial.owner_action_required)
+        self.assertNotIn("first step raw output", str(partial.as_dict()))
+
+        uncertain_goal = self.planned_goal()
+        self.coordinator.prepare(
+            uncertain_goal.goal_id, "alice",
+            expected_version=uncertain_goal.version, now=NOW,
+        )
+        uncertain_engine = TaskEngine(
+            self.task_store, {}, "uncertain-worker",
+            principal_handlers={
+                "collect": lambda data, key, principal: (
+                    (_ for _ in ()).throw(RuntimeError("external effect uncertain"))
+                ),
+            },
+        )
+        uncertain_task = uncertain_engine.run_once(now=NOW)
+        self.assertEqual(uncertain_task.state, "reconciliation_required")
+        self.coordinator.reconcile(uncertain_goal.goal_id, "alice", now=NOW)
+        uncertain = self.coordinator.completion_report(
+            uncertain_goal.goal_id, "alice",
+        )
+        self.assertEqual(uncertain.completion_status, "uncertain")
+        self.assertEqual(uncertain.next_action, "owner_or_host_reconciliation_required")
+        self.assertTrue(uncertain.owner_action_required)
+
     def test_uncertain_handler_outcome_quarantines_goal_for_reconciliation(self):
         goal = self.planned_goal()
         self.coordinator.prepare(goal.goal_id, "alice", expected_version=goal.version, now=NOW)
