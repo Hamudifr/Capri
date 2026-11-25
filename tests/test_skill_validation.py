@@ -178,6 +178,19 @@ class SkillValidationTests(unittest.TestCase):
             report = validate_skill_tree(root)
             self.assertTrue(any("does not exist" in item for item in report["skills"][0]["errors"]))
 
+    def test_rejects_unsafe_link_schemes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_skill(
+                root,
+                "unsafe-link",
+                "name: unsafe-link\\n"
+                "description: Use when validating skill resource links.\\n",
+                "# Unsafe Link\\n\\nOpen [this](javascript:alert(1)).\\n",
+            )
+            report = validate_skill_tree(root)
+            self.assertTrue(any("unsupported linked resource scheme" in item for item in report["skills"][0]["errors"]))
+
     def test_rejects_relative_resource_that_escapes_skill_directory(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
