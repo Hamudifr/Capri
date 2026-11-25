@@ -28,7 +28,11 @@ int main(void) {
     char dir[]="/tmp/capri-c-test-XXXXXX"; assert(mkdtemp(dir)!=NULL); assert(chmod(dir,0700)==0);
     char path[512]; snprintf(path,sizeof path,"%s/sessions.sqlite3",dir);
     char backup_path[512]; snprintf(backup_path,sizeof backup_path,"%s/sessions-backup.sqlite3",dir);
+    char restored_path[512]; snprintf(restored_path,sizeof restored_path,"%s/sessions-restored.sqlite3",dir);
     char corrupt_backup_path[512]; snprintf(corrupt_backup_path,sizeof corrupt_backup_path,"%s/corrupt-backup.sqlite3",dir);
+    char corrupt_restore_path[512]; snprintf(corrupt_restore_path,sizeof corrupt_restore_path,"%s/corrupt-restored.sqlite3",dir);
+    /* */
+ snprintf(corrupt_backup_path,sizeof corrupt_backup_path,"%s/corrupt-backup.sqlite3",dir);
     CapriSessionError error; CapriSessionStore *store=capri_session_store_open(path,200,16000,64000,131072,&error);
     assert(store!=NULL && error==CAPRI_SESSION_OK);
     CapriSession alice={0}, bob={0}, committed={0};
@@ -89,7 +93,11 @@ int main(void) {
     assert(capri_session_backup_to(store,path)==CAPRI_SESSION_INVALID);
     assert(capri_session_backup_to(store,backup_path)==CAPRI_SESSION_OK);
     assert(capri_session_backup_to(store,backup_path)==CAPRI_SESSION_INVALID);
-    CapriSessionStore *backup_store=capri_session_store_open(backup_path,200,16000,64000,131072,&error); assert(backup_store!=NULL);
+    assert(capri_session_restore_to(store,backup_path,backup_path)==CAPRI_SESSION_INVALID);
+    assert(capri_session_restore_to(store,backup_path,path)==CAPRI_SESSION_INVALID);
+    assert(capri_session_restore_to(store,backup_path,restored_path)==CAPRI_SESSION_OK);
+    assert(capri_session_restore_to(store,backup_path,restored_path)==CAPRI_SESSION_INVALID);
+    CapriSessionStore *backup_store=capri_session_store_open(restored_path,200,16000,64000,131072,&error); assert(backup_store!=NULL);
     CapriSession backup_session={0};
     assert(capri_session_get_for_principal(backup_store,session_id,"principal-alice",&backup_session)==CAPRI_SESSION_OK);
     assert(backup_session.version==2 && backup_session.closed);
@@ -116,6 +124,13 @@ int main(void) {
     assert(capri_session_integrity_check(store)==CAPRI_SESSION_CORRUPT);
     assert(capri_session_backup_to(store,corrupt_backup_path)==CAPRI_SESSION_CORRUPT);
     struct stat missing_backup; assert(lstat(corrupt_backup_path,&missing_backup)!=0);
+    sqlite3 *corrupt_copy=NULL; assert(sqlite3_open(corrupt_backup_path,&corrupt_copy)==SQLITE_OK);
+    assert(chmod(corrupt_backup_path,0600)==0);
+    sqlite3_backup *copy_backup=sqlite3_backup_init(corrupt_copy,"main",raw,"main"); assert(copy_backup!=NULL);
+    int copy_rc; do { copy_rc=sqlite3_backup_step(copy_backup,256); } while(copy_rc==SQLITE_OK);
+    assert(copy_rc==SQLITE_DONE); assert(sqlite3_backup_finish(copy_backup)==SQLITE_OK); assert(sqlite3_close(corrupt_copy)==SQLITE_OK);
+    assert(capri_session_restore_to(store,corrupt_backup_path,corrupt_restore_path)==CAPRI_SESSION_CORRUPT);
+    struct stat missing_restore; assert(lstat(corrupt_restore_path,&missing_restore)!=0);
     capri_session_free(&corrupt_session); capri_session_free(&committed);
     CapriSession nul_owner_session={0};
     assert(capri_session_create_for_principal(store,"principal-nul-owner",&nul_owner_session)==CAPRI_SESSION_OK);
@@ -134,6 +149,6 @@ int main(void) {
     assert(symlink(path,linkpath)==0);
     store=capri_session_store_open(linkpath,200,16000,64000,131072,&error); assert(store==NULL);
     unlink(linkpath);
-    unlink(backup_path); unlink(corrupt_backup_path); unlink(path); char wal[520],shm[520];snprintf(wal,sizeof wal,"%s-wal",path);snprintf(shm,sizeof shm,"%s-shm",path);unlink(wal);unlink(shm);rmdir(dir);
+    unlink(backup_path); unlink(restored_path); unlink(corrupt_backup_path); unlink(corrupt_restore_path); unlink(path); char wal[520],shm[520];snprintf(wal,sizeof wal,"%s-wal",path);snprintf(shm,sizeof shm,"%s-shm",path);unlink(wal);unlink(shm);rmdir(dir);
     puts("native SQLite session tests: ok"); return 0;
 }
