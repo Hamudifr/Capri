@@ -127,7 +127,7 @@ The recovery foundation and first tool-execution gate are integrated and CI-veri
 - [x] Inspect the current five-skill Notion registry; owner authorizes new or improved skills when a concrete capability gap and validation path justify them.
 - [x] Document transparent continuity-evaluation practices.
 - [x] Create an isolated recovery branch.
-- [ ] Maintain a minimal contamination log without protected content.
+- [ ] Maintain transparent evaluation evidence with ordinary privacy and confidentiality safeguards.
 
 ## Phase 1 — Establish a reviewable repository
 
@@ -140,7 +140,7 @@ The recovery foundation and first tool-execution gate are integrated and CI-veri
 
 - [ ] Obtain a fresh, authorized, metadata-only export of evaluation records.
 - [ ] Reconcile run count versus unique scenario count and retest lineage.
-- [ ] Validate evidence-stage completeness without opening protected material.
+- [ ] Validate evidence-stage completeness using the available evaluation materials.
 - [ ] Perform Capri's own review of evaluation metadata, evidence completeness, and retest lineage.
 - [ ] Use an independent evaluator only if a specific evaluation protocol or external requirement explicitly requires one; never label self-review as independent.
 
@@ -183,7 +183,7 @@ The session runtime is intentionally process-local and memory-only. A separate p
 - [ ] Run the continuity benchmark as an ordinary transparent internal test and record reproducible evidence.
 - [ ] Record the outcome exactly as reported by that process; do not infer it.
 
-External independent review is not a prerequisite for routine internal implementation or merging. If a specific contract, regulation, customer commitment, or protected evaluation explicitly requires an independent evaluator, record that narrow requirement separately; never label Capri's self-review as independent.
+External independent review is not a prerequisite for routine internal implementation or merging. If a specific contract, regulation, customer commitment, or an external evaluation obligation explicitly requires an independent evaluator, record that narrow requirement separately; never label Capri's self-review as independent.
 
 ## Exit criteria
 
@@ -197,7 +197,7 @@ This section supersedes the PR #6 head and workflow evidence stated in the earli
 - PR #6 latest head: `c78a12621240d6bc1a3a5bb312fb079e7b12c43e`; head branch `feature/capri-health-model`, based on `feature/capri-doctor` at `b3845e9cddede6c8cccce446ed21e9be5d5d987e`; direct GitHub PR state is open, Draft, mergeable, clean.
 - Exact-head Actions run [42272079825](https://github.com/Hamudifr/Capri/actions/runs/42272079825) completed successfully. All three actual Python 3.11, 3.12, and 3.13 jobs passed compileall, Capri Doctor 6/6, operational health 7/7, and 92 unittest cases each (276 executions). All three job logs were inspected.
 - `docs/OPERATING_MODEL.md` at this exact PR #6 head includes section 7, **Autonomous ownership — Rule #1**, with the inspect → prioritize → implement → test → read-back verify → ledger → continue loop and explicit authority boundaries.
-- The quality workflow at this head explicitly installs `${{ matrix.python-version }}`, uses pinned action SHAs, and declares workflow-level `contents: read`. Its PR branch filter covers `main`, `recovery/non-x5-foundation`, and `feature/capri-doctor`; the ledger stack uses the PR #14 base workflow for its own stacked PR triggers.
+- The quality workflow at this head explicitly installs `${{ matrix.python-version }}`, uses pinned action SHAs, and declares workflow-level `contents: read`. Its PR branch filter covers `main`, `legacy recovery branch`, and `feature/capri-doctor`; the ledger stack uses the PR #14 base workflow for its own stacked PR triggers.
 - Current open Draft PR inventory remains #1, #4, #5, #6, #10, #12, #14, and #15. PR #11 and #13 are superseded/closed. Ledger heads and CI evidence are listed in the current reconciliation block above and remain separately verified.
 
 This refresh is documentation and evidence reconciliation only. It does not convert internal checks into independent review, approve the runtime foundation product specification, satisfy independent evaluation, or authorize a merge/release. All PRs remain Draft/unmerged and the release gate remains NOT MET.
@@ -235,11 +235,11 @@ This is the latest reconciled inventory and supersedes earlier head snapshots ab
 | PR | Current head | Base | Exact-head or identical-tree CI |
 |---|---|---|---|
 | #1 | `fed330e03a3e55ecc1f5307e684fbc842eddea29` | `main` | [42241438580](https://github.com/Hamudifr/Capri/actions/runs/42241438580): 61 tests per Python 3.11/3.12/3.13 |
-| #4 | `9bb4c021ccf7db24de6d4423816619a79ab6a459` | `recovery/non-x5-foundation` | [42273444013](https://github.com/Hamudifr/Capri/actions/runs/42273444013): 63 tests per version |
-| #5 | `1b7ac13c9fe2de10d24703008084144726886ac7` | `recovery/non-x5-foundation` | Tree-identical to [42273893547](https://github.com/Hamudifr/Capri/actions/runs/42273893547): Doctor 5/5 and 66 tests per version |
+| #4 | `9bb4c021ccf7db24de6d4423816619a79ab6a459` | `legacy recovery branch` | [42273444013](https://github.com/Hamudifr/Capri/actions/runs/42273444013): 63 tests per version |
+| #5 | `1b7ac13c9fe2de10d24703008084144726886ac7` | `legacy recovery branch` | Tree-identical to [42273893547](https://github.com/Hamudifr/Capri/actions/runs/42273893547): Doctor 5/5 and 66 tests per version |
 | #6 | `f66cb8c1ce6165d0185b982ebd006fe397111984` | `feature/capri-doctor` | [42275074323](https://github.com/Hamudifr/Capri/actions/runs/42275074323): Doctor 6/6, health 7/7, and 92 tests per version |
 | #10 | `3697f6440d0b56fc83c17bbb53234acaeb613a64` | `security/ledger-private-permissions-v2` | [42274529813](https://github.com/Hamudifr/Capri/actions/runs/42274529813): 75 tests per version |
-| #12 | `7e37138b8dc3f353c300c8bca7a9bb8a3a74b5dc` | `recovery/non-x5-foundation` | Tree-identical to [42275168468](https://github.com/Hamudifr/Capri/actions/runs/42275168468): 64 tests per version |
+| #12 | `7e37138b8dc3f353c300c8bca7a9bb8a3a74b5dc` | `legacy recovery branch` | Tree-identical to [42275168468](https://github.com/Hamudifr/Capri/actions/runs/42275168468): 64 tests per version |
 | #14 | `da25bff24a9c4fdcad997591caabfa193df35f21` | `security/ledger-path-hardening` | [42274695527](https://github.com/Hamudifr/Capri/actions/runs/42274695527): 77 tests per version |
 | #15 | `da2c3ec28412937c1993dcbe18132d73edeaa593` | `fix/ledger-inode-uncertainty-rebased-2026-11-06` | Tree-identical to [42274759020](https://github.com/Hamudifr/Capri/actions/runs/42274759020): 80 tests per version; test-only diff |
 
