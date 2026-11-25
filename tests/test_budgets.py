@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 
 from capri_runtime import (
@@ -53,6 +54,25 @@ class SQLiteBudgetStoreTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp.cleanup()
+
+    def test_usage_read_reuses_one_connection_for_policy_and_usage(self):
+        self.store.reserve_for_principal(
+            "alice", {"provider_calls": 1, "tool_calls": 1}, now=NOW,
+        )
+        custom = BudgetPolicy(
+            window_seconds=120, max_provider_calls=3,
+            max_provider_input_bytes=2_000, max_tool_calls=4,
+            max_task_steps=5, max_task_input_bytes=3_000,
+        )
+        self.store.set_policy_for_principal("alice", custom, now=NOW)
+        original_connect = self.store._connect
+        with patch.object(self.store, "_connect", wraps=original_connect) as connect:
+            usage = self.store.usage_for_principal("alice", now=NOW)
+        self.assertEqual(connect.call_count, 1)
+        self.assertEqual(usage.policy, custom)
+        self.assertEqual(usage.used["provider_calls"], 1)
+        self.assertEqual(usage.used["tool_calls"], 1)
+        self.assertEqual(usage.reset_at.timestamp() - NOW.timestamp(), 120)
 
     def test_multi_dimension_reservation_is_atomic_and_principal_scoped(self):
         self.store.reserve_for_principal(
