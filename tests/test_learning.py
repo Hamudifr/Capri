@@ -739,6 +739,100 @@ class LearningStoreTests(unittest.TestCase):
             },
         )
 
+    def test_backup_round_trip_preserves_all_four_tables_and_export_dependencies(self):
+        self.store.record(example())
+        jsonl_path = self.root / "backup-source.jsonl"
+        jsonl_result = self.store.export_jsonl(jsonl_path, minimum_quality=0.0)
+        bundle_path = self.root / "backup-source.zip"
+        bundle_result = self.store.export_bundle(bundle_path, minimum_quality=0.0)
+        backup_path = self.root / "learning-backup.sqlite3"
+
+        self.assertEqual(self.store.integrity_check(), "ok")
+        self.assertEqual(
+            self.store.backup_to(backup_path), str(backup_path.absolute())
+        )
+        self.assertEqual(stat.S_IMODE(backup_path.stat().st_mode), 0o600)
+
+        restored = LearningStore(backup_path)
+        self.assertEqual(restored.integrity_check(), "ok")
+        self.assertEqual(restored.counts(), {"verified_success": 1})
+        self.assertTrue(restored.verify_export(jsonl_result["export_id"], jsonl_path)["valid"])
+        self.assertTrue(restored.verify_export(bundle_result["export_id"], bundle_path)["valid"])
+
+        connection = sqlite3.connect(backup_path)
+        try:
+            counts = {
+                table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                for table in (
+                    "learning_examples", "learning_consents",
+                    "learning_exports", "learning_export_consents",
+                )
+            }
+        finally:
+            connection.close()
+        self.assertEqual(
+            counts,
+            {
+                "learning_examples": 1,
+                "learning_consents": 1,
+                "learning_exports": 2,
+                "learning_export_consents": 2,
+            },
+        )
+
+    def test_backup_refuses_existing_destination_and_live_database(self):
+        destination = self.root / "private-backup.sqlite3"
+        self.store.backup_to(destination)
+        with self.assertRaises(LearningDataError):
+            self.store.backup_to(destination)
+        with self.assertRaises(LearningDataError):
+            self.store.backup_to(self.store.database)
+
+    def test_backup_rejects_example_content_hash_corruption(self):
+        self.store.record(example())
+        with self.store._connection() as connection:
+            connection.execute(
+                "UPDATE learning_examples SET content_hash=? WHERE example_id=?",
+                ("0" * 64, "ex-001"),
+            )
+        self.assertEqual(self.store.integrity_check(), "semantic validation failed")
+        with self.assertRaises(LearningDataError):
+            self.store.backup_to(self.root / "corrupt-example-backup.sqlite3")
+        self.assertFalse((self.root / "corrupt-example-backup.sqlite3").exists())
+
+    def test_backup_rejects_export_dependency_manifest_mismatch(self):
+        self.store.record(example())
+        output = self.root / "dependency-mismatch.zip"
+        result = self.store.export_bundle(output, minimum_quality=0.0)
+        with self.store._connection() as connection:
+            row = connection.execute(
+                "SELECT manifest_json FROM learning_exports WHERE export_id=?",
+                (result["export_id"],),
+            ).fetchone()
+            manifest = json.loads(row["manifest_json"])
+            manifest["consent_ids"] = []
+            connection.execute(
+                "UPDATE learning_exports SET manifest_json=? WHERE export_id=?",
+                (json.dumps(manifest, sort_keys=True, separators=(",", ":")), result["export_id"]),
+            )
+        self.assertEqual(self.store.integrity_check(), "semantic validation failed")
+        with self.assertRaises(LearningDataError):
+            self.store.backup_to(self.root / "corrupt-export-backup.sqlite3")
+
+    def test_backup_rejects_active_export_with_revoked_consent(self):
+        self.store.record(example())
+        output = self.root / "revoked-active.zip"
+        result = self.store.export_bundle(output, minimum_quality=0.0)
+        self.store.revoke_consent("consent-001", "2026-11-24T12:00:00+00:00")
+        with self.store._connection() as connection:
+            connection.execute(
+                "UPDATE learning_exports SET status='active' WHERE export_id=?",
+                (result["export_id"],),
+            )
+        self.assertEqual(self.store.integrity_check(), "semantic validation failed")
+        with self.assertRaises(LearningDataError):
+            self.store.backup_to(self.root / "revoked-export-backup.sqlite3")
+
 
 if __name__ == "__main__":
     unittest.main()
