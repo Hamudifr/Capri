@@ -388,12 +388,34 @@ static bool table_session_foreign_key_is_valid(sqlite3 *db,const char *table) {
     return valid;
 }
 
+static bool index_matches(sqlite3 *db,const char *name,const char *table,const char *expected_sql) {
+    sqlite3_stmt *st=NULL;
+    if(sqlite3_prepare_v2(
+        db,
+        "SELECT tbl_name,sql FROM sqlite_master WHERE type='index' AND name=?1",
+        -1,&st,NULL
+    )!=SQLITE_OK)return false;
+    sqlite3_bind_text(st,1,name,-1,SQLITE_STATIC);
+    int rc=sqlite3_step(st);
+    bool matches=rc==SQLITE_ROW
+        &&sqlite3_column_text(st,0)
+        &&strcmp((const char*)sqlite3_column_text(st,0),table)==0
+        &&sqlite3_column_type(st,1)==SQLITE_TEXT
+        &&normalized_sql_equal((const char*)sqlite3_column_text(st,1),expected_sql);
+    sqlite3_finalize(st);
+    return matches;
+}
+
 static bool session_schema_valid(sqlite3 *db) {
     return table_primary_key_is(db,"sessions","session_id")
         &&table_primary_key_is(db,"session_owners","session_id")
         &&table_primary_key_is(db,"session_turn_leases","session_id")
         &&table_session_foreign_key_is_valid(db,"session_owners")
-        &&table_session_foreign_key_is_valid(db,"session_turn_leases");
+        &&table_session_foreign_key_is_valid(db,"session_turn_leases")
+        &&index_matches(db,"sessions_updated_at","sessions",
+            "CREATE INDEX sessions_updated_at ON sessions(updated_at)")
+        &&index_matches(db,"session_owners_principal_id","session_owners",
+            "CREATE INDEX session_owners_principal_id ON session_owners(principal_id)");
 }
 
 static CapriSessionError validate_backup_snapshot(CapriSessionStore *store,sqlite3 *db) {
