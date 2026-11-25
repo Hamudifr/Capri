@@ -52,12 +52,12 @@ This evaluator does not implement the later full-promotion gate. Full promotion 
 The host can now use `StrategyApprovalBridge` and `StrategyApprovalRequest` from `capri_runtime` to connect strategy activation grants to the existing durable HostApprovalService:
 
 1. Construct HostApprovalService with the real host authenticator, authorization callback, private HMAC signer, and durable SQLiteApprovalChallengeStore.
-2. Construct StrategyApprovalBridge with that service. It refuses configurations whose challenge lifetime plus grant lifetime exceeds 15 minutes.
+2. Construct StrategyApprovalBridge with that service. It refuses configurations whose strategy grant lifetime exceeds 15 minutes.
 3. Construct SQLiteStrategyStore with `approval_verifier=bridge.verify`.
 4. Host code creates a request for the exact principal, strategy class/ID/version, current evaluation fingerprint, config fingerprint, expected activation generation and action. Preserve the request object and operation ID for retries.
 5. Present a redacted human-readable summary through the authenticated approval UX. Call `bridge.approve(credential, request)` only after the configured approver authentication and authorization policy succeeds.
 6. Pass the resulting signed StrategyActivationGrant to the strategy store. The store still enforces exact principal, strategy, version, config/evaluation fingerprints, generation, expiry and one-use approval ID.
 
-New HMAC approval grants bind the authenticated approver identity as well as the operation ID and exact digest. The challenge record is immutable after its one terminal decision and cannot be deleted. Keep the signer and bridge in trusted host code; do not expose them to the model. The same trusted UTC clock must be used by HostApprovalService and its HMAC signer.
+New HMAC approval grants bind the authenticated approver identity, actual grant-issuance timestamp, operation ID and exact digest. The challenge record is immutable after its one terminal decision and cannot be deleted. Keep the signer and bridge in trusted host code; do not expose them to the model. The same trusted UTC clock must be used by HostApprovalService and its HMAC signer.
 
 **Important limitation:** this bridge binds the existing single-cohort StrategyEvaluation fingerprint stored on a candidate. It does not yet persist or bind the multi-cohort StrategyPromotionAssessment, authenticate the evidence manifest, or prove task-family classification. It therefore strengthens explicitly approved manual activation only. It is not sufficient to enable automatic canary routing or staged promotion. Those remain disabled until assessment persistence, evidence provenance and passive shadow-mode gates are implemented and verified.
