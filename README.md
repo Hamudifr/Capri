@@ -106,6 +106,8 @@ Read [`docs/SECURITY_REVIEW.md`](docs/SECURITY_REVIEW.md), [`docs/TOOL_EXECUTION
 The capability roadmap separates implemented foundations from work still required for reliable autonomous operations and evidence-based adaptation.
 
 - [Capability roadmap](docs/CAPABILITY_ROADMAP.md)
+- [SQLite persistence profiling](docs/PERSISTENCE_BENCHMARKS.md)
+- [Runtime performance baseline](docs/RUNTIME_BENCHMARKS.md)
 - [Runtime architecture](docs/RUNTIME_CORE.md)
 - [Host runtime contract](docs/HOST_RUNTIME.md)
 - [Task execution semantics](docs/TASK_EXECUTION.md)

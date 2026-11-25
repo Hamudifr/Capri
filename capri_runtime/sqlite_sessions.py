@@ -327,28 +327,6 @@ class SQLiteSessionStore(SessionStore):
                 connection.close()
         return session
 
-    def _require_owner(self, session_id: str, principal_id: str) -> None:
-        self._validate_principal_id(principal_id)
-        if (
-            not isinstance(session_id, str)
-            or not session_id.strip()
-            or len(session_id) > 256
-            or _contains_surrogate(session_id)
-        ):
-            raise ValidationError("session_id must be bounded valid text")
-        with self._lock:
-            connection = self._connect()
-            try:
-                row = connection.execute(
-                    "SELECT 1 FROM session_owners WHERE session_id = ? AND principal_id = ?",
-                    (session_id, principal_id),
-                ).fetchone()
-            finally:
-                connection.close()
-        if row is None:
-            # Deliberately conceal whether the session exists for another principal.
-            raise SessionNotFoundError("session does not exist")
-
     def get_for_principal(self, session_id: str, principal_id: str) -> Session:
         principal_id = self._validate_principal_id(principal_id)
         if (
@@ -425,32 +403,33 @@ class SQLiteSessionStore(SessionStore):
         *,
         lease_owner: str | None = None,
     ) -> Session:
-        # Ownership rows are immutable through the public API; this precondition
-        # therefore remains true through the underlying atomic versioned commit.
-        self._require_owner(session_id, principal_id)
-        return self.commit_turn_messages(
-            session_id, expected_version, turn_messages, lease_owner=lease_owner
+        return self._commit_turn_messages(
+            session_id, expected_version, turn_messages,
+            lease_owner=lease_owner, principal_id=principal_id,
         )
 
     def claim_turn_lease_for_principal(
         self, session_id: str, principal_id: str, owner_token: str,
         lease_seconds: float = 30.0,
     ) -> str:
-        self._require_owner(session_id, principal_id)
-        return self.claim_turn_lease(session_id, owner_token, lease_seconds)
+        return self._claim_turn_lease(
+            session_id, owner_token, lease_seconds, principal_id=principal_id,
+        )
 
     def renew_turn_lease_for_principal(
         self, session_id: str, principal_id: str, owner_token: str,
         lease_seconds: float = 30.0,
     ) -> str:
-        self._require_owner(session_id, principal_id)
-        return self.renew_turn_lease(session_id, owner_token, lease_seconds)
+        return self._renew_turn_lease(
+            session_id, owner_token, lease_seconds, principal_id=principal_id,
+        )
 
     def release_turn_lease_for_principal(
         self, session_id: str, principal_id: str, owner_token: str,
     ) -> bool:
-        self._require_owner(session_id, principal_id)
-        return self.release_turn_lease(session_id, owner_token)
+        return self._release_turn_lease(
+            session_id, owner_token, principal_id=principal_id,
+        )
 
     def get(self, session_id: str) -> Session:
         if not isinstance(session_id, str) or not session_id.strip():
@@ -531,8 +510,20 @@ class SQLiteSessionStore(SessionStore):
         owner_token: str,
         lease_seconds: float = 30.0,
     ) -> str:
+        return self._claim_turn_lease(session_id, owner_token, lease_seconds)
+
+    def _claim_turn_lease(
+        self,
+        session_id: str,
+        owner_token: str,
+        lease_seconds: float = 30.0,
+        *,
+        principal_id: str | None = None,
+    ) -> str:
         """Acquire a durable cross-process session-turn lease or fail if held."""
         owner_token, lease_seconds = self._lease_parameters(owner_token, lease_seconds)
+        if principal_id is not None:
+            principal_id = self._validate_principal_id(principal_id)
         if (
             not isinstance(session_id, str)
             or not session_id.strip()
@@ -546,10 +537,18 @@ class SQLiteSessionStore(SessionStore):
                 connection.execute("BEGIN IMMEDIATE")
                 now = self._lease_now()
                 expires_at = (now + timedelta(seconds=lease_seconds)).isoformat()
-                session = connection.execute(
-                    "SELECT closed FROM sessions WHERE session_id = ?",
-                    (session_id,),
-                ).fetchone()
+                if principal_id is None:
+                    session = connection.execute(
+                        "SELECT closed FROM sessions WHERE session_id = ?",
+                        (session_id,),
+                    ).fetchone()
+                else:
+                    session = connection.execute(
+                        """SELECT s.closed FROM sessions AS s
+                        JOIN session_owners AS o ON o.session_id = s.session_id
+                        WHERE s.session_id = ? AND o.principal_id = ?""",
+                        (session_id, principal_id),
+                    ).fetchone()
                 if session is None:
                     raise SessionNotFoundError("session does not exist")
                 if session[0] == 1:
@@ -595,8 +594,20 @@ class SQLiteSessionStore(SessionStore):
         owner_token: str,
         lease_seconds: float = 30.0,
     ) -> str:
+        return self._renew_turn_lease(session_id, owner_token, lease_seconds)
+
+    def _renew_turn_lease(
+        self,
+        session_id: str,
+        owner_token: str,
+        lease_seconds: float = 30.0,
+        *,
+        principal_id: str | None = None,
+    ) -> str:
         """Renew only a still-live lease owned by this exact worker token."""
         owner_token, lease_seconds = self._lease_parameters(owner_token, lease_seconds)
+        if principal_id is not None:
+            principal_id = self._validate_principal_id(principal_id)
         if (
             not isinstance(session_id, str)
             or not session_id.strip()
@@ -608,6 +619,13 @@ class SQLiteSessionStore(SessionStore):
             connection = self._connect()
             try:
                 connection.execute("BEGIN IMMEDIATE")
+                if principal_id is not None:
+                    owner = connection.execute(
+                        "SELECT 1 FROM session_owners WHERE session_id = ? AND principal_id = ?",
+                        (session_id, principal_id),
+                    ).fetchone()
+                    if owner is None:
+                        raise SessionNotFoundError("session does not exist")
                 now = self._lease_now()
                 expires_at = (now + timedelta(seconds=lease_seconds)).isoformat()
                 current = connection.execute(
@@ -636,7 +654,15 @@ class SQLiteSessionStore(SessionStore):
                 connection.close()
 
     def release_turn_lease(self, session_id: str, owner_token: str) -> bool:
+        return self._release_turn_lease(session_id, owner_token)
+
+    def _release_turn_lease(
+        self, session_id: str, owner_token: str, *,
+        principal_id: str | None = None,
+    ) -> bool:
         """Release only the lease still owned by the supplied worker token."""
+        if principal_id is not None:
+            principal_id = self._validate_principal_id(principal_id)
         if (
             not isinstance(session_id, str)
             or not session_id.strip()
@@ -652,6 +678,13 @@ class SQLiteSessionStore(SessionStore):
             connection = self._connect()
             try:
                 connection.execute("BEGIN IMMEDIATE")
+                if principal_id is not None:
+                    owner = connection.execute(
+                        "SELECT 1 FROM session_owners WHERE session_id = ? AND principal_id = ?",
+                        (session_id, principal_id),
+                    ).fetchone()
+                    if owner is None:
+                        raise SessionNotFoundError("session does not exist")
                 current = connection.execute(
                     "SELECT owner_token, expires_at FROM session_turn_leases WHERE session_id = ?",
                     (session_id,),
@@ -689,6 +722,28 @@ class SQLiteSessionStore(SessionStore):
         *,
         lease_owner: str | None = None,
     ) -> Session:
+        return self._commit_turn_messages(
+            session_id, expected_version, turn_messages, lease_owner=lease_owner,
+        )
+
+    def _commit_turn_messages(
+        self,
+        session_id: str,
+        expected_version: int,
+        turn_messages: tuple[Message, ...],
+        *,
+        lease_owner: str | None = None,
+        principal_id: str | None = None,
+    ) -> Session:
+        if principal_id is not None:
+            principal_id = self._validate_principal_id(principal_id)
+            if (
+                not isinstance(session_id, str)
+                or not session_id.strip()
+                or len(session_id) > 256
+                or _contains_surrogate(session_id)
+            ):
+                raise ValidationError("session_id must be bounded valid text")
         validated = _validate_turn_messages(
             turn_messages,
             max_input_chars=self.max_input_chars,
@@ -702,11 +757,21 @@ class SQLiteSessionStore(SessionStore):
             connection = self._connect()
             try:
                 connection.execute("BEGIN IMMEDIATE")
-                row = connection.execute(
-                    """SELECT session_id, created_at, updated_at, version, closed, messages_json
-                    FROM sessions WHERE session_id = ?""",
-                    (session_id,),
-                ).fetchone()
+                if principal_id is None:
+                    row = connection.execute(
+                        """SELECT session_id, created_at, updated_at, version, closed, messages_json
+                        FROM sessions WHERE session_id = ?""",
+                        (session_id,),
+                    ).fetchone()
+                else:
+                    row = connection.execute(
+                        """SELECT s.session_id, s.created_at, s.updated_at, s.version,
+                        s.closed, s.messages_json
+                        FROM sessions AS s
+                        JOIN session_owners AS o ON o.session_id = s.session_id
+                        WHERE s.session_id = ? AND o.principal_id = ?""",
+                        (session_id, principal_id),
+                    ).fetchone()
                 if row is None:
                     raise SessionNotFoundError("session does not exist")
                 current = self._decode(row)
