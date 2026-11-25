@@ -63,7 +63,7 @@ def _parse_scalar(raw: str) -> str:
     if value.startswith(("|", ">")):
         raise ValueError("unsupported YAML block scalar indicator")
     if value.casefold() in {"null", "true", "false", "~"} or re.fullmatch(
-        r"[-+]?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][-+]?[0-9]+)?",
+        r"[-+]?(?:0|[1-9][0-9]*)(?:[.][0-9]+)?(?:[eE][-+]?[0-9]+)?",
         value,
     ):
         raise ValueError("plain YAML scalar is not a string; quote string values")
