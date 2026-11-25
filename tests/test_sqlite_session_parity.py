@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import subprocess
 import tempfile
 import unittest
@@ -111,6 +112,49 @@ class NativeSQLiteSessionParityTests(unittest.TestCase):
             self.assertTrue(closed.closed)
             self.assertTrue(native_closed["closed"])
             self.assertEqual(native_closed["version"], closed.version)
+
+    def test_native_opens_legacy_unversioned_python_session_schema(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = str(Path(directory) / "legacy-sessions.sqlite3")
+            store = SQLiteSessionStore(path)
+            created = store.create_for_principal("principal-legacy")
+            state = store.commit_turn_messages(created.session_id, 0, TURN_ONE)
+
+            connection = sqlite3.connect(path)
+            try:
+                connection.execute("PRAGMA foreign_keys=OFF")
+                connection.executescript(
+                    "DROP INDEX sessions_updated_at;"
+                    "CREATE TABLE sessions_new ("
+                    "session_id TEXT PRIMARY KEY, created_at TEXT NOT NULL, "
+                    "updated_at TEXT NOT NULL, version INTEGER NOT NULL CHECK(version >= 0), "
+                    "closed INTEGER NOT NULL CHECK(closed IN (0, 1)), "
+                    "messages_json TEXT NOT NULL);"
+                    "INSERT INTO sessions_new SELECT * FROM sessions;"
+                    "DROP TABLE sessions;"
+                    "CREATE TABLE sessions ("
+                    "session_id TEXT PRIMARY KEY, created_at TEXT NOT NULL, "
+                    "updated_at TEXT NOT NULL, version INTEGER NOT NULL CHECK(version >= 0), "
+                    "closed INTEGER NOT NULL CHECK(closed IN (0, 1)), "
+                    "messages_json TEXT NOT NULL);"
+                    "INSERT INTO sessions SELECT * FROM sessions_new;"
+                    "DROP TABLE sessions_new;"
+                    "CREATE INDEX sessions_updated_at ON sessions(updated_at);"
+                    "PRAGMA user_version=0;"
+                )
+                connection.commit()
+            finally:
+                connection.close()
+
+            native = self.invoke(
+                "read-principal", path, created.session_id, "principal-legacy"
+            )
+            self.assertEqual(native["version"], state.version)
+            reopened = SQLiteSessionStore(path)
+            self.assertEqual(
+                reopened.get_for_principal(created.session_id, "principal-legacy"),
+                state,
+            )
 
     def test_python_created_principal_session_is_native_readable_and_writable(self):
         with tempfile.TemporaryDirectory() as directory:
