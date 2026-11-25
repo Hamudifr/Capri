@@ -22,6 +22,7 @@ from capri_runtime import (
 )
 from capri_runtime.host_runtime import CapriHostRuntime, HostRuntimeError
 from capri_runtime.tasks import TaskNotFoundError, TaskValidationError
+from capri_runtime.goals import GoalNotFoundError, GoalPlanProposal, SQLiteGoalStore
 
 
 class RecordingAdapter:
@@ -274,6 +275,55 @@ class CapriHostRuntimeTests(unittest.TestCase):
             host.create_task(
                 "alice-token", [{"tool": "collect", "input": {}}]
             )
+
+    def test_goal_operations_are_bound_to_authenticated_principal(self):
+        goal_store = SQLiteGoalStore(os.path.join(self.temp.name, "goals.sqlite3"))
+        worker = TaskWorker(TaskEngine(
+            self.task_store, {}, "worker",
+            principal_handlers={
+                "collect": lambda data, key, principal: {"ok": True},
+            },
+        ))
+        host = self.make_host(task_worker=worker, goal_store=goal_store)
+        goal = host.create_goal(
+            "alice-token", "Prepare a verified report",
+            acceptance_criteria=["Sources cited", "Claims checked"],
+            idempotency_key="goal-1",
+        )
+        self.assertEqual(host.get_goal("alice-token", goal.goal_id), goal)
+        with self.assertRaises(GoalNotFoundError):
+            host.get_goal("bob-token", goal.goal_id)
+        with self.assertRaises(GoalNotFoundError):
+            host.transition_goal(
+                "bob-token", goal.goal_id, "planning", expected_version=1,
+            )
+        planned = host.save_goal_plan(
+            "alice-token", goal.goal_id,
+            GoalPlanProposal(({"tool": "collect", "input": {}},)),
+            expected_version=1,
+        )
+        self.assertEqual(planned.state, "planned")
+        self.assertEqual(planned.plan[0]["tool"], "collect")
+        with self.assertRaises(Exception):
+            host.save_goal_plan(
+                "alice-token", goal.goal_id,
+                GoalPlanProposal(({"tool": "admin", "input": {}},)),
+                expected_version=2,
+            )
+
+    def test_goal_api_requires_configured_store_and_authentication(self):
+        host = self.make_host()
+        with self.assertRaises(HostRuntimeError):
+            host.create_goal(
+                "alice-token", "outcome", acceptance_criteria=["done"],
+            )
+        goal_store = SQLiteGoalStore(os.path.join(self.temp.name, "goals-auth.sqlite3"))
+        configured = self.make_host(goal_store=goal_store)
+        with self.assertRaises(HostAuthorityError):
+            configured.create_goal(
+                "invalid-token", "outcome", acceptance_criteria=["done"],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
