@@ -1,0 +1,33 @@
+name: Native C migration checks
+
+on:
+  push:
+    branches: ["migration/gnu11-posix-runtime-2026-11-25"]
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "c/**"
+      - ".github/workflows/c-migration.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c-migration-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gnu11:
+    name: GNU11 build and regression tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Verify optimized build and tests
+        run: |
+          make -C c clean all test
+      - name: Verify AddressSanitizer and UndefinedBehaviorSanitizer
+        run: |
+          make -C c clean test CFLAGS="-std=gnu11 -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer" LDLIBS="-lm -fsanitize=address,undefined"
