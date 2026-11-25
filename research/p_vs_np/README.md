@@ -70,3 +70,12 @@ See [certificate-lifted canonical-pair MinMax analysis](R42_CERTIFICATE_LIFTED_M
 The key representation change is to use certified encodings z=(formula, label, witness-or-refutation) as the MinMax column domain. The payoff valid(z) AND (C(formula) != label) is a total PV predicate, unlike the direct SAT-disagreement payoff. Under canonical-pair hardness, majority amplification gives a constant game value and a polynomial-size certificate-carrying antichecker support.
 
 This is a formalization route, not a proof of canonical-pair hardness or of the APC1/APX1 MinMax theorem. The universal antichecker proof and full KPS transfer implication remain open.
+
+
+# R43: APC1 KPT uniformization under P = NP
+
+See [APC1 KPT uniformization conditional theorem](R43_APC1_KPT_COLLAPSE.md).
+
+The new conditional implication is: if APC1 proves the existential SAT-antichecker statement S_K for every sufficiently large fixed exponent, then P != NP. The key is the witnessed dWPHP form of the APC1 KPT theorem. Under P = NP, each missing-range witness function h_e can be computed in P by searching for a value outside the range of a polynomial-time function; the KPT terms then become uniform P-time, and the R40 path selector yields the witness functions needed by Pich–Santhanam Corollary 1.
+
+This does not prove S_K in APC1 or P != NP unconditionally. The R42 certificate-lifted PV MinMax formulation remains the candidate upstream route.
