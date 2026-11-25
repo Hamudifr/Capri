@@ -23,6 +23,13 @@ TURN_TWO = (
     Message(role="assistant", content="Committed by the other runtime."),
 )
 
+TOOL_TURN = (
+    Message(role="user", content="Inspect this Unicode payload: 🧪"),
+    Message(role="assistant", content="I will inspect the payload."),
+    Message(role="tool", content="Tool result: café ☕ and 🧬"),
+    Message(role="assistant", content="The tool exchange was preserved."),
+)
+
 
 def encode_turn(messages):
     return json.dumps(
@@ -177,6 +184,37 @@ class NativeSQLiteSessionParityTests(unittest.TestCase):
             closed = self.invoke("close-legacy", second_path, native["session_id"])
             self.assertTrue(closed["closed"])
             self.assertTrue(python_state.get(native["session_id"]).closed)
+
+    def test_tool_exchange_and_unicode_transcript_are_cross_runtime_compatible(self):
+        with tempfile.TemporaryDirectory() as directory:
+            native_path = str(Path(directory) / "native.sqlite3")
+            native = self.invoke(
+                "create-principal", native_path, "principal-tool", encode_turn(TOOL_TURN)
+            )
+            python_store = SQLiteSessionStore(native_path)
+            recovered = python_store.get_for_principal(
+                native["session_id"], "principal-tool"
+            )
+            self.assertEqual(recovered.messages, TOOL_TURN)
+            self.assertEqual(
+                native["messages"],
+                [{"role": item.role, "content": item.content} for item in TOOL_TURN],
+            )
+
+            python_path = str(Path(directory) / "python.sqlite3")
+            reverse_store = SQLiteSessionStore(python_path)
+            created = reverse_store.create_for_principal("principal-tool")
+            python_state = reverse_store.commit_turn_messages(
+                created.session_id, 0, TOOL_TURN
+            )
+            native_state = self.invoke(
+                "read-principal", python_path, created.session_id, "principal-tool"
+            )
+            self.assertEqual(native_state["version"], python_state.version)
+            self.assertEqual(
+                native_state["messages"],
+                [{"role": item.role, "content": item.content} for item in TOOL_TURN],
+            )
 
 
 if __name__ == "__main__":
