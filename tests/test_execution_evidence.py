@@ -137,6 +137,16 @@ class SQLiteExecutionEvidenceJournalTests(unittest.TestCase):
         with self.assertRaisesRegex(Exception, "conflicting execution evidence"):
             changed.record_execution("host-credential", self.claim, self.result)
 
+    def test_idempotent_replay_rejects_strategy_id_drift(self):
+        self.journal.record_execution("host-credential", self.claim, self.result)
+        changed = self.make_journal(
+            resolver=lambda principal, claim: StrategyBinding(
+                "reasoning", "candidate", "1.0",
+            ),
+        )
+        with self.assertRaisesRegex(Exception, "conflicting execution evidence"):
+            changed.record_execution("host-credential", self.claim, self.result)
+
     def test_raw_result_is_not_persisted(self):
         self.journal.record_execution("host-credential", self.claim, self.result)
         with self.tasks._lock:

@@ -27,7 +27,7 @@ The task claim is revalidated against the authoritative `SQLiteTaskStore` and pr
 5. The returned `host-execution-event:<uuid>` reference can populate a `StrategyObservation.evidence_ref`.
 6. The existing `SQLiteStrategyEvidenceManifestStore` can use the journal's `classify_task_family` and `validate_source_events` methods as its trusted callbacks.
 
-A repeated write for the same task step, attempt, and strategy is idempotent only when the claim/result digests, principal, strategy class/version, task classification, verified outcome, and all measured metrics match. Any drift is rejected as conflicting evidence.
+A task step attempt admits at most one evidence event, regardless of strategy ID. A repeated write is idempotent only when the claim/result digests, principal, strategy class/version, task classification, verified outcome, and all measured metrics match. Any drift is rejected as conflicting evidence.
 
 ## Data minimization and integrity
 

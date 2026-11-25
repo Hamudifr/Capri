@@ -168,7 +168,7 @@ class SQLiteExecutionEvidenceJournal:
                     event_sha256 TEXT NOT NULL,
                     signature TEXT NOT NULL,
                     payload_json TEXT NOT NULL,
-                    UNIQUE(task_id,step_index,attempt,strategy_id)
+                    UNIQUE(task_id,step_index,attempt)
                 )""")
                 connection.execute("""CREATE TRIGGER IF NOT EXISTS execution_evidence_immutable_update
                     BEFORE UPDATE ON execution_evidence_events
@@ -319,16 +319,16 @@ class SQLiteExecutionEvidenceJournal:
                 self._tasks._assert_claim_matches(claim, live_claim, created_at)
                 existing = connection.execute(
                     """SELECT event_id,claim_sha256,result_sha256,principal_id,
-                    strategy_class,strategy_version,task_family,scenario,outcome,
+                    strategy_class,strategy_id,strategy_version,task_family,scenario,outcome,
                     safety_violation,tool_calls,context_tokens,estimated_cost_units,latency_ms
                     FROM execution_evidence_events
-                    WHERE task_id=? AND step_index=? AND attempt=? AND strategy_id=?""",
-                    (claim.task_id, claim.step_index, claim.attempt, binding.strategy_id),
+                    WHERE task_id=? AND step_index=? AND attempt=?""",
+                    (claim.task_id, claim.step_index, claim.attempt),
                 ).fetchone()
                 if existing:
                     expected_existing = (
                         claim_digest, result_digest, principal,
-                        binding.strategy_class, binding.strategy_version,
+                        binding.strategy_class, binding.strategy_id, binding.strategy_version,
                         classification.task_family, classification.scenario,
                         verified.outcome, int(verified.safety_violation),
                         verified.tool_calls, verified.context_tokens,
@@ -551,7 +551,7 @@ def validate_execution_evidence_snapshot(connection: Any) -> None:
         indexed = [
             row[2] for row in connection.execute(f'PRAGMA index_info("{name}")').fetchall()
         ]
-        if indexed == ["task_id", "step_index", "attempt", "strategy_id"]:
+        if indexed == ["task_id", "step_index", "attempt"]:
             unique_constraint = True
             break
     if not unique_constraint:
