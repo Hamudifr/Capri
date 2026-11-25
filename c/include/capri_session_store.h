@@ -73,6 +73,11 @@ CapriSessionError capri_session_release_turn_lease_for_principal(
 CapriSessionError capri_session_close_for_principal(
     CapriSessionStore *store, const char *session_id, const char *principal_id,
     CapriSession *out);
+/* Creates a consistent, validated, mode-0600 snapshot without overwriting an
+ * existing destination. The destination parent must already be private.
+ */
+CapriSessionError capri_session_backup_to(CapriSessionStore *store, const char *destination_path);
+CapriSessionError capri_session_integrity_check(CapriSessionStore *store);
 void capri_session_free(CapriSession *session);
 const char *capri_session_error_string(CapriSessionError error);
 
