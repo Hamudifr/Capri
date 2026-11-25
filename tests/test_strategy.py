@@ -151,7 +151,7 @@ class StrategyEvaluationTests(unittest.TestCase):
         records = cohort()
         records[1] = StrategyObservation(
             task_id="task-000", scenario="different", strategy_id="candidate",
-            outcome="verified_success", evidence_ref="test://evidence/task-000",
+            strategy_version="1.0", outcome="verified_success", evidence_ref="test://evidence/task-000",
         )
         with self.assertRaisesRegex(StrategyEvaluationError, "same scenario"):
             evaluate_strategies("baseline", "candidate", records)
@@ -232,7 +232,7 @@ class StrategyEvaluationTests(unittest.TestCase):
         changed = list(records)
         changed[0] = StrategyObservation(
             task_id="task-000", scenario="research", strategy_id="baseline",
-            outcome="verified_success", evidence_ref="test://evidence/changed",
+            strategy_version="1.0", outcome="verified_success", evidence_ref="test://evidence/changed",
             tool_calls=5, context_tokens=1_000,
             estimated_cost_units=100, latency_ms=2_000,
         )
@@ -247,7 +247,7 @@ class StrategyEvaluationTests(unittest.TestCase):
         changed = list(records)
         changed[-1] = StrategyObservation(
             task_id="task-019", scenario="research", strategy_id="candidate",
-            outcome="verified_success", evidence_ref="test://evidence/changed",
+            strategy_version="1.0", outcome="verified_success", evidence_ref="test://evidence/changed",
             tool_calls=5, context_tokens=1_000,
             estimated_cost_units=100, latency_ms=2_000,
         )
