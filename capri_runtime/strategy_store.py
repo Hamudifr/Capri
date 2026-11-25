@@ -1327,7 +1327,8 @@ class SQLiteStrategyStore:
                 rows = connection.execute(
                     """SELECT event_id,principal_id,strategy_class,generation,action,
                     from_strategy_id,from_version,to_strategy_id,to_version,to_config_sha256,
-                    evaluation_id,approval_id,approver_id,created_at,previous_hash,event_hash
+                    evaluation_id,approval_id,approver_id,created_at,previous_hash,event_hash,
+                    promotion_assessment_sha256
                     FROM strategy_events WHERE principal_id=? AND strategy_class=?
                     ORDER BY generation""",
                     (principal, category),
@@ -1344,7 +1345,7 @@ class SQLiteStrategyStore:
                         row[0], row[1], row[2], row[3], row[4], row[5], row[6],
                         row[7], row[8], row[9],
                         evaluation_hashes.get(row[10]) if row[10] else None,
-                        row[11], row[12], row[13], row[14], row[15],
+                        row[11], row[12], row[13], row[14], row[15], row[16],
                     )
                     for row in rows
                 )
