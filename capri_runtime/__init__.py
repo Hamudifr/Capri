@@ -104,6 +104,7 @@ from .goals import (
     GoalPlanProposal, GoalPlanner, GoalRecord, GoalValidationError, SQLiteGoalStore,
     validate_goal_plan,
 )
+from .strategy_evidence import HostStrategyEvidenceAuthority
 from .strategy_approval import (
     HostStrategyApprovalAuthority,
     StrategyApprovalIdentity,
@@ -244,6 +245,7 @@ __all__ = [
     "SQLiteApprovalChallengeStore",
     "SQLiteSecurityStore",
     "SQLiteSessionStore",
+    "HostStrategyEvidenceAuthority",
     "HostStrategyApprovalAuthority",
     "StrategyApprovalIdentity",
     "StrategyApprovalRequest",
