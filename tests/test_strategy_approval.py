@@ -1,3 +1,4 @@
+import tempfile
 import unittest
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -7,7 +8,11 @@ from capri_runtime.strategy_approval import (
     StrategyApprovalIdentity,
     StrategyApprovalRequest,
 )
-from capri_runtime.strategy_store import StrategyAuthorizationError
+from capri_runtime.strategy_store import (
+    SQLiteStrategyStore,
+    StrategyAuthorizationError,
+)
+from capri_runtime.tasks import SQLiteTaskStore
 from capri_runtime.tools import HmacApprovalKeyRing
 
 
@@ -100,6 +105,31 @@ class HostStrategyApprovalAuthorityTests(unittest.TestCase):
     def test_tampered_signature_is_rejected(self):
         grant = self.authority.issue_grant("valid", self.request)
         self.assertFalse(self.authority.verify(replace(grant, signature="k1." + "0" * 64)))
+
+    def test_grant_is_accepted_by_strategy_store(self):
+        with tempfile.TemporaryDirectory() as directory:
+            task_store = SQLiteTaskStore(f"{directory}/tasks.sqlite3")
+            store = SQLiteStrategyStore(
+                task_store, approval_verifier=self.authority.verify,
+                evidence_verifier=lambda context: True,
+            )
+            baseline = store.register_baseline_for_principal(
+                "alice", "reasoning", "baseline", "1.0", {"mode": "standard"},
+            )
+            request = StrategyApprovalRequest(
+                principal_id="alice",
+                strategy_class="reasoning",
+                strategy_id="baseline",
+                version="1.0",
+                evaluation_sha256=None,
+                config_sha256=baseline.config_sha256,
+                expected_generation=0,
+                action="activate",
+            )
+            grant = self.authority.issue_grant("valid", request)
+            active = store.activate_for_principal("alice", grant)
+            self.assertEqual(active.strategy_id, "baseline")
+            self.assertEqual(active.config_sha256, baseline.config_sha256)
 
 
 if __name__ == "__main__":
