@@ -1,17 +1,22 @@
 # Capri C migration
 
-This directory is the first native-C port in the staged migration of Capri.
+This directory contains the native GNU C11 implementation being built toward a repository-wide Capri migration.
 
-## Contract
+## Current native modules
+
+- **CCEL research engine**: bounded grid transformations, synthesis, prediction, and probe selection in include/ccel.h and src/ccel.c.
+- **Core evaluation records**: fixed-capacity record types and validation in include/capri_core.h and src/capri_core.c. Validation rejects malformed UTF-8 (including surrogate encodings), unterminated fixed fields, unknown controlled-vocabulary dimensions, invalid enum states, invalid timezone-aware RFC 3339 timestamps, inconsistent evaluator/evidence stages, and self-parent lineage.
+
+The core validator is a native library component, not a wrapper around Python. Its current record contract is an initial port; exact field-by-field parity with every Python record edge case remains to be established.
+
+## Contract and build
 
 - Language baseline: GNU C11.
-- Portability target: POSIX.1-2024 for host-facing system interfaces; the CCEL library itself uses GNU C and the C math library only.
-- No third-party runtime dependency.
-- Public interfaces are declared in `include/ccel.h`; implementation is in `src/ccel.c`.
+- Portability target: POSIX.1-2024 for host-facing system interfaces.
+- CCEL currently links only the C math library. Core record validation has no external runtime dependency.
+- Public interfaces are declared in include/; implementations are in src/.
 - Bounded inputs are validated before processing. Allocation failures are explicit errors.
-- Ownership is explicit: result objects returned by synthesis, prediction, and probe selection must be released with their matching `*_free` function.
-
-## Build and test
+- Ownership is explicit: result objects returned by CCEL synthesis, prediction, and probe selection must be released with their matching *_free function.
 
 ```sh
 make -C c test
@@ -20,14 +25,17 @@ make -C c clean all
 
 ## Migration policy
 
-The repository-wide conversion is incremental. This port does not replace or delete the existing Python or Rust implementation. The current Rust CCEL crate remains the behavioral reference until differential tests establish parity. Each subsystem is migrated behind a C API, receives equivalent regression/security tests, and is integrated only after exact-head validation. Python and Rust files remain in place during the transition so existing users and workflows are not broken.
+The requested end state is a genuinely C-based Capri runtime. Python and Rust remain in the repository as behavioral references until each native subsystem passes parity and security regression tests. No legacy implementation is removed as part of the initial port.
 
-Planned sequence:
-1. CCEL bounded grid transformations, synthesis, prediction, and probe selection.
+The migration covers, as one coordinated release:
+1. CCEL research engine.
 2. Core records, validation, ledger, and diagnostics.
-3. Runtime primitives and persistence, retaining SQLite's stable C API.
-4. Host orchestration, tool authorization, approvals, memory, provider adapters, and task recovery.
-5. Port test contracts and benchmark harnesses; update build/CI and packaging.
-6. Remove legacy language implementations only after feature parity, migration notes, and a deliberate release decision.
+3. Runtime and SQLite persistence.
+4. Host tool execution, authorization, approvals, and recovery.
+5. Memory, orchestration, and provider integrations.
+6. Tests, documentation, build system, packaging, and CI.
+7. Compilation, differential regression tests, sanitizer checks, and security verification.
 
-The C port is not considered complete merely because it compiles. Behavioral parity, malformed-input handling, memory ownership, overflow safety, and security-boundary equivalence are release requirements.
+The work is committed in small, reviewable units so each subsystem can be compiled, tested, and audited without weakening the overall one-go migration goal. Host identity and authorization remain outside model control; model output is untrusted data, never authority. Approval grants must be bound to the exact principal, tool, operation, argument digest, expiry, and single-use identifier. External side effects must not be blindly replayed after uncertain outcomes.
+
+The C port is not complete merely because it compiles. Behavioral parity, malformed-input handling, memory ownership, overflow safety, persistence integrity, and security-boundary equivalence are release requirements.
