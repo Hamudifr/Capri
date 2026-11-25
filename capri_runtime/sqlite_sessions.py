@@ -251,7 +251,7 @@ class SQLiteSessionStore(SessionStore):
             session_id TEXT PRIMARY KEY,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
-            version INTEGER NOT NULL CHECK(version >= 0),
+            version INTEGER NOT NULL,
             closed INTEGER NOT NULL CHECK(closed IN (0, 1)),
             messages_json TEXT NOT NULL
         )"""
