@@ -487,5 +487,15 @@ class SQLiteWorkerRegistryTests(unittest.TestCase):
         self.assertEqual(after, before)
         self.assertEqual(self.registry.integrity_check(), "ok")
 
+    def test_registry_rejects_duck_typed_non_task_store(self):
+        class FakeTaskStore:
+            _lock = threading.RLock()
+
+            def _connect(self):
+                raise AssertionError("must reject before opening a database")
+
+        with self.assertRaisesRegex(WorkerRegistryError, "requires a SQLiteTaskStore"):
+            SQLiteWorkerRegistry(FakeTaskStore())
+
 if __name__ == "__main__":
     unittest.main()
