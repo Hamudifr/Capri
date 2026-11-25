@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from capri_core.validation import contains_surrogate
+from capri_core.strategy import StrategyEvaluation, StrategyObservation
 
 from .memory import UntrustedMemoryContext
 from .knowledge_graph import UntrustedKnowledgeContext
@@ -25,6 +26,10 @@ from .goals import (
 from .goal_coordinator import GoalCoordinator, GoalExecution
 from .goal_reports import GoalReport, build_goal_report
 from .budgets import BudgetUsage, SQLiteBudgetStore
+from .strategy_store import (
+    ActiveStrategyRecord, SQLiteStrategyStore, StrategyActivationEvent,
+    StrategyActivationGrant, StrategyVersionRecord,
+)
 from .tools import ExecutionContext, HostAuthorityResolver
 
 
@@ -130,6 +135,7 @@ class CapriHostRuntime:
         task_store: SQLiteTaskStore | None = None,
         goal_store: SQLiteGoalStore | None = None,
         budget_store: SQLiteBudgetStore | None = None,
+        strategy_store: SQLiteStrategyStore | None = None,
     ) -> None:
         if not isinstance(authority, HostAuthorityResolver):
             raise HostRuntimeError("a trusted HostAuthorityResolver is required")
@@ -165,6 +171,8 @@ class CapriHostRuntime:
             raise HostRuntimeError("goal_store must be a SQLiteGoalStore")
         if budget_store is not None and not isinstance(budget_store, SQLiteBudgetStore):
             raise HostRuntimeError("budget_store must be a SQLiteBudgetStore")
+        if strategy_store is not None and not isinstance(strategy_store, SQLiteStrategyStore):
+            raise HostRuntimeError("strategy_store must be a SQLiteStrategyStore")
         if (
             task_store is not None and task_worker is not None
             and task_store.path != task_worker.engine.store.path
@@ -181,6 +189,11 @@ class CapriHostRuntime:
             task_store if task_store is not None
             else (task_worker.engine.store if task_worker is not None else None)
         )
+        if strategy_store is not None and (
+            self._task_store is None or strategy_store.task_store is not self._task_store
+        ):
+            raise HostRuntimeError("strategy_store must share the exact configured task store")
+        self._strategy_store = strategy_store
         self._goal_store = goal_store
         configured_budgets = [
             item for item in (
@@ -254,6 +267,74 @@ class CapriHostRuntime:
         if self._task_store is None:
             raise HostRuntimeError("no task store is configured")
         return self._task_store.get_for_principal(task_id, context.principal_id)
+
+    def register_strategy_baseline(
+        self, credential: Any, strategy_class: str, strategy_id: str,
+        version: str, config: dict[str, Any],
+    ) -> StrategyVersionRecord:
+        """Register an immutable baseline config for the authenticated principal."""
+        context = self._context(credential)
+        if self._strategy_store is None:
+            raise HostRuntimeError("no strategy store is configured")
+        return self._strategy_store.register_baseline_for_principal(
+            context.principal_id, strategy_class, strategy_id, version, config,
+        )
+
+    def register_strategy_candidate(
+        self, credential: Any, strategy_class: str, strategy_id: str,
+        version: str, config: dict[str, Any], evaluation: StrategyEvaluation, *,
+        observations: tuple[StrategyObservation, ...],
+        evidence_manifest_ref: str,
+    ) -> StrategyVersionRecord:
+        """Persist a recomputed, evidence-referenced candidate without activating it."""
+        context = self._context(credential)
+        if self._strategy_store is None:
+            raise HostRuntimeError("no strategy store is configured")
+        return self._strategy_store.register_candidate_for_principal(
+            context.principal_id, strategy_class, strategy_id, version, config,
+            evaluation, observations=observations,
+            evidence_manifest_ref=evidence_manifest_ref,
+        )
+
+    def get_active_strategy(
+        self, credential: Any, strategy_class: str,
+    ) -> ActiveStrategyRecord | None:
+        """Read only the authenticated principal's active strategy configuration."""
+        context = self._context(credential)
+        if self._strategy_store is None:
+            raise HostRuntimeError("no strategy store is configured")
+        return self._strategy_store.get_active_for_principal(
+            context.principal_id, strategy_class,
+        )
+
+    def activate_strategy(
+        self, credential: Any, grant: StrategyActivationGrant,
+    ) -> ActiveStrategyRecord:
+        """Activate one registered version using a host-authenticated one-use grant."""
+        context = self._context(credential)
+        if self._strategy_store is None:
+            raise HostRuntimeError("no strategy store is configured")
+        return self._strategy_store.activate_for_principal(context.principal_id, grant)
+
+    def rollback_strategy(
+        self, credential: Any, grant: StrategyActivationGrant,
+    ) -> ActiveStrategyRecord:
+        """Restore a previously active version as a new approved history event."""
+        context = self._context(credential)
+        if self._strategy_store is None:
+            raise HostRuntimeError("no strategy store is configured")
+        return self._strategy_store.rollback_for_principal(context.principal_id, grant)
+
+    def get_strategy_events(
+        self, credential: Any, strategy_class: str,
+    ) -> tuple[StrategyActivationEvent, ...]:
+        """Return the authenticated principal's verified append-only strategy history."""
+        context = self._context(credential)
+        if self._strategy_store is None:
+            raise HostRuntimeError("no strategy store is configured")
+        return self._strategy_store.events_for_principal(
+            context.principal_id, strategy_class,
+        )
 
     def cancel_task(self, credential: Any, task_id: str) -> TaskRecord:
         """Cancel only a task owned by the authenticated principal."""

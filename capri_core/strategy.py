@@ -31,6 +31,7 @@ class StrategyObservation:
     strategy_id: str
     outcome: Outcome
     evidence_ref: str
+    strategy_version: str = "unversioned"
     safety_violation: bool = False
     tool_calls: int = 0
     context_tokens: int = 0
@@ -55,6 +56,8 @@ class StrategyEvaluation:
 
     baseline_id: str
     candidate_id: str
+    baseline_version: str
+    candidate_version: str
     cohort_sha256: str
     matched_pairs: int
     baseline_unmatched: int
@@ -88,6 +91,7 @@ def _validate_observation(item: object) -> StrategyObservation:
     _require_text(item.scenario, "scenario")
     _require_text(item.strategy_id, "strategy_id")
     _require_text(item.evidence_ref, "evidence_ref")
+    _require_text(item.strategy_version, "strategy_version")
     if type(item.outcome) is not str or item.outcome not in _ALLOWED_OUTCOMES:
         raise StrategyEvaluationError("outcome must be verified_success, verified_failure, or unverified")
     if type(item.safety_violation) is not bool:
@@ -191,6 +195,13 @@ def evaluate_strategies(
         if baseline_records[task_id].scenario != candidate_records[task_id].scenario:
             raise StrategyEvaluationError("matched task records must have the same scenario")
 
+    baseline_versions = {record.strategy_version for record in baseline_records.values()}
+    candidate_versions = {record.strategy_version for record in candidate_records.values()}
+    if len(baseline_versions) != 1 or len(candidate_versions) != 1:
+        raise StrategyEvaluationError("each strategy must use exactly one version in a cohort")
+    baseline_version = next(iter(baseline_versions))
+    candidate_version = next(iter(candidate_versions))
+
     baseline_matched = [baseline_records[key] for key in common_tasks]
     candidate_matched = [candidate_records[key] for key in common_tasks]
     baseline_metrics = _metrics(baseline_matched) if common_tasks else StrategyMetrics(0, 0.0, 0, 0.0, 0.0, 0.0, 0.0)
@@ -241,6 +252,8 @@ def evaluate_strategies(
     return StrategyEvaluation(
         baseline_id=baseline_id,
         candidate_id=candidate_id,
+        baseline_version=baseline_version,
+        candidate_version=candidate_version,
         cohort_sha256=cohort_sha256,
         matched_pairs=len(common_tasks),
         baseline_unmatched=len(baseline_tasks - candidate_tasks),
