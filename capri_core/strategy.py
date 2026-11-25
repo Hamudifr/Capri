@@ -5,9 +5,9 @@ permissions, changes active configuration, or trains/modifies a model.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass
 from hashlib import sha256
-import json
 from statistics import fmean
 from typing import Iterable, Literal
 
@@ -112,7 +112,6 @@ def _metrics(records: list[StrategyObservation]) -> StrategyMetrics:
     )
 
 
-
 def _input_fingerprint(
     baseline_id: str,
     candidate_id: str,
@@ -140,6 +139,7 @@ def _input_fingerprint(
                 "latency_ms": record.latency_ms,
             })
     payload = {
+        "schema": "capri.strategy-input.v1",
         "baseline_id": baseline_id,
         "candidate_id": candidate_id,
         "observations": observations,
@@ -148,6 +148,7 @@ def _input_fingerprint(
         payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")
     return sha256(canonical).hexdigest()
+
 
 def evaluate_strategies(
     baseline_id: str,
