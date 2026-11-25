@@ -324,6 +324,8 @@ def _promotion_record_digest(summary_json: str, refs_json: str, hashes_json: str
 
 def _promotion_record_from_row(row: tuple[Any, ...]) -> StrategyPromotionRecord:
     summary_json, refs_json, hashes_json = row[10], row[11], row[12]
+    if not all(type(value) is str for value in (summary_json, refs_json, hashes_json)):
+        raise StrategyIntegrityError("stored promotion assessment fields are not text")
     if (
         len(summary_json.encode("utf-8")) > 32_768
         or len(refs_json.encode("utf-8")) > 4_096
@@ -925,7 +927,7 @@ class SQLiteStrategyStore:
         hashes_json = _promotion_json(cohort_hashes, field="promotion cohort fingerprints", maximum=2_048)
         assessment_hash = _promotion_record_digest(summary_json, refs_json, hashes_json)
         now = self._now()
-        timestamp = created_at or now
+        timestamp = now if created_at is None else created_at
         if not isinstance(timestamp, datetime) or timestamp.tzinfo is None or timestamp.utcoffset() is None:
             raise StrategyStoreError("created_at must be timezone-aware")
         if timestamp.astimezone(timezone.utc) > now.astimezone(timezone.utc):
