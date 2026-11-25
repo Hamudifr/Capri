@@ -33,8 +33,6 @@ int main(void) {
     char restored_path[512]; snprintf(restored_path,sizeof restored_path,"%s/sessions-restored.sqlite3",dir);
     char corrupt_backup_path[512]; snprintf(corrupt_backup_path,sizeof corrupt_backup_path,"%s/corrupt-backup.sqlite3",dir);
     char corrupt_restore_path[512]; snprintf(corrupt_restore_path,sizeof corrupt_restore_path,"%s/corrupt-restored.sqlite3",dir);
-    /* */
- snprintf(corrupt_backup_path,sizeof corrupt_backup_path,"%s/corrupt-backup.sqlite3",dir);
     CapriSessionError error; CapriSessionStore *store=capri_session_store_open(path,200,16000,64000,131072,&error);
     assert(store!=NULL && error==CAPRI_SESSION_OK);
     CapriSession alice={0}, bob={0}, committed={0};
@@ -99,6 +97,39 @@ int main(void) {
     pthread_join(ta,NULL); pthread_join(tb,NULL); pthread_barrier_destroy(&barrier);
     assert((a.result==CAPRI_SESSION_OK&&b.result==CAPRI_SESSION_CONFLICT)||(b.result==CAPRI_SESSION_OK&&a.result==CAPRI_SESSION_CONFLICT));
     capri_session_free(&a.output); capri_session_free(&b.output); capri_session_store_close(store2);
+    CapriSession process_session={0};
+    assert(capri_session_create_for_principal(store,"principal-race",&process_session)==CAPRI_SESSION_OK);
+    int ready_pipe[2],start_pipe[2],process_result_pipe[2];
+    assert(pipe(ready_pipe)==0&&pipe(start_pipe)==0&&pipe(process_result_pipe)==0);
+    pid_t worker=fork();assert(worker>=0);
+    if(worker==0){
+        close(ready_pipe[0]);close(start_pipe[1]);close(process_result_pipe[0]);
+        CapriSessionError child_error=CAPRI_SESSION_INVALID;
+        CapriSessionStore *child_store=capri_session_store_open(path,200,16000,64000,131072,&child_error);
+        int ready=child_store!=NULL&&child_error==CAPRI_SESSION_OK;
+        (void)write(ready_pipe[1],&ready,sizeof ready);close(ready_pipe[1]);
+        if(!ready){close(start_pipe[0]);close(process_result_pipe[1]);_exit(2);}
+        unsigned char go=0;if(read(start_pipe[0],&go,sizeof go)!=(ssize_t)sizeof go){capri_session_store_close(child_store);_exit(3);}
+        close(start_pipe[0]);
+        const char *process_turn="[{\"role\":\"user\",\"content\":\"process race\"},{\"role\":\"assistant\",\"content\":\"child\"}]";
+        CapriSession child_output={0};
+        CapriSessionError child_result=capri_session_commit_turn_for_principal(child_store,process_session.session_id,"principal-race",0,process_turn,NULL,&child_output);
+        int child_code=(int)child_result;
+        (void)write(process_result_pipe[1],&child_code,sizeof child_code);
+        capri_session_free(&child_output);capri_session_store_close(child_store);close(process_result_pipe[1]);_exit(0);
+    }
+    close(ready_pipe[1]);close(start_pipe[0]);close(process_result_pipe[1]);
+    int child_ready=0;assert(read(ready_pipe[0],&child_ready,sizeof child_ready)==(ssize_t)sizeof child_ready);close(ready_pipe[0]);assert(child_ready==1);
+    unsigned char go=1;assert(write(start_pipe[1],&go,sizeof go)==(ssize_t)sizeof go);close(start_pipe[1]);
+    const char *process_turn="[{\"role\":\"user\",\"content\":\"process race\"},{\"role\":\"assistant\",\"content\":\"parent\"}]";
+    CapriSession parent_output={0};
+    CapriSessionError parent_result=capri_session_commit_turn_for_principal(store,process_session.session_id,"principal-race",0,process_turn,NULL,&parent_output);
+    int child_result_code=-1;assert(read(process_result_pipe[0],&child_result_code,sizeof child_result_code)==(ssize_t)sizeof child_result_code);close(process_result_pipe[0]);
+    int worker_status=0;assert(waitpid(worker,&worker_status,0)==worker);assert(WIFEXITED(worker_status)&&WEXITSTATUS(worker_status)==0);
+    CapriSessionError child_result=(CapriSessionError)child_result_code;
+    assert((parent_result==CAPRI_SESSION_OK&&child_result==CAPRI_SESSION_CONFLICT)||(child_result==CAPRI_SESSION_OK&&parent_result==CAPRI_SESSION_CONFLICT));
+    CapriSession process_state={0};assert(capri_session_get_for_principal(store,process_session.session_id,"principal-race",&process_state)==CAPRI_SESSION_OK&&process_state.version==1);
+    capri_session_free(&process_state);capri_session_free(&parent_output);capri_session_free(&process_session);
     CapriSession race_state={0};
     assert(capri_session_get_for_principal(store,race_session.session_id,"principal-race",&race_state)==CAPRI_SESSION_OK);
     assert(race_state.version==1);
@@ -163,6 +194,10 @@ int main(void) {
     assert(capri_session_commit_turn_for_principal(store,nul_owner_session.session_id,"principal-nul-owner",0,turn,NULL,&committed)==CAPRI_SESSION_CORRUPT);
     capri_session_free(&nul_owner_session); capri_session_free(&committed);
     sqlite3_close(raw);
+    struct stat database_mode;assert(stat(path,&database_mode)==0&&(database_mode.st_mode&0777u)==0600u);
+    assert(chmod(path,0644)==0);
+    assert(capri_session_get_for_principal(store,session_id,"principal-alice",&bob)==CAPRI_SESSION_IO);
+    assert(chmod(path,0600)==0);
     capri_session_store_close(store);
 
     /* A concurrent schema opener must wait for an existing writer lock. */
