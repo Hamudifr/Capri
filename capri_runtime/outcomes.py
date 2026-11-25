@@ -499,7 +499,7 @@ class SQLiteOutcomeStore:
             ("outcomes_immutable_delete", "BEFORE DELETE ON outcomes"),
         ):
             sql = triggers.get(name, "").upper()
-            if operation not in sql or "RAISE(ABORT" not in sql:
+            if operation.upper() not in sql or "RAISE(ABORT" not in sql:
                 raise OutcomeValidationError("outcome journal append-only protection is missing")
         successor_index = {
             row["name"]: row for row in connection.execute("PRAGMA index_list(outcomes)").fetchall()
