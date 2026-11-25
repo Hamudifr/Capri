@@ -628,6 +628,11 @@ class CapriHostRuntime:
         self._authorize_worker_observer(observer_credential, worker_id)
         with self._worker_reservation_lock:
             self._purge_worker_reservation_contexts()
+            pending_contexts = tuple(
+                context for context in self._worker_reservation_contexts.values()
+                if context.reservation.worker_id == worker_id
+                and not context.reservation.committed
+            )
             self._begin_worker_audit_operation()
             try:
                 snapshot = self._worker_registry.record_failure(
@@ -646,6 +651,23 @@ class CapriHostRuntime:
                 health_state=snapshot.health.state,
                 health_revision=snapshot.health.revision,
             )
+            # record_failure revokes pending holds but deliberately preserves
+            # committed work. Close only the pending host wrappers it removed.
+            for context in pending_contexts:
+                token = context.reservation.token
+                self._worker_reservation_contexts.pop(token, None)
+                self._record_worker_lifecycle_event(
+                    "worker.reservation.revoked",
+                    worker_id,
+                    principal_id=context.principal_id,
+                    task_id=context.task_id,
+                    capability=context.capability,
+                    protocol_version=context.protocol_version,
+                    descriptor_revision=context.reservation.descriptor_revision,
+                    reservation_token=token,
+                    status="revoked",
+                    error_code="worker_failure",
+                )
             self._finish_worker_audit_operation()
             return snapshot
 
