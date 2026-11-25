@@ -45,6 +45,8 @@ class SQLiteStrategyEvidenceManifestStoreTests(unittest.TestCase):
                 outcome="verified_success", **base,
             ))
             candidate = dict(base)
+            candidate["evidence_ref"] = f"host-event:candidate:{task_id}"
+            base["evidence_ref"] = f"host-event:baseline:{task_id}"
             candidate["estimated_cost_units"] = 90
             self.observations.append(StrategyObservation(
                 strategy_id="candidate", strategy_version="2.0",
