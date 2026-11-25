@@ -887,7 +887,7 @@ class SQLiteStrategyStore:
                 if candidate_row is None or candidate_row[0] != 0 or candidate_row[1] is None:
                     raise StrategyNotFoundError("promotion candidate version is not registered for this principal")
                 registered_evaluation = connection.execute(
-                    """SELECT baseline_id,candidate_id,cohort_sha256,evidence_manifest_ref,evidence_verified
+                    """SELECT baseline_id,candidate_id,cohort_sha256,evidence_manifest_ref,evidence_verified,summary_json
                     FROM strategy_evaluations WHERE evaluation_id=?""",
                     (candidate_row[1],),
                 ).fetchone()
@@ -898,6 +898,16 @@ class SQLiteStrategyStore:
                     or registered_evaluation[4] != 1
                 ):
                     raise StrategyAuthorizationError("candidate's registered evaluation is not evidence-verified")
+                try:
+                    registered_summary = json.loads(registered_evaluation[5])
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    raise StrategyIntegrityError("candidate evaluation summary is corrupt") from None
+                if (
+                    type(registered_summary) is not dict
+                    or registered_summary.get("baseline_version") != assessment.baseline_version
+                    or registered_summary.get("candidate_version") != assessment.candidate_version
+                ):
+                    raise StrategyAuthorizationError("promotion assessment baseline or candidate version differs from the registered evaluation")
                 matching_cohorts = [
                     cohort_id for cohort_id, evaluation in cohort_evaluations.items()
                     if evaluation.cohort_sha256 == registered_evaluation[2]
