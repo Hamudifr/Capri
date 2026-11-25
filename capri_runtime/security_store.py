@@ -225,15 +225,38 @@ def _validate_approval_challenges(connection: sqlite3.Connection) -> None:
         raise ToolValidationError("security backup contains invalid worker audit state")
 
 
+def _decode_audit_metadata(metadata_json: str | None, digest: str | None) -> dict[str, Any] | None:
+    if not isinstance(metadata_json, str) or not isinstance(digest, str):
+        return None
+    if not _DIGEST_RE.fullmatch(digest):
+        return None
+    try:
+        metadata = json.loads(metadata_json)
+        canonical = json.dumps(
+            metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
+        )
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if (
+        not isinstance(metadata, dict)
+        or canonical != metadata_json
+        or hashlib.sha256(metadata_json.encode("utf-8")).hexdigest() != digest
+    ):
+        return None
+    return metadata
+
+
 def _outstanding_worker_reservations(connection: sqlite3.Connection) -> int:
     rows = connection.execute(
-        "SELECT tool_name, metadata_json FROM audit_events ORDER BY rowid"
+        """SELECT tool_name, argument_digest, metadata_json
+        FROM audit_events ORDER BY rowid"""
     ).fetchall()
-    last_ack = max(
-        (index for index, row in enumerate(rows)
-         if row[0] == "worker.reconciliation.acknowledged"),
-        default=-1,
-    )
+    last_ack = -1
+    for index, (event_type, digest, metadata_json) in enumerate(rows):
+        if event_type == "worker.reconciliation.acknowledged":
+            if _decode_audit_metadata(metadata_json, digest) is None:
+                return 1
+            last_ack = index
     states: dict[str, str] = {}
     closed_events = {
         "worker.reservation.released",
@@ -243,14 +266,11 @@ def _outstanding_worker_reservations(connection: sqlite3.Connection) -> int:
         "worker.reservation.release_missing",
         "worker.reservation.collision_released",
     }
-    for event_type, metadata_json in rows[last_ack + 1:]:
+    for event_type, digest, metadata_json in rows[last_ack + 1:]:
         if not isinstance(event_type, str) or not event_type.startswith("worker.reservation."):
             continue
-        try:
-            metadata = json.loads(metadata_json or "")
-        except (TypeError, ValueError, json.JSONDecodeError):
-            return 1
-        if not isinstance(metadata, dict):
+        metadata = _decode_audit_metadata(metadata_json, digest)
+        if metadata is None:
             return 1
         token_hash = metadata.get("reservation_token_sha256")
         if not isinstance(token_hash, str) or len(token_hash) != 64:
