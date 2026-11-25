@@ -536,11 +536,13 @@ class CapriHostRuntime:
             raise HostRuntimeError("host worker descriptor approval failed") from None
         if type(approved) is not WorkerDescriptor or approved.worker_id != identity:
             raise HostRuntimeError("host worker descriptor approval returned an invalid identity")
+        self._begin_worker_audit_operation()
         try:
             snapshot = self._worker_registry.register(
                 approved, authenticated_worker_id=identity,
             )
         except WorkerRegistryError:
+            self._finish_worker_audit_operation()
             raise HostRuntimeError("worker registration was rejected") from None
         self._record_worker_lifecycle_event(
             "worker.registered",
@@ -550,6 +552,7 @@ class CapriHostRuntime:
             protocol_versions=snapshot.descriptor.protocol_versions,
             max_concurrency=snapshot.descriptor.max_concurrency,
         )
+        self._finish_worker_audit_operation()
         return snapshot
 
     def _authorize_worker_observer(self, credential: Any, worker_id: str) -> None:
@@ -580,11 +583,13 @@ class CapriHostRuntime:
         """Record liveness only from a trusted supervisor and host-derived load."""
         self._authorize_worker_observer(observer_credential, worker_id)
         in_flight = self._worker_in_flight(worker_id)
+        self._begin_worker_audit_operation()
         try:
             snapshot = self._worker_registry.heartbeat(
                 worker_id, authenticated_worker_id=worker_id, in_flight=in_flight,
             )
         except WorkerRegistryError:
+            self._finish_worker_audit_operation()
             raise HostRuntimeError("worker heartbeat was rejected") from None
         self._record_worker_lifecycle_event(
             "worker.heartbeat",
@@ -594,6 +599,7 @@ class CapriHostRuntime:
             health_state=snapshot.health.state,
             health_revision=snapshot.health.revision,
         )
+        self._finish_worker_audit_operation()
         return snapshot
 
     def record_worker_failure(
@@ -601,11 +607,13 @@ class CapriHostRuntime:
     ) -> WorkerSnapshot:
         """Record failure only from a trusted host supervisor/monitor."""
         self._authorize_worker_observer(observer_credential, worker_id)
+        self._begin_worker_audit_operation()
         try:
             snapshot = self._worker_registry.record_failure(
                 worker_id, authenticated_worker_id=worker_id,
             )
         except WorkerRegistryError:
+            self._finish_worker_audit_operation()
             raise HostRuntimeError("worker failure observation was rejected") from None
         self._record_worker_lifecycle_event(
             "worker.failure",
@@ -614,6 +622,7 @@ class CapriHostRuntime:
             health_state=snapshot.health.state,
             health_revision=snapshot.health.revision,
         )
+        self._finish_worker_audit_operation()
         return snapshot
 
     def _worker_policy_allowlist(
