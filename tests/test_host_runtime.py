@@ -219,6 +219,42 @@ class CapriHostRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(json.loads(committed_event.metadata_json)["observed_in_flight"], 0)
 
+    def test_worker_audit_failure_requires_reconciliation_before_restart(self):
+        class FailingHeartbeatAuditSink(InMemoryAuditSink):
+            def write(self, event):
+                if event.tool_name == "worker.heartbeat":
+                    raise OSError("simulated durable audit outage")
+                super().write(event)
+
+        audit = FailingHeartbeatAuditSink()
+        identities = {"worker-token": "worker-1"}
+        registry = InMemoryWorkerRegistry()
+        host = self.make_worker_host(
+            registry, identities, lambda *args: {"worker-1"}, audit_sink=audit,
+        )
+        host.register_worker(
+            "worker-token", WorkerDescriptor("worker-1", (1,), ("math.factorial",)),
+        )
+        with self.assertRaisesRegex(HostRuntimeError, "audit persistence failed"):
+            host.heartbeat_worker("monitor-token", "worker-1")
+        self.assertTrue(audit.worker_lifecycle_reconciliation_required())
+
+        with self.assertRaisesRegex(HostRuntimeError, "reconcile and acknowledge"):
+            self.make_worker_host(
+                InMemoryWorkerRegistry(), identities,
+                lambda *args: {"worker-1"}, audit_sink=audit,
+            )
+        self.assertTrue(
+            audit.acknowledge_worker_lifecycle_reconciliation(
+                "Supervisor checked worker process state and host load; stale in-memory registry discarded",
+            )
+        )
+        restarted = self.make_worker_host(
+            InMemoryWorkerRegistry(), identities,
+            lambda *args: {"worker-1"}, audit_sink=audit,
+        )
+        self.assertIsNotNone(restarted)
+
     def test_worker_audit_failure_disables_registry_gateway(self):
         audit = InMemoryAuditSink(max_events=1)
         registry = InMemoryWorkerRegistry()
@@ -236,6 +272,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
                 "alice-token", "task-does-not-exist", "math.factorial", 1,
             )
         self.assertEqual(len(audit.events()), 1)
+        self.assertTrue(audit.worker_lifecycle_reconciliation_required())
 
     def test_worker_registry_requires_all_host_callbacks(self):
         with self.assertRaises(HostRuntimeError):
