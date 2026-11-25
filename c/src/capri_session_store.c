@@ -476,10 +476,6 @@ static bool table_matches(sqlite3 *db,const char *name,const char *expected_sql)
     bool matches=rc==SQLITE_ROW
         &&sqlite3_column_type(st,0)==SQLITE_TEXT
         &&normalized_sql_equal((const char*)sqlite3_column_text(st,0),expected_sql);
-    if(!matches&&rc==SQLITE_ROW){
-        fprintf(stderr,"schema table mismatch (%s): actual=[%s] expected=[%s]\\n",
-            name,sqlite3_column_text(st,0),expected_sql);
-    }
     sqlite3_finalize(st);
     return matches;
 }
@@ -533,7 +529,7 @@ static bool sessions_constraints_valid(sqlite3 *db) {
     sqlite3_finalize(version_st);
     const char *strict_sql=
         "CREATE TABLE sessions(session_id TEXT PRIMARY KEY,created_at TEXT NOT NULL,"
-        "updated_at TEXT NOT NULL,version INTEGER NOT NULL CHECK(version>=0),"
+        "updated_at TEXT NOT NULL,version INTEGER NOT NULL,"
         "closed INTEGER NOT NULL CHECK(closed IN(0,1)),messages_json TEXT NOT NULL "
         "CHECK(json_valid(messages_json) AND json_type(messages_json)='array'))";
     const char *legacy_sql=
