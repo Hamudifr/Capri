@@ -4,6 +4,7 @@
 
 #include <sqlite3.h>
 #include <errno.h>
+#include <ctype.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <stdbool.h>
@@ -261,6 +262,32 @@ static CapriSessionError select_unowned(CapriSessionStore *s,const char *id,Capr
     sqlite3_bind_text(st,1,id,-1,SQLITE_TRANSIENT);rc=sqlite3_step(st);
     CapriSessionError e=rc==SQLITE_ROW?read_row(s,s->db,st,out):(rc==SQLITE_DONE?CAPRI_SESSION_NOT_FOUND:map_sqlite(rc));sqlite3_finalize(st);return e;
 }
+static bool normalized_sql_equal(const char *actual,const char *expected) {
+    const unsigned char *a=(const unsigned char*)actual;
+    const unsigned char *b=(const unsigned char*)expected;
+    while(true){
+        while(*a&&isspace(*a))++a;
+        while(*b&&isspace(*b))++b;
+        if(!*a||!*b)return *a==*b;
+        if(*a=='\\''){
+            if(*b!='\\'')return false;
+            ++a;++b;
+            while(*a&&*b){
+                if(*a!=*b)return false;
+                if(*a=='\\''){
+                    if(a[1]=='\\''&&b[1]=='\\''){a+=2;b+=2;continue;}
+                    ++a;++b;
+                    break;
+                }
+                ++a;++b;
+            }
+        }else{
+            if(*b=='\\''||toupper(*a)!=toupper(*b))return false;
+            ++a;++b;
+        }
+    }
+}
+
 static bool owner_trigger_matches(sqlite3 *db,const char *name,const char *expected_sql) {
     sqlite3_stmt *st=NULL;
     int rc=sqlite3_prepare_v2(
@@ -273,7 +300,7 @@ static bool owner_trigger_matches(sqlite3 *db,const char *name,const char *expec
     rc=sqlite3_step(st);
     bool matches=rc==SQLITE_ROW
         && sqlite3_column_type(st,0)==SQLITE_TEXT
-        && strcmp((const char*)sqlite3_column_text(st,0),expected_sql)==0;
+        && normalized_sql_equal((const char*)sqlite3_column_text(st,0),expected_sql);
     sqlite3_finalize(st);
     return matches;
 }
