@@ -82,3 +82,17 @@ Potential alternatives, not yet proved:
 The naive soft-weight idea also has a warning: ordinary exponential weights can assign minimum mass exp(-poly(n)) after poly(n) rounds, again below APC₁'s additive precision. A polynomial floor may destroy the usual regret bound. This requires a genuine new lemma, not just replacing zero-one weights by clipped weights.
 
 Parameter caveat: choosing β_n=Θ(log n/n) makes 2^(β_n n) polynomial in n and the OPS sample size polynomial, but the published hardness-magnification theorem states β as a fixed positive constant. The variable-β rescaling is an exploratory parameter substitution for the combinatorial selector lemma, not a published corollary of Theorem 1.4.
+
+
+## R37 soft-weight floor experiment
+
+The soft-weight alternative was tested against an explicit finite expert game.
+
+- M=2^20=1,048,576 experts; one expert has zero loss on all 150 rounds, every other expert has unit loss.
+- Standard exponential weights with η=0.2 concentrates mass 0.99999990 on the perfect expert; average loss is approximately 9.81×10⁻⁸.
+- A naive raw per-expert floor λ=1/100 leaves each bad expert with weight at least 0.01. The perfect expert then receives only 0.0000954 mass; average loss is approximately 0.999905.
+- If instead the floor is applied to normalized probabilities at λ/M, total added mass remains small, but the per-expert floor is 9.54×10⁻⁹, far below the illustrative additive precision 0.01.
+
+This is a finite counterexample to the naive polynomial raw-weight floor, not a no-go theorem for every soft-weight regularizer. It exposes the trade-off precisely: a floor large enough to keep each expert visible ruins concentration; a floor small enough to preserve regret is exponentially small per expert and does not solve the additive-counting problem.
+
+Reproducible artifact: soft_weights_floor_test.py with two unit tests. Across the OPS selector toy and this experiment, all five Python tests pass locally.
