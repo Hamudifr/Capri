@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import hashlib
+import re
 from typing import Iterable
 
 from capri_core.validation import contains_surrogate
@@ -59,8 +61,8 @@ class DomainEvent:
             raise DomainEventValidationError("only CloudEvents specversion 1.0 is supported")
         if not self.source.startswith("urn:capri:"):
             raise DomainEventValidationError("event source must use the Capri URN namespace")
-        if not self.type.startswith("com.capri."):
-            raise DomainEventValidationError("event type must use the com.capri namespace")
+        if re.fullmatch(r"com\\.capri\\.[a-z0-9]+(?:[.-][a-z0-9]+)*", self.type) is None:
+            raise DomainEventValidationError("event type must use a bounded com.capri name")
         if type(self.time) is not str:
             raise DomainEventValidationError("event time must be a timezone-aware ISO timestamp")
         try:
@@ -141,7 +143,16 @@ def memory_event(
     if supersedes_id is not None:
         data.append(("supersedes_id", supersedes_id))
     if derived_from is not None:
-        data.append(("derived_from", derived_from))
+        if type(derived_from) is not str:
+            raise DomainEventValidationError("derived_from must be a plain string")
+        if contains_surrogate(derived_from):
+            raise DomainEventValidationError("derived_from contains invalid Unicode")
+        if len(derived_from.encode("utf-8")) <= 512:
+            data.append(("derived_from", derived_from))
+        else:
+            data.append(("evidence_digest", hashlib.sha256(
+                derived_from.encode("utf-8")
+            ).hexdigest()))
     return DomainEvent(
         id=event_id, source=f"urn:capri:memory:{memory_id}",
         type=f"com.capri.memory.{event_type}", subject=memory_id,
