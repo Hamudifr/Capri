@@ -221,7 +221,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
             host.get_worker_candidates(
                 "alice-token", "task-does-not-exist", "math.factorial", 1,
             )
-        self.assertEqual(len(audit.events), 1)
+        self.assertEqual(len(audit.events()), 1)
 
     def test_worker_registry_requires_all_host_callbacks(self):
         with self.assertRaises(HostRuntimeError):
