@@ -91,6 +91,27 @@ class CapriHostRuntimeTests(unittest.TestCase):
             **kwargs,
         )
 
+    def test_goal_completion_report_is_owner_scoped_without_requiring_a_worker(self):
+        goal_store = SQLiteGoalStore(
+            os.path.join(self.temp.name, "report-goals.sqlite3")
+        )
+        goal = goal_store.create_for_principal(
+            "alice", "Prepare a verified owner report",
+            acceptance_criteria=["Evidence is attached"],
+        )
+        host = self.make_host(
+            goal_store=goal_store,
+            task_store=self.task_store,
+        )
+        report = host.get_goal_report("alice-token", goal.goal_id)
+        self.assertEqual(report.goal_id, goal.goal_id)
+        self.assertEqual(report.completion_status, "not_started")
+        self.assertEqual(report.acceptance_status, "not_requested")
+        with self.assertRaises(GoalNotFoundError):
+            host.get_goal_report("bob-token", goal.goal_id)
+        with self.assertRaises(HostAuthorityError):
+            host.get_goal_report("invalid-token", goal.goal_id)
+
     def test_execution_budget_usage_is_wired_and_principal_scoped(self):
         budgets = SQLiteBudgetStore(
             os.path.join(self.temp.name, "host-budgets.sqlite3"),
