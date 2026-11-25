@@ -135,7 +135,7 @@ def task_event(
 def memory_event(
     *, event_id: str, memory_id: str, event_type: str, timestamp: str,
     supersedes_id: str | None = None, status: str | None = None,
-    derived_from: str | None = None,
+    derived_from: str | None = None, source_namespace: str = "memory",
 ) -> DomainEvent:
     data: list[tuple[str, str | int | None]] = []
     if status is not None:
@@ -153,8 +153,10 @@ def memory_event(
             data.append(("evidence_digest", hashlib.sha256(
                 derived_from.encode("utf-8")
             ).hexdigest()))
+    if source_namespace not in {"memory", "notion-memory"}:
+        raise DomainEventValidationError("unsupported memory event source namespace")
     return DomainEvent(
-        id=event_id, source=f"urn:capri:memory:{memory_id}",
+        id=event_id, source=f"urn:capri:{source_namespace}:{memory_id}",
         type=f"com.capri.memory.{event_type}", subject=memory_id,
         time=timestamp, data=tuple(data),
     )
