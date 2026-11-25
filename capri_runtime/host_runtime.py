@@ -533,6 +533,9 @@ class CapriHostRuntime:
         except WorkerRegistryError:
             self._finish_worker_audit_operation()
             raise HostRuntimeError("worker registration was rejected") from None
+        except Exception:
+            self._worker_audit_healthy = False
+            raise HostRuntimeError("worker registration failed; reconciliation is required") from None
         self._record_worker_lifecycle_event(
             "worker.registered",
             identity,
@@ -580,6 +583,9 @@ class CapriHostRuntime:
         except WorkerRegistryError:
             self._finish_worker_audit_operation()
             raise HostRuntimeError("worker heartbeat was rejected") from None
+        except Exception:
+            self._worker_audit_healthy = False
+            raise HostRuntimeError("worker heartbeat failed; reconciliation is required") from None
         self._record_worker_lifecycle_event(
             "worker.heartbeat",
             worker_id,
@@ -604,6 +610,9 @@ class CapriHostRuntime:
         except WorkerRegistryError:
             self._finish_worker_audit_operation()
             raise HostRuntimeError("worker failure observation was rejected") from None
+        except Exception:
+            self._worker_audit_healthy = False
+            raise HostRuntimeError("worker failure observation failed; reconciliation is required") from None
         self._record_worker_lifecycle_event(
             "worker.failure",
             worker_id,
@@ -711,6 +720,9 @@ class CapriHostRuntime:
             except WorkerRegistryError:
                 self._finish_worker_audit_operation()
                 raise HostRuntimeError("host worker reservation was rejected") from None
+            except Exception:
+                self._worker_audit_healthy = False
+                raise HostRuntimeError("worker reservation failed; reconciliation is required") from None
             if reservation is None:
                 self._finish_worker_audit_operation()
                 return None
@@ -723,6 +735,9 @@ class CapriHostRuntime:
                         reservation, authenticated_worker_id=reservation.worker_id,
                     )
                 except WorkerRegistryError:
+                    self._worker_audit_healthy = False
+                    raise HostRuntimeError("worker reservation collision cleanup failed") from None
+                except Exception:
                     self._worker_audit_healthy = False
                     raise HostRuntimeError("worker reservation collision cleanup failed") from None
                 self._record_worker_lifecycle_event(
@@ -810,6 +825,9 @@ class CapriHostRuntime:
                 except WorkerRegistryError:
                     self._worker_audit_healthy = False
                     raise HostRuntimeError("worker reservation policy cleanup failed") from None
+                except Exception:
+                    self._worker_audit_healthy = False
+                    raise HostRuntimeError("worker reservation policy cleanup failed") from None
                 self._worker_reservation_contexts.pop(stored.reservation.token, None)
                 self._record_worker_lifecycle_event(
                     "worker.reservation.denied",
@@ -859,6 +877,9 @@ class CapriHostRuntime:
                 self._finish_worker_audit_operation()
                 self._purge_worker_reservation_contexts()
                 raise HostRuntimeError("worker reservation commit was rejected") from None
+            except Exception:
+                self._worker_audit_healthy = False
+                raise HostRuntimeError("worker reservation commit failed; reconciliation is required") from None
             if committed is None:
                 self._record_worker_lifecycle_event(
                     "worker.reservation.commit_rejected",
@@ -943,6 +964,9 @@ class CapriHostRuntime:
             except WorkerRegistryError:
                 self._finish_worker_audit_operation()
                 raise HostRuntimeError("worker reservation release was rejected") from None
+            except Exception:
+                self._worker_audit_healthy = False
+                raise HostRuntimeError("worker reservation release failed; reconciliation is required") from None
             self._worker_reservation_contexts.pop(stored.reservation.token, None)
             self._record_worker_lifecycle_event(
                 "worker.reservation.released",
