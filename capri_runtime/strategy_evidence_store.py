@@ -512,8 +512,8 @@ def validate_strategy_evidence_snapshot(connection: sqlite3.Connection) -> None:
             "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND tbl_name='strategy_evidence_manifests'"
         ).fetchall()
     }
-    update_trigger = re.sub(r"\\s+", " ", triggers.get("strategy_evidence_immutable_update", "")).strip()
-    delete_trigger = re.sub(r"\\s+", " ", triggers.get("strategy_evidence_immutable_delete", "")).strip()
+    update_trigger = re.sub(r"\s+", " ", triggers.get("strategy_evidence_immutable_update", "")).strip()
+    delete_trigger = re.sub(r"\s+", " ", triggers.get("strategy_evidence_immutable_delete", "")).strip()
     update_expected = (
         "BEFORE UPDATE ON STRATEGY_EVIDENCE_MANIFESTS BEGIN SELECT RAISE(ABORT, "
         "'STRATEGY EVIDENCE MANIFESTS ARE APPEND-ONLY'); END"
