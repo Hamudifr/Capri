@@ -39,7 +39,9 @@ class ApprovalLifecycleTests(unittest.TestCase):
             lambda approver, challenge: approver == "reviewer" and challenge.principal_id == "alice",
             clock=lambda: self.now,
         )
-        self.context = ExecutionContext("alice", frozenset({"records:delete"}))
+        self.context = ExecutionContext(
+            "alice", frozenset({"records:delete"}), operation_id="session-1:call-1"
+        )
         self.outcome = ToolCallOutcome(
             "call-1", "delete_record", "approval_required",
             error_code="approval_required", argument_digest=digest({"record_id": "r-1"}),
@@ -61,6 +63,15 @@ class ApprovalLifecycleTests(unittest.TestCase):
         )
         with self.assertRaises(ToolValidationError):
             self.service.create_challenge(self.context, changed, "session-1:call-1")
+
+    def test_challenge_cannot_be_created_from_a_different_operation_context(self):
+        other_context = ExecutionContext(
+            "alice", frozenset({"records:delete"}), operation_id="session-1:call-2"
+        )
+        with self.assertRaises(ToolValidationError):
+            self.service.create_challenge(
+                other_context, self.outcome, "session-1:call-1"
+            )
 
     def test_only_approval_required_outcomes_can_create_challenges(self):
         with self.assertRaises(ToolValidationError):
@@ -85,6 +96,7 @@ class ApprovalLifecycleTests(unittest.TestCase):
         self.assertEqual(approved.grant.principal_id, "alice")
         self.assertEqual(approved.grant.tool_name, "delete_record")
         self.assertEqual(approved.grant.argument_digest, self.outcome.argument_digest)
+        self.assertEqual(approved.grant.operation_id, challenge.operation_id)
         repeated = self.service.approve("approver-token", challenge.challenge_id)
         self.assertEqual(repeated.grant, approved.grant)
 
@@ -128,7 +140,10 @@ class ApprovalLifecycleTests(unittest.TestCase):
         with self.assertRaises(ToolValidationError):
             self.challenge_store.decide(
                 challenge.challenge_id, "reviewer", "approve", later,
-                lambda item: self.signer.issue(item.principal_id, item.tool_name, item.argument_digest),
+                lambda item: self.signer.issue(
+                    item.principal_id, item.tool_name, item.argument_digest,
+                    operation_id=item.operation_id,
+                ),
             )
         self.assertEqual(self.challenge_store.get(challenge.challenge_id, later).status, "expired")
 
@@ -178,10 +193,14 @@ class ApprovalLifecycleTests(unittest.TestCase):
             )
             for store in stores
         ]
+        concurrent_context = ExecutionContext(
+            "alice", frozenset({"records:delete"}),
+            operation_id="session-1:concurrent-call",
+        )
         with ThreadPoolExecutor(max_workers=4) as pool:
             results = list(pool.map(
                 lambda service: service.create_challenge(
-                    self.context, self.outcome, "session-1:concurrent-call"
+                    concurrent_context, self.outcome, "session-1:concurrent-call"
                 ),
                 services,
             ))

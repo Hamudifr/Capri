@@ -143,8 +143,15 @@ class SQLiteSecurityStoreTests(unittest.TestCase):
         link = os.path.join(self.temp.name, "link.sqlite3")
         os.symlink(existing, link)
         with self.assertRaises(ToolValidationError):
-            store.backup_to(link)
-        with open(existing, "rb") as stream:
+        grant = ApprovalGrant(
+            "grant-1", "principal-1", "delete_item", argument_digest({"item": "item-1"}),
+            (self.now + timedelta(minutes=5)).isoformat(),
+            operation_id="session-1:durable-delete",
+        )
+        context = ExecutionContext(
+            "principal-1", frozenset({"tools:delete"}), (grant,),
+            operation_id="session-1:durable-delete",
+        )
             self.assertEqual(stream.read(), b"keep")
 
     @unittest.skipUnless(os.name == "posix", "POSIX filesystem permissions are required")

@@ -61,6 +61,7 @@ class ToolCancelledError(ToolExecutionError):
 _SCHEMA_KEYS = {
     "type", "properties", "required", "additionalProperties", "items", "enum",
     "minLength", "maxLength", "minimum", "maximum", "minItems", "maxItems",
+_OPERATION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 }
 _TYPES = {"object", "array", "string", "integer", "number", "boolean", "null"}
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
@@ -243,6 +244,7 @@ class ApprovalGrant:
     grant_id: str
     principal_id: str
     tool_name: str
+    operation_id: str | None = None
     argument_digest: str
     expires_at: str
     signature: str | None = None
@@ -376,6 +378,7 @@ class HmacApprovalAuthority:
             {
                 "grant_id": grant.grant_id,
                 "principal_id": grant.principal_id,
+                **({"operation_id": grant.operation_id} if grant.operation_id is not None else {}),
                 "tool_name": grant.tool_name,
                 "argument_digest": grant.argument_digest,
                 "expires_at": grant.expires_at,
@@ -388,8 +391,11 @@ class HmacApprovalAuthority:
 
     def issue(
         self,
+        operation_id: str,
         principal_id: str,
         tool_name: str,
+        if not isinstance(operation_id, str) or not _OPERATION_RE.fullmatch(operation_id):
+            raise ToolValidationError("approval operation ID is invalid")
         argument_digest: str,
         *,
         ttl_seconds: int = 300,
@@ -406,7 +412,7 @@ class HmacApprovalAuthority:
         now = self._clock()
         if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
             raise ToolValidationError("approval clock must return a timezone-aware datetime")
-        expiry = (now.astimezone(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+            key_id=active_key_id, operation_id=operation_id,
         active_key_id = self._active_signing_key_id()
         unsigned = ApprovalGrant(
             str(uuid4()), principal_id, tool_name, argument_digest, expiry,
@@ -422,11 +428,13 @@ class HmacApprovalAuthority:
                 raise ValueError("invalid MAC output")
         except Exception:
             raise ToolValidationError("approval signing provider failed") from None
-        signature = signature_bytes.hex()
+            unsigned.key_id, unsigned.operation_id,
         return ApprovalGrant(
             unsigned.grant_id, unsigned.principal_id, unsigned.tool_name,
             unsigned.argument_digest, unsigned.expires_at, signature,
             unsigned.key_id,
+                or not isinstance(grant.operation_id, str)
+                or not _OPERATION_RE.fullmatch(grant.operation_id)
         )
 
     def verify(self, grant: ApprovalGrant) -> bool:
@@ -458,6 +466,7 @@ class HmacApprovalAuthority:
 @dataclass(frozen=True, slots=True)
 class ExecutionContext:
     """Trusted host identity and grants; never construct this from model output."""
+    operation_id: str | None = None
 
     principal_id: str
     permissions: frozenset[str]
@@ -465,18 +474,17 @@ class ExecutionContext:
 
 
 class HostAuthorityError(ToolBoundaryError):
-    """The host could not establish a valid authenticated execution context."""
+    """Build authority from trusted authentication, policy, and operation state.
 
-
-class HostAuthorityResolver:
-    """Build execution authority from trusted authentication and policy callbacks.
+    Approval lookup is scoped to an immutable host-generated operation ID. The
+    callback must return only grants for that exact principal and operation.
 
     The callbacks are installed by the host application, never supplied by a model
     or request payload. Authentication returns a principal ID or None. Permission
     and approval callbacks resolve current grants from authoritative host state.
     """
 
-    def __init__(
+        approvals_for: Callable[[str, str], Any] | None = None,
         self,
         authenticate: Callable[[Any], str | None],
         permissions_for: Callable[[str], Any],
@@ -486,12 +494,61 @@ class HostAuthorityResolver:
             raise HostAuthorityError("trusted authentication and permission callbacks are required")
         if approvals_for is not None and not callable(approvals_for):
             raise HostAuthorityError("approval resolver must be callable")
-        self._authenticate = authenticate
+    def for_operation(
+        self, context: ExecutionContext, operation_id: str
+    ) -> ExecutionContext:
+        """Attach approvals for one trusted operation without re-authenticating."""
+        if not isinstance(context, ExecutionContext):
+            raise HostAuthorityError("a trusted execution context is required")
+        if (not isinstance(context.principal_id, str) or not context.principal_id.strip()
+                or len(context.principal_id) > 256 or _contains_surrogate(context.principal_id)
+                or not isinstance(context.permissions, frozenset)
+                or len(context.permissions) > 128
+                or any(not isinstance(item, str) or not item or len(item) > 128
+                       or _contains_surrogate(item) for item in context.permissions)):
+            raise HostAuthorityError("trusted execution context is invalid")
+        if not isinstance(operation_id, str) or not _OPERATION_RE.fullmatch(operation_id):
+            raise HostAuthorityError("host operation identity is invalid")
+        if context.operation_id is not None and context.operation_id != operation_id:
+            raise HostAuthorityError("execution context belongs to a different operation")
+
+        approvals: tuple[ApprovalGrant, ...] = ()
+        if self._approvals_for is not None:
+            try:
+                raw_approvals = self._approvals_for(context.principal_id, operation_id)
+                if isinstance(raw_approvals, (str, bytes, bytearray)):
+                    raise ValueError("invalid approval collection")
+                approvals = tuple(islice(iter(raw_approvals), 33))
+            except Exception:
+                raise HostAuthorityError("host approval resolution failed") from None
+            if len(approvals) > 32 or any(
+                not isinstance(grant, ApprovalGrant)
+                or grant.principal_id != context.principal_id
+                or grant.operation_id != operation_id
+                or not isinstance(grant.grant_id, str) or not 0 < len(grant.grant_id) <= 128
+                or not isinstance(grant.tool_name, str) or not _NAME_RE.fullmatch(grant.tool_name)
+                or not isinstance(grant.argument_digest, str) or not _DIGEST_RE.fullmatch(grant.argument_digest)
+                or not isinstance(grant.expires_at, str) or not 0 < len(grant.expires_at) <= 64
+                for grant in approvals
+            ):
+                raise HostAuthorityError("host approval resolution returned invalid grants")
+        return ExecutionContext(
+            context.principal_id, context.permissions, approvals, operation_id
+        )
+
+    def resolve(
+        self, credential: Any, *, operation_id: str | None = None
+    ) -> ExecutionContext:
         self._permissions_for = permissions_for
         self._approvals_for = approvals_for
 
-    def resolve(self, credential: Any) -> ExecutionContext:
+        in errors or audit metadata. Without an operation ID, no approval lookup
+        is performed.
         """Authenticate opaque host input and resolve least-privilege grants.
+        if operation_id is not None and (
+            not isinstance(operation_id, str) or not _OPERATION_RE.fullmatch(operation_id)
+        ):
+            raise HostAuthorityError("host operation identity is invalid")
 
         Credentials and callback exception details are deliberately not retained
         in errors or audit metadata.
@@ -516,26 +573,8 @@ class HostAuthorityResolver:
             raise HostAuthorityError("host permission resolution returned an invalid grant set") from None
         if (len(permissions) > 128
                 or any(not isinstance(item, str) or not item or len(item) > 128
-                       or _contains_surrogate(item) for item in permissions)
-                or len(set(permissions)) != len(permissions)):
-            raise HostAuthorityError("host permission resolution returned an invalid grant set")
-
-        approvals: tuple[ApprovalGrant, ...] = ()
-        if self._approvals_for is not None:
-            try:
-                raw_approvals = self._approvals_for(principal_id)
-                if isinstance(raw_approvals, (str, bytes, bytearray)):
-                    raise ValueError("invalid approval collection")
-                approvals = tuple(islice(iter(raw_approvals), 33))
-            except Exception:
-                raise HostAuthorityError("host approval resolution failed") from None
-            if len(approvals) > 32 or any(
-                not isinstance(grant, ApprovalGrant)
-                or grant.principal_id != principal_id
-                or not isinstance(grant.grant_id, str) or not 0 < len(grant.grant_id) <= 128
-                or not isinstance(grant.tool_name, str) or not _NAME_RE.fullmatch(grant.tool_name)
-                or not isinstance(grant.argument_digest, str) or not _DIGEST_RE.fullmatch(grant.argument_digest)
-                or not isinstance(grant.expires_at, str) or not 0 < len(grant.expires_at) <= 64
+        context = ExecutionContext(principal_id, frozenset(permissions))
+        return self.for_operation(context, operation_id) if operation_id is not None else context
                 for grant in approvals
             ):
                 raise HostAuthorityError("host approval resolution returned invalid grants")
@@ -705,6 +744,8 @@ class ToolExecutor:
             if isinstance(grant, ApprovalGrant)
             and isinstance(grant.grant_id, str) and 0 < len(grant.grant_id) <= 128
             and isinstance(grant.principal_id, str) and len(grant.principal_id) <= 256
+            and context.operation_id is not None
+            and grant.operation_id == context.operation_id
             and isinstance(grant.tool_name, str) and _NAME_RE.fullmatch(grant.tool_name)
             and isinstance(grant.argument_digest, str) and _DIGEST_RE.fullmatch(grant.argument_digest)
             and isinstance(grant.expires_at, str) and len(grant.expires_at) <= 64
@@ -749,6 +790,10 @@ class ToolExecutor:
             raise ToolValidationError("host principal_id must be valid non-empty text of at most 256 characters")
         if (not isinstance(context.permissions, frozenset)
                 or any(not isinstance(x, str) or not x or len(x) > 128 or _contains_surrogate(x)
+        if context.operation_id is not None and (
+            not isinstance(context.operation_id, str) or not _OPERATION_RE.fullmatch(context.operation_id)
+        ):
+            raise ToolValidationError("host operation_id must be a bounded trusted identifier")
                        for x in context.permissions)):
             raise ToolValidationError("host permissions must be a frozenset of bounded valid strings")
         if not isinstance(context.approvals, tuple) or len(context.approvals) > 32:
