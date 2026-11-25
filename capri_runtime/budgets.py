@@ -159,15 +159,24 @@ class SQLiteBudgetStore:
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        if os.path.realpath(os.path.dirname(self.path)) != os.path.dirname(self.path):
+        parent = os.path.dirname(self.path)
+        if os.path.realpath(parent) != parent:
             raise BudgetValidationError("database parent changed")
         if os.name == "posix":
+            parent_stat = os.stat(parent, follow_symlinks=False)
+            if (not stat.S_ISDIR(parent_stat.st_mode)
+                    or parent_stat.st_uid != os.geteuid()
+                    or stat.S_IMODE(parent_stat.st_mode) & 0o077):
+                raise BudgetValidationError("database parent ownership or privacy changed")
             info = os.lstat(self.path)
             if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
-                    or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) & 0o077):
+                    or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600):
                 raise BudgetValidationError("database file identity or permissions changed")
         connection = sqlite3.connect(self.path, timeout=10, isolation_level=None)
         connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute("PRAGMA recursive_triggers=ON")
+        connection.execute("PRAGMA trusted_schema=OFF")
+        connection.execute("PRAGMA synchronous=FULL")
         connection.execute("PRAGMA busy_timeout=10000")
         return connection
 
