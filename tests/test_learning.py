@@ -512,6 +512,37 @@ class LearningStoreTests(unittest.TestCase):
         self.assertIn(export_id, recovered["failed"])
         self.assertEqual(self.store.get_export_status(export_id)["status"], "failed")
 
+    def test_pathless_legacy_staging_path_is_retained_for_operator_review(self):
+        export_id = "00000000-0000-4000-8000-000000000124"
+        staging = self.root / ".orphaned-legacy-export.stage"
+        staging.write_bytes(b"synthetic staging bytes")
+        with self.store._connection() as connection:
+            connection.execute(
+                """INSERT INTO learning_exports
+                (export_id, bundle_sha256, manifest_json, status, created_at, staging_path)
+                VALUES (?, ?, ?, 'publishing', ?, ?)""",
+                (
+                    export_id, "0" * 64, "{}", "2026-11-24T12:00:00+00:00",
+                    str(staging),
+                ),
+            )
+
+        recovered = self.store.reconcile_pending_exports()
+        status = self.store.get_export_status(export_id)
+        self.assertIn(export_id, recovered["failed"])
+        self.assertEqual(status["status"], "failed")
+        self.assertEqual(status["artifact_path"], "")
+        self.assertEqual(status["staging_path"], str(staging))
+        self.assertTrue(staging.is_file())
+        self.assertEqual(staging.read_bytes(), b"synthetic staging bytes")
+
+        # Repeated reconciliation must not infer a safe deletion target from
+        # a staging path when its intended artifact path is absent.
+        second = self.store.reconcile_pending_exports()
+        self.assertEqual(second["cleaned_staging"], 0)
+        self.assertEqual(self.store.get_export_status(export_id)["staging_path"], str(staging))
+        self.assertTrue(staging.is_file())
+
     def test_reconcile_fails_closed_when_pending_jsonl_artifact_is_missing(self):
         self.store.record(example())
         output = self.root / "missing-after-crash.jsonl"
