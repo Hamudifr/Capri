@@ -140,6 +140,16 @@ class NativeSQLiteSessionParityTests(unittest.TestCase):
             self.assertEqual(recovered.version, 2)
             self.assertEqual(recovered.messages, TURN_ONE + TURN_TWO)
 
+            # Unowned compatibility operations must not cross the principal boundary.
+            self.invoke_error(4, "read-legacy", path, created.session_id)
+            self.invoke_error(
+                4, "commit-legacy", path, created.session_id, "2", encode_turn(TURN_ONE)
+            )
+            self.invoke_error(4, "close-legacy", path, created.session_id)
+            still_owned = python_store.get_for_principal(created.session_id, "principal-bob")
+            self.assertEqual(still_owned.version, 2)
+            self.assertFalse(still_owned.closed)
+
     def test_legacy_unowned_session_compatibility_is_cross_runtime(self):
         with tempfile.TemporaryDirectory() as directory:
             path = str(Path(directory) / "sessions.sqlite3")
