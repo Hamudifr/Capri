@@ -136,7 +136,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
             "worker_observer_authorizer": lambda credential, worker_id: (
                 credential == "monitor-token" and worker_id in known_ids
             ),
-            "worker_in_flight_resolver": lambda worker_id: 0,
+            "worker_unreserved_in_flight_resolver": lambda worker_id: 0,
             "worker_policy_resolver": policy,
         }
         if audit_sink is not None:
@@ -151,7 +151,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
                 worker_identity_resolver=lambda credential: "worker-1",
                 worker_descriptor_resolver=self.approve_worker_descriptor,
                 worker_observer_authorizer=lambda credential, worker_id: True,
-                worker_in_flight_resolver=lambda worker_id: 0,
+                worker_unreserved_in_flight_resolver=lambda worker_id: 0,
                 worker_policy_resolver=lambda *args: {"worker-1"},
                 worker_lifecycle_audit_sink=AuditSink(),
             )
@@ -164,7 +164,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
                 worker_identity_resolver=lambda credential: "worker-1",
                 worker_descriptor_resolver=self.approve_worker_descriptor,
                 worker_observer_authorizer=lambda credential, worker_id: True,
-                worker_in_flight_resolver=lambda worker_id: 0,
+                worker_unreserved_in_flight_resolver=lambda worker_id: 0,
                 worker_policy_resolver=lambda *args: {"worker-1"},
                 worker_lifecycle_audit_sink=None,
             )
@@ -490,7 +490,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
             worker_observer_authorizer=lambda credential, worker_id: (
                 credential == "monitor-token" and worker_id == "worker-1"
             ),
-            worker_in_flight_resolver=lambda worker_id: load[worker_id],
+            worker_unreserved_in_flight_resolver=lambda worker_id: load[worker_id],
             worker_policy_resolver=lambda *args: {"worker-1"},
         )
         host.register_worker(
@@ -655,7 +655,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
             worker_observer_authorizer=lambda credential, worker_id: (
                 credential == "monitor-token" and worker_id == "worker-1"
             ),
-            worker_in_flight_resolver=lambda worker_id: True,
+            worker_unreserved_in_flight_resolver=lambda worker_id: True,
             worker_policy_resolver=lambda *args: set(),
         )
         host.register_worker(
