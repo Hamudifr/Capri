@@ -1063,6 +1063,13 @@ class SQLiteWorkerRegistry:
             now_ns=now_ns,
         )
 
+    def active_reservations(self) -> tuple[WorkerReservation, ...]:
+        """Return active reservations and durably purge expired holds in one transaction."""
+        return self._run(
+            "active_reservations",
+            lambda memory, timestamp: tuple(memory._reservations.values()),
+        )
+
     def update_descriptor(
         self, descriptor: WorkerDescriptor, *, authenticated_worker_id: str,
         expected_revision: int,
