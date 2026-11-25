@@ -1,11 +1,12 @@
-"""Finite-game diagnostics for P-vs-NP antichecker research.
+"""Finite-game diagnostics for the P-vs-NP antichecker research notes.
 
-Experimental checker only; not a proof of an asymptotic circuit lower bound.
+This is an experimental checker, not a proof of an asymptotic circuit lower bound.
 Requires NumPy and SciPy (scipy.optimize.linprog).
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import product
 from math import log
 from typing import Callable, Hashable, Sequence
 
@@ -92,6 +93,38 @@ def extract_terminal_package(
         "no universal package found: the supplied causal strategy does not "
         "satisfy the KPT all-sequences success condition"
     )
+
+
+def satisfies_kpt_all_sequences(
+    universe: Sequence[Hashable],
+    package_for_history: Callable[[int, tuple[Hashable, ...]], set[Hashable]],
+    rounds: int,
+) -> bool:
+    """Check whether every length-rounds challenge sequence hits a package."""
+    for challenges in product(universe, repeat=rounds):
+        history: list[Hashable] = []
+        hit = False
+        for stage, challenge in enumerate(challenges):
+            if challenge in package_for_history(stage, tuple(history)):
+                hit = True
+                break
+            history.append(challenge)
+        if not hit:
+            return False
+    return True
+
+
+def has_terminal_package(
+    universe: Sequence[Hashable],
+    package_for_history: Callable[[int, tuple[Hashable, ...]], set[Hashable]],
+    rounds: int,
+) -> bool:
+    """Check whether some stage/history package covers the whole universe."""
+    for stage in range(rounds):
+        for history in product(universe, repeat=stage):
+            if set(package_for_history(stage, tuple(history))) == set(universe):
+                return True
+    return False
 
 
 def demo() -> None:
