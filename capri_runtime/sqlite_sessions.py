@@ -686,7 +686,15 @@ class SQLiteSessionStore(SessionStore):
                 connection.close()
 
     def release_turn_lease(self, session_id: str, owner_token: str) -> bool:
+        return self._release_turn_lease(session_id, owner_token)
+
+    def _release_turn_lease(
+        self, session_id: str, owner_token: str, *,
+        principal_id: str | None = None,
+    ) -> bool:
         """Release only the lease still owned by the supplied worker token."""
+        if principal_id is not None:
+            principal_id = self._validate_principal_id(principal_id)
         if (
             not isinstance(session_id, str)
             or not session_id.strip()
@@ -702,6 +710,13 @@ class SQLiteSessionStore(SessionStore):
             connection = self._connect()
             try:
                 connection.execute("BEGIN IMMEDIATE")
+                if principal_id is not None:
+                    owner = connection.execute(
+                        "SELECT 1 FROM session_owners WHERE session_id = ? AND principal_id = ?",
+                        (session_id, principal_id),
+                    ).fetchone()
+                    if owner is None:
+                        raise SessionNotFoundError("session does not exist")
                 current = connection.execute(
                     "SELECT owner_token, expires_at FROM session_turn_leases WHERE session_id = ?",
                     (session_id,),
