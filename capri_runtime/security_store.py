@@ -213,6 +213,17 @@ def _validate_approval_challenges(connection: sqlite3.Connection) -> None:
             )
         grant_ids.add(grant_id)
 
+    worker_state_rows = connection.execute(
+        "SELECT singleton_id, pending_operations FROM worker_audit_state"
+    ).fetchall()
+    if (
+        len(worker_state_rows) != 1
+        or worker_state_rows[0][0] != 1
+        or type(worker_state_rows[0][1]) is not int
+        or worker_state_rows[0][1] < 0
+    ):
+        raise ToolValidationError("security backup contains invalid worker audit state")
+
 
 class SQLiteSecurityStore(AuditSink, ApprovalStore):
     """Durable, cross-process audit sink and one-use approval replay store.
@@ -321,6 +332,15 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
                 for column in ("resource_type", "resource_id", "task_id", "metadata_json"):
                     if column not in existing_audit_columns:
                         connection.execute(f"ALTER TABLE audit_events ADD COLUMN {column} TEXT")
+                connection.execute(
+                    """CREATE TABLE IF NOT EXISTS worker_audit_state (
+                        singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+                        pending_operations INTEGER NOT NULL CHECK(pending_operations >= 0)
+                    )"""
+                )
+                connection.execute(
+                    "INSERT OR IGNORE INTO worker_audit_state(singleton_id, pending_operations) VALUES (1, 0)"
+                )
                 connection.execute(
                     """CREATE TRIGGER IF NOT EXISTS audit_events_immutable_update
                     BEFORE UPDATE ON audit_events
@@ -467,6 +487,106 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
                     connection.execute("ROLLBACK")
                 except sqlite3.Error:
                     pass
+                raise
+            finally:
+                connection.close()
+
+    def begin_worker_lifecycle_operation(self) -> None:
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                cursor = connection.execute(
+                    """UPDATE worker_audit_state
+                    SET pending_operations = pending_operations + 1
+                    WHERE singleton_id = 1"""
+                )
+                if cursor.rowcount != 1:
+                    raise ToolValidationError("worker audit state is unavailable")
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+            finally:
+                connection.close()
+
+    def finish_worker_lifecycle_operation(self) -> None:
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                cursor = connection.execute(
+                    """UPDATE worker_audit_state
+                    SET pending_operations = pending_operations - 1
+                    WHERE singleton_id = 1 AND pending_operations > 0"""
+                )
+                if cursor.rowcount != 1:
+                    raise ToolValidationError("no worker lifecycle operation is pending")
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+            finally:
+                connection.close()
+
+    def worker_lifecycle_reconciliation_required(self) -> bool:
+        with self._lock:
+            connection = self._connect()
+            try:
+                row = connection.execute(
+                    "SELECT pending_operations FROM worker_audit_state WHERE singleton_id = 1"
+                ).fetchone()
+                if row is None or type(row[0]) is not int or row[0] < 0:
+                    raise ToolValidationError("worker audit state is invalid")
+                return row[0] > 0
+            finally:
+                connection.close()
+
+    def acknowledge_worker_lifecycle_reconciliation(self, note: str) -> bool:
+        if (
+            not isinstance(note, str) or not note or len(note) > 1024
+            or contains_surrogate(note)
+        ):
+            raise ToolValidationError("worker lifecycle reconciliation note is invalid")
+        event_id = uuid4().hex
+        timestamp = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    "SELECT pending_operations FROM worker_audit_state WHERE singleton_id = 1"
+                ).fetchone()
+                if row is None or type(row[0]) is not int or row[0] < 0:
+                    raise ToolValidationError("worker audit state is invalid")
+                pending = row[0]
+                if pending == 0:
+                    connection.rollback()
+                    return False
+                metadata_json = json.dumps(
+                    {"pending_operations": pending, "reconciliation_note": note},
+                    sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
+                )
+                digest = hashlib.sha256(metadata_json.encode("utf-8")).hexdigest()
+                connection.execute(
+                    """INSERT INTO audit_events
+                    (event_id, timestamp, principal_id, tool_name, argument_digest, status,
+                     error_code, resource_type, resource_id, task_id, metadata_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        event_id, timestamp, "host", "worker.reconciliation.acknowledged",
+                        digest, "success", None, "worker_registry", "registry", None,
+                        metadata_json,
+                    ),
+                )
+                connection.execute(
+                    """UPDATE worker_audit_state SET pending_operations = 0
+                    WHERE singleton_id = 1"""
+                )
+                connection.commit()
+                return True
+            except Exception:
+                connection.rollback()
                 raise
             finally:
                 connection.close()
