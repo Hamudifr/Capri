@@ -100,12 +100,13 @@ class WorkerHealth:
 
 @dataclass(frozen=True, slots=True)
 class WorkerReservation:
-    """Opaque, short-lived host reservation for one worker capacity slot."""
+    """Opaque host capacity hold; pending holds expire, committed holds do not."""
 
     token: str
     worker_id: str
     expires_at_ns: int
     descriptor_revision: int
+    committed: bool = False
 
     def __post_init__(self) -> None:
         if type(self.token) is not str or re.fullmatch(r"[A-Za-z0-9_-]{32,128}", self.token) is None:
@@ -115,6 +116,8 @@ class WorkerReservation:
             raise WorkerRegistryError("reservation expiry must be a non-negative integer")
         if type(self.descriptor_revision) is not int or self.descriptor_revision < 1:
             raise WorkerRegistryError("reservation descriptor revision must be positive")
+        if type(self.committed) is not bool:
+            raise WorkerRegistryError("reservation committed state must be a boolean")
 
 
 @dataclass(frozen=True, slots=True)
@@ -388,7 +391,7 @@ class InMemoryWorkerRegistry:
         """Remove expired capacity holds. Caller must hold _lock."""
         expired = [
             token for token, reservation in self._reservations.items()
-            if now_ns >= reservation.expires_at_ns
+            if not reservation.committed and now_ns >= reservation.expires_at_ns
         ]
         for token in expired:
             del self._reservations[token]
@@ -474,6 +477,54 @@ class InMemoryWorkerRegistry:
             self._reservations[token] = reservation
             return reservation
 
+    def commit_reservation(
+        self,
+        reservation: WorkerReservation,
+        *,
+        authenticated_worker_id: str,
+        now_ns: int | None = None,
+    ) -> WorkerReservation | None:
+        """Convert a pending expiring hold into a non-expiring in-flight hold.
+
+        Commit before dispatch. The returned token remains capacity-accounted
+        until explicitly released after host-observed load has been updated,
+        or until trusted host reconciliation revokes it.
+        """
+        if type(reservation) is not WorkerReservation:
+            raise WorkerRegistryError("reservation must be an exact WorkerReservation")
+        identity = _identifier(authenticated_worker_id, "authenticated_worker_id")
+        if identity != reservation.worker_id:
+            raise WorkerRegistryError("authenticated identity does not match reservation worker")
+        timestamp = _now_ns(now_ns, self._clock_ns)
+        with self._lock:
+            self._purge_expired_reservations(timestamp)
+            current = self._reservations.get(reservation.token)
+            if current is None:
+                return None
+            if current != reservation:
+                raise WorkerConflictError("reservation token does not match current reservation")
+            if current.committed:
+                return current
+            snapshot = self._workers.get(current.worker_id)
+            if snapshot is None or snapshot.descriptor.revision != current.descriptor_revision:
+                del self._reservations[current.token]
+                return None
+            heartbeat = snapshot.health.last_heartbeat_ns
+            fresh = (
+                heartbeat is not None and heartbeat <= timestamp
+                and timestamp - heartbeat <= self._ttl_ns
+            )
+            if (
+                not snapshot.descriptor.enabled
+                or snapshot.health.state != "healthy"
+                or not fresh
+            ):
+                del self._reservations[current.token]
+                return None
+            committed = replace(current, committed=True)
+            self._reservations[current.token] = committed
+            return committed
+
     def release_reservation(
         self,
         reservation: WorkerReservation,
@@ -481,7 +532,11 @@ class InMemoryWorkerRegistry:
         authenticated_worker_id: str,
         now_ns: int | None = None,
     ) -> bool:
-        """Release one pending hold; expired or already released tokens return False."""
+        """Release a pending or committed hold after capacity is reflected elsewhere.
+
+        Expired, revoked or already released tokens return False. For committed
+        work, update host-observed in-flight load before releasing this hold.
+        """
         if type(reservation) is not WorkerReservation:
             raise WorkerRegistryError("reservation must be an exact WorkerReservation")
         identity = _identifier(authenticated_worker_id, "authenticated_worker_id")
