@@ -16,7 +16,7 @@ from typing import Protocol
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from .domain_events import DomainEvent, memory_event
+from .domain_events import DomainEvent, memory_event, project_domain_events
 from .memory import (
     MemoryConflictError,
     MemoryErrorBase,
@@ -598,7 +598,7 @@ class NotionMemoryAdapter:
             derived_from=record.source,
             source_namespace="notion-memory",
         ) for record in self._list_all())
-        return tuple(sorted(events, key=lambda item: (item.time, item.source, item.id)))
+        return project_domain_events(events)
 
     def archive(self, memory_id: str) -> MemoryRecord:
         _validate_memory_id(memory_id)
