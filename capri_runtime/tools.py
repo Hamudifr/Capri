@@ -713,6 +713,7 @@ class InMemoryAuditSink(AuditSink):
             "worker.reservation.commit_rejected",
             "worker.reservation.release_missing",
             "worker.reservation.collision_released",
+            "worker.reservation.expired",
         }
         for event in self._events[last_ack + 1:]:
             if not event.tool_name.startswith("worker.reservation."):
