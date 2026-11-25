@@ -45,6 +45,34 @@ class SQLiteSecurityStoreTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def test_worker_lifecycle_operation_markers_and_reconciliation_ack(self):
+        store = SQLiteSecurityStore(self.path)
+        self.assertFalse(store.worker_lifecycle_reconciliation_required())
+        with self.assertRaises(ToolValidationError):
+            store.finish_worker_lifecycle_operation()
+
+        store.begin_worker_lifecycle_operation()
+        store.begin_worker_lifecycle_operation()
+        self.assertTrue(store.worker_lifecycle_reconciliation_required())
+        self.assertTrue(
+            store.acknowledge_worker_lifecycle_reconciliation(
+                "Supervisor reconciled worker registry and host-observed load after restart",
+            )
+        )
+        self.assertFalse(store.worker_lifecycle_reconciliation_required())
+        event = store.events()[-1]
+        self.assertEqual(event.tool_name, "worker.reconciliation.acknowledged")
+        self.assertEqual(event.resource_type, "worker_registry")
+        self.assertEqual(event.resource_id, "registry")
+        self.assertEqual(
+            json.loads(event.metadata_json)["pending_operations"], 2,
+        )
+        self.assertFalse(
+            store.acknowledge_worker_lifecycle_reconciliation(
+                "No pending operation remains",
+            )
+        )
+
     def test_enriched_audit_metadata_roundtrips_with_digest_binding(self):
         store = SQLiteSecurityStore(self.path)
         metadata = {
