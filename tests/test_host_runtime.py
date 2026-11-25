@@ -845,10 +845,18 @@ class CapriHostRuntimeTests(unittest.TestCase):
                 and request.principal_id == principal_id
             ),
         )
+        class SpoofedBoundVerifier:
+            def __init__(self, authority):
+                self.__self__ = authority
+                self.__func__ = type(authority).verify
+
+            def __call__(self, _payload):
+                return True
+
         untrusted_store = SQLiteStrategyStore(
             self.task_store,
-            approval_verifier=lambda grant: True,
-            evidence_verifier=lambda context: True,
+            approval_verifier=SpoofedBoundVerifier(approval_authority),
+            evidence_verifier=SpoofedBoundVerifier(evidence_authority),
         )
         with self.assertRaises(HostRuntimeError):
             CapriHostRuntime(
