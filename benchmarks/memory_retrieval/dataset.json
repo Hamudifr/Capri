@@ -1,101 +1,672 @@
 {
-  "version": 1,
-  "description": "Synthetic, non-sensitive hard-negative corpus for deterministic lexical retrieval regression testing.",
+  "version": 2,
+  "description": "Synthetic, non-sensitive hard-negative corpus for deterministic lexical retrieval regression testing. It is a regression fixture, not a representative sample of owner queries.",
   "documents": [
     {
       "id": "goal-contract",
       "title": "Durable goal planner contract",
       "content": "Versioned goal records and planner proposals are validated before task creation.",
       "scope": "Capri System",
-      "tags": ["architecture", "delivery"]
+      "tags": [
+        "architecture",
+        "delivery"
+      ]
     },
     {
       "id": "goal-coordinator",
       "title": "Goal planner coordination protocol",
       "content": "The planner contract links accepted goals to bounded tasks and recoverable execution.",
       "scope": "Capri System",
-      "tags": ["architecture", "delivery"]
+      "tags": [
+        "architecture",
+        "delivery"
+      ]
     },
     {
       "id": "goal-recovery-notes",
       "title": "Execution recovery notes",
       "content": "The goal planner protocol is reviewed after task recovery failures.",
       "scope": "Capri System",
-      "tags": ["delivery"]
+      "tags": [
+        "delivery"
+      ]
     },
     {
       "id": "runtime-benchmark-guide",
       "title": "Runtime benchmark guide",
       "content": "Goal planner latency and execution throughput are measured offline.",
       "scope": "Capri System",
-      "tags": ["tooling"]
+      "tags": [
+        "tooling"
+      ]
     },
     {
       "id": "memory-ranking-policy",
       "title": "Memory retrieval ranking policy",
       "content": "Rank project memory by field relevance while retaining provenance and scope filters.",
       "scope": "Capri System",
-      "tags": ["memory", "architecture"]
+      "tags": [
+        "memory",
+        "architecture"
+      ]
     },
     {
       "id": "memory-context-builder",
       "title": "Memory context retrieval builder",
       "content": "The bounded builder selects active non-sensitive memory records for untrusted context.",
       "scope": "Capri System",
-      "tags": ["memory", "security"]
+      "tags": [
+        "memory",
+        "security"
+      ]
     },
     {
       "id": "memory-backup-guide",
       "title": "SQLite memory backup guide",
       "content": "Memory retrieval remains bounded while backup and restore preserve provenance.",
       "scope": "Capri System",
-      "tags": ["memory", "security"]
+      "tags": [
+        "memory",
+        "security"
+      ]
     },
     {
       "id": "provider-sync-guide",
       "title": "Provider synchronization guide",
       "content": "Memory retrieval queries are forwarded to the Notion adapter with scope filters.",
       "scope": "Capri System",
-      "tags": ["tooling"]
+      "tags": [
+        "tooling"
+      ]
     },
     {
       "id": "notion-recovery",
       "title": "Notion correction recovery workflow",
       "content": "Interrupted replacement activation is reconciled by deterministic readback.",
       "scope": "Notion Workspace",
-      "tags": ["memory", "delivery"]
+      "tags": [
+        "memory",
+        "delivery"
+      ]
     },
     {
       "id": "notion-correction-contract",
       "title": "Notion memory correction contract",
       "content": "Only the active predecessor may be corrected and retries are idempotent.",
       "scope": "Notion Workspace",
-      "tags": ["memory", "security"]
+      "tags": [
+        "memory",
+        "security"
+      ]
     },
     {
       "id": "notion-transport-guide",
       "title": "Notion transport retry guide",
       "content": "Notion correction can require readback after an interrupted archive request.",
       "scope": "Notion Workspace",
-      "tags": ["tooling"]
+      "tags": [
+        "tooling"
+      ]
     },
     {
       "id": "domain-event-projection",
       "title": "Domain event projection notes",
       "content": "Notion correction history is projected as bounded provenance metadata.",
       "scope": "Notion Workspace",
-      "tags": ["architecture"]
+      "tags": [
+        "architecture"
+      ]
+    },
+    {
+      "id": "lease-heartbeat-contract",
+      "title": "Lease heartbeat ownership contract",
+      "content": "The lease heartbeat contract records worker ownership and prevents stale claims from being renewed.",
+      "scope": "Runtime Operations",
+      "tags": [
+        "security",
+        "delivery"
+      ]
+    },
+    {
+      "id": "lease-heartbeat-recovery",
+      "title": "Lease heartbeat recovery protocol",
+      "content": "The lease heartbeat recovery protocol detects missed pulses and safely fences expired workers.",
+      "scope": "Runtime Operations",
+      "tags": [
+        "security",
+        "delivery"
+      ]
+    },
+    {
+      "id": "lease-heartbeat-hard-negative-1",
+      "title": "Worker liveness overview",
+      "content": "Lease heartbeat signals are observed alongside worker liveness and task completion.",
+      "scope": "Runtime Operations",
+      "tags": [
+        "security",
+        "delivery"
+      ]
+    },
+    {
+      "id": "lease-heartbeat-hard-negative-2",
+      "title": "Task claim lifecycle",
+      "content": "A lease heartbeat can accompany task claims but does not replace claim fencing.",
+      "scope": "Runtime Operations",
+      "tags": [
+        "security",
+        "delivery"
+      ]
+    },
+    {
+      "id": "lease-heartbeat-hard-negative-3",
+      "title": "Worker retry policy",
+      "content": "Lease heartbeat checks are considered before a worker retry is allowed.",
+      "scope": "Runtime Operations",
+      "tags": [
+        "security",
+        "delivery"
+      ]
+    },
+    {
+      "id": "lease-heartbeat-hard-negative-4",
+      "title": "Session maintenance guide",
+      "content": "Session maintenance records lease heartbeat observations for diagnosis.",
+      "scope": "Runtime Operations",
+      "tags": [
+        "security",
+        "delivery"
+      ]
+    },
+    {
+      "id": "lease-heartbeat-hard-negative-5",
+      "title": "Coordinator scheduling notes",
+      "content": "The coordinator may inspect lease heartbeat age when scheduling a worker.",
+      "scope": "Runtime Operations",
+      "tags": [
+        "security",
+        "delivery"
+      ]
+    },
+    {
+      "id": "lease-heartbeat-hard-negative-6",
+      "title": "Execution telemetry guide",
+      "content": "Lease heartbeat latency is recorded as one worker execution metric.",
+      "scope": "Runtime Operations",
+      "tags": [
+        "security",
+        "delivery"
+      ]
+    },
+    {
+      "id": "approval-replay-contract",
+      "title": "Approval replay protection contract",
+      "content": "Approval replay protection binds each signed grant to one exact operation and principal.",
+      "scope": "Security Engineering",
+      "tags": [
+        "security",
+        "architecture"
+      ]
+    },
+    {
+      "id": "approval-replay-audit",
+      "title": "Approval replay audit protocol",
+      "content": "Approval replay audit records consumed grant identifiers and rejects duplicate operations.",
+      "scope": "Security Engineering",
+      "tags": [
+        "security",
+        "architecture"
+      ]
+    },
+    {
+      "id": "approval-replay-hard-negative-1",
+      "title": "Tool approval overview",
+      "content": "Approval replay checks complement tool approval and host-side execution controls.",
+      "scope": "Security Engineering",
+      "tags": [
+        "security",
+        "architecture"
+      ]
+    },
+    {
+      "id": "approval-replay-hard-negative-2",
+      "title": "Principal identity guide",
+      "content": "Approval replay signals are reviewed with principal identity and session ownership.",
+      "scope": "Security Engineering",
+      "tags": [
+        "security",
+        "architecture"
+      ]
+    },
+    {
+      "id": "approval-replay-hard-negative-3",
+      "title": "Signed grant lifecycle",
+      "content": "Approval replay prevention is checked during the signed grant lifecycle.",
+      "scope": "Security Engineering",
+      "tags": [
+        "security",
+        "architecture"
+      ]
+    },
+    {
+      "id": "approval-replay-hard-negative-4",
+      "title": "Execution challenge workflow",
+      "content": "Approval replay evidence is retained when an execution challenge is resolved.",
+      "scope": "Security Engineering",
+      "tags": [
+        "security",
+        "architecture"
+      ]
+    },
+    {
+      "id": "approval-replay-hard-negative-5",
+      "title": "Security audit schema",
+      "content": "Approval replay events are represented in the security audit schema.",
+      "scope": "Security Engineering",
+      "tags": [
+        "security",
+        "architecture"
+      ]
+    },
+    {
+      "id": "approval-replay-hard-negative-6",
+      "title": "Host authorization notes",
+      "content": "Approval replay is one control in the broader host authorization boundary.",
+      "scope": "Security Engineering",
+      "tags": [
+        "security",
+        "architecture"
+      ]
+    },
+    {
+      "id": "backup-validation-contract",
+      "title": "Backup validation integrity contract",
+      "content": "Backup validation checks SQLite integrity, foreign keys, schema semantics, and private publication.",
+      "scope": "Storage Reliability",
+      "tags": [
+        "security",
+        "tooling"
+      ]
+    },
+    {
+      "id": "backup-validation-recovery",
+      "title": "Backup validation recovery procedure",
+      "content": "Backup validation recovery rejects corrupt snapshots and preserves the last verified source database.",
+      "scope": "Storage Reliability",
+      "tags": [
+        "security",
+        "tooling"
+      ]
+    },
+    {
+      "id": "backup-validation-hard-negative-1",
+      "title": "SQLite backup overview",
+      "content": "Backup validation is performed after a SQLite snapshot has been written.",
+      "scope": "Storage Reliability",
+      "tags": [
+        "security",
+        "tooling"
+      ]
+    },
+    {
+      "id": "backup-validation-hard-negative-2",
+      "title": "Restore rehearsal notes",
+      "content": "Backup validation results are reviewed during a restore rehearsal.",
+      "scope": "Storage Reliability",
+      "tags": [
+        "security",
+        "tooling"
+      ]
+    },
+    {
+      "id": "backup-validation-hard-negative-3",
+      "title": "Filesystem publication guide",
+      "content": "Backup validation follows atomic publication and directory synchronization.",
+      "scope": "Storage Reliability",
+      "tags": [
+        "security",
+        "tooling"
+      ]
+    },
+    {
+      "id": "backup-validation-hard-negative-4",
+      "title": "Database integrity checklist",
+      "content": "Backup validation is one step in the database integrity checklist.",
+      "scope": "Storage Reliability",
+      "tags": [
+        "security",
+        "tooling"
+      ]
+    },
+    {
+      "id": "backup-validation-hard-negative-5",
+      "title": "Recovery retention policy",
+      "content": "Backup validation evidence informs recovery retention decisions.",
+      "scope": "Storage Reliability",
+      "tags": [
+        "security",
+        "tooling"
+      ]
+    },
+    {
+      "id": "backup-validation-hard-negative-6",
+      "title": "Snapshot operations manual",
+      "content": "Backup validation status is attached to each snapshot operation.",
+      "scope": "Storage Reliability",
+      "tags": [
+        "security",
+        "tooling"
+      ]
+    },
+    {
+      "id": "tool-routing-policy",
+      "title": "Tool routing decision policy",
+      "content": "Tool routing selects native connectors or execution languages according to the requested operation and verification path.",
+      "scope": "Engineering Practices",
+      "tags": [
+        "tooling",
+        "architecture"
+      ]
+    },
+    {
+      "id": "tool-routing-verification",
+      "title": "Tool routing verification checklist",
+      "content": "Tool routing verification measures correctness, end-to-end cost, and recovery rather than language reputation.",
+      "scope": "Engineering Practices",
+      "tags": [
+        "tooling",
+        "architecture"
+      ]
+    },
+    {
+      "id": "tool-routing-hard-negative-1",
+      "title": "Connector capability guide",
+      "content": "Tool routing decisions consider the available connector capability surface.",
+      "scope": "Engineering Practices",
+      "tags": [
+        "tooling",
+        "architecture"
+      ]
+    },
+    {
+      "id": "tool-routing-hard-negative-2",
+      "title": "Python execution notes",
+      "content": "Tool routing can choose Python for substantial numerical and scientific workloads.",
+      "scope": "Engineering Practices",
+      "tags": [
+        "tooling",
+        "architecture"
+      ]
+    },
+    {
+      "id": "tool-routing-hard-negative-3",
+      "title": "Browser research workflow",
+      "content": "Tool routing may use browser search and extraction for current public information.",
+      "scope": "Engineering Practices",
+      "tags": [
+        "tooling",
+        "architecture"
+      ]
+    },
+    {
+      "id": "tool-routing-hard-negative-4",
+      "title": "SQL query handbook",
+      "content": "Tool routing uses SQL for relational queries and database-native operations.",
+      "scope": "Engineering Practices",
+      "tags": [
+        "tooling",
+        "architecture"
+      ]
+    },
+    {
+      "id": "tool-routing-hard-negative-5",
+      "title": "JavaScript integration notes",
+      "content": "Tool routing can use JavaScript for lightweight orchestration and JSON transformation.",
+      "scope": "Engineering Practices",
+      "tags": [
+        "tooling",
+        "architecture"
+      ]
+    },
+    {
+      "id": "tool-routing-hard-negative-6",
+      "title": "Shell operations guide",
+      "content": "Tool routing reserves shell execution for suitable system-level tasks.",
+      "scope": "Engineering Practices",
+      "tags": [
+        "tooling",
+        "architecture"
+      ]
+    },
+    {
+      "id": "event-provenance-contract",
+      "title": "Event provenance integrity contract",
+      "content": "Event provenance records actor, source, derivation, and revision metadata without creating a global transaction.",
+      "scope": "Data Architecture",
+      "tags": [
+        "architecture",
+        "memory"
+      ]
+    },
+    {
+      "id": "event-provenance-audit",
+      "title": "Event provenance audit projection",
+      "content": "Event provenance projection preserves domain-local histories and deterministic source identifiers.",
+      "scope": "Data Architecture",
+      "tags": [
+        "architecture",
+        "memory"
+      ]
+    },
+    {
+      "id": "event-provenance-hard-negative-1",
+      "title": "CloudEvents format guide",
+      "content": "Event provenance uses CloudEvents identity conventions for read-only projection.",
+      "scope": "Data Architecture",
+      "tags": [
+        "architecture",
+        "memory"
+      ]
+    },
+    {
+      "id": "event-provenance-hard-negative-2",
+      "title": "Goal history overview",
+      "content": "Event provenance can expose goal history without changing its source of truth.",
+      "scope": "Data Architecture",
+      "tags": [
+        "architecture",
+        "memory"
+      ]
+    },
+    {
+      "id": "event-provenance-hard-negative-3",
+      "title": "Task audit notes",
+      "content": "Event provenance links task audit records to bounded evidence references.",
+      "scope": "Data Architecture",
+      "tags": [
+        "architecture",
+        "memory"
+      ]
+    },
+    {
+      "id": "event-provenance-hard-negative-4",
+      "title": "Memory correction workflow",
+      "content": "Event provenance helps explain memory correction and supersession.",
+      "scope": "Data Architecture",
+      "tags": [
+        "architecture",
+        "memory"
+      ]
+    },
+    {
+      "id": "event-provenance-hard-negative-5",
+      "title": "Domain store architecture",
+      "content": "Event provenance does not imply a cross-store causal order.",
+      "scope": "Data Architecture",
+      "tags": [
+        "architecture",
+        "memory"
+      ]
+    },
+    {
+      "id": "event-provenance-hard-negative-6",
+      "title": "Audit metadata schema",
+      "content": "Event provenance metadata excludes raw prompts and private payloads.",
+      "scope": "Data Architecture",
+      "tags": [
+        "architecture",
+        "memory"
+      ]
+    },
+    {
+      "id": "strategy-evaluation-contract",
+      "title": "Strategy evaluation comparison contract",
+      "content": "Strategy evaluation compares matched cohorts against a fixed baseline using verified outcomes and resource metrics.",
+      "scope": "Adaptive Intelligence",
+      "tags": [
+        "autonomy",
+        "delivery"
+      ]
+    },
+    {
+      "id": "strategy-evaluation-gates",
+      "title": "Strategy evaluation safety gates",
+      "content": "Strategy evaluation gates reject per-task safety, success, and resource regressions before manual review.",
+      "scope": "Adaptive Intelligence",
+      "tags": [
+        "autonomy",
+        "delivery"
+      ]
+    },
+    {
+      "id": "strategy-evaluation-hard-negative-1",
+      "title": "Outcome learning overview",
+      "content": "Strategy evaluation is informed by evidence-backed outcome learning and correction history.",
+      "scope": "Adaptive Intelligence",
+      "tags": [
+        "autonomy",
+        "delivery"
+      ]
+    },
+    {
+      "id": "strategy-evaluation-hard-negative-2",
+      "title": "Task planning guide",
+      "content": "Strategy evaluation can compare different task planning approaches.",
+      "scope": "Adaptive Intelligence",
+      "tags": [
+        "autonomy",
+        "delivery"
+      ]
+    },
+    {
+      "id": "strategy-evaluation-hard-negative-3",
+      "title": "Resource measurement notes",
+      "content": "Strategy evaluation records tool calls, context tokens, estimated cost units, and latency.",
+      "scope": "Adaptive Intelligence",
+      "tags": [
+        "autonomy",
+        "delivery"
+      ]
+    },
+    {
+      "id": "strategy-evaluation-hard-negative-4",
+      "title": "Shadow execution workflow",
+      "content": "Strategy evaluation results may be recorded in shadow mode without changing execution.",
+      "scope": "Adaptive Intelligence",
+      "tags": [
+        "autonomy",
+        "delivery"
+      ]
+    },
+    {
+      "id": "strategy-evaluation-hard-negative-5",
+      "title": "Approval lifecycle guide",
+      "content": "Strategy evaluation must remain separate from host approval and tool authority.",
+      "scope": "Adaptive Intelligence",
+      "tags": [
+        "autonomy",
+        "delivery"
+      ]
+    },
+    {
+      "id": "strategy-evaluation-hard-negative-6",
+      "title": "Rollback design notes",
+      "content": "Strategy evaluation evidence can inform a later reversible strategy decision.",
+      "scope": "Adaptive Intelligence",
+      "tags": [
+        "autonomy",
+        "delivery"
+      ]
     }
   ],
   "queries": [
-    {"query": "goal planner", "relevant": ["goal-contract", "goal-coordinator"]},
-    {"query": "memory retrieval", "relevant": ["memory-ranking-policy", "memory-context-builder"]},
-    {"query": "notion correction", "relevant": ["notion-recovery", "notion-correction-contract"]}
+    {
+      "query": "goal planner",
+      "relevant": [
+        "goal-contract",
+        "goal-coordinator"
+      ]
+    },
+    {
+      "query": "memory retrieval",
+      "relevant": [
+        "memory-ranking-policy",
+        "memory-context-builder"
+      ]
+    },
+    {
+      "query": "notion correction",
+      "relevant": [
+        "notion-recovery",
+        "notion-correction-contract"
+      ]
+    },
+    {
+      "query": "lease heartbeat",
+      "relevant": [
+        "lease-heartbeat-contract",
+        "lease-heartbeat-recovery"
+      ]
+    },
+    {
+      "query": "approval replay",
+      "relevant": [
+        "approval-replay-contract",
+        "approval-replay-audit"
+      ]
+    },
+    {
+      "query": "backup validation",
+      "relevant": [
+        "backup-validation-contract",
+        "backup-validation-recovery"
+      ]
+    },
+    {
+      "query": "tool routing",
+      "relevant": [
+        "tool-routing-policy",
+        "tool-routing-verification"
+      ]
+    },
+    {
+      "query": "event provenance",
+      "relevant": [
+        "event-provenance-contract",
+        "event-provenance-audit"
+      ]
+    },
+    {
+      "query": "strategy evaluation",
+      "relevant": [
+        "strategy-evaluation-contract",
+        "strategy-evaluation-gates"
+      ]
+    }
   ],
   "regression_thresholds": {
     "ndcg_at_5": 0.95,
     "mrr_at_5": 0.95,
-    "recall_at_5": 1.0,
+    "recall_at_5": 1,
     "minimum_ndcg_gain_over_previous": 0.25
   }
 }
