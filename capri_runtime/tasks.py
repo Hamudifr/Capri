@@ -347,7 +347,7 @@ class SQLiteTaskStore:
 
     def create_for_principal(
         self, principal_id: str, plan: Any, idempotency_key: str | None = None,
-        now: datetime | None = None,
+        now: datetime | None = None, *, deferred: bool = False,
     ) -> TaskRecord:
         """Atomically create a task bound to an authenticated principal.
 
@@ -356,6 +356,8 @@ class SQLiteTaskStore:
         digests so different principals can safely reuse the same client key.
         """
         principal_id = _text(principal_id, "principal_id", 128)
+        if type(deferred) is not bool:
+            raise TaskValidationError("deferred must be a boolean")
         scoped_key = None
         if idempotency_key is not None:
             key = _text(idempotency_key, "idempotency_key", 128)
@@ -363,11 +365,14 @@ class SQLiteTaskStore:
                 (principal_id + "\0" + key).encode("utf-8")
             ).hexdigest()
             scoped_key = "principal:" + digest
-        return self._create(plan, scoped_key, now, principal_id=principal_id)
+        return self._create(
+            plan, scoped_key, now, principal_id=principal_id,
+            initial_state="blocked" if deferred else "queued",
+        )
 
     def _create(
         self, plan: Any, idempotency_key: str | None, now: datetime | None,
-        *, principal_id: str | None,
+        *, principal_id: str | None, initial_state: str = "queued",
     ) -> TaskRecord:
         plan_json, _ = _validate_plan(plan)
         if idempotency_key is not None:
@@ -397,10 +402,12 @@ class SQLiteTaskStore:
                             raise TaskIdempotencyConflict("idempotency key already identifies a different plan")
                         connection.execute("COMMIT")
                         return self._record(existing[:11])
+                if initial_state not in {"queued", "blocked"}:
+                    raise TaskValidationError("initial task state is unsupported")
                 connection.execute(
                     """INSERT INTO tasks(task_id,idempotency_key,state,plan_json,current_step,attempts,
-                    created_at,updated_at,available_at) VALUES(?,?,'queued',?,0,0,?,?,?)""",
-                    (task_id, idempotency_key, plan_json, stamp, stamp, stamp),
+                    created_at,updated_at,available_at) VALUES(?,?,?,?,0,0,?,?,?)""",
+                    (task_id, idempotency_key, initial_state, plan_json, stamp, stamp, stamp),
                 )
                 if principal_id is not None:
                     connection.execute(
@@ -408,8 +415,8 @@ class SQLiteTaskStore:
                         (task_id, principal_id),
                     )
                 connection.execute(
-                    "INSERT INTO task_events(task_id,timestamp,state,step_index,attempt) VALUES(?,?,'queued',0,0)",
-                    (task_id, stamp),
+                    "INSERT INTO task_events(task_id,timestamp,state,step_index,attempt) VALUES(?,?,?,?,0)",
+                    (task_id, stamp, initial_state, 0),
                 )
                 row = connection.execute(
                     "SELECT task_id,idempotency_key,state,created_at,updated_at,current_step,attempts,available_at,cancel_requested,results_json,error_code FROM tasks WHERE task_id=?",
@@ -444,6 +451,48 @@ class SQLiteTaskStore:
     def get_for_principal(self, task_id: str, principal_id: str) -> TaskRecord:
         self._assert_principal_owner(task_id, principal_id)
         return self.get(task_id)
+
+    def activate_for_principal(
+        self, task_id: str, principal_id: str, now: datetime | None = None
+    ) -> TaskRecord:
+        """Idempotently release a deferred principal task after its goal link is durable."""
+        stamp = _iso(now or _now())
+        _text(task_id, "task_id", 64)
+        principal_id = _text(principal_id, "principal_id", 128)
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    """SELECT tasks.state FROM tasks JOIN task_owners
+                    ON task_owners.task_id=tasks.task_id
+                    WHERE tasks.task_id=? AND task_owners.principal_id=?""",
+                    (task_id, principal_id),
+                ).fetchone()
+                if row is None:
+                    raise TaskNotFoundError("task does not exist")
+                state = row[0]
+                if state == "blocked":
+                    connection.execute(
+                        "UPDATE tasks SET state='queued',updated_at=?,available_at=? WHERE task_id=? AND state='blocked'",
+                        (stamp, stamp, task_id),
+                    )
+                    connection.execute(
+                        "INSERT INTO task_events(task_id,timestamp,state,step_index,attempt) SELECT task_id,?,'queued',current_step,attempts FROM tasks WHERE task_id=?",
+                        (stamp, task_id),
+                    )
+                # A retry after a crash may find the task already queued, running,
+                # or complete. Those states are already released and are idempotent.
+                connection.execute("COMMIT")
+                return self.get(task_id)
+            except Exception:
+                try:
+                    connection.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+                raise
+            finally:
+                connection.close()
 
     def request_cancel_for_principal(
         self, task_id: str, principal_id: str, now: datetime | None = None
@@ -487,7 +536,7 @@ class SQLiteTaskStore:
                 if state in {"succeeded", "failed", "cancelled"}:
                     connection.execute("COMMIT")
                     return self.get(task_id)
-                if state in {"queued", "retry_wait"}:
+                if state in {"queued", "blocked", "retry_wait"}:
                     connection.execute(
                         "UPDATE tasks SET state='cancelled',cancel_requested=1,updated_at=?,lease_owner=NULL,lease_until=NULL WHERE task_id=?",
                         (stamp, task_id),
@@ -975,7 +1024,7 @@ class SQLiteTaskStore:
                 connection.close()
 
     def _validate_backup_snapshot(self, connection: sqlite3.Connection) -> None:
-        allowed_states = {"queued", "running", "retry_wait", "reconciliation_required", "succeeded", "failed", "cancelled"}
+        allowed_states = {"queued", "blocked", "running", "retry_wait", "reconciliation_required", "succeeded", "failed", "cancelled"}
         rows = connection.execute(
             """SELECT task_id,idempotency_key,state,created_at,updated_at,current_step,
             attempts,available_at,cancel_requested,results_json,error_code,plan_json,
@@ -1025,11 +1074,11 @@ class SQLiteTaskStore:
                 or len(record.result) != index
             ):
                 raise TaskValidationError("backup contains invalid task lifecycle progress")
-            if state in {"queued", "retry_wait", "running", "reconciliation_required", "failed"}:
+            if state in {"queued", "blocked", "retry_wait", "running", "reconciliation_required", "failed"}:
                 if not 0 <= index < len(plan):
                     raise TaskValidationError("backup contains invalid task lifecycle progress")
                 maximum = plan[index]["max_attempts"]
-                if state == "queued":
+                if state in {"queued", "blocked"}:
                     valid_attempts = attempts == 0
                 elif state == "retry_wait":
                     valid_attempts = 1 <= attempts < maximum

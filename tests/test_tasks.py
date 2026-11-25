@@ -325,6 +325,52 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 "alice", [{"tool": "different", "input": {}}], "same-key", NOW
             )
 
+    def test_deferred_principal_task_is_invisible_until_idempotent_activation(self):
+        task = self.store.create_for_principal(
+            "alice", PLAN, "deferred-goal-task", NOW, deferred=True,
+        )
+        self.assertEqual(task.state, "blocked")
+        self.assertIsNone(self.store.claim_next(
+            "worker", now=NOW, principal_tools=frozenset({"prepare", "finish"}),
+        ))
+        activated = self.store.activate_for_principal(task.task_id, "alice", NOW)
+        self.assertEqual(activated.state, "queued")
+        self.assertEqual(
+            self.store.activate_for_principal(task.task_id, "alice", NOW),
+            activated,
+        )
+        claim = self.store.claim_next(
+            "worker", now=NOW, principal_tools=frozenset({"prepare", "finish"}),
+        )
+        self.assertIsNotNone(claim)
+        self.assertEqual(claim.task_id, task.task_id)
+
+    def test_deferred_task_can_be_cancelled_before_activation(self):
+        task = self.store.create_for_principal(
+            "alice", PLAN, "deferred-cancel", NOW, deferred=True,
+        )
+        cancelled = self.store.request_cancel_for_principal(task.task_id, "alice", NOW)
+        self.assertEqual(cancelled.state, "cancelled")
+        self.assertEqual(
+            self.store.activate_for_principal(task.task_id, "alice", NOW).state,
+            "cancelled",
+        )
+        self.assertIsNone(self.store.claim_next(
+            "worker", now=NOW, principal_tools=frozenset({"prepare", "finish"}),
+        ))
+
+    def test_backup_preserves_blocked_deferred_task(self):
+        task = self.store.create_for_principal(
+            "alice", PLAN, "deferred-backup", NOW, deferred=True,
+        )
+        backup = os.path.join(self.temp.name, "blocked-task-backup.sqlite3")
+        self.store.backup_to(backup)
+        restored = SQLiteTaskStore(backup)
+        self.assertEqual(restored.get_for_principal(task.task_id, "alice"), task)
+        self.assertIsNone(restored.claim_next(
+            "worker", now=NOW, principal_tools=frozenset({"prepare", "finish"}),
+        ))
+
     def test_task_owner_rows_are_immutable_and_legacy_tasks_stay_unowned(self):
         owned = self.store.create_for_principal("alice", PLAN, now=NOW)
         legacy = self.store.create(PLAN, now=NOW)

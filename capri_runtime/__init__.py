@@ -82,6 +82,7 @@ from .security_store import SQLiteSecurityStore
 from .memory import MemoryErrorBase, MemoryNotFoundError, MemoryProvider, MemoryRecord, MemoryValidationError, SQLiteMemoryStore, UntrustedMemoryContext, build_untrusted_memory_context, serialize_untrusted_memory_context
 from .notion_memory import MemorySyncError, NotionMemoryAdapter, NotionMemoryTransport
 from .notion_rest import NotionRateLimitError, NotionRESTTransport, NotionTransportError, create_notion_memory_adapter_from_environment
+from .goal_coordinator import GoalCoordinator, GoalExecution
 from .goals import (
     GoalConflictError, GoalError, GoalIdempotencyConflict, GoalNotFoundError,
     GoalPlanProposal, GoalPlanner, GoalRecord, GoalValidationError, SQLiteGoalStore,
@@ -102,6 +103,8 @@ from .tasks import (
 )
 
 __all__ = [
+    "GoalCoordinator",
+    "GoalExecution",
     "GoalConflictError",
     "GoalError",
     "GoalIdempotencyConflict",
