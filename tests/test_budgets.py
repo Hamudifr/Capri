@@ -192,7 +192,7 @@ class ExecutionBudgetIntegrationTests(unittest.TestCase):
             orchestrator.run("session", "hello again", (), context)
         self.assertEqual(orchestrator.adapter.calls, 1)
         self.assertEqual(
-            self.budgets.usage_for_principal("alice", now=NOW).used["provider_calls"], 1,
+            self.budgets.usage_for_principal("alice").used["provider_calls"], 1,
         )
 
     def test_task_budget_defers_without_consuming_attempt_then_resumes(self):
