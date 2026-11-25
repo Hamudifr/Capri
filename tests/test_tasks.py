@@ -325,6 +325,16 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 "alice", [{"tool": "different", "input": {}}], "same-key", NOW
             )
 
+    def test_task_integrity_check_detects_missing_event_protection(self):
+        self.store.create(PLAN, "event-trigger-check", NOW)
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute("DROP TRIGGER task_event_immutable_delete")
+            connection.commit()
+        finally:
+            connection.close()
+        self.assertEqual(self.store.integrity_check(), "task store validation failed")
+
     def test_task_events_are_immutable_and_project_with_owner_provenance(self):
         task = self.store.create_for_principal("alice", PLAN, "event-projection", NOW)
         events = self.store.domain_events_for_principal(task.task_id, "alice")
