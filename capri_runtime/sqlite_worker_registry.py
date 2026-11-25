@@ -992,8 +992,14 @@ class SQLiteWorkerRegistry:
         *,
         authenticated_worker_id: str,
         observed_unreserved_in_flight: int | None = None,
+        observed_in_flight: int | None = None,
         now_ns: int | None = None,
     ) -> bool:
+        if observed_unreserved_in_flight is not None and observed_in_flight is not None:
+            raise WorkerRegistryError("supply only one observed in-flight load value")
+        if observed_unreserved_in_flight is None:
+            observed_unreserved_in_flight = observed_in_flight
+
         def release(memory: InMemoryWorkerRegistry, timestamp: int):
             current = self._current_reservation(memory, reservation)
             if current is None:
