@@ -747,7 +747,7 @@ class SQLiteSessionStoreTests(unittest.TestCase):
                 "DROP TABLE sessions;"
                 "CREATE TABLE sessions ("
                 "session_id TEXT PRIMARY KEY, created_at TEXT NOT NULL, "
-                "updated_at TEXT NOT NULL, version INTEGER NOT NULL, "
+                "updated_at TEXT NOT NULL, version INTEGER NOT NULL CHECK(version >= 0), "
                 "closed INTEGER NOT NULL CHECK(closed IN (0, 1)), "
                 "messages_json TEXT NOT NULL);"
                 "INSERT INTO sessions SELECT * FROM sessions_new;"
