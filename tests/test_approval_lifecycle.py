@@ -1,8 +1,10 @@
 import hashlib
 import json
 import os
+import sqlite3
 import tempfile
 import unittest
+from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
@@ -113,6 +115,59 @@ class ApprovalLifecycleTests(unittest.TestCase):
         recovered = restarted_service.approve("approver-token", challenge.challenge_id)
         self.assertEqual(recovered.grant, approved.grant)
         self.assertTrue(self.signer.verify(recovered.grant))
+
+    def test_generic_action_challenge_is_durable_and_grant_verifiable(self):
+        operation_id = "strategy-activate-001"
+        argument_digest = digest({
+            "strategy_id": "candidate",
+            "generation": 2,
+            "config_sha256": "a" * 64,
+        })
+        challenge = self.service.create_action_challenge(
+            "alice", "strategy.activate", argument_digest, operation_id
+        )
+        self.assertEqual(
+            self.challenge_store.get_by_operation_id(operation_id, self.now),
+            challenge,
+        )
+        approved = self.service.approve("approver-token", challenge.challenge_id)
+        self.assertTrue(self.service.verify_grant(approved.grant))
+        self.assertEqual(
+            self.service.get_challenge_by_operation_id(operation_id).grant,
+            approved.grant,
+        )
+        self.assertFalse(self.service.verify_grant(
+            replace(approved.grant, argument_digest="0" * 64)
+        ))
+
+    def test_approval_challenge_identity_and_terminal_state_are_immutable(self):
+        pending = self.create()
+        connection = self.security._connect()
+        try:
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    "UPDATE approval_challenges SET argument_digest=? WHERE challenge_id=?",
+                    ("0" * 64, pending.challenge_id),
+                )
+        finally:
+            connection.close()
+
+        approved = self.service.approve("approver-token", pending.challenge_id)
+        connection = self.security._connect()
+        try:
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    "UPDATE approval_challenges SET approver_id='attacker' WHERE challenge_id=?",
+                    (pending.challenge_id,),
+                )
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    "DELETE FROM approval_challenges WHERE challenge_id=?",
+                    (pending.challenge_id,),
+                )
+        finally:
+            connection.close()
+        self.assertTrue(self.service.verify_grant(approved.grant))
 
     def test_self_approval_is_denied_by_default(self):
         challenge = self.create()
