@@ -712,6 +712,36 @@ class CapriHostRuntime:
             and left.reservation.worker_id == right.reservation.worker_id
         )
 
+    def _run_worker_registry_operation(
+        self, operation: Callable[[], Any],
+    ) -> tuple[Any, tuple[WorkerReservation, ...]]:
+        """Return expiries committed by the same SQLite transaction as an operation."""
+        if isinstance(self._worker_registry, SQLiteWorkerRegistry):
+            with self._worker_registry.capture_expired_reservations() as expired:
+                result = operation()
+            return result, tuple(expired)
+        return operation(), ()
+
+    def _record_expired_worker_reservations(
+        self, expired: tuple[WorkerReservation, ...],
+    ) -> None:
+        """Mirror committed registry expiries into the host lifecycle audit."""
+        for reservation in expired:
+            self._worker_reservation_contexts.pop(reservation.token, None)
+            self._record_worker_lifecycle_event(
+                "worker.reservation.expired",
+                reservation.worker_id,
+                principal_id=reservation.principal_id or "host",
+                task_id=reservation.task_id,
+                capability=reservation.capability,
+                protocol_version=reservation.protocol_version,
+                descriptor_revision=reservation.descriptor_revision,
+                reservation_token=reservation.token,
+                expires_at_ns=reservation.expires_at_ns,
+                status="expired",
+                error_code="reservation_ttl_elapsed",
+            )
+
     def _purge_worker_reservation_contexts(self) -> None:
         if self._worker_registry is None:
             self._worker_reservation_contexts.clear()
@@ -723,21 +753,7 @@ class CapriHostRuntime:
             try:
                 active, expired = self._worker_registry.active_reservations_with_expired()
                 active_by_token = {item.token: item for item in active}
-                expired_by_token = {item.token: item for item in expired}
-                for reservation in expired:
-                    self._record_worker_lifecycle_event(
-                        "worker.reservation.expired",
-                        reservation.worker_id,
-                        principal_id=reservation.principal_id or "host",
-                        task_id=reservation.task_id,
-                        capability=reservation.capability,
-                        protocol_version=reservation.protocol_version,
-                        descriptor_revision=reservation.descriptor_revision,
-                        reservation_token=reservation.token,
-                        expires_at_ns=reservation.expires_at_ns,
-                        status="expired",
-                        error_code="reservation_ttl_elapsed",
-                    )
+                self._record_expired_worker_reservations(expired)
                 for token, context in tuple(self._worker_reservation_contexts.items()):
                     current = active_by_token.get(token)
                     if current is not None:
@@ -752,8 +768,6 @@ class CapriHostRuntime:
                             )
                         continue
                     self._worker_reservation_contexts.pop(token, None)
-                    if token in expired_by_token:
-                        continue
                     self._record_worker_lifecycle_event(
                         "worker.reservation.context_missing",
                         context.reservation.worker_id,
