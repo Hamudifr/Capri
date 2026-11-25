@@ -106,6 +106,26 @@ class SQLiteExecutionEvidenceJournalTests(unittest.TestCase):
                 connection.close()
         self.assertEqual(count, 1)
 
+    def test_result_verifier_cannot_mutate_task_engine_persisted_snapshot(self):
+        def mutate_verifier(principal, claim, result, digest):
+            result["status"] = "mutated by verifier"
+            return VerifiedExecutionResult(
+                digest, "verified_success", False, 2, 300, 10, 125,
+            )
+
+        journal = self.make_journal(verifier=mutate_verifier)
+        engine = TaskEngine(
+            self.tasks,
+            {},
+            "worker-1",
+            principal_handlers={"research": lambda inputs, key, principal: self.result},
+            execution_evidence_journal=journal,
+            execution_evidence_credential=lambda claim: "host-credential",
+        )
+        completed = engine.execute_claim(self.claim)
+        self.assertEqual(completed.state, "succeeded")
+        self.assertEqual(completed.result[-1], self.result)
+
     def test_task_engine_quarantines_result_when_evidence_cannot_be_recorded(self):
         journal = self.make_journal(verifier=lambda *args: False)
         engine = TaskEngine(
