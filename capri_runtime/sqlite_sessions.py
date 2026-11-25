@@ -327,28 +327,6 @@ class SQLiteSessionStore(SessionStore):
                 connection.close()
         return session
 
-    def _require_owner(self, session_id: str, principal_id: str) -> None:
-        self._validate_principal_id(principal_id)
-        if (
-            not isinstance(session_id, str)
-            or not session_id.strip()
-            or len(session_id) > 256
-            or _contains_surrogate(session_id)
-        ):
-            raise ValidationError("session_id must be bounded valid text")
-        with self._lock:
-            connection = self._connect()
-            try:
-                row = connection.execute(
-                    "SELECT 1 FROM session_owners WHERE session_id = ? AND principal_id = ?",
-                    (session_id, principal_id),
-                ).fetchone()
-            finally:
-                connection.close()
-        if row is None:
-            # Deliberately conceal whether the session exists for another principal.
-            raise SessionNotFoundError("session does not exist")
-
     def get_for_principal(self, session_id: str, principal_id: str) -> Session:
         principal_id = self._validate_principal_id(principal_id)
         if (
