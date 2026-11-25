@@ -549,8 +549,10 @@ class CapriHostRuntime:
             self._purge_worker_reservation_contexts()
             self._begin_worker_audit_operation()
             try:
-                snapshot = self._worker_registry.register(
-                    approved, authenticated_worker_id=identity,
+                snapshot, expired = self._run_worker_registry_operation(
+                    lambda: self._worker_registry.register(
+                        approved, authenticated_worker_id=identity,
+                    )
                 )
             except WorkerRegistryError:
                 self._finish_worker_audit_operation()
@@ -558,6 +560,7 @@ class CapriHostRuntime:
             except Exception:
                 self._worker_audit_healthy = False
                 raise HostRuntimeError("worker registration failed; reconciliation is required") from None
+            self._record_expired_worker_reservations(expired)
             self._record_worker_lifecycle_event(
                 "worker.registered",
                 identity,
@@ -601,17 +604,21 @@ class CapriHostRuntime:
             self._begin_worker_audit_operation()
             try:
                 if isinstance(self._worker_registry, SQLiteWorkerRegistry):
-                    snapshot = self._worker_registry.heartbeat_with_load_resolver(
-                        worker_id,
-                        authenticated_worker_id=worker_id,
-                        in_flight_resolver=self._worker_in_flight,
+                    snapshot, expired = self._run_worker_registry_operation(
+                        lambda: self._worker_registry.heartbeat_with_load_resolver(
+                            worker_id,
+                            authenticated_worker_id=worker_id,
+                            in_flight_resolver=self._worker_in_flight,
+                        )
                     )
                     in_flight = snapshot.health.in_flight
                 else:
                     # In-memory registry updates are serialized by the host lock.
                     in_flight = self._worker_in_flight(worker_id)
-                    snapshot = self._worker_registry.heartbeat(
-                        worker_id, authenticated_worker_id=worker_id, in_flight=in_flight,
+                    snapshot, expired = self._run_worker_registry_operation(
+                        lambda: self._worker_registry.heartbeat(
+                            worker_id, authenticated_worker_id=worker_id, in_flight=in_flight,
+                        )
                     )
             except HostRuntimeError:
                 # A rejected host load observation happens before the registry
@@ -625,6 +632,7 @@ class CapriHostRuntime:
             except Exception:
                 self._worker_audit_healthy = False
                 raise HostRuntimeError("worker heartbeat failed; reconciliation is required") from None
+            self._record_expired_worker_reservations(expired)
             self._record_worker_lifecycle_event(
                 "worker.heartbeat",
                 worker_id,
@@ -650,8 +658,10 @@ class CapriHostRuntime:
             )
             self._begin_worker_audit_operation()
             try:
-                snapshot = self._worker_registry.record_failure(
-                    worker_id, authenticated_worker_id=worker_id,
+                snapshot, expired = self._run_worker_registry_operation(
+                    lambda: self._worker_registry.record_failure(
+                        worker_id, authenticated_worker_id=worker_id,
+                    )
                 )
             except WorkerRegistryError:
                 self._finish_worker_audit_operation()
@@ -659,6 +669,12 @@ class CapriHostRuntime:
             except Exception:
                 self._worker_audit_healthy = False
                 raise HostRuntimeError("worker failure observation failed; reconciliation is required") from None
+            self._record_expired_worker_reservations(expired)
+            expired_tokens = {reservation.token for reservation in expired}
+            pending_contexts = tuple(
+                context for context in pending_contexts
+                if context.reservation.token not in expired_tokens
+            )
             self._record_worker_lifecycle_event(
                 "worker.failure",
                 worker_id,
@@ -892,12 +908,14 @@ class CapriHostRuntime:
             self._purge_worker_reservation_contexts()
             self._begin_worker_audit_operation()
             try:
-                reservation = self._worker_registry.reserve_eligible(
-                    capability,
-                    protocol_version=protocol_version,
-                    authorized_worker_ids=allowed,
-                    principal_id=context.principal_id,
-                    task_id=task_id,
+                reservation, expired = self._run_worker_registry_operation(
+                    lambda: self._worker_registry.reserve_eligible(
+                        capability,
+                        protocol_version=protocol_version,
+                        authorized_worker_ids=allowed,
+                        principal_id=context.principal_id,
+                        task_id=task_id,
+                    )
                 )
             except WorkerRegistryError:
                 self._finish_worker_audit_operation()
@@ -905,6 +923,7 @@ class CapriHostRuntime:
             except Exception:
                 self._worker_audit_healthy = False
                 raise HostRuntimeError("worker reservation failed; reconciliation is required") from None
+            self._record_expired_worker_reservations(expired)
             if reservation is None:
                 self._finish_worker_audit_operation()
                 return None
@@ -1052,8 +1071,10 @@ class CapriHostRuntime:
             heartbeat_snapshot = self.heartbeat_worker(observer_credential, worker_id)
             self._begin_worker_audit_operation()
             try:
-                committed = self._worker_registry.commit_reservation(
-                    stored.reservation, authenticated_worker_id=worker_id,
+                committed, expired = self._run_worker_registry_operation(
+                    lambda: self._worker_registry.commit_reservation(
+                        stored.reservation, authenticated_worker_id=worker_id,
+                    )
                 )
             except WorkerRegistryError:
                 self._finish_worker_audit_operation()
@@ -1062,6 +1083,7 @@ class CapriHostRuntime:
             except Exception:
                 self._worker_audit_healthy = False
                 raise HostRuntimeError("worker reservation commit failed; reconciliation is required") from None
+            self._record_expired_worker_reservations(expired)
             if committed is None:
                 self._record_worker_lifecycle_event(
                     "worker.reservation.commit_rejected",
