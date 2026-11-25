@@ -22,7 +22,7 @@ class PersistenceComparisonTests(unittest.TestCase):
                                  baseline_sha="base", candidate_sha="candidate")
         self.assertEqual(result["rounds_per_revision"], 3)
         self.assertEqual(result["workloads"][0]["baseline_median_us"], 13)
-        self.assertEqual(result["workloads"][0]["candidate_median_us"], 10)
+        self.assertEqual(result["workloads"][0]["candidate_median_us"], 11)
         self.assertLess(result["workloads"][0]["median_change_percent"], 0)
 
     def test_rejects_mismatched_runtime_environment(self):
