@@ -94,7 +94,7 @@ class BudgetUsage:
 
 
 def _identity(value: Any) -> str:
-    if (type(value) is not str or not value.strip() or len(value) > 128
+    if (type(value) is not str or not value.strip() or len(value) > 256
             or contains_surrogate(value)):
         raise BudgetValidationError("principal_id must be bounded non-empty text")
     return value
