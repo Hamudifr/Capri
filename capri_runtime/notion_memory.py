@@ -16,6 +16,7 @@ from typing import Protocol
 from urllib.parse import urlsplit
 from uuid import UUID
 
+from .domain_events import DomainEvent
 from .memory import (
     MemoryConflictError,
     MemoryErrorBase,
@@ -450,11 +451,20 @@ class NotionMemoryAdapter:
                 "retention": old.retention, "tags": old.tags, "expires_at": old.expires_at,
             }
             values.update(changes)
+            if type(values["record_type"]) is not str or values["record_type"] not in _ALLOWED_TYPES:
+                raise MemoryValidationError("unsupported record_type")
+            scope = _validate_transport_text(values["scope"], "scope", 100)
+            if scope not in _ALLOWED_SCOPES:
+                raise MemoryValidationError("unsupported scope")
+            if type(values["confidence"]) is not str or values["confidence"] not in _ALLOWED_CONFIDENCE:
+                raise MemoryValidationError("unsupported confidence")
+            if type(values["retention"]) is not str or values["retention"] not in _ALLOWED_RETENTION:
+                raise MemoryValidationError("unsupported retention")
             expected = {
                 "title": _validate_transport_text(values["title"], "title", 200),
                 "content": _validate_transport_text(values["content"], "content", 20_000),
                 "record_type": values["record_type"],
-                "scope": _validate_transport_text(values["scope"], "scope", 100),
+                "scope": scope,
                 "source": self._source(values["source"]),
                 "confidence": values["confidence"],
                 "retention": values["retention"],
