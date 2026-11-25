@@ -6,7 +6,7 @@ This directory contains the native GNU C11 implementation being built toward a r
 
 - **CCEL research engine**: bounded grid transformations, synthesis, prediction, and probe selection in include/ccel.h and src/ccel.c.
 - **Core evaluation records**: fixed-capacity record types and validation in include/capri_core.h and src/capri_core.c. Validation rejects malformed UTF-8 (including surrogate encodings), unterminated fixed fields, unknown controlled-vocabulary dimensions, invalid enum states, invalid timezone-aware RFC 3339 timestamps, inconsistent evaluator/evidence stages, and self-parent lineage.
-- **Native SQLite sessions**: principal-owned durable sessions, immutable ownership rows, strict transcript validation, optimistic version-checked turn commits, durable turn leases, and close/read operations in include/capri_session_store.h and src/capri_session_store.c. The database and transcript remain plaintext; the host supplies the authenticated principal ID.
+- **Native SQLite sessions**: principal-owned durable sessions, immutable ownership rows, strict transcript validation, optimistic version-checked turn commits, durable turn leases, integrity checking, and validated atomic online backups in include/capri_session_store.h and src/capri_session_store.c. The database and transcript remain plaintext; the host supplies the authenticated principal ID.
 
 The core validator is a native library component, not a wrapper around Python. Its current record contract is an initial port; exact field-by-field parity with every Python record edge case remains to be established.
 
@@ -52,7 +52,7 @@ The first C persistence slice now covers:
 - Principal-scoped reads and close operations that hide foreign and legacy-unowned sessions as not found.
 - Strict JSON message-shape, role-order, UTF-8, per-message size, transcript-version, and history validation.
 - Optimistic version-checked turn commits in BEGIN IMMEDIATE transactions.
-- Durable claim, renew, and release operations for principal-bound turn leases, with active lease fencing on commits.
+- Durable claim, renew, and release operations for principal-bound turn leases, with active lease fencing on commits and corruption detection for malformed persisted lease timestamps/owner tokens.
 - Per-handle thread serialization plus SQLite transaction locking across independent handles/processes.
 
-This is an initial native session-store milestone, not parity with the complete Python SQLiteSessionStore. Native backup/restore and full host-runtime/credential-resolver integration remain outstanding. The host must authenticate the caller and pass the resulting principal ID; this store is not an identity provider. Transcripts are plaintext and require host-managed encryption, access control, retention, and backup protection. The C implementation currently uses a stricter byte-length bound for some identifiers than Python's character-count bound; differential parity testing remains required.
+This is an initial native session-store milestone, not parity with the complete Python SQLiteSessionStore. Native backup and integrity-check APIs are implemented: backups use SQLite's online backup API, validate the copied snapshot, fsync it, and publish without overwriting an existing destination. An in-place restore/recovery API and full host-runtime/credential-resolver integration remain outstanding. The host must authenticate the caller and pass the resulting principal ID; this store is not an identity provider. Transcripts are plaintext and require host-managed encryption, access control, retention, and backup protection. The C implementation currently uses a stricter byte-length bound for some identifiers than Python's character-count bound; differential parity testing remains required.
