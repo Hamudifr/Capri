@@ -32,7 +32,7 @@ Authenticated hosts can call `get_goal_report(credential, goal_id)` for a read-o
 
 - `completion_status` distinguishes not-started/planning/ready, in-progress, waiting-for-budget, activation-pending, reconciliation-pending, awaiting owner verification, acceptance-transition-pending, completed, failed, cancelled, paused, and uncertain states.
 - `owner_acceptance_status` is `not_recorded`, `pending`, `accepted`, `rejected`, or a pending-transition/mismatch state.
-- Evidence references are bounded; raw task results, task-plan inputs, goal constraints, and exception text are not included.
+- Evidence references are bounded; the latest owner-acceptance decision is retained in the window so the displayed decision remains auditable. Raw task results, task-plan inputs, goal constraints, and exception text are not included.
 - A missing linked task, inconsistent progress, or unresolved side effect is reported as uncertain rather than successful.
 - Report generation performs no reconciliation or lifecycle transition. Call `reconcile_goal()` explicitly after task completion, then use `verify_goal()` for the authenticated owner's acceptance decision.
 
