@@ -7,13 +7,14 @@ Retrieved content is untrusted data and must never grant authority or tool permi
 from __future__ import annotations
 
 import json
+import math
 import os
 import sqlite3
 import stat
 import threading
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from typing import Protocol
+from typing import Protocol, Sequence
 from uuid import uuid4
 
 from capri_core.validation import contains_surrogate
@@ -62,6 +63,58 @@ class MemoryRecord:
     expires_at: str | None = None
     status: str = "active"
     supersedes_id: str | None = None
+
+
+def _rank_memory_records(records: Sequence[MemoryRecord], query: str) -> tuple[MemoryRecord, ...]:
+    """Rank all-term lexical matches by field relevance, then freshness.
+
+    Title and tag matches outweigh body mentions; inverse document frequency
+    reduces the influence of terms common to nearly every candidate. The
+    all-terms retrieval contract is retained, so this does not become a loose
+    OR search or silently broaden retrieval.
+    """
+    terms = tuple(dict.fromkeys(part.casefold() for part in query.split() if part))
+    if not terms:
+        return ()
+    candidates: list[tuple[MemoryRecord, str, str, str, str]] = []
+    for record in records:
+        title = record.title.casefold()
+        content = record.content.casefold()
+        scope = record.scope.casefold()
+        tags = " ".join(record.tags).casefold()
+        combined = "\n".join((title, content, scope, tags))
+        if all(term in combined for term in terms):
+            candidates.append((record, title, content, scope, tags))
+    if not candidates:
+        return ()
+    document_count = len(candidates)
+    document_frequency = {
+        term: sum(
+            term in "\n".join((title, content, scope, tags))
+            for _, title, content, scope, tags in candidates
+        )
+        for term in terms
+    }
+    ranked: list[tuple[float, float, str, MemoryRecord]] = []
+    for record, title, content, scope, tags in candidates:
+        score = 0.0
+        for term in terms:
+            frequency = document_frequency[term]
+            inverse_frequency = 1.0 + math.log(
+                1.0 + (document_count - frequency + 0.5) / (frequency + 0.5)
+            )
+            score += inverse_frequency * (
+                4.0 * min(title.count(term), 3)
+                + 3.0 * min(tags.count(term), 3)
+                + 1.5 * min(scope.count(term), 3)
+                + 1.0 * min(content.count(term), 3)
+            )
+        if query.casefold().strip() in title:
+            score += 6.0
+        updated = datetime.fromisoformat(record.updated_at.replace("Z", "+00:00")).timestamp()
+        ranked.append((score, updated, record.memory_id, record))
+    ranked.sort(key=lambda item: (-item[0], -item[1], item[2]))
+    return tuple(item[3] for item in ranked)
 
 
 @dataclass(frozen=True, slots=True)
@@ -523,20 +576,16 @@ class SQLiteMemoryStore:
                          AND (? IS NULL OR scope = ?)""",
                     (now, scope, scope),
                 ).fetchall()
-                ranked = []
+                eligible = []
                 for row in rows:
                     record = self._record(row)
                     if cutoff is not None:
                         updated = _validate_expiry(record.updated_at)
                         if updated is None or updated < cutoff:
                             continue
-                    haystack = (row["title"] + "\n" + row["content"] + "\n" + row["scope"] + "\n" + row["tags"]).casefold()
-                    matched = sum(term in haystack for term in terms)
-                    if matched == len(terms):
-                        exact = int(row["title"].casefold() == query.casefold())
-                        ranked.append((exact, matched, row["updated_at"], record))
-                ranked.sort(key=lambda item: (-item[0], -item[1], -datetime.fromisoformat(item[2]).timestamp(), item[3].memory_id))
-                return tuple(item[3] for item in ranked[offset:offset + limit])
+                    eligible.append(record)
+                ranked = _rank_memory_records(eligible, query)
+                return ranked[offset:offset + limit]
             finally:
                 db.close()
 
