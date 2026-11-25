@@ -626,8 +626,20 @@ class SQLiteSessionStore(SessionStore):
         owner_token: str,
         lease_seconds: float = 30.0,
     ) -> str:
+        return self._renew_turn_lease(session_id, owner_token, lease_seconds)
+
+    def _renew_turn_lease(
+        self,
+        session_id: str,
+        owner_token: str,
+        lease_seconds: float = 30.0,
+        *,
+        principal_id: str | None = None,
+    ) -> str:
         """Renew only a still-live lease owned by this exact worker token."""
         owner_token, lease_seconds = self._lease_parameters(owner_token, lease_seconds)
+        if principal_id is not None:
+            principal_id = self._validate_principal_id(principal_id)
         if (
             not isinstance(session_id, str)
             or not session_id.strip()
@@ -639,6 +651,13 @@ class SQLiteSessionStore(SessionStore):
             connection = self._connect()
             try:
                 connection.execute("BEGIN IMMEDIATE")
+                if principal_id is not None:
+                    owner = connection.execute(
+                        "SELECT 1 FROM session_owners WHERE session_id = ? AND principal_id = ?",
+                        (session_id, principal_id),
+                    ).fetchone()
+                    if owner is None:
+                        raise SessionNotFoundError("session does not exist")
                 now = self._lease_now()
                 expires_at = (now + timedelta(seconds=lease_seconds)).isoformat()
                 current = connection.execute(
