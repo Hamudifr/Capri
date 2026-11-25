@@ -117,6 +117,31 @@ class SQLiteOutcomeStoreTests(unittest.TestCase):
                 idempotency_key="correction-001",
             )
 
+    def test_concurrent_corrections_cannot_create_competing_successors(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        original = self.append()
+        second_store = SQLiteOutcomeStore(self.path)
+
+        def correct(store, suffix):
+            try:
+                return store.correct_for_principal(
+                    "alice", original.outcome_id, status="partial",
+                    summary="A competing correction " + suffix,
+                    reason="Concurrent correction race.",
+                )
+            except OutcomeConflictError:
+                return None
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = tuple(pool.map(
+                lambda pair: correct(*pair),
+                ((self.store, "one"), (second_store, "two")),
+            ))
+        self.assertEqual(sum(item is not None for item in results), 1)
+        self.assertEqual(len(self.store.list_for_principal("alice")), 1)
+        self.assertEqual(self.store.integrity_check(), "ok")
+
     def test_cannot_correct_another_principals_record(self):
         first = self.append()
         with self.assertRaises(OutcomeNotFoundError):
