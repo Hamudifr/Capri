@@ -190,6 +190,63 @@ class SkillValidationTests(unittest.TestCase):
             self.assertEqual(report["status"], "pass")
             self.assertEqual(report["summary"]["warnings"], 2)
 
+    def test_supports_single_quoted_values_and_inline_comments(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_skill(
+                root,
+                "quoted-skill",
+                "name: quoted-skill # package id\\n"
+                "description: 'Use when checking a skill''s description # safely.'\\n"
+                "license: 'MIT' # license label\\n",
+            )
+            report = validate_skill_tree(root)
+            self.assertEqual(report["status"], "pass", report)
+
+    def test_rejects_duplicate_metadata_keys(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_skill(
+                root,
+                "metadata-duplicate",
+                "name: metadata-duplicate\\n"
+                "description: Use when testing metadata integrity.\\n"
+                "metadata:\\n"
+                "  author: Capri\\n"
+                "  author: another-value\\n",
+            )
+            report = validate_skill_tree(root)
+            self.assertTrue(any("duplicate metadata key" in item for item in report["skills"][0]["errors"]))
+
+    def test_rejects_symbolic_link_skill_directories(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_skill(
+                root,
+                "real-skill",
+                "name: real-skill\\n"
+                "description: Use when testing symbolic link rejection.\\n",
+            )
+            try:
+                (root / "skills" / "linked-skill").symlink_to(
+                    root / "skills" / "real-skill",
+                    target_is_directory=True,
+                )
+            except (OSError, NotImplementedError):
+                self.skipTest("symbolic links are unavailable on this platform")
+            report = validate_skill_tree(root)
+            linked = next(item for item in report["skills"] if item["directory"] == "linked-skill")
+            self.assertTrue(any("symbolic link" in item for item in linked["errors"]))
+
+    def test_missing_skills_root_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report = validate_skill_tree(Path(directory))
+            self.assertEqual(report["status"], "fail")
+            self.assertEqual(report["summary"]["errors"], 1)
+
+    def test_authoring_document_exists(self):
+        self.assertTrue((ROOT / "docs" / "SKILL_AUTHORING.md").is_file())
+
     def test_cli_emits_machine_readable_validation_report(self):
         output = io.StringIO()
         with redirect_stdout(output):
