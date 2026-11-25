@@ -514,10 +514,17 @@ class InMemoryWorkerRegistry:
                 heartbeat is not None and heartbeat <= timestamp
                 and timestamp - heartbeat <= self._ttl_ns
             )
+            # Host-observed load may have advanced after this pending hold was made.
+            # Count this reservation and every other hold before committing it.
+            reserved_count = sum(
+                1 for item in self._reservations.values()
+                if item.worker_id == current.worker_id
+            )
             if (
                 not snapshot.descriptor.enabled
                 or snapshot.health.state != "healthy"
                 or not fresh
+                or snapshot.health.in_flight + reserved_count > snapshot.descriptor.max_concurrency
             ):
                 del self._reservations[current.token]
                 return None

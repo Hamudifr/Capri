@@ -477,6 +477,28 @@ class WorkerRegistryTests(unittest.TestCase):
             pending, authenticated_worker_id="worker-1", now_ns=self.now,
         ))
 
+    def test_commit_rechecks_host_observed_load_after_pending_reservation(self):
+        self.register_healthy(max_concurrency=1)
+        pending = self.registry.reserve_eligible(
+            "math.factorial", protocol_version=1,
+            authorized_worker_ids={"worker-1"}, now_ns=self.now,
+        )
+        self.assertIsNotNone(pending)
+        self.registry.heartbeat(
+            "worker-1", authenticated_worker_id="worker-1",
+            in_flight=1, now_ns=self.now + 1,
+        )
+        self.assertIsNone(self.registry.commit_reservation(
+            pending, authenticated_worker_id="worker-1", now_ns=self.now + 1,
+        ))
+        self.assertFalse(self.registry.release_reservation(
+            pending, authenticated_worker_id="worker-1", now_ns=self.now + 1,
+        ))
+        self.assertEqual(self.registry.eligible(
+            "math.factorial", protocol_version=1,
+            authorized_worker_ids={"worker-1"}, now_ns=self.now + 1,
+        ), ())
+
     def test_committed_hold_survives_worker_failure_and_descriptor_change(self):
         self.register_healthy(max_concurrency=1)
         pending = self.registry.reserve_eligible(
