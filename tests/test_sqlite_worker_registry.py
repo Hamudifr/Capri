@@ -203,6 +203,25 @@ class SQLiteWorkerRegistryTests(unittest.TestCase):
         self.assertTrue(recovered.committed)
         self.assertEqual(recovered.token, committed.token)
 
+    def test_expire_reservations_returns_the_rows_removed_by_its_sweep(self):
+        self.register_healthy()
+        pending = self.reserve(self.registry, "task-explicit-expiry")
+        self.assertIsNotNone(pending)
+
+        self.clock.advance_ms(1_001)
+        expired = self.registry.expire_reservations()
+        self.assertEqual(tuple(item.token for item in expired), (pending.token,))
+        self.assertIsNone(self.registry.get_reservation(pending.token))
+        event_types = [
+            event["event_type"]
+            for event in self.registry.events_for_worker("worker-1")
+        ]
+        self.assertIn("reservation_expired", event_types)
+
+        # The same sweep is idempotent and reports no already-removed rows.
+        self.assertEqual(self.registry.expire_reservations(), ())
+        self.assertEqual(self.registry.integrity_check(), "ok")
+
     def test_two_registry_instances_cannot_overbook_one_capacity_slot(self):
         self.register_healthy(max_concurrency=1)
         second_store = SQLiteTaskStore(self.path)
