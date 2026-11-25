@@ -39,7 +39,7 @@ A host-issued `StrategyActivationGrant` binds the exact strategy version measure
 - issue/expiry timestamps (maximum 15-minute lifetime);
 - one-use grant ID and approver identity.
 
-The host verifier must authenticate the grant's signature/authorization. The store independently checks the fields, expiry, principal, config/evaluation fingerprints, grant replay, and generation compare-and-swap inside an atomic SQLite write transaction. The host grant issuer must independently re-verify the candidate's authenticated evidence manifest and task-family classification before signing, including for legacy candidate rows created before an `evidence_verifier` was configured; admission-time verification does not retroactively authenticate old rows.
+The host verifier must authenticate the grant's signature/authorization. The store independently checks the fields, expiry, principal, config/evaluation fingerprints, grant replay, and generation compare-and-swap inside an atomic SQLite write transaction. The store persists an immutable `evidence_verified` flag for each evaluation. Existing rows are migrated with `evidence_verified=0` and cannot be activated; preserve them as history and register a new cohort through the trusted verifier. `get_active_for_principal` also refuses to return an already-active legacy candidate with an unverified flag; a host must explicitly restore a verified baseline before enabling any selector. The host grant issuer must still independently re-verify the candidate's authenticated evidence manifest and task-family classification before signing.
 
 Rollback is not deletion or time travel. It appends a new `rollback` event pointing to a version that was previously active. The former state remains in history.
 
