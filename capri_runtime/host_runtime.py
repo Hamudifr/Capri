@@ -18,11 +18,12 @@ from .orchestration import (
 )
 from .runtime import Message, Session, SessionClosedError, SessionStore
 from .sqlite_sessions import SQLiteSessionStore
-from .tasks import SQLiteTaskStore, TaskRecord, TaskWorker
+from .tasks import SQLiteTaskStore, TaskNotFoundError, TaskRecord, TaskWorker
 from .goals import (
     GoalPlanProposal, GoalRecord, SQLiteGoalStore,
 )
 from .goal_coordinator import GoalCoordinator, GoalExecution
+from .goal_reports import GoalReport, build_goal_report
 from .budgets import BudgetUsage, SQLiteBudgetStore
 from .tools import ExecutionContext, HostAuthorityResolver
 
@@ -286,6 +287,20 @@ class CapriHostRuntime:
         if self._goal_store is None:
             raise HostRuntimeError("no goal store is configured")
         return self._goal_store.get_for_principal(goal_id, context.principal_id)
+
+    def get_goal_report(self, credential: Any, goal_id: str) -> GoalReport:
+        """Return a read-only owner-scoped summary without raw task results."""
+        context = self._context(credential)
+        if self._goal_store is None:
+            raise HostRuntimeError("no goal store is configured")
+        goal = self._goal_store.get_for_principal(goal_id, context.principal_id)
+        task = None
+        if goal.task_id is not None and self._task_store is not None:
+            try:
+                task = self._task_store.get_for_principal(goal.task_id, context.principal_id)
+            except TaskNotFoundError:
+                task = None
+        return build_goal_report(goal, task)
 
     def save_goal_plan(
         self, credential: Any, goal_id: str, proposal: GoalPlanProposal, *,

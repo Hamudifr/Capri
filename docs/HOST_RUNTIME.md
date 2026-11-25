@@ -26,6 +26,18 @@ The task worker may share the same task database. Principal-owned claims carry t
 
 `SQLiteSessionStore.backup_to()` creates a consistent private snapshot that includes ownership records, immutable-owner triggers, and semantically validated durable turn leases. The backup is also plaintext; see [SQLITE_SESSION_BACKUP.md](SQLITE_SESSION_BACKUP.md). Task, memory, security, and session stores now expose private consistent backup methods; the backups remain plaintext and no scheduler, retention policy, or automated restore workflow is provided. See [SQLITE_STORE_BACKUP.md](SQLITE_STORE_BACKUP.md).
 
+## Goal reports and owner acceptance
+
+Authenticated hosts can call `get_goal_report(credential, goal_id)` for a read-only, principal-scoped `GoalReport`. The projection separates task completion from the owner's acceptance decision and reports progress, partial work, cancellation, reconciliation, and uncertain outcomes.
+
+- `completion_status` distinguishes not-started/planning/ready, in-progress, waiting-for-budget, activation-pending, reconciliation-pending, awaiting owner verification, acceptance-transition-pending, completed, failed, cancelled, paused, and uncertain states.
+- `owner_acceptance_status` is `not_recorded`, `pending`, `accepted`, `rejected`, or a pending-transition/mismatch state.
+- Evidence references are bounded; raw task results, task-plan inputs, goal constraints, and exception text are not included.
+- A missing linked task, inconsistent progress, or unresolved side effect is reported as uncertain rather than successful.
+- Report generation performs no reconciliation or lifecycle transition. Call `reconcile_goal()` explicitly after task completion, then use `verify_goal()` for the authenticated owner's acceptance decision.
+
+The report is a status projection, not an independent verification of external evidence. A durable evidence reference records what the owner supplied; the host remains responsible for checking that reference before accepting the outcome.
+
 ## Composition
 
 The host supplies:
