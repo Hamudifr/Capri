@@ -325,6 +325,45 @@ int main(void) {
     assert(tampered_reopen==NULL && error==CAPRI_SESSION_DATABASE);
     capri_session_store_close(store);
 
-    unlink(backup_path); unlink(restored_path); unlink(corrupt_backup_path); unlink(corrupt_restore_path); unlink(path); char wal[520],shm[520];snprintf(wal,sizeof wal,"%s-wal",path);snprintf(shm,sizeof shm,"%s-shm",path);unlink(wal);unlink(shm);rmdir(dir);
+    /* A table rebuilt without the owner primary key must fail closed. */
+    char schema_path[512],schema_backup_path[512];
+    snprintf(schema_path,sizeof schema_path,"%s/schema-tampered.sqlite3",dir);
+    snprintf(schema_backup_path,sizeof schema_backup_path,"%s/schema-tampered-backup.sqlite3",dir);
+    CapriSessionStore *schema_store=capri_session_store_open(schema_path,200,16000,64000,131072,&error);
+    assert(schema_store!=NULL && error==CAPRI_SESSION_OK);
+    CapriSession schema_session={0};
+    assert(capri_session_create_for_principal(schema_store,"schema-principal",&schema_session)==CAPRI_SESSION_OK);
+    capri_session_free(&schema_session);
+    sqlite3 *schema_tamper=NULL;
+    assert(sqlite3_open(schema_path,&schema_tamper)==SQLITE_OK);
+    assert(sqlite3_exec(
+        schema_tamper,
+        "PRAGMA foreign_keys=OFF;"
+        "DROP TRIGGER session_owners_immutable_insert;"
+        "DROP TRIGGER session_owners_immutable_update;"
+        "DROP TRIGGER session_owners_immutable_delete;"
+        "DROP INDEX session_owners_principal_id;"
+        "ALTER TABLE session_owners RENAME TO session_owners_old;"
+        "CREATE TABLE session_owners("
+        "session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,"
+        "principal_id TEXT NOT NULL,created_at TEXT NOT NULL);"
+        "INSERT INTO session_owners SELECT * FROM session_owners_old;"
+        "DROP TABLE session_owners_old;"
+        "CREATE INDEX session_owners_principal_id ON session_owners(principal_id);"
+        "CREATE TRIGGER session_owners_immutable_update BEFORE UPDATE ON session_owners BEGIN SELECT RAISE(ABORT,'session owner is immutable'); END;"
+        "CREATE TRIGGER session_owners_immutable_delete BEFORE DELETE ON session_owners BEGIN SELECT RAISE(ABORT,'session owner is immutable'); END;"
+        "CREATE TRIGGER session_owners_immutable_insert BEFORE INSERT ON session_owners WHEN EXISTS(SELECT 1 FROM session_owners WHERE session_id=NEW.session_id) BEGIN SELECT RAISE(ABORT,'session owner is immutable'); END;",
+        NULL,NULL,NULL
+    )==SQLITE_OK);
+    sqlite3_close(schema_tamper);
+    assert(capri_session_integrity_check(schema_store)==CAPRI_SESSION_CORRUPT);
+    assert(capri_session_backup_to(schema_store,schema_backup_path)==CAPRI_SESSION_CORRUPT);
+    struct stat schema_backup_missing;
+    assert(lstat(schema_backup_path,&schema_backup_missing)!=0);
+    capri_session_store_close(schema_store);
+    CapriSessionStore *schema_reopen=capri_session_store_open(schema_path,200,16000,64000,131072,&error);
+    assert(schema_reopen==NULL && error==CAPRI_SESSION_DATABASE);
+
+    unlink(backup_path); unlink(restored_path); unlink(corrupt_backup_path); unlink(corrupt_restore_path); unlink(path); unlink(schema_path); char wal[520],shm[520],schema_wal[540],schema_shm[540];snprintf(wal,sizeof wal,"%s-wal",path);snprintf(shm,sizeof shm,"%s-shm",path);snprintf(schema_wal,sizeof schema_wal,"%s-wal",schema_path);snprintf(schema_shm,sizeof schema_shm,"%s-shm",schema_path);unlink(wal);unlink(shm);unlink(schema_wal);unlink(schema_shm);rmdir(dir);
     puts("native SQLite session tests: ok"); return 0;
 }
