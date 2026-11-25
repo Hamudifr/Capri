@@ -38,6 +38,17 @@ int main(void) {
     CapriSession alice={0}, bob={0}, committed={0};
     assert(capri_session_create_for_principal(store,"principal-alice",&alice)==CAPRI_SESSION_OK);
     assert(alice.version==0 && !alice.closed && strcmp(alice.messages_json,"[]")==0);
+    CapriSession legacy={0},legacy_read={0},legacy_committed={0},legacy_closed={0};
+    assert(capri_session_create(store,&legacy)==CAPRI_SESSION_OK);
+    assert(capri_session_get(store,legacy.session_id,&legacy_read)==CAPRI_SESSION_OK);
+    assert(capri_session_get_for_principal(store,legacy.session_id,"principal-alice",&bob)==CAPRI_SESSION_NOT_FOUND);
+    assert(capri_session_get(store,alice.session_id,&bob)==CAPRI_SESSION_NOT_FOUND);
+    const char *legacy_turn="[{\\"role\\":\\"user\\",\\"content\\":\\"legacy\\\\"},{\\"role\\":\\"assistant\\",\\"content\\":\\"compatible\\\\"}]";
+    assert(capri_session_commit_turn(store,legacy.session_id,0,legacy_turn,NULL,&legacy_committed)==CAPRI_SESSION_OK);
+    assert(legacy_committed.version==1);
+    assert(capri_session_close(store,legacy.session_id,&legacy_closed)==CAPRI_SESSION_OK&&legacy_closed.closed);
+    assert(capri_session_commit_turn(store,legacy.session_id,1,legacy_turn,NULL,&bob)==CAPRI_SESSION_CLOSED);
+    capri_session_free(&legacy);capri_session_free(&legacy_read);capri_session_free(&legacy_committed);capri_session_free(&legacy_closed);
     char session_id[37]; strcpy(session_id,alice.session_id);
     assert(capri_session_get_for_principal(store,alice.session_id,"principal-bob",&bob)==CAPRI_SESSION_NOT_FOUND);
     const char *turn="[{\"role\":\"user\",\"content\":\"hello\"},{\"role\":\"assistant\",\"content\":\"world\"}]";
