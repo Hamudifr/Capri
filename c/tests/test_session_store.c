@@ -43,7 +43,7 @@ int main(void) {
     assert(capri_session_get(store,legacy.session_id,&legacy_read)==CAPRI_SESSION_OK);
     assert(capri_session_get_for_principal(store,legacy.session_id,"principal-alice",&bob)==CAPRI_SESSION_NOT_FOUND);
     assert(capri_session_get(store,alice.session_id,&bob)==CAPRI_SESSION_NOT_FOUND);
-    const char *legacy_turn="[{\\"role\\":\\"user\\",\\"content\\":\\"legacy\\\\"},{\\"role\\":\\"assistant\\",\\"content\\":\\"compatible\\\\"}]";
+    const char *legacy_turn="[{\"role\":\"user\",\"content\":\"legacy\"},{\"role\":\"assistant\",\"content\":\"compatible\"}]";
     assert(capri_session_commit_turn(store,legacy.session_id,0,legacy_turn,NULL,&legacy_committed)==CAPRI_SESSION_OK);
     assert(legacy_committed.version==1);
     assert(capri_session_close(store,legacy.session_id,&legacy_closed)==CAPRI_SESSION_OK&&legacy_closed.closed);
