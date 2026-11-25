@@ -27,6 +27,8 @@ static void *concurrent_commit(void *opaque) {
 int main(void) {
     char dir[]="/tmp/capri-c-test-XXXXXX"; assert(mkdtemp(dir)!=NULL); assert(chmod(dir,0700)==0);
     char path[512]; snprintf(path,sizeof path,"%s/sessions.sqlite3",dir);
+    char backup_path[512]; snprintf(backup_path,sizeof backup_path,"%s/sessions-backup.sqlite3",dir);
+    char corrupt_backup_path[512]; snprintf(corrupt_backup_path,sizeof corrupt_backup_path,"%s/corrupt-backup.sqlite3",dir);
     CapriSessionError error; CapriSessionStore *store=capri_session_store_open(path,200,16000,64000,131072,&error);
     assert(store!=NULL && error==CAPRI_SESSION_OK);
     CapriSession alice={0}, bob={0}, committed={0};
@@ -73,7 +75,33 @@ int main(void) {
     pthread_t ta,tb; assert(pthread_create(&ta,NULL,concurrent_commit,&a)==0); assert(pthread_create(&tb,NULL,concurrent_commit,&b)==0);
     pthread_join(ta,NULL); pthread_join(tb,NULL); pthread_barrier_destroy(&barrier);
     assert((a.result==CAPRI_SESSION_OK&&b.result==CAPRI_SESSION_CONFLICT)||(b.result==CAPRI_SESSION_OK&&a.result==CAPRI_SESSION_CONFLICT));
-    capri_session_free(&a.output); capri_session_free(&b.output); capri_session_free(&race_session); capri_session_store_close(store2);
+    capri_session_free(&a.output); capri_session_free(&b.output); capri_session_store_close(store2);
+    CapriSession race_state={0};
+    assert(capri_session_get_for_principal(store,race_session.session_id,"principal-race",&race_state)==CAPRI_SESSION_OK);
+    assert(race_state.version==1);
+    assert(capri_session_claim_turn_lease_for_principal(store,race_session.session_id,"principal-race","backup-worker",30.0)==CAPRI_SESSION_OK);
+    size_t large_len=64000u;const char *large_prefix="[{\"role\":\"user\",\"content\":\"x\"},{\"role\":\"assistant\",\"content\":\"";const char *large_suffix="\"}]";
+    size_t turn_size=strlen(large_prefix)+large_len+strlen(large_suffix)+1u;char *large_turn=malloc(turn_size);assert(large_turn!=NULL);
+    strcpy(large_turn,large_prefix);memset(large_turn+strlen(large_prefix),'x',large_len);strcpy(large_turn+strlen(large_prefix)+large_len,large_suffix);
+    for(int k=0;k<20;++k){CapriSession large_session={0},large_committed={0};assert(capri_session_create_for_principal(store,"principal-large",&large_session)==CAPRI_SESSION_OK);assert(capri_session_commit_turn_for_principal(store,large_session.session_id,"principal-large",0,large_turn,NULL,&large_committed)==CAPRI_SESSION_OK);capri_session_free(&large_session);capri_session_free(&large_committed);}
+    free(large_turn);
+    assert(capri_session_integrity_check(store)==CAPRI_SESSION_OK);
+    assert(capri_session_backup_to(store,path)==CAPRI_SESSION_INVALID);
+    assert(capri_session_backup_to(store,backup_path)==CAPRI_SESSION_OK);
+    assert(capri_session_backup_to(store,backup_path)==CAPRI_SESSION_INVALID);
+    CapriSessionStore *backup_store=capri_session_store_open(backup_path,200,16000,64000,131072,&error); assert(backup_store!=NULL);
+    CapriSession backup_session={0};
+    assert(capri_session_get_for_principal(backup_store,session_id,"principal-alice",&backup_session)==CAPRI_SESSION_OK);
+    assert(backup_session.version==2 && backup_session.closed);
+    assert(capri_session_integrity_check(backup_store)==CAPRI_SESSION_OK);
+    const char *backup_turn="[{\"role\":\"user\",\"content\":\"backup\"},{\"role\":\"assistant\",\"content\":\"restored lease works\"}]";
+    CapriSession backup_race={0};
+    assert(capri_session_commit_turn_for_principal(backup_store,race_session.session_id,"principal-race",1,backup_turn,"backup-worker",&backup_race)==CAPRI_SESSION_OK);
+    assert(backup_race.version==2);
+    capri_session_free(&backup_race); capri_session_free(&backup_session); capri_session_store_close(backup_store);
+    int backup_lease_released=0;
+    assert(capri_session_release_turn_lease_for_principal(store,race_session.session_id,"principal-race","backup-worker",&backup_lease_released)==CAPRI_SESSION_OK&&backup_lease_released==1);
+    capri_session_free(&race_session); capri_session_free(&race_state);
     CapriSession corrupt_session={0};
     assert(sqlite3_open(path,&raw)==SQLITE_OK);
     assert(capri_session_create_for_principal(store,"principal-corrupt",&corrupt_session)==CAPRI_SESSION_OK);
@@ -85,6 +113,9 @@ int main(void) {
     assert(capri_session_renew_turn_lease_for_principal(store,corrupt_session.session_id,"principal-corrupt","worker-corrupt",30.0)==CAPRI_SESSION_CORRUPT);
     assert(capri_session_release_turn_lease_for_principal(store,corrupt_session.session_id,"principal-corrupt","worker-corrupt",&released)==CAPRI_SESSION_CORRUPT);
     assert(capri_session_commit_turn_for_principal(store,corrupt_session.session_id,"principal-corrupt",0,turn,NULL,&committed)==CAPRI_SESSION_CORRUPT);
+    assert(capri_session_integrity_check(store)==CAPRI_SESSION_CORRUPT);
+    assert(capri_session_backup_to(store,corrupt_backup_path)==CAPRI_SESSION_CORRUPT);
+    struct stat missing_backup; assert(lstat(corrupt_backup_path,&missing_backup)!=0);
     capri_session_free(&corrupt_session); capri_session_free(&committed);
     CapriSession nul_owner_session={0};
     assert(capri_session_create_for_principal(store,"principal-nul-owner",&nul_owner_session)==CAPRI_SESSION_OK);
@@ -103,6 +134,6 @@ int main(void) {
     assert(symlink(path,linkpath)==0);
     store=capri_session_store_open(linkpath,200,16000,64000,131072,&error); assert(store==NULL);
     unlink(linkpath);
-    unlink(path); char wal[520],shm[520];snprintf(wal,sizeof wal,"%s-wal",path);snprintf(shm,sizeof shm,"%s-shm",path);unlink(wal);unlink(shm);rmdir(dir);
+    unlink(backup_path); unlink(corrupt_backup_path); unlink(path); char wal[520],shm[520];snprintf(wal,sizeof wal,"%s-wal",path);snprintf(shm,sizeof shm,"%s-shm",path);unlink(wal);unlink(shm);rmdir(dir);
     puts("native SQLite session tests: ok"); return 0;
 }
