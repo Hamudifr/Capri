@@ -189,7 +189,8 @@ def build_goal_report(
             -(_MAX_EVIDENCE_ITEMS - 1):
         ]
         selected_indices.sort()
-    bounded_evidence = tuple(evidence_rows[index] for index in selected_indices)    raw_goal_state = goal.state
+    bounded_evidence = tuple(evidence_rows[index] for index in selected_indices)
+    raw_goal_state = goal.state
     goal_state = raw_goal_state if raw_goal_state in _GOAL_STATES else "unknown"
     task_state = None
     if task is not None:
