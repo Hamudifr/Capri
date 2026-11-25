@@ -1,5 +1,7 @@
 """Durable worker-registry restart and lifecycle-audit integration tests."""
 
+import hashlib
+import json
 import os
 import tempfile
 import threading
@@ -374,10 +376,13 @@ class DurableWorkerRestartTests(unittest.TestCase):
         self.assertEqual(len(candidates), 1)
         self.assertIsNone(registry.get_reservation(pending.reservation.token))
         self.assertNotIn(pending.reservation.token, host._worker_reservation_contexts)
+        expected_token_digest = hashlib.sha256(
+            pending.reservation.token.encode("utf-8")
+        ).hexdigest()
         expiry_events = [
             event for event in audit_store.events()
             if event.tool_name == "worker.reservation.expired"
-            and event.reservation_token == pending.reservation.token
+            and json.loads(event.metadata_json)["reservation_token_sha256"] == expected_token_digest
         ]
         self.assertEqual(len(expiry_events), 1)
         self.assertFalse(audit_store.worker_lifecycle_reconciliation_required())
