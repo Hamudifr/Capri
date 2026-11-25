@@ -528,22 +528,65 @@ class SQLiteTaskStore:
     def events_for_principal(
         self, task_id: str, principal_id: str
     ) -> tuple[dict[str, Any], ...]:
-        self._assert_principal_owner(task_id, principal_id)
-        return self.events(task_id)
+        _text(task_id, "task_id", 64)
+        principal_id = _text(principal_id, "principal_id", 128)
+        with self._lock:
+            connection = self._connect()
+            try:
+                rows = connection.execute(
+                    """SELECT task_events.timestamp,task_events.state,
+                    task_events.step_index,task_events.attempt,task_events.error_code
+                    FROM task_events
+                    JOIN tasks ON tasks.task_id=task_events.task_id
+                    JOIN task_owners ON task_owners.task_id=tasks.task_id
+                    WHERE tasks.task_id=? AND task_owners.principal_id=?
+                    ORDER BY task_events.event_id""",
+                    (task_id, principal_id),
+                ).fetchall()
+                if not rows:
+                    exists = connection.execute(
+                        """SELECT 1 FROM tasks JOIN task_owners
+                        ON task_owners.task_id=tasks.task_id
+                        WHERE tasks.task_id=? AND task_owners.principal_id=?""",
+                        (task_id, principal_id),
+                    ).fetchone()
+                    if exists is None:
+                        raise TaskNotFoundError("task does not exist")
+                return tuple(dict(zip(
+                    ("timestamp", "state", "step_index", "attempt", "error_code"), row
+                )) for row in rows)
+            finally:
+                connection.close()
 
     def domain_events_for_principal(
         self, task_id: str, principal_id: str
     ) -> tuple[DomainEvent, ...]:
         """Return an owner-checked CloudEvents projection of this task's local events."""
-        self._assert_principal_owner(task_id, principal_id)
+        _text(task_id, "task_id", 64)
+        principal_id = _text(principal_id, "principal_id", 128)
         with self._lock:
             connection = self._connect()
             try:
                 rows = connection.execute(
-                    """SELECT event_id,timestamp,state,step_index,attempt,error_code
-                    FROM task_events WHERE task_id=? ORDER BY event_id""",
-                    (task_id,),
+                    """SELECT task_events.event_id,task_events.timestamp,
+                    task_events.state,task_events.step_index,task_events.attempt,
+                    task_events.error_code
+                    FROM task_events
+                    JOIN tasks ON tasks.task_id=task_events.task_id
+                    JOIN task_owners ON task_owners.task_id=tasks.task_id
+                    WHERE tasks.task_id=? AND task_owners.principal_id=?
+                    ORDER BY task_events.event_id""",
+                    (task_id, principal_id),
                 ).fetchall()
+                if not rows:
+                    exists = connection.execute(
+                        """SELECT 1 FROM tasks JOIN task_owners
+                        ON task_owners.task_id=tasks.task_id
+                        WHERE tasks.task_id=? AND task_owners.principal_id=?""",
+                        (task_id, principal_id),
+                    ).fetchone()
+                    if exists is None:
+                        raise TaskNotFoundError("task does not exist")
                 return project_domain_events(tuple(task_event(
                     event_id=row[0], task_id=task_id, timestamp=row[1],
                     state=row[2], step_index=row[3], attempt=row[4],
