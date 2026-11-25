@@ -70,12 +70,13 @@ reservation = registry.reserve_eligible(
     authorized_worker_ids={"local-python-1"},
 )
 if reservation is not None:
+    authenticated_worker_id = authenticated_transport.worker_id
     try:
         # Host policy and authenticated transport are re-checked before dispatch.
         pass
     finally:
         registry.release_reservation(
-            reservation, authenticated_worker_id=reservation.worker_id,
+            reservation, authenticated_worker_id=authenticated_transport.worker_id,
         )
 ```
 
