@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from capri_runtime.goal_coordinator import GoalCoordinator
 from capri_runtime.goals import (
     GoalConflictError,
+    GoalNotFoundError,
     GoalPlanProposal,
     SQLiteGoalStore,
 )
@@ -203,7 +204,7 @@ class GoalCoordinatorTests(unittest.TestCase):
                 goal.goal_id, "alice", "different-task",
                 expected_version=execution.goal.version, now=NOW,
             )
-        with self.assertRaises(Exception):
+        with self.assertRaises(GoalNotFoundError):
             self.goal_store.evidence_for_principal(goal.goal_id, "bob")
         self.goal_store.record_evidence_for_principal(
             goal.goal_id, "alice", "test_digest", "a" * 64, 0, now=NOW,
