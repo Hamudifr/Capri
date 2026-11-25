@@ -265,9 +265,19 @@ class CapriHostRuntime:
             raise HostRuntimeError("worker_in_flight_resolver must be callable")
         if worker_policy_resolver is not None and not callable(worker_policy_resolver):
             raise HostRuntimeError("worker_policy_resolver must be callable")
+        audit_contract_methods = (
+            "write",
+            "begin_worker_lifecycle_operation",
+            "finish_worker_lifecycle_operation",
+            "worker_lifecycle_reconciliation_required",
+            "acknowledge_worker_lifecycle_reconciliation",
+        )
         if worker_lifecycle_audit_sink is not None and (
             not isinstance(worker_lifecycle_audit_sink, AuditSink)
-            or type(worker_lifecycle_audit_sink).write is AuditSink.write
+            or any(
+                getattr(type(worker_lifecycle_audit_sink), name) is getattr(AuditSink, name)
+                for name in audit_contract_methods
+            )
         ):
             raise HostRuntimeError("worker_lifecycle_audit_sink must implement the trusted AuditSink contract")
         if worker_registry is None and worker_lifecycle_audit_sink is not None:
@@ -292,6 +302,16 @@ class CapriHostRuntime:
             )
         if worker_registry is not None and worker_lifecycle_audit_sink is None:
             raise HostRuntimeError("worker_registry requires a trusted lifecycle audit sink")
+        if worker_registry is not None:
+            try:
+                if worker_lifecycle_audit_sink.worker_lifecycle_reconciliation_required():
+                    raise HostRuntimeError(
+                        "worker lifecycle audit has pending operations; reconcile and acknowledge before startup"
+                    )
+            except HostRuntimeError:
+                raise
+            except Exception:
+                raise HostRuntimeError("worker lifecycle audit state could not be verified") from None
         if (
             task_store is not None and task_worker is not None
             and task_store.path != task_worker.engine.store.path
@@ -404,12 +424,38 @@ class CapriHostRuntime:
         return identity
 
     def _require_worker_audit_healthy(self) -> None:
-        if self._worker_registry is not None and (
-            self._worker_lifecycle_audit_sink is None or not self._worker_audit_healthy
-        ):
+        if self._worker_registry is None:
+            return
+        if self._worker_lifecycle_audit_sink is None or not self._worker_audit_healthy:
             raise HostRuntimeError(
                 "worker registry is disabled because lifecycle audit persistence is unavailable"
             )
+        try:
+            if self._worker_lifecycle_audit_sink.worker_lifecycle_reconciliation_required():
+                self._worker_audit_healthy = False
+                raise HostRuntimeError(
+                    "worker registry is disabled pending lifecycle audit reconciliation"
+                )
+        except HostRuntimeError:
+            raise
+        except Exception:
+            self._worker_audit_healthy = False
+            raise HostRuntimeError("worker lifecycle audit state could not be verified") from None
+
+    def _begin_worker_audit_operation(self) -> None:
+        self._require_worker_audit_healthy()
+        try:
+            self._worker_lifecycle_audit_sink.begin_worker_lifecycle_operation()
+        except Exception:
+            self._worker_audit_healthy = False
+            raise HostRuntimeError("worker lifecycle audit begin marker failed") from None
+
+    def _finish_worker_audit_operation(self) -> None:
+        try:
+            self._worker_lifecycle_audit_sink.finish_worker_lifecycle_operation()
+        except Exception:
+            self._worker_audit_healthy = False
+            raise HostRuntimeError("worker lifecycle audit completion marker failed") from None
 
     def _record_worker_lifecycle_event(
         self,
