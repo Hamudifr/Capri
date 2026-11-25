@@ -109,8 +109,8 @@ class SkillValidationTests(unittest.TestCase):
             write_skill(
                 root,
                 "numeric-name",
-                "name: 123\\n"
-                "description: Use when validating scalar types.\\n",
+                "name: 123\n"
+                "description: Use when validating scalar types.\n",
             )
             report = validate_skill_tree(root)
             self.assertTrue(any("not a string" in item for item in report["skills"][0]["errors"]))
