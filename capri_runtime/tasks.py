@@ -20,7 +20,7 @@ from uuid import uuid4
 from capri_core.validation import contains_surrogate
 
 from .sqlite_backup import backup_sqlite_database
-from .domain_events import DomainEvent, task_event
+from .domain_events import DomainEvent, project_domain_events, task_event
 from .tools import ToolCancelledError
 from .budgets import BudgetExceededError, SQLiteBudgetStore
 
@@ -527,11 +527,11 @@ class SQLiteTaskStore:
                     FROM task_events WHERE task_id=? ORDER BY event_id""",
                     (task_id,),
                 ).fetchall()
-                return tuple(task_event(
+                return project_domain_events(tuple(task_event(
                     event_id=row[0], task_id=task_id, timestamp=row[1],
                     state=row[2], step_index=row[3], attempt=row[4],
                     error_code=row[5], principal_id=principal_id,
-                ) for row in rows)
+                ) for row in rows))
             finally:
                 connection.close()
 
