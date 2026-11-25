@@ -213,6 +213,8 @@ class StrategyApprovalBridge:
         if approved.status != "approved" or approved.grant is None or approved.approver_id is None:
             raise StrategyAuthorizationError("strategy approval was not granted")
         approval = approved.grant
+        if approval.approver_id != approved.approver_id:
+            raise StrategyAuthorizationError("signed approver identity does not match the approval record")
         grant = StrategyActivationGrant(
             grant_id=approval.grant_id,
             principal_id=request.principal_id,
@@ -225,7 +227,7 @@ class StrategyApprovalBridge:
             action=request.action,
             issued_at=request.issued_at,
             expires_at=approval.expires_at,
-            approver_id=approved.approver_id,
+            approver_id=approval.approver_id,
             signature=approval.signature or "",
             key_id=approval.key_id,
             operation_id=approval.operation_id,
@@ -249,7 +251,7 @@ class StrategyApprovalBridge:
             approval = ApprovalGrant(
                 grant.grant_id, grant.principal_id, f"strategy.{grant.action}",
                 digest, grant.expires_at, grant.signature, grant.key_id,
-                grant.operation_id,
+                grant.operation_id, grant.approver_id,
             )
             if self._service.verify_grant(approval) is not True:
                 return False
