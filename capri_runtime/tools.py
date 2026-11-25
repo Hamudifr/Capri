@@ -601,9 +601,21 @@ class AuditEvent:
 
 
 class AuditSink:
-    """Base contract for host-provided durable audit storage."""
+    """Base contract for host-provided durable audit storage and restart reconciliation."""
 
     def write(self, event: AuditEvent) -> None:
+        raise NotImplementedError
+
+    def begin_worker_lifecycle_operation(self) -> None:
+        raise NotImplementedError
+
+    def finish_worker_lifecycle_operation(self) -> None:
+        raise NotImplementedError
+
+    def worker_lifecycle_reconciliation_required(self) -> bool:
+        raise NotImplementedError
+
+    def acknowledge_worker_lifecycle_reconciliation(self, note: str) -> bool:
         raise NotImplementedError
 
 
@@ -647,6 +659,7 @@ class InMemoryAuditSink(AuditSink):
             raise ToolValidationError("max_events must be a positive integer")
         self._max_events = max_events
         self._events: list[AuditEvent] = []
+        self._pending_worker_operations = 0
         self._lock = threading.Lock()
 
     def write(self, event: AuditEvent) -> None:
@@ -654,6 +667,53 @@ class InMemoryAuditSink(AuditSink):
             if len(self._events) >= self._max_events:
                 raise OSError("audit capacity reached")
             self._events.append(event)
+
+    def begin_worker_lifecycle_operation(self) -> None:
+        with self._lock:
+            self._pending_worker_operations += 1
+
+    def finish_worker_lifecycle_operation(self) -> None:
+        with self._lock:
+            if self._pending_worker_operations < 1:
+                raise ToolValidationError("no worker lifecycle operation is pending")
+            self._pending_worker_operations -= 1
+
+    def worker_lifecycle_reconciliation_required(self) -> bool:
+        with self._lock:
+            return self._pending_worker_operations > 0
+
+    def acknowledge_worker_lifecycle_reconciliation(self, note: str) -> bool:
+        if (
+            not isinstance(note, str) or not note or len(note) > 1024
+            or contains_surrogate(note)
+        ):
+            raise ToolValidationError("worker lifecycle reconciliation note is invalid")
+        with self._lock:
+            pending = self._pending_worker_operations
+            if pending == 0:
+                return False
+            metadata_json = json.dumps(
+                {"pending_operations": pending, "reconciliation_note": note},
+                sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
+            )
+            event = AuditEvent(
+                uuid4().hex,
+                datetime.now(timezone.utc).isoformat(),
+                "host",
+                "worker.reconciliation.acknowledged",
+                hashlib.sha256(metadata_json.encode("utf-8")).hexdigest(),
+                "success",
+                None,
+                "worker_registry",
+                "registry",
+                None,
+                metadata_json,
+            )
+            if len(self._events) >= self._max_events:
+                raise OSError("audit capacity reached")
+            self._events.append(event)
+            self._pending_worker_operations = 0
+            return True
 
     def events(self) -> tuple[AuditEvent, ...]:
         with self._lock:
