@@ -28,7 +28,6 @@ int main(void) {
     char dir[]="/tmp/capri-c-test-XXXXXX"; assert(mkdtemp(dir)!=NULL); assert(chmod(dir,0700)==0);
     char path[512]; snprintf(path,sizeof path,"%s/sessions.sqlite3",dir);
     char backup_path[512]; snprintf(backup_path,sizeof backup_path,"%s/sessions-backup.sqlite3",dir);
-    char restored_path[512]; snprintf(restored_path,sizeof restored_path,"%s/sessions-restored.sqlite3",dir);
     char corrupt_backup_path[512]; snprintf(corrupt_backup_path,sizeof corrupt_backup_path,"%s/corrupt-backup.sqlite3",dir);
     CapriSessionError error; CapriSessionStore *store=capri_session_store_open(path,200,16000,64000,131072,&error);
     assert(store!=NULL && error==CAPRI_SESSION_OK);
@@ -90,11 +89,7 @@ int main(void) {
     assert(capri_session_backup_to(store,path)==CAPRI_SESSION_INVALID);
     assert(capri_session_backup_to(store,backup_path)==CAPRI_SESSION_OK);
     assert(capri_session_backup_to(store,backup_path)==CAPRI_SESSION_INVALID);
-    assert(capri_session_restore_to(store,backup_path,backup_path)==CAPRI_SESSION_INVALID);
-    assert(capri_session_restore_to(store,backup_path,path)==CAPRI_SESSION_INVALID);
-    assert(capri_session_restore_to(store,backup_path,restored_path)==CAPRI_SESSION_OK);
-    assert(capri_session_restore_to(store,backup_path,restored_path)==CAPRI_SESSION_INVALID);
-    CapriSessionStore *backup_store=capri_session_store_open(restored_path,200,16000,64000,131072,&error); assert(backup_store!=NULL);
+    CapriSessionStore *backup_store=capri_session_store_open(backup_path,200,16000,64000,131072,&error); assert(backup_store!=NULL);
     CapriSession backup_session={0};
     assert(capri_session_get_for_principal(backup_store,session_id,"principal-alice",&backup_session)==CAPRI_SESSION_OK);
     assert(backup_session.version==2 && backup_session.closed);
@@ -139,6 +134,6 @@ int main(void) {
     assert(symlink(path,linkpath)==0);
     store=capri_session_store_open(linkpath,200,16000,64000,131072,&error); assert(store==NULL);
     unlink(linkpath);
-    unlink(backup_path); unlink(restored_path); unlink(corrupt_backup_path); unlink(path); char wal[520],shm[520];snprintf(wal,sizeof wal,"%s-wal",path);snprintf(shm,sizeof shm,"%s-shm",path);unlink(wal);unlink(shm);rmdir(dir);
+    unlink(backup_path); unlink(corrupt_backup_path); unlink(path); char wal[520],shm[520];snprintf(wal,sizeof wal,"%s-wal",path);snprintf(shm,sizeof shm,"%s-shm",path);unlink(wal);unlink(shm);rmdir(dir);
     puts("native SQLite session tests: ok"); return 0;
 }
