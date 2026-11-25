@@ -11,7 +11,7 @@ The harness is offline and standard-library-only. It creates private temporary d
 ## Measurements
 
 - Goal create API (includes the store's readback), principal-scoped goal reads, evidence reads, event reads, and domain-event projection.
-- Principal-scoped budget usage reads (policy and counters from one consistent SQLite snapshot).
+- Principal-scoped budget usage reads (policy and counters from one consistent SQLite snapshot), plus multi-dimension reservation writes.
 - Task create, unscoped task reads, and principal-scoped task/event reads (including owner authorization and event projection).
 - Plan JSON encode/decode cost, measured separately from database calls.
 - A controlled SQLite insert probe with statement execution and COMMIT wall time reported separately. It uses WAL and `synchronous=FULL`; it does not weaken durability.
