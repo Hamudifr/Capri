@@ -1,5 +1,9 @@
 """Provider-neutral non-X5 runtime and permissioned tool boundary."""
 
+from .budgets import (
+    BudgetError, BudgetExceededError, BudgetPolicy, BudgetReservation,
+    BudgetUsage, BudgetValidationError, SQLiteBudgetStore,
+)
 from .runtime import (
     Message,
     ModelAdapter,
@@ -32,6 +36,7 @@ from .tools import (
     PermissionDeniedError,
     ToolBoundaryError,
     ToolExecutionError,
+    ToolBudgetExceededError,
     ToolCancelledError,
     ToolResultValidationError,
     ToolExecutor,
@@ -103,6 +108,14 @@ from .tasks import (
 )
 
 __all__ = [
+    "BudgetError",
+    "BudgetExceededError",
+    "BudgetPolicy",
+    "BudgetReservation",
+    "BudgetUsage",
+    "BudgetValidationError",
+    "SQLiteBudgetStore",
+    "ToolBudgetExceededError",
     "GoalCoordinator",
     "GoalExecution",
     "GoalConflictError",
