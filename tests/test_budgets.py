@@ -136,6 +136,27 @@ class SQLiteBudgetStoreTests(unittest.TestCase):
         finally:
             connection.close()
 
+    def test_sqlite_connections_enable_durable_private_trigger_settings(self):
+        connection = self.store._connect()
+        try:
+            self.assertEqual(connection.execute("PRAGMA synchronous").fetchone()[0], 2)
+            self.assertEqual(connection.execute("PRAGMA recursive_triggers").fetchone()[0], 1)
+            self.assertEqual(connection.execute("PRAGMA trusted_schema").fetchone()[0], 0)
+        finally:
+            connection.close()
+
+    def test_integrity_check_detects_usage_ledger_mismatch(self):
+        self.store.reserve_for_principal("alice", {"tool_calls": 1}, now=NOW)
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute(
+                "UPDATE budget_usage SET used=0 WHERE principal_id='alice' AND dimension='tool_calls'"
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        self.assertEqual(self.store.integrity_check(), "budget ledger validation failed")
+
     def test_budget_reservation_rows_are_append_only(self):
         self.store.reserve_for_principal("alice", {"tool_calls": 1}, now=NOW)
         connection = sqlite3.connect(self.path)
@@ -259,6 +280,7 @@ class ExecutionBudgetIntegrationTests(unittest.TestCase):
         self.assertEqual(deferred.task_id, second.task_id)
         self.assertEqual(deferred.state, "budget_wait")
         self.assertEqual(deferred.attempts, 0)
+        self.assertEqual(store.events(second.task_id)[-1]["attempt"], 1)
         self.assertEqual(len(calls), 1)
         self.assertIsNone(engine.run_once(now=NOW + timedelta(seconds=1)))
         reset = self.budgets.usage_for_principal("alice", now=NOW + timedelta(seconds=1)).reset_at
