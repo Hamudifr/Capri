@@ -23,6 +23,7 @@ from capri_runtime import (
 from capri_runtime.host_runtime import CapriHostRuntime, HostRuntimeError
 from capri_runtime.tasks import TaskNotFoundError, TaskValidationError
 from capri_runtime.goals import GoalNotFoundError, GoalPlanProposal, GoalValidationError, SQLiteGoalStore
+from capri_runtime.budgets import BudgetExceededError, BudgetPolicy, SQLiteBudgetStore
 
 
 class RecordingAdapter:
@@ -384,6 +385,36 @@ class CapriHostRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(cancelled.goal.state, "cancelled")
         self.assertEqual(cancelled.task.state, "cancelled")
+
+    def test_host_wires_one_budget_ledger_across_provider_tools_and_tasks(self):
+        budget_store = SQLiteBudgetStore(
+            os.path.join(self.temp.name, "host-budgets.sqlite3"),
+            BudgetPolicy(
+                window_seconds=3600, max_provider_calls=1,
+                max_provider_input_bytes=10_000, max_tool_calls=2,
+                max_task_steps=3, max_task_input_bytes=10_000,
+            ),
+        )
+        worker = TaskWorker(TaskEngine(
+            self.task_store, {}, "budget-worker",
+            principal_handlers={"collect": lambda data, key, principal: {"ok": True}},
+        ))
+        host = self.make_host(task_worker=worker, budget_store=budget_store)
+        self.assertIs(host._orchestrator.budget_store, budget_store)
+        self.assertIs(host._orchestrator.bridge.executor.budget_store, budget_store)
+        self.assertIs(worker.engine.budget_store, budget_store)
+        session = host.create_session("alice-token")
+        host.run_turn("alice-token", session.session_id, "first call")
+        with self.assertRaises(BudgetExceededError):
+            host.run_turn("alice-token", session.session_id, "second call")
+        self.assertEqual(len(self.adapter.calls), 1)
+        usage = host.get_budget_usage("alice-token")
+        self.assertEqual(usage.used["provider_calls"], 1)
+        with self.assertRaises(BudgetExceededError):
+            budget_store.reserve_for_principal(
+                "alice", {"provider_calls": 1},
+            )
+        self.assertEqual(host.get_budget_usage("bob-token").used["provider_calls"], 0)
 
     def test_goal_api_requires_configured_store_and_authentication(self):
         host = self.make_host()
