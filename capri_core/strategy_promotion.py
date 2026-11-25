@@ -18,6 +18,7 @@ from .strategy import StrategyEvaluationError, StrategyObservation, evaluate_str
 
 
 _POLICY_VERSION = "capri.strategy-promotion.v1"
+STRATEGY_PROMOTION_POLICY_VERSION = _POLICY_VERSION
 _ALLOWED_TASK_FAMILIES = frozenset({
     "coding",
     "formatting",
@@ -321,7 +322,7 @@ def assess_strategy_canary(
 
     blocked_reasons = tuple(dict.fromkeys(blocked))
     return StrategyPromotionAssessment(
-        policy_version=_POLICY_VERSION,
+        policy_version=STRATEGY_PROMOTION_POLICY_VERSION,
         strategy_class=strategy_class,
         task_family=task_family,
         baseline_id=baseline_id,
