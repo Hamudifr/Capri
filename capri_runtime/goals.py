@@ -187,6 +187,14 @@ def validate_goal_plan(
         if type(attempts) is not int or not 1 <= attempts <= 10:
             raise GoalValidationError(f"planner step {index} max_attempts is invalid")
         normalized.append({"tool": tool, "input": json.loads(json.dumps(args)), "max_attempts": attempts})
+    try:
+        encoded_plan = json.dumps(
+            normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8", errors="strict")
+    except (TypeError, ValueError, UnicodeEncodeError, RecursionError):
+        raise GoalValidationError("planner output is not valid bounded JSON") from None
+    if len(encoded_plan) > 65_536:
+        raise GoalValidationError("planner output exceeds the 65,536-byte plan limit")
     return tuple(normalized)
 
 
