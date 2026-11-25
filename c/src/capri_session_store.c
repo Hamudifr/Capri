@@ -174,9 +174,13 @@ CapriSessionStore *capri_session_store_open(const char *path,size_t max_messages
     CapriSessionStore *s=calloc(1u,sizeof *s); if(!s){free(absolute);if(error)*error=CAPRI_SESSION_NO_MEMORY;return NULL;}
     s->path=absolute;s->max_messages=max_messages;s->max_input=max_input;s->max_output=max_output;s->max_tool=max_tool;
     if(pthread_mutex_init(&s->mutex,NULL)!=0){free(s->path);free(s);if(error)*error=CAPRI_SESSION_IO;return NULL;}
-    int rc=sqlite3_open_v2(absolute,&s->db,SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE|SQLITE_OPEN_FULLMUTEX,NULL);
+    int sqlite_flags=SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE|SQLITE_OPEN_FULLMUTEX;
+#ifdef SQLITE_OPEN_NOFOLLOW
+    sqlite_flags|=SQLITE_OPEN_NOFOLLOW;
+#endif
+    int rc=sqlite3_open_v2(absolute,&s->db,sqlite_flags,NULL);
+    if(rc==SQLITE_OK) (void)sqlite3_busy_timeout(s->db,5000);
     if(rc!=SQLITE_OK || !schema(s->db) || !store_path_safe(s)){ if(s->db)sqlite3_close(s->db);pthread_mutex_destroy(&s->mutex);free(s->path);free(s);if(error)*error=CAPRI_SESSION_DATABASE;return NULL; }
-    (void)sqlite3_busy_timeout(s->db,5000);
 #ifdef SQLITE_DBCONFIG_DEFENSIVE
     (void)sqlite3_db_config(s->db,SQLITE_DBCONFIG_DEFENSIVE,1,NULL);
 #endif
