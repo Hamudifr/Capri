@@ -425,11 +425,9 @@ class SQLiteSessionStore(SessionStore):
         *,
         lease_owner: str | None = None,
     ) -> Session:
-        # Ownership rows are immutable through the public API; this precondition
-        # therefore remains true through the underlying atomic versioned commit.
-        self._require_owner(session_id, principal_id)
-        return self.commit_turn_messages(
-            session_id, expected_version, turn_messages, lease_owner=lease_owner
+        return self._commit_turn_messages(
+            session_id, expected_version, turn_messages,
+            lease_owner=lease_owner, principal_id=principal_id,
         )
 
     def claim_turn_lease_for_principal(
@@ -458,11 +456,21 @@ class SQLiteSessionStore(SessionStore):
         with self._lock:
             connection = self._connect()
             try:
-                row = connection.execute(
-                    """SELECT session_id, created_at, updated_at, version, closed, messages_json
-                    FROM sessions WHERE session_id = ?""",
-                    (session_id,),
-                ).fetchone()
+                if principal_id is None:
+                    row = connection.execute(
+                        """SELECT session_id, created_at, updated_at, version, closed, messages_json
+                        FROM sessions WHERE session_id = ?""",
+                        (session_id,),
+                    ).fetchone()
+                else:
+                    row = connection.execute(
+                        """SELECT s.session_id, s.created_at, s.updated_at, s.version,
+                        s.closed, s.messages_json
+                        FROM sessions AS s
+                        JOIN session_owners AS o ON o.session_id = s.session_id
+                        WHERE s.session_id = ? AND o.principal_id = ?""",
+                        (session_id, principal_id),
+                    ).fetchone()
             finally:
                 connection.close()
         if row is None:
@@ -689,6 +697,28 @@ class SQLiteSessionStore(SessionStore):
         *,
         lease_owner: str | None = None,
     ) -> Session:
+        return self._commit_turn_messages(
+            session_id, expected_version, turn_messages, lease_owner=lease_owner,
+        )
+
+    def _commit_turn_messages(
+        self,
+        session_id: str,
+        expected_version: int,
+        turn_messages: tuple[Message, ...],
+        *,
+        lease_owner: str | None = None,
+        principal_id: str | None = None,
+    ) -> Session:
+        if principal_id is not None:
+            principal_id = self._validate_principal_id(principal_id)
+            if (
+                not isinstance(session_id, str)
+                or not session_id.strip()
+                or len(session_id) > 256
+                or _contains_surrogate(session_id)
+            ):
+                raise ValidationError("session_id must be bounded valid text")
         validated = _validate_turn_messages(
             turn_messages,
             max_input_chars=self.max_input_chars,
