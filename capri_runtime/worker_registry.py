@@ -147,6 +147,8 @@ class InMemoryWorkerRegistry:
         identity = _identifier(authenticated_worker_id, "authenticated_worker_id")
         if identity != descriptor.worker_id:
             raise WorkerRegistryError("authenticated identity does not match worker descriptor")
+        if descriptor.revision != 1:
+            raise WorkerRegistryError("new worker descriptors must start at revision 1")
         _now_ns(now_ns, self._clock_ns)
         with self._lock:
             if descriptor.worker_id in self._workers:
@@ -188,6 +190,8 @@ class InMemoryWorkerRegistry:
                 raise WorkerNotFoundError("worker is not registered")
             if current.descriptor.revision != expected_revision:
                 raise WorkerConflictError("worker descriptor revision changed")
+            if current.health.state == "retired":
+                raise WorkerConflictError("retired workers cannot be updated or re-enabled")
             if descriptor.revision != expected_revision + 1:
                 raise WorkerRegistryError("new descriptor revision must increment exactly once")
             updated = WorkerSnapshot(descriptor, current.health)
@@ -286,7 +290,7 @@ class InMemoryWorkerRegistry:
                 current.descriptor, enabled=False, revision=current.descriptor.revision + 1,
             )
             health = replace(
-                current.health, state="retired", in_flight=0,
+                current.health, state="retired",
                 revision=current.health.revision + 1,
             )
             updated = WorkerSnapshot(descriptor, health)
@@ -312,7 +316,7 @@ class InMemoryWorkerRegistry:
                 raise WorkerConflictError("worker is not quarantined")
             health = replace(
                 current.health, state="starting", last_heartbeat_ns=None,
-                consecutive_failures=0, in_flight=0,
+                consecutive_failures=0,
                 revision=current.health.revision + 1,
             )
             updated = WorkerSnapshot(current.descriptor, health)
@@ -338,7 +342,7 @@ class InMemoryWorkerRegistry:
             if current.health.state == "retired":
                 raise WorkerConflictError("retired workers cannot change health state")
             health = replace(
-                current.health, state=state, in_flight=0,
+                current.health, state=state,
                 revision=current.health.revision + 1,
             )
             updated = WorkerSnapshot(current.descriptor, health)
@@ -360,6 +364,8 @@ class InMemoryWorkerRegistry:
             raise WorkerRegistryError("protocol_version is invalid")
         if type(authorized_worker_ids) not in (set, frozenset):
             raise WorkerRegistryError("authorized_worker_ids must be a host policy set")
+        if len(authorized_worker_ids) > self._max_workers:
+            raise WorkerRegistryError("authorized worker set exceeds the registry bound")
         allowed = frozenset(
             _identifier(item, "authorized worker ID") for item in authorized_worker_ids
         )
