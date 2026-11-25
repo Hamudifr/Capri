@@ -14,11 +14,11 @@ import sqlite3
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 from uuid import uuid4
 
 from capri_core.validation import contains_surrogate
-from capri_core.strategy import StrategyEvaluation
+from capri_core.strategy import StrategyEvaluation, StrategyObservation, evaluate_strategies
 from .tasks import SQLiteTaskStore
 
 
@@ -64,6 +64,7 @@ class StrategyActivationGrant:
     strategy_id: str
     version: str
     evaluation_sha256: str | None
+    config_sha256: str
     expected_generation: int
     action: str
     issued_at: str
@@ -109,6 +110,7 @@ class StrategyActivationEvent:
     from_version: str | None
     to_strategy_id: str
     to_version: str
+    config_sha256: str
     evaluation_sha256: str | None
     approval_id: str
     approver_id: str
@@ -224,8 +226,10 @@ def _grant_payload(grant: StrategyActivationGrant) -> None:
         raise StrategyAuthorizationError("evaluation fingerprint is invalid")
     if type(grant.expected_generation) is not int or not 0 <= grant.expected_generation < 2**63 - 1:
         raise StrategyAuthorizationError("expected_generation is invalid")
-    if grant.action not in {"activate", "rollback"}:
+    if type(grant.action) is not str or grant.action not in {"activate", "rollback"}:
         raise StrategyAuthorizationError("grant action must be activate or rollback")
+    if type(grant.config_sha256) is not str or not _SHA256.fullmatch(grant.config_sha256):
+        raise StrategyAuthorizationError("strategy config fingerprint is invalid")
     issued = _timestamp(grant.issued_at, "issued_at")
     expires = _timestamp(grant.expires_at, "expires_at")
     if expires <= issued or (expires - issued).total_seconds() > _MAX_APPROVAL_TTL:
@@ -308,6 +312,7 @@ class SQLiteStrategyStore:
                     from_version TEXT,
                     to_strategy_id TEXT NOT NULL,
                     to_version TEXT NOT NULL,
+                    to_config_sha256 TEXT NOT NULL,
                     evaluation_id TEXT REFERENCES strategy_evaluations(evaluation_id),
                     approval_id TEXT NOT NULL UNIQUE,
                     approver_id TEXT NOT NULL,
@@ -363,9 +368,10 @@ class SQLiteStrategyStore:
         strategy = _identifier(strategy_id, "strategy_id")
         version = _version(version)
         config_json, config_hash = _encode_config(config)
-        timestamp = (created_at or datetime.now(timezone.utc)).astimezone(timezone.utc)
-        if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+        timestamp = created_at or datetime.now(timezone.utc)
+        if not isinstance(timestamp, datetime) or timestamp.tzinfo is None or timestamp.utcoffset() is None:
             raise StrategyStoreError("created_at must be timezone-aware")
+        timestamp = timestamp.astimezone(timezone.utc)
         created = timestamp.isoformat()
         with self._lock:
             connection = self._connect()
@@ -387,6 +393,8 @@ class SQLiteStrategyStore:
                     )
                 elif row[:4] != (config_json, config_hash, 1, None):
                     raise StrategyConflictError("baseline version already exists with different content")
+                if row is not None:
+                    created = row[4]
                 connection.execute("COMMIT")
             except Exception:
                 if connection.in_transaction:
@@ -402,6 +410,7 @@ class SQLiteStrategyStore:
     def register_candidate_for_principal(
         self, principal_id: str, strategy_class: str, strategy_id: str,
         version: str, config: dict[str, Any], evaluation: StrategyEvaluation, *,
+        observations: Iterable[StrategyObservation],
         evidence_manifest_ref: str,
         created_at: datetime | None = None,
     ) -> StrategyVersionRecord:
@@ -411,16 +420,26 @@ class SQLiteStrategyStore:
         version = _version(version)
         if type(evaluation) is not StrategyEvaluation:
             raise StrategyStoreError("a StrategyEvaluation result is required")
+        try:
+            baseline_id = _identifier(evaluation.baseline_id, "baseline_id")
+            candidate_id = _identifier(evaluation.candidate_id, "candidate_id")
+            recomputed = evaluate_strategies(
+                baseline_id, candidate_id, observations, min_pairs=20
+            )
+        except Exception:
+            raise StrategyStoreError("candidate evaluation could not be independently recomputed") from None
         if (
-            evaluation.candidate_id != strategy
+            candidate_id != strategy
             or evaluation.eligible_for_manual_review is not True
             or evaluation.blocked_reasons
             or not evaluation.improved_dimensions
             or type(evaluation.matched_pairs) is not int
             or evaluation.matched_pairs < 20
+            or type(evaluation.cohort_sha256) is not str
             or not _SHA256.fullmatch(evaluation.cohort_sha256)
+            or recomputed.to_dict() != evaluation.to_dict()
         ):
-            raise StrategyStoreError("candidate evaluation does not meet the registry admission gate")
+            raise StrategyStoreError("candidate evaluation does not meet the independently recomputed registry admission gate")
         evidence_ref = _text(evidence_manifest_ref, "evidence_manifest_ref", 512)
         config_json, config_hash = _encode_config(config)
         timestamp = (created_at or datetime.now(timezone.utc)).astimezone(timezone.utc)
@@ -515,15 +534,16 @@ class SQLiteStrategyStore:
                 "event_id": row[0], "principal_id": row[1], "strategy_class": row[2],
                 "generation": row[3], "action": row[4], "from_strategy_id": row[5],
                 "from_version": row[6], "to_strategy_id": row[7], "to_version": row[8],
-                "evaluation_id": row[9], "approval_id": row[10], "approver_id": row[11],
-                "created_at": row[12], "previous_hash": row[13],
+                "to_config_sha256": row[9], "evaluation_id": row[10],
+                "approval_id": row[11], "approver_id": row[12],
+                "created_at": row[13], "previous_hash": row[14],
             }
             if row[3] != expected_generation or row[13] != previous_hash:
                 raise StrategyIntegrityError("strategy event sequence or previous hash is invalid")
             digest = hashlib.sha256(json.dumps(
                 payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
             ).encode("utf-8")).hexdigest()
-            if digest != row[14]:
+            if digest != row[15]:
                 raise StrategyIntegrityError("strategy event hash does not match")
             previous_hash = digest
             expected_generation += 1
@@ -595,6 +615,8 @@ class SQLiteStrategyStore:
                     raise StrategyNotFoundError("target strategy version is not registered for this principal")
                 config_json, config_hash, is_baseline, evaluation_id, cohort_hash, eligible = target
                 expected_hash = None if is_baseline else cohort_hash
+                if grant.config_sha256 != config_hash:
+                    raise StrategyAuthorizationError("approval grant config fingerprint does not match target version")
                 if is_baseline:
                     if grant.evaluation_sha256 is not None:
                         raise StrategyAuthorizationError("baseline activation must not claim a candidate evaluation")
@@ -631,6 +653,7 @@ class SQLiteStrategyStore:
                     "generation": next_generation, "action": required_action,
                     "from_strategy_id": from_id, "from_version": from_version,
                     "to_strategy_id": grant.strategy_id, "to_version": grant.version,
+                    "to_config_sha256": config_hash,
                     "evaluation_id": evaluation_id, "approval_id": grant.grant_id,
                     "approver_id": grant.approver_id, "created_at": created,
                     "previous_hash": previous_hash,
@@ -641,13 +664,13 @@ class SQLiteStrategyStore:
                 connection.execute(
                     """INSERT INTO strategy_events
                     (event_id,principal_id,strategy_class,generation,action,
-                     from_strategy_id,from_version,to_strategy_id,to_version,evaluation_id,
-                     approval_id,approver_id,created_at,previous_hash,event_hash)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                     from_strategy_id,from_version,to_strategy_id,to_version,to_config_sha256,
+                     evaluation_id,approval_id,approver_id,created_at,previous_hash,event_hash)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (event_id, principal, grant.strategy_class, next_generation,
                      required_action, from_id, from_version, grant.strategy_id,
-                     grant.version, evaluation_id, grant.grant_id, grant.approver_id,
-                     created, previous_hash, event_hash),
+                     grant.version, config_hash, evaluation_id, grant.grant_id,
+                     grant.approver_id, created, previous_hash, event_hash),
                 )
                 connection.execute(
                     """INSERT INTO strategy_active
@@ -668,7 +691,8 @@ class SQLiteStrategyStore:
                 connection.close()
         return ActiveStrategyRecord(
             principal, grant.strategy_class, grant.strategy_id, grant.version,
-            next_generation, _decode_config(config_json, config_hash), created, event_id,
+            next_generation, _decode_config(config_json, config_hash), config_hash,
+            created, event_id,
         )
 
     def activate_for_principal(
@@ -707,7 +731,7 @@ class SQLiteStrategyStore:
                     return None
                 return ActiveStrategyRecord(
                     principal, category, row[0], row[1], row[2],
-                    _decode_config(row[5], row[6]), row[6], row[3],
+                    _decode_config(row[5], row[6]), row[6], row[4], row[3],
                 )
             finally:
                 connection.close()
@@ -723,24 +747,25 @@ class SQLiteStrategyStore:
                 self._verify_chain(connection, principal, category)
                 rows = connection.execute(
                     """SELECT event_id,principal_id,strategy_class,generation,action,
-                    from_strategy_id,from_version,to_strategy_id,to_version,evaluation_id,
-                    approval_id,approver_id,created_at,previous_hash,event_hash
+                    from_strategy_id,from_version,to_strategy_id,to_version,to_config_sha256,
+                    evaluation_id,approval_id,approver_id,created_at,previous_hash,event_hash
                     FROM strategy_events WHERE principal_id=? AND strategy_class=?
                     ORDER BY generation""",
                     (principal, category),
                 ).fetchall()
                 evaluation_hashes: dict[str, str] = {}
                 for row in rows:
-                    if row[9] is not None and row[9] not in evaluation_hashes:
-                        evaluation_hashes[row[9]] = connection.execute(
+                    if row[10] is not None and row[10] not in evaluation_hashes:
+                        evaluation_hashes[row[10]] = connection.execute(
                             "SELECT cohort_sha256 FROM strategy_evaluations WHERE evaluation_id=?",
-                            (row[9],),
+                            (row[10],),
                         ).fetchone()[0]
                 return tuple(
                     StrategyActivationEvent(
                         row[0], row[1], row[2], row[3], row[4], row[5], row[6],
-                        row[7], row[8], evaluation_hashes.get(row[9]) if row[9] else None,
-                        row[10], row[11], row[12], row[13], row[14],
+                        row[7], row[8], row[9],
+                        evaluation_hashes.get(row[10]) if row[10] else None,
+                        row[11], row[12], row[13], row[14], row[15],
                     )
                     for row in rows
                 )
