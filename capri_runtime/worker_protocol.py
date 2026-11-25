@@ -244,13 +244,13 @@ class WorkerResponse:
         request: WorkerRequest,
         *,
         expected_worker_id: str,
-        elapsed_ms: int | None = None,
+        elapsed_ns: int | None = None,
     ) -> None:
         """Validate correlation and a deadline measured by the trusted host.
 
-        elapsed_ms must be measured by the host with a monotonic clock from
-        dispatch until response acceptance. Worker-reported duration_ms is
-        telemetry only and is never sufficient to establish deadline compliance.
+        elapsed_ns must be measured by the host with monotonic_ns() from dispatch
+        until response acceptance. Worker-reported duration_ms is telemetry only
+        and is never sufficient to establish deadline compliance.
         """
         if type(request) is not WorkerRequest:
             raise WorkerProtocolError("request must be a validated WorkerRequest")
@@ -260,13 +260,13 @@ class WorkerResponse:
         request.to_json()
         self.to_json()
         _identifier(expected_worker_id, "expected_worker_id")
-        if type(elapsed_ms) is not int or elapsed_ms < 0:
-            raise WorkerProtocolError("elapsed_ms must be a non-negative host-measured integer")
+        if type(elapsed_ns) is not int or elapsed_ns < 0:
+            raise WorkerProtocolError("elapsed_ns must be a non-negative host-measured integer")
         if self.request_id != request.request_id:
             raise WorkerProtocolError("response request_id does not match the request")
         if self.worker_id != expected_worker_id:
             raise WorkerProtocolError("response worker_id does not match the selected worker")
-        if elapsed_ms > request.deadline_ms:
+        if elapsed_ns > request.deadline_ms * 1_000_000:
             raise WorkerProtocolError("host-measured response time exceeds the request deadline")
 
 
