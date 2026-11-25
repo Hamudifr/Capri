@@ -29,7 +29,7 @@ class WorkerProtocolTests(unittest.TestCase):
             output={"value": 479001600},
         )
         decoded = WorkerResponse.from_json(response.to_json())
-        decoded.validate_for(self.request, expected_worker_id="local-python-1", elapsed_ms=4)
+        decoded.validate_for(self.request, expected_worker_id="local-python-1", elapsed_ns=4_000_000)
         self.assertEqual(decoded, response)
 
     def test_failed_response_requires_error_only(self):
@@ -101,7 +101,7 @@ class WorkerProtocolTests(unittest.TestCase):
             "req-18", "worker-1", "succeeded", 2, output={"value": 1}
         )
         with self.assertRaises(WorkerProtocolError):
-            response.validate_for(self.request, expected_worker_id="worker-1", elapsed_ms=2)
+            response.validate_for(self.request, expected_worker_id="worker-1", elapsed_ns=2_000_000)
         response = WorkerResponse(
             "req-17", "worker-2", "succeeded", 2, output={"value": 1}
         )
@@ -130,7 +130,7 @@ class WorkerProtocolTests(unittest.TestCase):
         short_request = WorkerRequest("req-17", "math.factorial", {}, 10)
         late_response = WorkerResponse("req-17", "worker-1", "succeeded", 11, output={"value": 1})
         with self.assertRaises(WorkerProtocolError):
-            late_response.validate_for(short_request, expected_worker_id="worker-1", elapsed_ms=11)
+            late_response.validate_for(short_request, expected_worker_id="worker-1", elapsed_ns=11_000_000)
 
 
     def test_validate_for_requires_trusted_host_elapsed_time(self):
@@ -142,14 +142,14 @@ class WorkerProtocolTests(unittest.TestCase):
             with self.subTest(elapsed=elapsed):
                 with self.assertRaises(WorkerProtocolError):
                     response.validate_for(
-                        request, expected_worker_id="worker-1", elapsed_ms=elapsed
+                        request, expected_worker_id="worker-1", elapsed_ns=elapsed
                     )
         response.validate_for(
-            request, expected_worker_id="worker-1", elapsed_ms=10
+            request, expected_worker_id="worker-1", elapsed_ns=10_000_000
         )
         with self.assertRaises(WorkerProtocolError):
             response.validate_for(
-                request, expected_worker_id="worker-1", elapsed_ms=11
+                request, expected_worker_id="worker-1", elapsed_ns=10_000_001
             )
 
     def test_rejects_cycles_and_extreme_depth_without_recursion_error(self):
