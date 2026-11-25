@@ -216,6 +216,31 @@ class NativeSQLiteSessionParityTests(unittest.TestCase):
                 [{"role": item.role, "content": item.content} for item in TOOL_TURN],
             )
 
+    def test_multibyte_principal_identifier_uses_character_limits_in_both_runtimes(self):
+        principal = "🧪" * 100
+        with tempfile.TemporaryDirectory() as directory:
+            native_path = str(Path(directory) / "native.sqlite3")
+            native = self.invoke(
+                "create-principal", native_path, principal, encode_turn(TURN_ONE)
+            )
+            python_store = SQLiteSessionStore(native_path)
+            self.assertEqual(
+                python_store.get_for_principal(native["session_id"], principal).messages,
+                TURN_ONE,
+            )
+
+            python_path = str(Path(directory) / "python.sqlite3")
+            reverse_store = SQLiteSessionStore(python_path)
+            created = reverse_store.create_for_principal(principal)
+            reverse_store.commit_turn_messages(created.session_id, 0, TURN_ONE)
+            native_state = self.invoke(
+                "read-principal", python_path, created.session_id, principal
+            )
+            self.assertEqual(native_state["version"], 1)
+            self.assertEqual(native_state["messages"], [
+                {"role": item.role, "content": item.content} for item in TURN_ONE
+            ])
+
 
 if __name__ == "__main__":
     unittest.main()
