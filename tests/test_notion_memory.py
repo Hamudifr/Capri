@@ -390,6 +390,13 @@ class NotionMemoryAdapterTests(unittest.TestCase):
         with self.assertRaises(MemoryConflictError):
             self.store.correct(old.memory_id, content="Competing successor.")
 
+    def test_archived_review_replacement_is_not_mistaken_for_completed_activation(self):
+        old = self.create()
+        replacement = self.store.correct(old.memory_id, content="Replacement.")
+        self.store.archive(replacement.memory_id)
+        with self.assertRaises(MemoryConflictError):
+            self.store.correct(old.memory_id, content="Replacement.")
+
     def test_concurrent_corrections_from_separate_adapters_have_one_successor(self):
         from concurrent.futures import ThreadPoolExecutor
 
