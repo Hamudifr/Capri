@@ -16,7 +16,7 @@ Construct the journal only inside the trusted host process and inject:
 - `verify_result(principal_id, claim, result, result_sha256)`: independently verify the execution result and derive the outcome and bounded metrics. Return an exact `VerifiedExecutionResult` whose digest matches the supplied canonical result digest.
 - A host-held HMAC provider with a non-exported key. Do not expose the journal, key provider, credential, or callbacks through model-visible tools.
 
-The task claim is revalidated against the authoritative `SQLiteTaskStore` and principal ownership is checked before any event is persisted. The journal and `TaskEngine` must share the exact same `SQLiteTaskStore` object.
+The authenticated principal identifier uses the same 256-character bound as the host authority, session store, and principal-owned task APIs. The task claim is revalidated against the authoritative `SQLiteTaskStore` and principal ownership is checked before any event is persisted. The journal and `TaskEngine` must share the exact same `SQLiteTaskStore` object.
 
 ## Lifecycle
 
