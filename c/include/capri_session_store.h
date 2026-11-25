@@ -57,6 +57,15 @@ CapriSessionError capri_session_commit_turn(
     const char *turn_json, const char *lease_owner, CapriSession *out);
 CapriSessionError capri_session_close(
     CapriSessionStore *store, const char *session_id, CapriSession *out);
+CapriSessionError capri_session_claim_turn_lease(
+    CapriSessionStore *store, const char *session_id, const char *owner_token,
+    double lease_seconds);
+CapriSessionError capri_session_renew_turn_lease(
+    CapriSessionStore *store, const char *session_id, const char *owner_token,
+    double lease_seconds);
+CapriSessionError capri_session_release_turn_lease(
+    CapriSessionStore *store, const char *session_id, const char *owner_token,
+    int *released);
 
 /* Creates the session and immutable principal ownership in one transaction. */
 CapriSessionError capri_session_create_for_principal(
