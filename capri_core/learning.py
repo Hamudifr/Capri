@@ -829,6 +829,8 @@ class LearningStore:
                     raise LearningDataError(f"backup contains an invalid {label}")
                 if any(0xD800 <= ord(char) <= 0xDFFF for char in value):
                     raise LearningDataError(f"backup contains an invalid {label}")
+                if value and not Path(value).is_absolute():
+                    raise LearningDataError(f"backup contains a non-absolute {label}")
             if status == "active" and (not artifact_path or staging_path):
                 raise LearningDataError("active export has an incomplete publication record")
             if artifact_path and staging_path:
@@ -851,7 +853,8 @@ class LearningStore:
 
             if status in {"active", "publishing"}:
                 if (
-                    manifest.get("manifest_version") != 1
+                    type(manifest.get("manifest_version")) is not int
+                    or manifest.get("manifest_version") != 1
                     or manifest.get("export_id") != export_id
                     or manifest.get("created_at") != created_at
                 ):
@@ -892,6 +895,8 @@ class LearningStore:
                     or not re.fullmatch(r"[0-9a-f]{64}", manifest["dataset_sha256"])
                 ):
                     raise LearningDataError("backup ZIP manifest is incomplete")
+                if row_count > 0 and not consent_ids:
+                    raise LearningDataError("non-empty export has no consent dependencies")
                 manifest_ids = set(consent_ids)
                 manifest_versions = set(policy_versions)
             else:
