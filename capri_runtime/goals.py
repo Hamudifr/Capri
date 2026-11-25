@@ -41,7 +41,7 @@ class GoalIdempotencyConflict(GoalError):
 
 
 _GOAL_STATES = {
-    "accepted", "planning", "planned", "running", "paused",
+    "accepted", "planning", "planned", "running", "paused", "cancelling",
     "succeeded", "failed", "cancelled", "reconciliation_required",
 }
 _TRANSITIONS = {
@@ -50,7 +50,7 @@ _TRANSITIONS = {
     "planned": {"running", "paused", "cancelled"},
     "running": {"paused", "succeeded", "failed", "cancelled", "cancelling", "reconciliation_required"},
     "paused": {"planning", "planned", "running", "cancelled"},
-    "cancelling": {"cancelled", "reconciliation_required", "failed"},
+    "cancelling": {"cancelled", "reconciliation_required", "failed", "succeeded"},
     "reconciliation_required": {"running", "failed", "cancelled"},
     "succeeded": set(), "failed": set(), "cancelled": set(),
 }
@@ -712,7 +712,7 @@ class SQLiteGoalStore:
             _text(task_id, "goal task link task_id", 64)
             _text(principal_id, "goal task link principal_id", 128)
             _text(linked_at, "goal task link timestamp", 64)
-            _parse = datetime.fromisoformat(linked_at.replace("Z", "+00:00"))
+            _deadline(linked_at)
             if goal_id not in owners or owners[goal_id] != principal_id:
                 raise GoalValidationError("goal backup contains a mismatched task link owner")
         evidence_rows = connection.execute(
