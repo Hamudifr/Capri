@@ -24,4 +24,7 @@ jobs:
           lint: false
           use-mathlib-cache: false
           use-github-cache: false
+          axiom-audit: true
+          axiom-audit-root: PvNP
+          build-args: "--wfail"
           lake-package-directory: research/p_vs_np/formalization
