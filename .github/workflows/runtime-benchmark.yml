@@ -1,0 +1,78 @@
+name: Runtime performance baseline
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "benchmarks/runtime/**"
+      - "tests/test_runtime_benchmarks.py"
+      - "capri_runtime/goals.py"
+      - "capri_runtime/tasks.py"
+      - "capri_runtime/tools.py"
+      - "capri_runtime/orchestration.py"
+      - ".github/workflows/runtime-benchmark.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runtime-benchmark-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runtime-benchmark:
+    name: Offline runtime baseline (Python 3.13)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CAPRI_BENCHMARK_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      CAPRI_BENCHMARK_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+      CAPRI_BENCHMARK_HEAD_REF: ${{ github.head_ref || github.ref_name }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.13"
+      - name: Record benchmark environment
+        run: |
+          uname -a
+          lscpu
+          python --version
+          python -c "import sqlite3; print('SQLite', sqlite3.sqlite_version)"
+      - name: Run offline runtime benchmarks
+        run: |
+          python benchmarks/runtime/run.py --warmup 50 --samples 250 --output runtime-benchmark-results.json
+          cat runtime-benchmark-results.json
+          python - <<'PY'
+          import json
+          import os
+
+          with open("runtime-benchmark-results.json", encoding="utf-8") as source:
+              report = json.load(source)
+          lines = [
+              "## Capri runtime benchmark baseline",
+              "",
+              f"- Source commit: `{report['commit_sha']}`",
+              f"- Runner merge SHA: `{report['workflow_sha']}`",
+              f"- Python: {report['environment']['python_version']} ({report['environment']['python_implementation']})",
+              f"- SQLite: {report['environment']['sqlite_version']}",
+              f"- CPU: {report['environment']['cpu_model']} ({report['environment']['logical_cpu_count']} logical CPUs)",
+              f"- Warm-up: {report['configuration']['warmup_operations_per_workload']}; samples: {report['configuration']['measured_samples_per_workload']} per workload",
+              f"- Process peak RSS: {report['memory']['process_peak_rss_bytes']} bytes",
+              "",
+              "| Workload | Median µs | p95 µs | p99 µs | Operations/s |",
+              "|---|---:|---:|---:|---:|",
+          ]
+          for result in report["results"]:
+              latency = result["latency_us"]
+              lines.append(
+                  f"| {result['name']} | {latency['median']} | {latency['p95']} | "
+                  f"{latency['p99']} | {result['throughput_operations_per_second']} |"
+              )
+          lines.extend(["", "Raw per-sample timings are retained in the workflow log."])
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("\n".join(lines) + "\n")
+          PY
