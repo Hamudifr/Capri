@@ -16,7 +16,7 @@ from typing import Protocol
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from .domain_events import DomainEvent
+from .domain_events import DomainEvent, memory_event
 from .memory import (
     MemoryConflictError,
     MemoryErrorBase,
@@ -589,19 +589,15 @@ class NotionMemoryAdapter:
         Notion page snapshots are not a durable event log; status changes and actor
         attribution are intentionally not fabricated as historical events.
         """
-        events = []
-        for record in self._list_all():
-            data: tuple[tuple[str, str | int | None], ...] = (("derived_from", record.source),)
-            if record.supersedes_id is not None:
-                data += (("supersedes_id", record.supersedes_id),)
-            events.append(DomainEvent(
-                id=record.memory_id,
-                source=f"urn:capri:notion-memory:{record.memory_id}",
-                type="com.capri.memory.record_created",
-                subject=record.memory_id,
-                time=record.created_at,
-                data=data,
-            ))
+        events = tuple(memory_event(
+            event_id=record.memory_id,
+            memory_id=record.memory_id,
+            event_type="record_created",
+            timestamp=record.created_at,
+            supersedes_id=record.supersedes_id,
+            derived_from=record.source,
+            source_namespace="notion-memory",
+        ) for record in self._list_all())
         return tuple(sorted(events, key=lambda item: (item.time, item.source, item.id)))
 
     def archive(self, memory_id: str) -> MemoryRecord:
