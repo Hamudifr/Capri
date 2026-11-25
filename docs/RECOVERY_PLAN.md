@@ -45,7 +45,7 @@ This is a timestamped snapshot of the repository state observed before this docu
 - Draft PR #122: runtime architecture/lifecycle documentation reconciliation; docs-only. This branch is synchronized to current main; no exact-head CI.
 - Draft PR #124: principal-owned durable task execution and claim-tampering hardening; source/test readback verified, but the latest prior code-parent run failed with unavailable logs and the current head has no CI. It is 0 commits behind current main.
 - Keep all three PRs Draft/unmerged until their relevant exact-head validation is complete. The repository is now public, and standard GitHub-hosted `ubuntu-latest` CI is permitted for exact-head validation. Merge only after required checks pass, the exact diff is reviewed, and recovery is practical. Paid/larger runners remain approval-gated.
-- Branch-protection state is unknown through the current integration (403); rulesets require GitHub Pro or public visibility. Do not upgrade or expose the repository to enable protection.
+- Historical checkpoint: branch-protection state was not readable through the connected integration while the repository was private. The repository is now public, so public-repository branch protection/rulesets may be configured without upgrading. Current `main` metadata reports `protected=false`; this connector exposes no branch-protection write action, so no protection change is claimed here.
 
 ### Remaining work, ordered
 
