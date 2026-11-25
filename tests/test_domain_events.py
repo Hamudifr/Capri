@@ -58,6 +58,23 @@ class DomainEventTests(unittest.TestCase):
                 data=(("evidence_reference", "x" * 513),),
             )
 
+    def test_oversized_source_reference_is_represented_by_digest(self):
+        event = memory_event(
+            event_id="event-2", memory_id="memory-2", event_type="record_created",
+            timestamp="2026-11-25T08:00:00+00:00", derived_from="https://example.com/" + "x" * 600,
+        )
+        data = dict(event.data)
+        self.assertIn("evidence_digest", data)
+        self.assertNotIn("derived_from", data)
+
+    def test_event_type_rejects_unbounded_or_whitespace_names(self):
+        with self.assertRaises(DomainEventValidationError):
+            DomainEvent(
+                id="event-1", source="urn:capri:memory:memory-1",
+                type="com.capri.memory.created injected", subject="memory-1",
+                time="2026-11-25T08:00:00+00:00",
+            )
+
     def test_event_contract_rejects_naive_time_and_invalid_namespaces(self):
         with self.assertRaises(DomainEventValidationError):
             DomainEvent(
