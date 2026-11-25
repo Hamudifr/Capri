@@ -1432,5 +1432,32 @@ class CapriHostRuntimeTests(unittest.TestCase):
         self.assertIsNotNone(persisted)
         self.assertFalse(persisted.committed)
 
+
+    def test_worker_unreserved_load_resolver_legacy_alias_is_supported(self):
+        registry = InMemoryWorkerRegistry()
+        host = self.make_host(
+            task_store=self.task_store,
+            worker_registry=registry,
+            worker_identity_resolver=lambda credential: "worker-1",
+            worker_descriptor_resolver=self.approve_worker_descriptor,
+            worker_observer_authorizer=lambda credential, worker_id: True,
+            worker_in_flight_resolver=lambda worker_id: 7,
+            worker_policy_resolver=lambda *args: {"worker-1"},
+        )
+        self.assertEqual(host._worker_in_flight("worker-1"), 7)
+
+    def test_worker_unreserved_load_resolver_rejects_ambiguous_dual_configuration(self):
+        with self.assertRaisesRegex(HostRuntimeError, "legacy alias cannot be combined"):
+            self.make_host(
+                task_store=self.task_store,
+                worker_registry=InMemoryWorkerRegistry(),
+                worker_identity_resolver=lambda credential: "worker-1",
+                worker_descriptor_resolver=self.approve_worker_descriptor,
+                worker_observer_authorizer=lambda credential, worker_id: True,
+                worker_unreserved_in_flight_resolver=lambda worker_id: 0,
+                worker_in_flight_resolver=lambda worker_id: 0,
+                worker_policy_resolver=lambda *args: {"worker-1"},
+            )
+
 if __name__ == "__main__":
     unittest.main()
