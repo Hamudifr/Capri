@@ -597,16 +597,22 @@ class CapriHostRuntime:
         """Record liveness only from a trusted supervisor and host-derived load."""
         self._authorize_worker_observer(observer_credential, worker_id)
         with self._worker_reservation_lock:
-            # Sample host-observed load under the same lock as the registry
-            # update. Otherwise concurrent heartbeats can persist stale counts
-            # out of order and under-account active work.
-            in_flight = self._worker_in_flight(worker_id)
             self._purge_worker_reservation_contexts()
             self._begin_worker_audit_operation()
             try:
-                snapshot = self._worker_registry.heartbeat(
-                    worker_id, authenticated_worker_id=worker_id, in_flight=in_flight,
-                )
+                if isinstance(self._worker_registry, SQLiteWorkerRegistry):
+                    snapshot = self._worker_registry.heartbeat_with_load_resolver(
+                        worker_id,
+                        authenticated_worker_id=worker_id,
+                        in_flight_resolver=self._worker_in_flight,
+                    )
+                    in_flight = snapshot.health.in_flight
+                else:
+                    # In-memory registry updates are serialized by the host lock.
+                    in_flight = self._worker_in_flight(worker_id)
+                    snapshot = self._worker_registry.heartbeat(
+                        worker_id, authenticated_worker_id=worker_id, in_flight=in_flight,
+                    )
             except WorkerRegistryError:
                 self._finish_worker_audit_operation()
                 raise HostRuntimeError("worker heartbeat was rejected") from None
