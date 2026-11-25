@@ -1169,27 +1169,52 @@ class CapriHostRuntime:
                 return False
             if not self._same_host_reservation_context(stored, reservation):
                 raise HostRuntimeError("worker reservation belongs to another task")
+
             observed_in_flight = None
-            if stored.reservation.committed:
-                observed_in_flight = self._worker_in_flight(worker_id)
             self._begin_worker_audit_operation()
             try:
-                if stored.reservation.committed:
-                    released = self._worker_registry.release_reservation(
-                        stored.reservation,
-                        authenticated_worker_id=worker_id,
-                        observed_unreserved_in_flight=observed_in_flight,
+                if stored.reservation.committed and isinstance(self._worker_registry, SQLiteWorkerRegistry):
+                    observed = {}
+
+                    def resolve_in_flight(current_worker_id: str) -> int:
+                        value = self._worker_in_flight(current_worker_id)
+                        observed["value"] = value
+                        return value
+
+                    released, expired = self._run_worker_registry_operation(
+                        lambda: self._worker_registry.release_reservation_with_load_resolver(
+                            stored.reservation,
+                            authenticated_worker_id=worker_id,
+                            in_flight_resolver=resolve_in_flight,
+                        )
+                    )
+                    observed_in_flight = observed.get("value")
+                elif stored.reservation.committed:
+                    observed_in_flight = self._worker_in_flight(worker_id)
+                    released, expired = self._run_worker_registry_operation(
+                        lambda: self._worker_registry.release_reservation(
+                            stored.reservation,
+                            authenticated_worker_id=worker_id,
+                            observed_unreserved_in_flight=observed_in_flight,
+                        )
                     )
                 else:
-                    released = self._worker_registry.release_reservation(
-                        stored.reservation, authenticated_worker_id=worker_id,
+                    released, expired = self._run_worker_registry_operation(
+                        lambda: self._worker_registry.release_reservation(
+                            stored.reservation, authenticated_worker_id=worker_id,
+                        )
                     )
+            except HostRuntimeError:
+                self._finish_worker_audit_operation()
+                raise
             except WorkerRegistryError:
                 self._finish_worker_audit_operation()
                 raise HostRuntimeError("worker reservation release was rejected") from None
             except Exception:
                 self._worker_audit_healthy = False
                 raise HostRuntimeError("worker reservation release failed; reconciliation is required") from None
+
+            self._record_expired_worker_reservations(expired)
             self._worker_reservation_contexts.pop(stored.reservation.token, None)
             self._record_worker_lifecycle_event(
                 "worker.reservation.released",
