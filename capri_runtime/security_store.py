@@ -59,7 +59,7 @@ def _validate_backup_semantics(connection: sqlite3.Connection) -> None:
         resource_type, resource_id, task_id, metadata_json,
     ) in audit_rows:
         if not all((
-            _valid_text(event_id, 64), _valid_text(timestamp),
+            _valid_text(event_id, 64), _valid_text(timestamp, 64),
             _valid_text(principal_id, 256), _valid_text(tool_name, 64),
             _valid_text(status, 64),
             isinstance(digest, str) and _DIGEST_RE.fullmatch(digest),
