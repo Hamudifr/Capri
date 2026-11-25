@@ -583,12 +583,17 @@ class NotionMemoryAdapter:
                     replacement.memory_id,
                 ) from exc
 
-    def domain_events(self) -> tuple[DomainEvent, ...]:
+    def domain_events(self, memory_id: str | None = None) -> tuple[DomainEvent, ...]:
         """Project immutable record identity and supersession links from Notion pages.
 
         Notion page snapshots are not a durable event log; status changes and actor
         attribution are intentionally not fabricated as historical events.
         """
+        if memory_id is not None:
+            _validate_memory_id(memory_id)
+        records = self._list_all()
+        if memory_id is not None:
+            records = tuple(record for record in records if record.memory_id == memory_id)
         events = tuple(memory_event(
             event_id=record.memory_id,
             memory_id=record.memory_id,
@@ -597,7 +602,7 @@ class NotionMemoryAdapter:
             supersedes_id=record.supersedes_id,
             derived_from=record.source,
             source_namespace="notion-memory",
-        ) for record in self._list_all())
+        ) for record in records)
         return project_domain_events(events)
 
     def archive(self, memory_id: str) -> MemoryRecord:
