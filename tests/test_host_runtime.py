@@ -1343,10 +1343,12 @@ class CapriHostRuntimeTests(unittest.TestCase):
             "alice-token", task.task_id, "math.factorial", 1,
         )
         self.assertIsNotNone(pending)
-        self.assertEqual(
-            registry.get_reservation_for_task("alice", task.task_id),
-            pending.reservation,
-        )
+        recovered_pending = registry.get_reservation_for_task("alice", task.task_id)
+        self.assertEqual(recovered_pending.token, pending.reservation.token)
+        self.assertEqual(recovered_pending.worker_id, pending.reservation.worker_id)
+        self.assertEqual(recovered_pending.principal_id, "alice")
+        self.assertEqual(recovered_pending.task_id, task.task_id)
+        self.assertFalse(recovered_pending.committed)
 
         # A restart requires explicit reconciliation of the independent lifecycle sink.
         self.assertTrue(audit.worker_lifecycle_reconciliation_required())
@@ -1362,10 +1364,12 @@ class CapriHostRuntimeTests(unittest.TestCase):
             "alice-token", "monitor-token", pending,
         )
         self.assertTrue(committed.reservation.committed)
-        self.assertEqual(
-            reopened_registry.get_reservation_for_task("alice", task.task_id),
-            committed.reservation,
-        )
+        recovered_committed = reopened_registry.get_reservation_for_task("alice", task.task_id)
+        self.assertEqual(recovered_committed.token, committed.reservation.token)
+        self.assertEqual(recovered_committed.worker_id, committed.reservation.worker_id)
+        self.assertEqual(recovered_committed.principal_id, "alice")
+        self.assertEqual(recovered_committed.task_id, task.task_id)
+        self.assertTrue(recovered_committed.committed)
         self.assertTrue(reopened_host.release_worker_reservation(
             "monitor-token", committed,
         ))
