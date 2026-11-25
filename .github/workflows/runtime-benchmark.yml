@@ -74,5 +74,5 @@ jobs:
               )
           lines.extend(["", "Raw per-sample timings are retained in the workflow log."])
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
-              summary.write("\\n".join(lines) + "\\n")
+              summary.write("\n".join(lines) + "\n")
           PY
