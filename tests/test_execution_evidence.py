@@ -81,6 +81,7 @@ class SQLiteExecutionEvidenceJournalTests(unittest.TestCase):
             {self.claim.task_id: "research"},
         ))
         self.assertEqual(self.journal.integrity_check(), "ok")
+        self.assertEqual(self.tasks.integrity_check(), "ok")
 
     def test_execution_record_is_idempotent_for_same_claim_and_result(self):
         first = self.journal.record_execution("host-credential", self.claim, self.result)
@@ -146,6 +147,7 @@ class SQLiteExecutionEvidenceJournalTests(unittest.TestCase):
             {self.claim.task_id: "research"},
         ))
         self.assertNotEqual(self.journal.integrity_check(), "ok")
+        self.assertEqual(self.tasks.integrity_check(), "task store validation failed")
 
     def test_observation_cannot_be_rebound_to_another_strategy(self):
         reference = self.journal.record_execution("host-credential", self.claim, self.result)
