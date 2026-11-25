@@ -133,6 +133,20 @@ class HostStrategyApprovalAuthorityTests(unittest.TestCase):
         self.assertEqual(newer.signature.split(":", 1)[0], "k2")
         self.assertTrue(authority.verify(newer))
 
+    def test_promotion_assessment_fingerprint_is_signed(self):
+        assessment_hash = "a" * 64
+        request = replace(self.request, promotion_assessment_sha256=assessment_hash)
+        grant = self.authority.issue_grant("valid", request)
+        self.assertEqual(grant.promotion_assessment_sha256, assessment_hash)
+        self.assertTrue(self.authority.verify(grant))
+        self.assertFalse(self.authority.verify(
+            replace(grant, promotion_assessment_sha256="b" * 64)
+        ))
+        with self.assertRaises(StrategyAuthorizationError):
+            self.authority.issue_grant(
+                "valid", replace(self.request, promotion_assessment_sha256="not-a-hash")
+            )
+
     def test_oversized_or_malformed_grants_fail_closed(self):
         grant = self.authority.issue_grant("valid", self.request)
         self.assertFalse(self.authority.verify(replace(grant, signature="x" * 2049)))
