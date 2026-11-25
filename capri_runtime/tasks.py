@@ -522,8 +522,7 @@ class SQLiteTaskStore:
     def request_cancel_for_principal(
         self, task_id: str, principal_id: str, now: datetime | None = None
     ) -> TaskRecord:
-        self._assert_principal_owner(task_id, principal_id)
-        return self.request_cancel(task_id, now=now)
+        return self._request_cancel(task_id, now, principal_id=principal_id)
 
     def events_for_principal(
         self, task_id: str, principal_id: str
@@ -611,20 +610,40 @@ class SQLiteTaskStore:
                 connection.close()
 
     def request_cancel(self, task_id: str, now: datetime | None = None) -> TaskRecord:
+        return self._request_cancel(task_id, now, principal_id=None)
+
+    def _request_cancel(
+        self, task_id: str, now: datetime | None, *, principal_id: str | None
+    ) -> TaskRecord:
+        _text(task_id, "task_id", 64)
+        if principal_id is not None:
+            principal_id = _text(principal_id, "principal_id", 128)
         stamp = _iso(now or _now())
+        columns = """tasks.task_id,tasks.idempotency_key,tasks.state,
+            tasks.created_at,tasks.updated_at,tasks.current_step,tasks.attempts,
+            tasks.available_at,tasks.cancel_requested,tasks.results_json,tasks.error_code"""
         with self._lock:
             connection = self._connect()
             try:
                 connection.execute("BEGIN IMMEDIATE")
-                row = connection.execute(
-                    "SELECT state FROM tasks WHERE task_id=?", (task_id,)
-                ).fetchone()
-                if not row:
+                if principal_id is None:
+                    row = connection.execute(
+                        f"SELECT {columns} FROM tasks WHERE tasks.task_id=?",
+                        (task_id,),
+                    ).fetchone()
+                else:
+                    row = connection.execute(
+                        f"""SELECT {columns} FROM tasks
+                        JOIN task_owners ON task_owners.task_id=tasks.task_id
+                        WHERE tasks.task_id=? AND task_owners.principal_id=?""",
+                        (task_id, principal_id),
+                    ).fetchone()
+                if row is None:
                     raise TaskNotFoundError("task does not exist")
-                state = row[0]
+                state = row[2]
                 if state in {"succeeded", "failed", "cancelled"}:
                     connection.execute("COMMIT")
-                    return self.get(task_id)
+                    return self._record(row)
                 if state in {"queued", "blocked", "budget_wait", "retry_wait"}:
                     connection.execute(
                         "UPDATE tasks SET state='cancelled',cancel_requested=1,updated_at=?,lease_owner=NULL,lease_until=NULL WHERE task_id=?",
@@ -647,8 +666,14 @@ class SQLiteTaskStore:
                     "INSERT INTO task_events(task_id,timestamp,state,step_index,attempt) SELECT task_id,?, ?,current_step,attempts FROM tasks WHERE task_id=?",
                     (stamp, new_state, task_id),
                 )
+                updated = connection.execute(
+                    f"SELECT {columns} FROM tasks WHERE tasks.task_id=?",
+                    (task_id,),
+                ).fetchone()
+                if updated is None:
+                    raise TaskNotFoundError("task does not exist")
                 connection.execute("COMMIT")
-                return self.get(task_id)
+                return self._record(updated)
             except Exception:
                 try:
                     connection.execute("ROLLBACK")
