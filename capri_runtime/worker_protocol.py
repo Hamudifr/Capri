@@ -266,6 +266,8 @@ class WorkerResponse:
             raise WorkerProtocolError("response request_id does not match the request")
         if self.worker_id != expected_worker_id:
             raise WorkerProtocolError("response worker_id does not match the selected worker")
+        if self.duration_ms > request.deadline_ms:
+            raise WorkerProtocolError("worker-reported duration exceeds the request deadline")
         if elapsed_ns > request.deadline_ms * 1_000_000:
             raise WorkerProtocolError("host-measured response time exceeds the request deadline")
 
