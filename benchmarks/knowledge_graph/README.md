@@ -21,8 +21,8 @@ Both report macro-averaged MRR@5, nDCG@5, and Recall@5 over relevant neuron IDs.
 - **MRR@5:** reciprocal rank of the first relevant neuron, zero when none appears in the first five.
 - **nDCG@5:** binary-relevance discounted gain normalized by the ideal ordering of the labelled relevant set.
 - **Recall@5:** fraction of labelled relevant neuron IDs present in the first five.
-- **Edge recall:** fraction of the query's explicitly labelled relevant synapses selected into the graph context.
-- **Contradiction preservation:** fraction of queries whose explicitly required active contradiction edges are retained, including the superseded claim endpoint.
+- **Edge recall:** fraction of a query's explicitly labelled relevant synapses selected into the graph context. The aggregate is macro-averaged only over queries with edge labels; unlabelled queries are not counted as perfect scores. The report includes the applicable query count.
+- **Contradiction preservation:** fraction of queries with explicitly required active contradiction edges that retain all those edges, including the superseded claim endpoint. The aggregate excludes queries without contradiction labels and reports its applicable query count. Per-query values are null when not applicable.
 
 ## Dataset scope
 
@@ -32,6 +32,6 @@ All records are synthetic, use reserved example.org source URLs, and contain no 
 
 ## Decision policy
 
-No MRR/nDCG/Recall release threshold is set from this small fixture. The hard regression assertions are deterministic output, labelled edge retrieval, and preservation of the explicitly labelled contradiction. Treat the ranking metrics as descriptive until a larger, independently reviewed, representative and non-sensitive query set exists.
+No MRR/nDCG/Recall release threshold is set from this small fixture. The benchmark CLI exits unsuccessfully unless output is deterministic, macro edge recall over labelled queries is 1.0, and all explicitly labelled contradiction edges are preserved. The dataset must contain at least one labelled edge query and one labelled contradiction query, preventing vacuous success. These checks are regression guards, not a production release gate. Treat the ranking metrics as descriptive until a larger, independently reviewed, representative and non-sensitive query set exists.
 
 Do not infer that embeddings are required or unnecessary from this fixture. Add a broader graph corpus and compare lexical, hybrid, and embedding approaches under the same labels before making that decision.

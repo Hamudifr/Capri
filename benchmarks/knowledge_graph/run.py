@@ -49,6 +49,13 @@ def _mean(rows: list[dict[str, float]], key: str) -> float:
     return round(sum(row[key] for row in rows) / len(rows), 6) if rows else 0.0
 
 
+def _regression_gates_pass(
+    *, deterministic: bool, edge_recall: float | None,
+    contradiction_preservation_rate: float | None,
+) -> bool:
+    return deterministic and edge_recall == 1.0 and contradiction_preservation_rate == 1.0
+
+
 def _load_graph(dataset: dict[str, Any]) -> InMemoryKnowledgeGraphProvider:
     neurons = tuple(GraphNeuron(
         neuron_id=item["id"],
@@ -84,6 +91,10 @@ def evaluate() -> dict[str, Any]:
         raise ValueError("unsupported graph benchmark dataset format")
     if not dataset.get("queries") or not dataset.get("neurons"):
         raise ValueError("graph benchmark dataset must contain neurons and queries")
+    if not any(case.get("relevant_edges") for case in dataset["queries"]):
+        raise ValueError("graph benchmark dataset must label at least one relevant edge")
+    if not any(case.get("required_contradiction_edges") for case in dataset["queries"]):
+        raise ValueError("graph benchmark dataset must label at least one required contradiction edge")
 
     provider = _load_graph(dataset)
     seed_rows: list[dict[str, float]] = []
@@ -125,15 +136,17 @@ def evaluate() -> dict[str, Any]:
         truncated_count += int(context.truncated)
         seed_rows.append(seed_metrics)
         context_rows.append(context_metrics)
-        edge_recalls.append(edge_recall)
-        contradiction_checks.append(preserved)
+        if relevant_edges:
+            edge_recalls.append(edge_recall)
+        if required_contradictions:
+            contradiction_checks.append(preserved)
         query_results.append({
             "id": case["id"],
             "query": query,
             "seed_metrics": seed_metrics,
             "context_metrics": context_metrics,
-            "edge_recall": round(edge_recall, 6),
-            "required_contradictions_preserved": preserved,
+            "edge_recall": round(edge_recall, 6) if relevant_edges else None,
+            "required_contradictions_preserved": preserved if required_contradictions else None,
             "seed_order": seed_ids,
             "context_order": context_ids,
             "selected_edges": sorted(edge_ids),
@@ -152,9 +165,17 @@ def evaluate() -> dict[str, Any]:
         key: _mean(context_rows, key)
         for key in ("mrr_at_5", "ndcg_at_5", "recall_at_5")
     }
+    edge_recall_rate = (
+        round(sum(edge_recalls) / len(edge_recalls), 6) if edge_recalls else None
+    )
     contradiction_rate = (
         round(sum(contradiction_checks) / len(contradiction_checks), 6)
-        if contradiction_checks else 1.0
+        if contradiction_checks else None
+    )
+    passed = _regression_gates_pass(
+        deterministic=deterministic,
+        edge_recall=edge_recall_rate,
+        contradiction_preservation_rate=contradiction_rate,
     )
     return {
         "dataset_sha256": hashlib.sha256(raw).hexdigest(),
@@ -165,11 +186,13 @@ def evaluate() -> dict[str, Any]:
         "query_count": count,
         "seed_ranking_at_5": seed_aggregate,
         "full_context_ranking_at_5": context_aggregate,
-        "edge_recall": round(sum(edge_recalls) / len(edge_recalls), 6) if edge_recalls else 1.0,
+        "edge_recall": edge_recall_rate,
+        "edge_query_count": len(edge_recalls),
         "contradiction_preservation_rate": contradiction_rate,
+        "contradiction_query_count": len(contradiction_checks),
         "truncation_rate": round(truncated_count / count, 6) if count else 0.0,
         "deterministic": deterministic,
-        "passed": deterministic and contradiction_rate == 1.0,
+        "passed": passed,
         "release_gate": False,
         "queries": query_results,
     }
