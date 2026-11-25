@@ -19,7 +19,7 @@ from uuid import uuid4
 from capri_core.validation import contains_surrogate
 
 from .sqlite_backup import backup_sqlite_database
-from .domain_events import DomainEvent, memory_event
+from .domain_events import DomainEvent, memory_event, project_domain_events
 
 class MemoryErrorBase(Exception):
     """Base class for expected memory failures."""
@@ -708,12 +708,12 @@ class SQLiteMemoryStore:
                         WHERE e.memory_id=? ORDER BY e.rowid""",
                         (memory_id,),
                     ).fetchall()
-                return tuple(memory_event(
+                return project_domain_events(tuple(memory_event(
                     event_id=row["event_id"], memory_id=row["memory_id"],
                     event_type=row["event_type"], timestamp=row["occurred_at"],
                     supersedes_id=row["supersedes_id"], status=row["status"],
                     derived_from=row["source"],
-                ) for row in rows)
+                ) for row in rows))
             finally:
                 db.close()
 
