@@ -701,7 +701,7 @@ class SQLiteStrategyStore:
                     eligible != 1 or evidence_verified != 1
                     or cohort_hash != grant.evaluation_sha256 or evaluation_id is None
                 ):
-                    raise StrategyAuthorizationError("candidate is not bound to an eligible evaluation fingerprint")
+                    raise StrategyAuthorizationError("candidate is not bound to an eligible, evidence-verified evaluation fingerprint")
 
                 if required_action == "rollback":
                     previous_activation = connection.execute(

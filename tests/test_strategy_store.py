@@ -455,6 +455,14 @@ class SQLiteStrategyStoreTests(unittest.TestCase):
         self.assertEqual(context.cohort_schema, self.evaluation.cohort_schema)
         self.assertEqual(context.evidence_manifest_ref, "test://manifests/dana-cohort")
         self.assertEqual(context.matched_pairs, self.evaluation.matched_pairs)
+        connection = self.task_store._connect()
+        try:
+            verified_row = connection.execute(
+                "SELECT evidence_verified FROM strategy_evaluations WHERE principal_id='dana'"
+            ).fetchone()
+        finally:
+            connection.close()
+        self.assertEqual(verified_row, (1,))
         with self.assertRaises((AttributeError, TypeError)):
             context.cohort_sha256 = "0" * 64
 
