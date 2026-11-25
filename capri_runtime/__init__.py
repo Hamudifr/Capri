@@ -1,4 +1,4 @@
-"""Provider-neutral non-X5 runtime and permissioned tool boundary."""
+"""Provider-neutral Capri runtime and permissioned tool boundary."""
 
 from .budgets import (
     BudgetError, BudgetExceededError, BudgetPolicy, BudgetReservation,
