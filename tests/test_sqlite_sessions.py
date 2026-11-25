@@ -724,6 +724,34 @@ class SQLiteSessionStoreTests(unittest.TestCase):
         finally:
             connection.close()
 
+    def test_reopen_accepts_legacy_unversioned_python_session_schema(self):
+        session = self.store.create_for_principal("principal-legacy")
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute("PRAGMA foreign_keys=OFF")
+            connection.executescript(
+                "DROP INDEX sessions_updated_at;"
+                "CREATE TABLE sessions_new ("
+                "session_id TEXT PRIMARY KEY, created_at TEXT NOT NULL, "
+                "updated_at TEXT NOT NULL, version INTEGER NOT NULL, "
+                "closed INTEGER NOT NULL CHECK(closed IN (0, 1)), "
+                "messages_json TEXT NOT NULL);"
+                "INSERT INTO sessions_new SELECT * FROM sessions;"
+                "DROP TABLE sessions;"
+                "ALTER TABLE sessions_new RENAME TO sessions;"
+                "CREATE INDEX sessions_updated_at ON sessions(updated_at);"
+                "PRAGMA user_version=0;"
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        reopened = SQLiteSessionStore(self.path)
+        self.assertEqual(
+            reopened.get_for_principal(session.session_id, "principal-legacy"),
+            session,
+        )
+
     def test_reopen_rejects_missing_ownership_table_without_recreating_it(self):
         session = self.store.create_for_principal("principal-owner")
         connection = sqlite3.connect(self.path)
