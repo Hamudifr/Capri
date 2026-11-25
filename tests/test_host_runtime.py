@@ -1343,6 +1343,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
             "alice-token", task.task_id, "math.factorial", 1,
         )
         self.assertIsNotNone(pending)
+        self.assertEqual(host.storage_health()["worker_registry"], "healthy")
         recovered_pending = registry.get_reservation_for_task("alice", task.task_id)
         self.assertEqual(recovered_pending.token, pending.reservation.token)
         self.assertEqual(recovered_pending.worker_id, pending.reservation.worker_id)
@@ -1458,6 +1459,14 @@ class CapriHostRuntimeTests(unittest.TestCase):
                 worker_in_flight_resolver=lambda worker_id: 0,
                 worker_policy_resolver=lambda *args: {"worker-1"},
             )
+
+
+    def test_storage_health_distinguishes_ephemeral_worker_registry(self):
+        host = self.make_worker_host(
+            InMemoryWorkerRegistry(), {"worker-token": "worker-1"},
+            lambda *args: {"worker-1"},
+        )
+        self.assertEqual(host.storage_health()["worker_registry"], "ephemeral")
 
 if __name__ == "__main__":
     unittest.main()
