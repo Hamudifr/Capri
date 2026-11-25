@@ -141,6 +141,8 @@ class GoalRecord:
     created_at: str
     updated_at: str
     plan: tuple[dict[str, Any], ...] = ()
+    task_id: str | None = None
+    evidence: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -281,6 +283,22 @@ class SQLiteGoalStore:
                     goal_id TEXT PRIMARY KEY REFERENCES goals(goal_id) ON DELETE RESTRICT,
                     principal_id TEXT NOT NULL
                 )""")
+                connection.execute("""CREATE TABLE IF NOT EXISTS goal_task_links (
+                    goal_id TEXT PRIMARY KEY REFERENCES goals(goal_id) ON DELETE RESTRICT,
+                    task_id TEXT NOT NULL UNIQUE,
+                    principal_id TEXT NOT NULL,
+                    linked_at TEXT NOT NULL
+                )""")
+                connection.execute("""CREATE TABLE IF NOT EXISTS goal_evidence (
+                    evidence_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    goal_id TEXT NOT NULL REFERENCES goals(goal_id) ON DELETE RESTRICT,
+                    principal_id TEXT NOT NULL,
+                    evidence_type TEXT NOT NULL,
+                    reference TEXT NOT NULL,
+                    step_index INTEGER NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(goal_id,evidence_type,reference,step_index)
+                )""")
                 connection.execute("""CREATE TABLE IF NOT EXISTS goal_events (
                     event_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     goal_id TEXT NOT NULL REFERENCES goals(goal_id),
@@ -289,6 +307,16 @@ class SQLiteGoalStore:
                     version INTEGER NOT NULL,
                     event_type TEXT NOT NULL
                 )""")
+                connection.execute("""CREATE TRIGGER IF NOT EXISTS goal_task_link_immutable_update
+                    BEFORE UPDATE ON goal_task_links
+                    BEGIN SELECT RAISE(ABORT, 'goal task links are immutable'); END""")
+                connection.execute("""CREATE TRIGGER IF NOT EXISTS goal_task_link_immutable_delete
+                    BEFORE DELETE ON goal_task_links
+                    BEGIN SELECT RAISE(ABORT, 'goal task links are immutable'); END""")
+                connection.execute("""CREATE TRIGGER IF NOT EXISTS goal_task_link_immutable_insert
+                    BEFORE INSERT ON goal_task_links
+                    WHEN EXISTS (SELECT 1 FROM goal_task_links WHERE goal_id=NEW.goal_id OR task_id=NEW.task_id)
+                    BEGIN SELECT RAISE(ABORT, 'goal task links are immutable'); END""")
                 connection.execute("""CREATE TRIGGER IF NOT EXISTS goal_owner_immutable_update
                     BEFORE UPDATE ON goal_owners
                     BEGIN SELECT RAISE(ABORT, 'goal ownership is immutable'); END""")
@@ -304,7 +332,10 @@ class SQLiteGoalStore:
                 connection.close()
 
     @staticmethod
-    def _record(row: tuple[Any, ...], principal_id: str) -> GoalRecord:
+    def _record(
+        row: tuple[Any, ...], principal_id: str, task_id: str | None = None,
+        evidence: tuple[dict[str, Any], ...] = (),
+    ) -> GoalRecord:
         try:
             constraints = json.loads(row[2])
             criteria = json.loads(row[4])
@@ -323,7 +354,7 @@ class SQLiteGoalStore:
             raise GoalValidationError("persisted goal record is corrupt") from None
         return GoalRecord(
             row[0], principal_id, row[1], constraints, row[3], checked_criteria,
-            row[5], row[6], row[7], row[8], tuple(plan),
+            row[5], row[6], row[7], row[8], tuple(plan), task_id, evidence,
         )
 
     def create_for_principal(
@@ -400,8 +431,9 @@ class SQLiteGoalStore:
         try:
             row = connection.execute(
                 """SELECT g.goal_id,g.outcome,g.constraints_json,g.deadline,g.criteria_json,
-                g.state,g.version,g.created_at,g.updated_at,g.plan_json,o.principal_id
+                g.state,g.version,g.created_at,g.updated_at,g.plan_json,o.principal_id,l.task_id
                 FROM goals g JOIN goal_owners o ON o.goal_id=g.goal_id
+                LEFT JOIN goal_task_links l ON l.goal_id=g.goal_id
                 WHERE g.goal_id=? AND o.principal_id=?""",
                 (goal_id, principal_id),
             ).fetchone()
@@ -414,7 +446,8 @@ class SQLiteGoalStore:
     def get_for_principal(self, goal_id: str, principal_id: str) -> GoalRecord:
         with self._lock:
             row = self._owned_row(goal_id, principal_id)
-            return self._record(row[:10], row[10])
+            evidence = self._evidence_rows(goal_id, principal_id)
+            return self._record(row[:10], row[10], row[11], evidence)
 
     def save_plan_for_principal(
         self, goal_id: str, principal_id: str, proposal: GoalPlanProposal,
@@ -506,6 +539,132 @@ class SQLiteGoalStore:
                 connection.close()
         return self.get_for_principal(goal_id, principal_id)
 
+
+    def _evidence_rows(
+        self, goal_id: str, principal_id: str
+    ) -> tuple[dict[str, Any], ...]:
+        connection = self._connect()
+        try:
+            rows = connection.execute(
+                """SELECT evidence_type,reference,step_index,created_at
+                FROM goal_evidence WHERE goal_id=? AND principal_id=?
+                ORDER BY evidence_id""",
+                (goal_id, principal_id),
+            ).fetchall()
+            return tuple({
+                "evidence_type": row[0], "reference": row[1],
+                "step_index": row[2], "created_at": row[3],
+            } for row in rows)
+        finally:
+            connection.close()
+
+    def link_task_for_principal(
+        self, goal_id: str, principal_id: str, task_id: str, *,
+        expected_version: int, now: datetime | None = None,
+    ) -> GoalRecord:
+        _text(goal_id, "goal_id", 64)
+        principal_id = _text(principal_id, "principal_id", 128)
+        task_id = _text(task_id, "task_id", 64)
+        if type(expected_version) is not int or expected_version < 1:
+            raise GoalValidationError("expected_version must be a positive integer")
+        stamp = _stamp(now)
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    """SELECT g.state,g.version,l.task_id FROM goals g
+                    JOIN goal_owners o ON o.goal_id=g.goal_id
+                    LEFT JOIN goal_task_links l ON l.goal_id=g.goal_id
+                    WHERE g.goal_id=? AND o.principal_id=?""",
+                    (goal_id, principal_id),
+                ).fetchone()
+                if row is None:
+                    raise GoalNotFoundError("goal does not exist")
+                if row[2] is not None:
+                    if row[2] != task_id:
+                        raise GoalConflictError("goal is already linked to another task")
+                    connection.execute("COMMIT")
+                    return self.get_for_principal(goal_id, principal_id)
+                if row[1] != expected_version:
+                    raise GoalConflictError("goal version changed")
+                if row[0] != "planned":
+                    raise GoalConflictError("only a planned goal can be linked to a task")
+                connection.execute(
+                    "INSERT INTO goal_task_links(goal_id,task_id,principal_id,linked_at) VALUES(?,?,?,?)",
+                    (goal_id, task_id, principal_id, stamp),
+                )
+                connection.execute(
+                    "UPDATE goals SET state='running',version=version+1,updated_at=? WHERE goal_id=? AND version=?",
+                    (stamp, goal_id, expected_version),
+                )
+                connection.execute(
+                    "INSERT INTO goal_events(goal_id,timestamp,state,version,event_type) VALUES(?,?,'running',?,'task_linked')",
+                    (goal_id, stamp, expected_version + 1),
+                )
+                connection.execute("COMMIT")
+            except Exception:
+                try:
+                    connection.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+                raise
+            finally:
+                connection.close()
+        return self.get_for_principal(goal_id, principal_id)
+
+    def record_evidence_for_principal(
+        self, goal_id: str, principal_id: str, evidence_type: str,
+        reference: str, step_index: int, *, now: datetime | None = None,
+    ) -> GoalRecord:
+        _text(evidence_type, "evidence_type", 64)
+        _text(reference, "evidence reference", 512)
+        if type(step_index) is not int or not 0 <= step_index < 32:
+            raise GoalValidationError("evidence step_index must be between 0 and 31")
+        stamp = _stamp(now)
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    """SELECT g.state FROM goals g JOIN goal_owners o ON o.goal_id=g.goal_id
+                    JOIN goal_task_links l ON l.goal_id=g.goal_id
+                    WHERE g.goal_id=? AND o.principal_id=? AND l.principal_id=?""",
+                    (goal_id, principal_id, principal_id),
+                ).fetchone()
+                if row is None:
+                    raise GoalNotFoundError("goal does not exist")
+                if row[0] not in {"running", "succeeded"}:
+                    raise GoalConflictError("goal is not accepting task evidence")
+                inserted = connection.execute(
+                    """INSERT OR IGNORE INTO goal_evidence(
+                    goal_id,principal_id,evidence_type,reference,step_index,created_at
+                    ) VALUES(?,?,?,?,?,?)""",
+                    (goal_id, principal_id, evidence_type, reference, step_index, stamp),
+                ).rowcount
+                if inserted:
+                    connection.execute(
+                        "INSERT INTO goal_events(goal_id,timestamp,state,version,event_type) SELECT goal_id,updated_at,state,version,'evidence_recorded' FROM goals WHERE goal_id=?",
+                        (goal_id,),
+                    )
+                connection.execute("COMMIT")
+            except Exception:
+                try:
+                    connection.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+                raise
+            finally:
+                connection.close()
+        return self.get_for_principal(goal_id, principal_id)
+
+    def evidence_for_principal(
+        self, goal_id: str, principal_id: str
+    ) -> tuple[dict[str, Any], ...]:
+        with self._lock:
+            self._owned_row(goal_id, principal_id)
+            return self._evidence_rows(goal_id, principal_id)
+
     def events_for_principal(
         self, goal_id: str, principal_id: str
     ) -> tuple[dict[str, Any], ...]:
@@ -544,7 +703,7 @@ class SQLiteGoalStore:
         for state, version, event_type in event_rows:
             if state not in _GOAL_STATES or type(version) is not int or version < 1:
                 raise GoalValidationError("goal backup contains an invalid event")
-            if event_type not in {"created", "plan_saved", "transition"}:
+            if event_type not in {"created", "plan_saved", "transition", "task_linked", "evidence_recorded"}:
                 raise GoalValidationError("goal backup contains an invalid event type")
 
     def backup_to(self, destination_path: str) -> str:
