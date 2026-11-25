@@ -2,7 +2,7 @@
 
 **Purpose:** test whether each packaged skill or remote tool improves task outcomes, and distinguish static packaging from actual runtime capability.
 
-**Current target:** Capri Engineering Lab v0.6.1 — 13 skills, 4 configured remote MCP servers.
+**Current target:** Capri Engineering Lab v0.7.3 — 15 packaged skill files, 4 configured remote MCP servers. The fixed suite remains 13 cases; two packaged skills are not individually covered.
 
 ## Evaluation layers
 
@@ -76,7 +76,7 @@ A skill is **provisionally useful** if it improves the aggregate score by at lea
 ## Release gate
 
 - [ ] Manifest and ZIP parse successfully.
-- [ ] All thirteen skill frontmatters are unique and all referenced files exist.
+- [ ] All fifteen packaged skill frontmatters are unique and all referenced files exist.
 - [ ] All four endpoint URLs and transports are present in plugin source.
 - [ ] License, maintainer, authentication, privacy, and data-flow review exists for each remote service.
 - [ ] ChatGPT-side initialize/tools/list succeeds for each endpoint.
@@ -91,7 +91,28 @@ A skill is **provisionally useful** if it improves the aggregate score by at lea
 - The saved `plugin.json` declares v0.6.1; the saved README lists 13 skills; the root `mcp.json` contains four Streamable HTTP server entries (calculator, Noodle, Scholar Sidekick, arXiv).
 - This verifies the saved plugin source and configured package only. ChatGPT runtime activation of this release and all four MCP handshakes/tool calls are **not verified** by source readback.
 - The 13 fixed skill cases above remain unchanged. Paired no-skill versus skill-enabled behavioral runs: **NOT RUN**. This runtime cannot reliably disable the plugin skills or guarantee a no-skill control, and actual plugin activation is not directly observable here. A non-comparable run would not measure the skill effect; no scores or pass/fail results are fabricated.
-- Next: run the existing 13 cases in a controlled host that can pin the model/prompt, toggle this exact release, capture raw outputs/tool traces, and repeat stochastic cases at least three times.
+- Next: run the existing 13 cases in a controlled host that can pin the model/prompt, toggle this exact release, capture raw outputs/tool traces, and repeat stochastic cases at least three times. Add dedicated coverage for the two currently uncovered skills only through a deliberate benchmark revision; do not silently change the fixed suite.
+
+
+
+## Source and runtime audit — 2026-11-23
+
+- Plugin Creator current-release readback: Capri Engineering Lab **v0.7.2**, release `pluginrel_6b00ad83e6888191b3228562d360c14a` (created 2026-11-20T20:28:51Z). Saved source contains 15 `SKILL.md` files and four configured Streamable HTTP MCP servers.
+- The saved README contains 14 skill bullets and omits `capri-quality-standard`; the source tree contains 15 skill files. The existing 13 fixed cases cover 13 of 15: `epistemic-reasoning` and `capri-quality-standard` have no dedicated case.
+- Root `mcp.json` and Codex `.mcp.json` define the same four server names, URLs and transports; Codex additionally supplies empty `headers` objects. They are semantically aligned, not byte-identical.
+- Companion private Capri Operator current release: **v1.1.4**, release `pluginrel_6b00ad25c8288191a7318e49b8e8bfa7` (created 2026-11-20T20:27:17Z), with 23 `SKILL.md` files. It is not covered by this Engineering Lab suite.
+- Six Notion Capri skills are present in the enabled-skill registry. The installed ChatGPT skill catalog returned zero entries in this runtime; this does not prove the private plugins are inactive, but plugin runtime activation is not verified here.
+- No MCP handshake, remote tool call, no-skill baseline, or skill-enabled behavioral benchmark was run. Benchmark result: **NOT RUN** because this runtime cannot provide a controlled plugin toggle and raw comparable traces. No scores or pass/fail results are inferred from source readback.
+- No plugin source was edited, no skill settings changed, and no plugin release was created. Next source repair: add the missing `capri-quality-standard` README entry and align the manifest/readme count during a separately reviewed plugin version; preserve the 13 existing cases and plan coverage expansion deliberately.
+
+## Source and runtime audit — 2026-11-25
+
+- Plugin Creator current-release readback: Capri Engineering Lab **v0.7.3**, release `pluginrel_6b062eeb14b08191ae6037abd9764c88`, scope `USER`, discoverability `PRIVATE`. Both `plugin.json` and `.codex-plugin/plugin.json` report v0.7.3.
+- The source archive contains 15 `SKILL.md` files; the README now lists all 15, including `capri-quality-standard`. This corrects the v0.7.2 inventory mismatch recorded below. No skill behavior or MCP configuration changed.
+- The live Notion enabled-skill registry returns **17 Capri skills**. The installed runtime skill loader returns **153 skill resources**, 87 with Capri-prefixed URIs. These are separate inventories and must not be conflated with the 15 skills packaged in this plugin.
+- The 13 fixed benchmark cases remain unchanged; two packaged skills still lack dedicated cases. Behavioral benchmark remains **NOT RUN** because this runtime cannot pin plugin activation and capture comparable raw traces.
+- All four MCP endpoints remain configured and read back, but no ChatGPT-side handshake or tool call was run. Static configuration is not runtime proof.
+- The plugin remains private and user-scoped; no paid service, API key, credential, or external account was added.
 
 ## Current evidence status
 
@@ -101,7 +122,7 @@ A skill is **provisionally useful** if it improves the aggregate score by at lea
 | Noodle | Configured/read back | Official server card and registry inspected | Pending | Pending | Pending |
 | Scholar Sidekick | Configured/read back | README, SECURITY.md, tools.json, release and engineering docs reviewed | Pending | Pending | Pending |
 | arXiv | Configured/read back | Official server.json/README/release; independent live scan (2026-11-03) | Pending | Pending | Pending |
-| Thirteen skills | Packaged/read back | Original skill text/source references present | Runtime activation pending | N/A | Not run |
+| Fifteen skill files | Packaged/read back; README and both manifests aligned at v0.7.3; 13 fixed cases cover 13 of 15 | Source and manifest readback only | Runtime activation pending | N/A | Not run |
 
 ## Rules
 
