@@ -76,12 +76,13 @@ def _validate_backup_semantics(connection: sqlite3.Connection) -> None:
                 _valid_text(resource_type, 64), _valid_text(resource_id, 256),
                 task_id is None or _valid_text(task_id, 128),
                 _valid_text(metadata_json, 16_384),
+                len(metadata_json.encode("utf-8")) <= 16_384,
             )):
                 raise ToolValidationError("security backup contains invalid audit resource metadata")
             try:
                 metadata = json.loads(metadata_json)
                 canonical_metadata = json.dumps(
-                    metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+                    metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
                 )
             except (TypeError, ValueError, json.JSONDecodeError):
                 raise ToolValidationError("security backup contains invalid audit metadata JSON") from None
