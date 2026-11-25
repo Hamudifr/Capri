@@ -339,6 +339,12 @@ def _promotion_record_from_row(row: tuple[Any, ...]) -> StrategyPromotionRecord:
         hashes = json.loads(hashes_json)
         if type(summary) is not dict or type(refs) is not dict or type(hashes) is not dict:
             raise ValueError("invalid promotion record")
+        if (
+            _promotion_json(summary, field="stored promotion summary", maximum=32_768) != summary_json
+            or _promotion_json(refs, field="stored promotion references", maximum=4_096) != refs_json
+            or _promotion_json(hashes, field="stored promotion cohort hashes", maximum=2_048) != hashes_json
+        ):
+            raise ValueError("promotion record JSON is not canonical")
         normalized_refs = tuple(sorted(
             (_text(key, "cohort_id", 128), _text(value, "evidence_manifest_ref", 512))
             for key, value in refs.items()
@@ -350,6 +356,8 @@ def _promotion_record_from_row(row: tuple[Any, ...]) -> StrategyPromotionRecord:
         ))
         if len(normalized_hashes) != len(hashes):
             raise ValueError("invalid cohort fingerprint")
+        if len({value for _, value in normalized_hashes}) != len(normalized_hashes):
+            raise ValueError("promotion cohort fingerprints must be unique")
         if {key for key, _ in normalized_refs} != {key for key, _ in normalized_hashes}:
             raise ValueError("cohort evidence bindings are inconsistent")
     except (TypeError, ValueError, json.JSONDecodeError):
