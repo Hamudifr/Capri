@@ -43,6 +43,8 @@ _PRIMARY_METRICS = frozenset({
     "safety_violations",
 })
 _MIN_COHORTS = 2
+_MAX_COHORTS = 4
+_MAX_OBSERVATIONS_PER_COHORT = 20_000
 _MIN_PAIRS = 100
 _MIN_SCENARIOS = 5
 _MIN_PAIRS_PER_SCENARIO = 20
@@ -200,9 +202,15 @@ def assess_strategy_canary(
     if isinstance(cohorts, (str, bytes)):
         raise StrategyPromotionError("cohorts must be an iterable of PromotionCohort records")
     try:
-        cohort_list = tuple(cohorts)
+        cohort_iterator = iter(cohorts)
     except TypeError:
         raise StrategyPromotionError("cohorts must be iterable") from None
+    collected_cohorts: list[PromotionCohort] = []
+    for cohort in cohort_iterator:
+        if len(collected_cohorts) >= _MAX_COHORTS:
+            raise StrategyPromotionError("cohort count exceeds the bounded maximum of 4")
+        collected_cohorts.append(cohort)
+    cohort_list = tuple(collected_cohorts)
     if any(type(item) is not PromotionCohort for item in cohort_list):
         raise StrategyPromotionError("cohorts must contain PromotionCohort records")
     for item in cohort_list:
@@ -226,6 +234,8 @@ def assess_strategy_canary(
         cohort_ids.add(cohort_id)
         if type(cohort.observations) is not tuple:
             raise StrategyPromotionError("cohort observations must be an immutable tuple")
+        if len(cohort.observations) > _MAX_OBSERVATIONS_PER_COHORT:
+            raise StrategyPromotionError("cohort observations exceed the bounded maximum of 20000")
 
         local_tasks = {
             item.task_id for item in cohort.observations

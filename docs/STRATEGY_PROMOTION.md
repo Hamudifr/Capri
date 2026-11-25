@@ -14,8 +14,9 @@ Each cohort contains an immutable tuple of `StrategyObservation` records for exa
 
 The policy thresholds are constants, not caller-configurable:
 
-- At least two independent cohorts.
+- At least two and at most four independent cohorts per assessment, bounding bootstrap work.
 - At least 100 matched task pairs in each cohort.
+- At most 20,000 observation records per cohort; oversized inputs fail before preprocessing.
 - At least five scenarios in each cohort, with at least 20 matched pairs per scenario.
 - Disjoint task IDs and evidence references across cohorts.
 - Explicit, identical baseline and candidate versions across cohorts; `unversioned` records are not eligible.
