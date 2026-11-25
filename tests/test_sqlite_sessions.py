@@ -131,6 +131,50 @@ class SQLiteSessionStoreTests(unittest.TestCase):
             session.session_id, "principal-alice", "worker-alice"
         ))
 
+    def test_principal_lease_operations_authorize_with_one_connection(self):
+        session = self.store.create_for_principal("principal-alice")
+        original_connect = self.store._connect
+
+        with patch.object(self.store, "_connect", wraps=original_connect) as connect:
+            with self.assertRaises(SessionNotFoundError):
+                self.store.claim_turn_lease_for_principal(
+                    session.session_id, "principal-bob", "worker-bob", 30,
+                )
+        self.assertEqual(connect.call_count, 1)
+
+        with patch.object(self.store, "_connect", wraps=original_connect) as connect:
+            self.store.claim_turn_lease_for_principal(
+                session.session_id, "principal-alice", "worker-alice", 30,
+            )
+        self.assertEqual(connect.call_count, 1)
+
+        with patch.object(self.store, "_connect", wraps=original_connect) as connect:
+            with self.assertRaises(SessionNotFoundError):
+                self.store.renew_turn_lease_for_principal(
+                    session.session_id, "principal-bob", "worker-alice", 30,
+                )
+        self.assertEqual(connect.call_count, 1)
+
+        with patch.object(self.store, "_connect", wraps=original_connect) as connect:
+            self.store.renew_turn_lease_for_principal(
+                session.session_id, "principal-alice", "worker-alice", 30,
+            )
+        self.assertEqual(connect.call_count, 1)
+
+        with patch.object(self.store, "_connect", wraps=original_connect) as connect:
+            with self.assertRaises(SessionNotFoundError):
+                self.store.release_turn_lease_for_principal(
+                    session.session_id, "principal-bob", "worker-alice",
+                )
+        self.assertEqual(connect.call_count, 1)
+
+        with patch.object(self.store, "_connect", wraps=original_connect) as connect:
+            released = self.store.release_turn_lease_for_principal(
+                session.session_id, "principal-alice", "worker-alice",
+            )
+        self.assertEqual(connect.call_count, 1)
+        self.assertTrue(released)
+
     def test_backup_is_private_consistent_and_restores_owned_transcripts(self):
         session = self.store.create_for_principal("principal-alice")
         committed = self.store.commit_turn_messages_for_principal(
