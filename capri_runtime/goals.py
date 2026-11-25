@@ -700,17 +700,27 @@ class SQLiteGoalStore:
     def evidence_for_principal(
         self, goal_id: str, principal_id: str
     ) -> tuple[dict[str, Any], ...]:
+        _text(goal_id, "goal_id", 64)
+        principal_id = _text(principal_id, "principal_id", 128)
         with self._lock:
-            self._owned_row(goal_id, principal_id)
-            return self._evidence_rows(goal_id, principal_id)
+            connection = self._connect()
+            try:
+                self._owned_row_on_connection(connection, goal_id, principal_id)
+                return self._evidence_rows_on_connection(
+                    connection, goal_id, principal_id
+                )
+            finally:
+                connection.close()
 
     def events_for_principal(
         self, goal_id: str, principal_id: str
     ) -> tuple[dict[str, Any], ...]:
+        _text(goal_id, "goal_id", 64)
+        principal_id = _text(principal_id, "principal_id", 128)
         with self._lock:
-            self._owned_row(goal_id, principal_id)
             connection = self._connect()
             try:
+                self._owned_row_on_connection(connection, goal_id, principal_id)
                 rows = connection.execute(
                     """SELECT timestamp,state,version,event_type FROM goal_events
                     WHERE goal_id=? ORDER BY event_id""",
@@ -727,10 +737,12 @@ class SQLiteGoalStore:
         self, goal_id: str, principal_id: str
     ) -> tuple[DomainEvent, ...]:
         """Return an owner-checked CloudEvents projection of this goal's local history."""
+        _text(goal_id, "goal_id", 64)
+        principal_id = _text(principal_id, "principal_id", 128)
         with self._lock:
-            self._owned_row(goal_id, principal_id)
             connection = self._connect()
             try:
+                self._owned_row_on_connection(connection, goal_id, principal_id)
                 rows = connection.execute(
                     """SELECT event_id,timestamp,state,version,event_type FROM goal_events
                     WHERE goal_id=? ORDER BY event_id""",
