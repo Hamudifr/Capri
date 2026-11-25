@@ -56,6 +56,7 @@ class StrategyEvaluation:
     baseline_id: str
     candidate_id: str
     cohort_sha256: str
+    min_pairs: int
     matched_pairs: int
     baseline_unmatched: int
     candidate_unmatched: int
@@ -242,6 +243,7 @@ def evaluate_strategies(
         baseline_id=baseline_id,
         candidate_id=candidate_id,
         cohort_sha256=cohort_sha256,
+        min_pairs=min_pairs,
         matched_pairs=len(common_tasks),
         baseline_unmatched=len(baseline_tasks - candidate_tasks),
         candidate_unmatched=len(candidate_tasks - baseline_tasks),
@@ -251,3 +253,32 @@ def evaluate_strategies(
         blocked_reasons=blocked_reasons,
         eligible_for_manual_review=eligible,
     )
+
+def verify_strategy_evaluation(
+    evaluation: StrategyEvaluation,
+    observations: Iterable[StrategyObservation],
+    *,
+    expected_min_pairs: int | None = None,
+) -> bool:
+    """Recompute an evaluation and check that its derived fields still agree.
+
+    This detects accidental or unsophisticated alteration of a saved result.
+    It is not a digital signature and cannot establish who created the record
+    or whether referenced evidence is authentic. Callers that require a
+    particular sample floor should supply it independently.
+    """
+    if type(evaluation) is not StrategyEvaluation:
+        return False
+    if expected_min_pairs is not None:
+        if type(expected_min_pairs) is not int or not 2 <= expected_min_pairs <= _MAX_OBSERVATIONS:
+            raise StrategyEvaluationError("expected_min_pairs must be an integer from 2 to 20000")
+        if evaluation.min_pairs != expected_min_pairs:
+            return False
+    recomputed = evaluate_strategies(
+        evaluation.baseline_id,
+        evaluation.candidate_id,
+        observations,
+        min_pairs=evaluation.min_pairs,
+    )
+    return recomputed == evaluation
+
