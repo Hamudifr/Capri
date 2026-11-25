@@ -12,7 +12,7 @@ There is no second global event database. The common contract is a read-only in-
 
 ## Envelope
 
-`capri_runtime.domain_events.DomainEvent` uses CloudEvents 1.0 identity conventions:
+`capri_runtime.domain_events.DomainEvent` uses CloudEvents v1.0.2 identity conventions (the required `specversion` value remains `1.0`):
 - `specversion`: exactly `1.0`;
 - `id`: event identifier unique within its source;
 - `source`: a Capri URN identifying the domain entity;
