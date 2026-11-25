@@ -856,7 +856,12 @@ class SQLiteStrategyStore:
 
         summary_json = _promotion_json(asdict(assessment), field="promotion assessment summary", maximum=32_768)
         refs_json = _promotion_json(dict(sorted(refs.items())), field="promotion evidence manifest references", maximum=4_096)
-        assessment_hash = _promotion_record_digest(summary_json, refs_json)
+        cohort_hashes = {
+            cohort_id: evaluation.cohort_sha256
+            for cohort_id, evaluation in sorted(cohort_evaluations.items())
+        }
+        hashes_json = _promotion_json(cohort_hashes, field="promotion cohort fingerprints", maximum=2_048)
+        assessment_hash = _promotion_record_digest(summary_json, refs_json, hashes_json)
         timestamp = created_at or self._now()
         if not isinstance(timestamp, datetime) or timestamp.tzinfo is None or timestamp.utcoffset() is None:
             raise StrategyStoreError("created_at must be timezone-aware")
@@ -909,7 +914,7 @@ class SQLiteStrategyStore:
                 existing = connection.execute(
                     """SELECT assessment_id,principal_id,strategy_class,baseline_id,baseline_version,
                     candidate_id,candidate_version,policy_version,task_family,assessment_sha256,
-                    summary_json,evidence_manifest_refs_json,primary_metric,created_at
+                    summary_json,evidence_manifest_refs_json,cohort_sha256s_json,primary_metric,created_at
                     FROM strategy_promotion_assessments
                     WHERE principal_id=? AND strategy_class=? AND candidate_id=?
                     AND candidate_version=? AND assessment_sha256=?""",
@@ -920,17 +925,18 @@ class SQLiteStrategyStore:
                         """INSERT INTO strategy_promotion_assessments
                         (assessment_id,principal_id,strategy_class,baseline_id,baseline_version,
                          candidate_id,candidate_version,policy_version,task_family,primary_metric,
-                         assessment_sha256,summary_json,evidence_manifest_refs_json,eligible_for_canary,created_at)
-                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)""",
+                         assessment_sha256,summary_json,evidence_manifest_refs_json,cohort_sha256s_json,
+                         eligible_for_canary,created_at)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)""",
                         (assessment_id, principal, category, baseline, assessment.baseline_version,
                          candidate, assessment.candidate_version, assessment.policy_version,
-                         family, metric, assessment_hash, summary_json, refs_json, created),
+                         family, metric, assessment_hash, summary_json, refs_json, hashes_json, created),
                     )
                 else:
                     if existing[1:9] != (
                         principal, category, baseline, assessment.baseline_version,
                         candidate, assessment.candidate_version, assessment.policy_version, family,
-                    ) or existing[10:13] != (summary_json, refs_json, metric):
+                    ) or existing[10:14] != (summary_json, refs_json, hashes_json, metric):
                         raise StrategyConflictError("promotion assessment fingerprint already belongs to different evidence")
                     assessment_id = existing[0]
                     created = existing[13]
@@ -965,7 +971,7 @@ class SQLiteStrategyStore:
                 row = connection.execute(
                     """SELECT assessment_id,principal_id,strategy_class,baseline_id,baseline_version,
                     candidate_id,candidate_version,policy_version,task_family,assessment_sha256,
-                    summary_json,evidence_manifest_refs_json,primary_metric,created_at
+                    summary_json,evidence_manifest_refs_json,cohort_sha256s_json,primary_metric,created_at
                     FROM strategy_promotion_assessments
                     WHERE principal_id=? AND strategy_class=? AND candidate_id=?
                     AND candidate_version=? AND assessment_sha256=?""",
@@ -974,6 +980,11 @@ class SQLiteStrategyStore:
                 if row is None:
                     raise StrategyNotFoundError("promotion assessment is not registered for this candidate")
                 record = _promotion_record_from_row(row)
+                cohort_results = record.summary.get("cohorts")
+                cohort_ids = {
+                    item.get("cohort_id") for item in cohort_results
+                    if type(item) is dict and type(item.get("cohort_id")) is str
+                } if type(cohort_results) is list else set()
                 if (
                     record.summary.get("eligible_for_canary") is not True
                     or record.summary.get("policy_version") != record.policy_version
@@ -983,6 +994,8 @@ class SQLiteStrategyStore:
                     or record.summary.get("candidate_version") != record.candidate_version
                     or record.summary.get("task_family") != record.task_family
                     or record.summary.get("primary_metric") != record.primary_metric
+                    or cohort_ids != {key for key, _ in record.evidence_manifest_refs}
+                    or cohort_ids != {key for key, _ in record.cohort_sha256s}
                 ):
                     raise StrategyIntegrityError("promotion assessment summary does not match its registry binding")
                 return record
