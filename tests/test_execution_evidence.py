@@ -392,6 +392,12 @@ class SQLiteExecutionEvidenceJournalTests(unittest.TestCase):
         reference = journal.record_execution_and_finish(
             "host-credential", claim, result,
         )
+        self.assertEqual(
+            journal.get_completed_event_ref(
+                principal_id, task.task_id, claim.step_index, claim.attempt,
+            ),
+            reference,
+        )
         observation = StrategyObservation(
             task_id=task.task_id,
             scenario="long-principal-scenario",
