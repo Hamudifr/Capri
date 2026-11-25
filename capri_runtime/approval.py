@@ -487,6 +487,13 @@ class HostApprovalService:
                 datetime.fromisoformat(grant.expires_at.replace("Z", "+00:00")),
                 "grant expiry",
             )
+            if grant.issued_at is not None:
+                issued = _utc(
+                    datetime.fromisoformat(grant.issued_at.replace("Z", "+00:00")),
+                    "grant issue time",
+                )
+                if issued > now:
+                    return False
             return expiry > now
         except Exception:
             return False
