@@ -347,13 +347,13 @@ class SQLiteTaskStoreTests(unittest.TestCase):
 
     def test_principal_idempotency_encoding_is_unambiguous_for_nul_fields(self):
         first = self.store.create_for_principal(
-            "a\\0b", PLAN, "c", NOW,
+            "a\0b", PLAN, "c", NOW,
         )
         second = self.store.create_for_principal(
-            "a", PLAN, "b\\0c", NOW,
+            "a", PLAN, "b\0c", NOW,
         )
         self.assertNotEqual(first.task_id, second.task_id)
-        self.assertEqual(self.store.get_for_principal(first.task_id, "a\\0b"), first)
+        self.assertEqual(self.store.get_for_principal(first.task_id, "a\0b"), first)
         self.assertEqual(self.store.get_for_principal(second.task_id, "a"), second)
 
     def test_principal_idempotency_preserves_legacy_retry_identity(self):
@@ -362,7 +362,7 @@ class SQLiteTaskStoreTests(unittest.TestCase):
         principal_id = "legacy-owner"
         idempotency_key = "legacy-key"
         legacy_digest = hashlib.sha256(
-            (principal_id + "\\0" + idempotency_key).encode("utf-8")
+            (principal_id + "\0" + idempotency_key).encode("utf-8")
         ).hexdigest()
         legacy = self.store._create(
             PLAN, "principal:" + legacy_digest, NOW,
