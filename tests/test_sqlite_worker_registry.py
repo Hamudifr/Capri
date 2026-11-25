@@ -399,5 +399,9 @@ class SQLiteWorkerRegistryTests(unittest.TestCase):
         with self.assertRaises(WorkerRegistryError):
             self.make_registry(SQLiteTaskStore(self.path))
 
+    def test_wall_clock_dependency_must_be_callable(self):
+        with self.assertRaisesRegex(WorkerRegistryError, "clock_wall_ns must be callable"):
+            SQLiteWorkerRegistry(self.store, clock_wall_ns=1)
+
 if __name__ == "__main__":
     unittest.main()
