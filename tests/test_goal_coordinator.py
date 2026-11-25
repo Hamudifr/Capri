@@ -113,7 +113,7 @@ class GoalCoordinatorTests(unittest.TestCase):
         task = engine.run_once(now=NOW)
         self.assertEqual(task.state, "succeeded")
         reconciled = self.coordinator.reconcile(goal.goal_id, "alice", now=NOW)
-        self.assertEqual(reconciled.goal.state, "succeeded")
+        self.assertEqual(reconciled.goal.state, "awaiting_verification")
         self.assertEqual(reconciled.task.state, "succeeded")
         self.assertEqual(len(reconciled.goal.evidence), 1)
         evidence = reconciled.goal.evidence[0]
@@ -121,7 +121,21 @@ class GoalCoordinatorTests(unittest.TestCase):
         self.assertEqual(len(evidence["reference"]), 64)
         self.assertNotIn("private raw result", repr(evidence))
         again = self.coordinator.reconcile(goal.goal_id, "alice", now=NOW)
-        self.assertEqual(again.goal.evidence, reconciled.goal.evidence)
+        self.assertEqual(again.goal.state, "awaiting_verification")
+        accepted = self.coordinator.verify(
+            goal.goal_id, "alice", accepted=True,
+            evidence_reference="b" * 64,
+            expected_version=again.goal.version, now=NOW,
+        )
+        self.assertEqual(accepted.state, "succeeded")
+        self.assertEqual(len(accepted.evidence), 2)
+        self.assertEqual(accepted.evidence[-1]["evidence_type"], "acceptance_accepted")
+        with self.assertRaises(GoalConflictError):
+            self.coordinator.verify(
+                goal.goal_id, "alice", accepted=True,
+                evidence_reference="c" * 64,
+                expected_version=again.goal.version, now=NOW,
+            )
 
     def test_uncertain_handler_outcome_quarantines_goal_for_reconciliation(self):
         goal = self.planned_goal()
