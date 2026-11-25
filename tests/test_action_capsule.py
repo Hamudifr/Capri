@@ -143,6 +143,28 @@ class ActionCapsuleTests(unittest.TestCase):
         )
         verify_action_capsule_history(indeterminate, (auth_event, dispatch_event, event))
 
+    def test_expired_undispatched_draft_can_be_closed_without_authority(self):
+        late = self.deadline + timedelta(seconds=1)
+        cancelled, event = transition_action_capsule(
+            self.capsule,
+            CapsuleState.CANCELLED,
+            occurred_at=late.isoformat(),
+            actor="host-1",
+        )
+        self.assertEqual(cancelled.state, CapsuleState.CANCELLED)
+        verify_action_capsule_history(cancelled, (event,))
+
+    def test_history_verification_has_a_hard_event_bound(self):
+        def unbounded_events():
+            while True:
+                yield object()
+
+        with self.assertRaises(CapsuleIntegrityError):
+            verify_action_capsule_history(self.capsule, unbounded_events())
+
+        with self.assertRaises(ActionCapsuleError):
+            replace(self.capsule, event_sequence=6)
+
     def test_authorized_capsule_expires_only_at_or_after_deadline(self):
         authorized, auth_event = self.step(
             self.capsule, CapsuleState.AUTHORIZED, 1, approval_ref="approval-1"
