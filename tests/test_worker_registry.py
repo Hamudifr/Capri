@@ -512,6 +512,21 @@ class WorkerRegistryTests(unittest.TestCase):
             authorized_worker_ids={"worker-1"}, now_ns=self.now + 1,
         ))
 
+    def test_pending_release_rejects_in_flight_observation(self):
+        self.register_healthy(max_concurrency=1)
+        pending = self.registry.reserve_eligible(
+            "math.factorial", protocol_version=1,
+            authorized_worker_ids={"worker-1"}, now_ns=self.now,
+        )
+        with self.assertRaises(WorkerRegistryError):
+            self.registry.release_reservation(
+                pending, authenticated_worker_id="worker-1",
+                observed_in_flight=0, now_ns=self.now,
+            )
+        self.assertTrue(self.registry.release_reservation(
+            pending, authenticated_worker_id="worker-1", now_ns=self.now,
+        ))
+
     def test_committed_release_rejects_invalid_host_observed_load(self):
         self.register_healthy(max_concurrency=1)
         pending = self.registry.reserve_eligible(
