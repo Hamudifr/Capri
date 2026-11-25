@@ -663,10 +663,13 @@ class SQLiteStrategyStore:
                 ).fetchone() is not None:
                     raise StrategyConflictError("approval grant has already been consumed")
 
+                write_time = self._now()
+                if issued > write_time or expires <= write_time:
+                    raise StrategyAuthorizationError("approval grant expired before event publication")
                 from_id, from_version = active[:2] if active is not None else (None, None)
                 next_generation = generation + 1
                 event_id = uuid4().hex
-                created = current_time.isoformat()
+                created = write_time.isoformat()
                 previous_hash = last_event[15] if last_event is not None else ""
                 payload = {
                     "event_id": event_id, "principal_id": principal,

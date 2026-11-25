@@ -136,6 +136,27 @@ class SQLiteStrategyStoreTests(unittest.TestCase):
             with self.subTest(verifier=verifier), self.assertRaises(StrategyAuthorizationError):
                 store.activate_for_principal("alice", self.grant())
 
+    def test_grant_expiring_before_event_publication_never_commits(self):
+        now = datetime.now(timezone.utc)
+        clock_values = [now, now, now + timedelta(seconds=2)]
+
+        def clock():
+            return clock_values.pop(0)
+
+        store = SQLiteStrategyStore(
+            self.task_store,
+            approval_verifier=lambda grant: True,
+            clock=clock,
+        )
+        grant = replace(
+            self.grant(now=now),
+            expires_at=(now + timedelta(seconds=1)).isoformat(),
+        )
+        with self.assertRaises(StrategyAuthorizationError):
+            store.activate_for_principal("alice", grant)
+        self.assertIsNone(store.get_active_for_principal("alice", "reasoning"))
+        self.assertEqual(store.events_for_principal("alice", "reasoning"), ())
+
     def test_expired_and_future_approval_grants_are_rejected(self):
         now = datetime.now(timezone.utc)
         expired = replace(
