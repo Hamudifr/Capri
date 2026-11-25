@@ -5,6 +5,8 @@ owns authentication callbacks, process supervision, credentials, and lifecycle.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+import threading
 from typing import Any, Callable
 
 from capri_core.validation import contains_surrogate
@@ -35,12 +37,38 @@ from .strategy_approval import HostStrategyApprovalAuthority, StrategyApprovalRe
 from .strategy_evidence import HostStrategyEvidenceAuthority
 from .tools import ExecutionContext, HostAuthorityResolver
 from .worker_registry import (
-    InMemoryWorkerRegistry, WorkerDescriptor, WorkerRegistryError, WorkerSnapshot,
+    InMemoryWorkerRegistry, WorkerDescriptor, WorkerRegistryError, WorkerReservation, WorkerSnapshot,
 )
 
 
 class HostRuntimeError(Exception):
     """A trusted host composition or retrieved-context resolution operation failed."""
+
+
+@dataclass(frozen=True, slots=True)
+class HostWorkerReservation:
+    """Principal/task-scoped host wrapper around an opaque registry capacity hold."""
+
+    principal_id: str
+    task_id: str
+    capability: str
+    protocol_version: int
+    reservation: WorkerReservation
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.principal_id) is not str or not self.principal_id
+            or len(self.principal_id) > 256 or contains_surrogate(self.principal_id)
+        ):
+            raise HostRuntimeError("worker reservation principal is invalid")
+        if type(self.task_id) is not str or not self.task_id or len(self.task_id) > 128:
+            raise HostRuntimeError("worker reservation task is invalid")
+        if type(self.capability) is not str or not self.capability or len(self.capability) > 128:
+            raise HostRuntimeError("worker reservation capability is invalid")
+        if type(self.protocol_version) is not int or not 1 <= self.protocol_version <= 255:
+            raise HostRuntimeError("worker reservation protocol version is invalid")
+        if type(self.reservation) is not WorkerReservation:
+            raise HostRuntimeError("worker reservation requires an exact registry reservation")
 
 
 def _is_bound_authority_method(callback: Any, authority: Any, method_name: str) -> bool:
@@ -322,6 +350,8 @@ class CapriHostRuntime:
         self._worker_observer_authorizer = worker_observer_authorizer
         self._worker_in_flight_resolver = worker_in_flight_resolver
         self._worker_policy_resolver = worker_policy_resolver
+        self._worker_reservation_lock = threading.RLock()
+        self._worker_reservation_contexts: dict[str, HostWorkerReservation] = {}
         self._goal_store = goal_store
         configured_budgets = [
             item for item in (
@@ -417,6 +447,52 @@ class CapriHostRuntime:
         except WorkerRegistryError:
             raise HostRuntimeError("worker failure observation was rejected") from None
 
+    def _worker_policy_allowlist(
+        self, principal_id: str, task_id: str, capability: str,
+    ) -> set[str] | frozenset[str]:
+        if self._worker_policy_resolver is None:
+            raise HostRuntimeError("no host worker policy resolver is configured")
+        try:
+            allowed = self._worker_policy_resolver(principal_id, task_id, capability)
+        except Exception:
+            raise HostRuntimeError("host worker policy resolution failed") from None
+        if type(allowed) not in (set, frozenset):
+            raise HostRuntimeError("host worker policy returned an invalid allow-list")
+        return allowed
+
+    @staticmethod
+    def _same_host_reservation_context(
+        left: HostWorkerReservation, right: HostWorkerReservation,
+    ) -> bool:
+        return (
+            left.principal_id == right.principal_id
+            and left.task_id == right.task_id
+            and left.capability == right.capability
+            and left.protocol_version == right.protocol_version
+            and left.reservation.token == right.reservation.token
+            and left.reservation.worker_id == right.reservation.worker_id
+        )
+
+    def _purge_worker_reservation_contexts(self) -> None:
+        if self._worker_registry is None:
+            self._worker_reservation_contexts.clear()
+            return
+        for token, context in tuple(self._worker_reservation_contexts.items()):
+            current = self._worker_registry.get_reservation(token)
+            if current is None:
+                self._worker_reservation_contexts.pop(token, None)
+            elif current != context.reservation:
+                if (
+                    current.worker_id == context.reservation.worker_id
+                    and current.committed and not context.reservation.committed
+                ):
+                    self._worker_reservation_contexts[token] = HostWorkerReservation(
+                        context.principal_id, context.task_id, context.capability,
+                        context.protocol_version, current,
+                    )
+                else:
+                    self._worker_reservation_contexts.pop(token, None)
+
     def get_worker_candidates(
         self, credential: Any, task_id: str, capability: str, protocol_version: int,
     ) -> tuple[WorkerSnapshot, ...]:
@@ -430,14 +506,7 @@ class CapriHostRuntime:
             self._task_store.get_for_principal(task_id, context.principal_id)
         except Exception:
             raise HostRuntimeError("task is unavailable to the authenticated principal") from None
-        try:
-            allowed = self._worker_policy_resolver(
-                context.principal_id, task_id, capability,
-            )
-        except Exception:
-            raise HostRuntimeError("host worker policy resolution failed") from None
-        if type(allowed) not in (set, frozenset):
-            raise HostRuntimeError("host worker policy returned an invalid allow-list")
+        allowed = self._worker_policy_allowlist(context.principal_id, task_id, capability)
         try:
             return self._worker_registry.eligible(
                 capability,
@@ -446,6 +515,147 @@ class CapriHostRuntime:
             )
         except WorkerRegistryError:
             raise HostRuntimeError("host worker candidate lookup was rejected") from None
+
+    def reserve_worker_candidate(
+        self, credential: Any, task_id: str, capability: str, protocol_version: int,
+    ) -> HostWorkerReservation | None:
+        """Reserve one candidate for an authenticated principal-owned task."""
+        context = self._context(credential)
+        if self._worker_registry is None or self._worker_policy_resolver is None:
+            raise HostRuntimeError("no host worker registry is configured")
+        if self._task_store is None:
+            raise HostRuntimeError("worker reservation requires a configured task store")
+        try:
+            self._task_store.get_for_principal(task_id, context.principal_id)
+        except Exception:
+            raise HostRuntimeError("task is unavailable to the authenticated principal") from None
+        allowed = self._worker_policy_allowlist(context.principal_id, task_id, capability)
+        with self._worker_reservation_lock:
+            self._purge_worker_reservation_contexts()
+            try:
+                reservation = self._worker_registry.reserve_eligible(
+                    capability,
+                    protocol_version=protocol_version,
+                    authorized_worker_ids=allowed,
+                )
+            except WorkerRegistryError:
+                raise HostRuntimeError("host worker reservation was rejected") from None
+            if reservation is None:
+                return None
+            wrapped = HostWorkerReservation(
+                context.principal_id, task_id, capability, protocol_version, reservation,
+            )
+            if reservation.token in self._worker_reservation_contexts:
+                try:
+                    self._worker_registry.release_reservation(
+                        reservation, authenticated_worker_id=reservation.worker_id,
+                    )
+                except WorkerRegistryError:
+                    pass
+                raise HostRuntimeError("worker reservation context collision")
+            self._worker_reservation_contexts[reservation.token] = wrapped
+            return wrapped
+
+    def commit_worker_reservation(
+        self,
+        credential: Any,
+        observer_credential: Any,
+        reservation: HostWorkerReservation,
+    ) -> HostWorkerReservation:
+        """Recheck principal/task policy and commit a pending hold under supervisor authority."""
+        if type(reservation) is not HostWorkerReservation:
+            raise HostRuntimeError("an exact host worker reservation is required")
+        context = self._context(credential)
+        if context.principal_id != reservation.principal_id:
+            raise HostRuntimeError("worker reservation belongs to another principal")
+        if self._worker_registry is None or self._task_store is None:
+            raise HostRuntimeError("worker reservation requires the configured host registry and task store")
+        try:
+            self._task_store.get_for_principal(reservation.task_id, context.principal_id)
+        except Exception:
+            raise HostRuntimeError("task is unavailable to the authenticated principal") from None
+        worker_id = reservation.reservation.worker_id
+        self._authorize_worker_observer(observer_credential, worker_id)
+        with self._worker_reservation_lock:
+            self._purge_worker_reservation_contexts()
+            stored = self._worker_reservation_contexts.get(reservation.reservation.token)
+            if stored is None or not self._same_host_reservation_context(stored, reservation):
+                raise HostRuntimeError("worker reservation is unavailable or belongs to another task")
+            if stored.reservation.committed:
+                return stored
+            try:
+                allowed = self._worker_policy_allowlist(
+                    stored.principal_id, stored.task_id, stored.capability,
+                )
+            except HostRuntimeError:
+                try:
+                    self._worker_registry.release_reservation(
+                        stored.reservation, authenticated_worker_id=worker_id,
+                    )
+                except WorkerRegistryError:
+                    pass
+                self._worker_reservation_contexts.pop(stored.reservation.token, None)
+                raise
+            if worker_id not in allowed:
+                try:
+                    self._worker_registry.release_reservation(
+                        stored.reservation, authenticated_worker_id=worker_id,
+                    )
+                except WorkerRegistryError:
+                    pass
+                self._worker_reservation_contexts.pop(stored.reservation.token, None)
+                raise HostRuntimeError("worker reservation is no longer authorized for this task")
+            self.heartbeat_worker(observer_credential, worker_id)
+            try:
+                committed = self._worker_registry.commit_reservation(
+                    stored.reservation, authenticated_worker_id=worker_id,
+                )
+            except WorkerRegistryError:
+                self._purge_worker_reservation_contexts()
+                raise HostRuntimeError("worker reservation commit was rejected") from None
+            if committed is None:
+                self._purge_worker_reservation_contexts()
+                raise HostRuntimeError("worker reservation expired or is no longer eligible")
+            wrapped = HostWorkerReservation(
+                stored.principal_id, stored.task_id, stored.capability,
+                stored.protocol_version, committed,
+            )
+            self._worker_reservation_contexts[committed.token] = wrapped
+            return wrapped
+
+    def release_worker_reservation(
+        self, observer_credential: Any, reservation: HostWorkerReservation,
+    ) -> bool:
+        """Release a pending hold or reconcile committed load under supervisor authority."""
+        if type(reservation) is not HostWorkerReservation:
+            raise HostRuntimeError("an exact host worker reservation is required")
+        worker_id = reservation.reservation.worker_id
+        self._authorize_worker_observer(observer_credential, worker_id)
+        if self._worker_registry is None:
+            raise HostRuntimeError("no host worker registry is configured")
+        with self._worker_reservation_lock:
+            self._purge_worker_reservation_contexts()
+            stored = self._worker_reservation_contexts.get(reservation.reservation.token)
+            if stored is None:
+                return False
+            if not self._same_host_reservation_context(stored, reservation):
+                raise HostRuntimeError("worker reservation belongs to another task")
+            try:
+                if stored.reservation.committed:
+                    observed_in_flight = self._worker_in_flight(worker_id)
+                    released = self._worker_registry.release_reservation(
+                        stored.reservation,
+                        authenticated_worker_id=worker_id,
+                        observed_in_flight=observed_in_flight,
+                    )
+                else:
+                    released = self._worker_registry.release_reservation(
+                        stored.reservation, authenticated_worker_id=worker_id,
+                    )
+            except WorkerRegistryError:
+                raise HostRuntimeError("worker reservation release was rejected") from None
+            self._worker_reservation_contexts.pop(stored.reservation.token, None)
+            return released
 
     def get_budget_usage(self, credential: Any) -> BudgetUsage:
         """Return only the authenticated principal's current budget-window usage."""
