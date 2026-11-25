@@ -215,6 +215,7 @@ class InMemoryWorkerRegistry:
                 raise WorkerConflictError("retired workers cannot be updated or re-enabled")
             if descriptor.revision != expected_revision + 1:
                 raise WorkerRegistryError("new descriptor revision must increment exactly once")
+            self._revoke_worker_reservations(identity)
             updated = WorkerSnapshot(descriptor, current.health)
             self._workers[identity] = updated
             return updated
@@ -272,6 +273,7 @@ class InMemoryWorkerRegistry:
                 raise WorkerConflictError("quarantined or retired worker state is terminal here")
             failures = current.health.consecutive_failures + 1
             state = "unavailable" if failures >= self._failure_threshold else "degraded"
+            self._revoke_worker_reservations(identity)
             health = replace(
                 current.health,
                 state=state,
@@ -307,6 +309,7 @@ class InMemoryWorkerRegistry:
                 raise WorkerNotFoundError("worker is not registered")
             if current.health.revision != expected_health_revision:
                 raise WorkerConflictError("worker health revision changed")
+            self._revoke_worker_reservations(identity)
             descriptor = replace(
                 current.descriptor, enabled=False, revision=current.descriptor.revision + 1,
             )
@@ -362,6 +365,7 @@ class InMemoryWorkerRegistry:
                 raise WorkerConflictError("worker health revision changed")
             if current.health.state == "retired":
                 raise WorkerConflictError("retired workers cannot change health state")
+            self._revoke_worker_reservations(identity)
             health = replace(
                 current.health, state=state,
                 revision=current.health.revision + 1,
