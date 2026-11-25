@@ -48,6 +48,19 @@ _EVENT_TYPES = {
 }
 
 
+def _execute_sql_script(connection: sqlite3.Connection, script: str) -> None:
+    """Execute a schema script without sqlite3.executescript's implicit COMMIT."""
+    statement = ""
+    for line in script.splitlines():
+        statement += line + "\n"
+        if sqlite3.complete_statement(statement):
+            if statement.strip():
+                connection.execute(statement)
+            statement = ""
+    if statement.strip():
+        raise WorkerRegistryError("worker registry schema script contains an incomplete statement")
+
+
 def _canonical_json(value: Any) -> str:
     return json.dumps(
         value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
@@ -365,7 +378,7 @@ class SQLiteWorkerRegistry:
             if present and present != _TABLES:
                 raise WorkerRegistryError("worker registry schema is partially initialized")
             if not present:
-                connection.executescript(
+                _execute_sql_script(connection,
                     """
                     CREATE TABLE worker_registry_meta (
                         singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
