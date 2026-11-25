@@ -305,6 +305,13 @@ class SQLiteWorkerRegistryTests(unittest.TestCase):
 
     def test_wall_clock_rollback_fails_worker_freshness_closed(self):
         self.register_healthy()
+        connection = self.store._connect()
+        try:
+            before = connection.execute(
+                "SELECT last_heartbeat_wall_ns FROM worker_registry_state WHERE worker_id='worker-1'"
+            ).fetchone()[0]
+        finally:
+            connection.close()
         self.clock.wall_ns -= 1_000_000_000
         self.assertEqual(
             self.registry.eligible(
@@ -314,6 +321,15 @@ class SQLiteWorkerRegistryTests(unittest.TestCase):
             ),
             (),
         )
+        connection = self.store._connect()
+        try:
+            after = connection.execute(
+                "SELECT last_heartbeat_wall_ns FROM worker_registry_state WHERE worker_id='worker-1'"
+            ).fetchone()[0]
+        finally:
+            connection.close()
+        self.assertEqual(after, before)
+        self.assertEqual(self.registry.integrity_check(), "ok")
 
 
     def test_worker_descriptor_projection_tampering_fails_closed(self):
