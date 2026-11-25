@@ -202,6 +202,19 @@ static bool schema(sqlite3 *db) {
       "CREATE TRIGGER session_owners_immutable_delete BEFORE DELETE ON session_owners BEGIN SELECT RAISE(ABORT,'session owner is immutable'); END;"
       "CREATE TRIGGER session_owners_immutable_insert BEFORE INSERT ON session_owners WHEN EXISTS(SELECT 1 FROM session_owners WHERE session_id=NEW.session_id) BEGIN SELECT RAISE(ABORT,'session owner is immutable'); END;";
     if(!configure_database(db) || !exec_sql_retry_busy(db,"BEGIN IMMEDIATE",5000))return false;
+    bool empty=true;
+    if(!schema_is_empty(db,&empty)){
+        (void)exec_sql(db,"ROLLBACK");
+        return false;
+    }
+    if(!empty){
+        /* Another process may have initialized the file while this opener was
+           waiting for BEGIN IMMEDIATE. Validate its committed schema instead
+           of attempting a second CREATE TABLE sequence. */
+        bool valid=session_schema_valid(db)&&owner_triggers_valid(db);
+        if(!exec_sql(db,valid?"COMMIT":"ROLLBACK"))return false;
+        return valid;
+    }
     if(!exec_sql(db,sql) || !exec_sql(db,"COMMIT")){
         (void)exec_sql(db,"ROLLBACK");
         return false;
