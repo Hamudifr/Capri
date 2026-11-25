@@ -6,9 +6,13 @@ owns authentication callbacks, process supervision, credentials, and lifecycle.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
 import threading
+from datetime import datetime, timezone
 from types import MethodType
 from typing import Any, Callable
+from uuid import uuid4
 
 from capri_core.validation import contains_surrogate
 from capri_core.strategy import StrategyEvaluation, StrategyObservation
@@ -36,7 +40,7 @@ from .strategy_store import (
 from .execution_evidence import SQLiteExecutionEvidenceJournal
 from .strategy_approval import HostStrategyApprovalAuthority, StrategyApprovalRequest
 from .strategy_evidence import HostStrategyEvidenceAuthority
-from .tools import ExecutionContext, HostAuthorityResolver
+from .tools import AuditEvent, AuditSink, ExecutionContext, HostAuthorityResolver
 from .worker_registry import (
     InMemoryWorkerRegistry, WorkerDescriptor, WorkerRegistryError, WorkerReservation, WorkerSnapshot,
 )
@@ -192,6 +196,7 @@ class CapriHostRuntime:
         worker_observer_authorizer: Callable[[Any, str], bool] | None = None,
         worker_in_flight_resolver: Callable[[str], int] | None = None,
         worker_policy_resolver: Callable[[str, str, str], set[str] | frozenset[str]] | None = None,
+        worker_lifecycle_audit_sink: AuditSink | None = None,
     ) -> None:
         if not isinstance(authority, HostAuthorityResolver):
             raise HostRuntimeError("a trusted HostAuthorityResolver is required")
@@ -260,6 +265,10 @@ class CapriHostRuntime:
             raise HostRuntimeError("worker_in_flight_resolver must be callable")
         if worker_policy_resolver is not None and not callable(worker_policy_resolver):
             raise HostRuntimeError("worker_policy_resolver must be callable")
+        if worker_lifecycle_audit_sink is not None and not isinstance(worker_lifecycle_audit_sink, AuditSink):
+            raise HostRuntimeError("worker_lifecycle_audit_sink must implement the trusted AuditSink contract")
+        if worker_registry is None and worker_lifecycle_audit_sink is not None:
+            raise HostRuntimeError("worker lifecycle audit sink requires a configured worker_registry")
         if worker_registry is None and any((
             worker_identity_resolver is not None,
             worker_descriptor_resolver is not None,
@@ -278,6 +287,8 @@ class CapriHostRuntime:
             raise HostRuntimeError(
                 "worker_registry requires identity, descriptor, supervisor-observer, host-load and policy resolvers"
             )
+        if worker_registry is not None and worker_lifecycle_audit_sink is None:
+            raise HostRuntimeError("worker_registry requires a trusted lifecycle audit sink")
         if (
             task_store is not None and task_worker is not None
             and task_store.path != task_worker.engine.store.path
@@ -352,6 +363,8 @@ class CapriHostRuntime:
         self._worker_observer_authorizer = worker_observer_authorizer
         self._worker_in_flight_resolver = worker_in_flight_resolver
         self._worker_policy_resolver = worker_policy_resolver
+        self._worker_lifecycle_audit_sink = worker_lifecycle_audit_sink
+        self._worker_audit_healthy = True
         self._worker_reservation_lock = threading.RLock()
         self._worker_reservation_contexts: dict[str, HostWorkerReservation] = {}
         self._goal_store = goal_store
@@ -387,8 +400,86 @@ class CapriHostRuntime:
             raise HostRuntimeError("worker transport identity is invalid")
         return identity
 
+    def _require_worker_audit_healthy(self) -> None:
+        if self._worker_registry is not None and (
+            self._worker_lifecycle_audit_sink is None or not self._worker_audit_healthy
+        ):
+            raise HostRuntimeError(
+                "worker registry is disabled because lifecycle audit persistence is unavailable"
+            )
+
+    def _record_worker_lifecycle_event(
+        self,
+        event_type: str,
+        worker_id: str,
+        *,
+        principal_id: str = "host",
+        task_id: str | None = None,
+        capability: str | None = None,
+        protocol_version: int | None = None,
+        descriptor_revision: int | None = None,
+        reservation_token: str | None = None,
+        observed_in_flight: int | None = None,
+        expires_at_ns: int | None = None,
+        health_state: str | None = None,
+        health_revision: int | None = None,
+        capabilities: tuple[str, ...] | None = None,
+        protocol_versions: tuple[int, ...] | None = None,
+        max_concurrency: int | None = None,
+        status: str = "success",
+        error_code: str | None = None,
+    ) -> None:
+        sink = self._worker_lifecycle_audit_sink
+        if sink is None or not self._worker_audit_healthy:
+            self._worker_audit_healthy = False
+            raise HostRuntimeError("worker lifecycle audit sink is unavailable")
+        metadata = {
+            "event_type": event_type,
+            "worker_id": worker_id,
+            "task_id": task_id,
+            "capability": capability,
+            "protocol_version": protocol_version,
+            "descriptor_revision": descriptor_revision,
+            "reservation_token_sha256": (
+                hashlib.sha256(reservation_token.encode("utf-8")).hexdigest()
+                if reservation_token is not None else None
+            ),
+            "observed_in_flight": observed_in_flight,
+            "expires_at_ns": expires_at_ns,
+            "health_state": health_state,
+            "health_revision": health_revision,
+            "capabilities": list(capabilities) if capabilities is not None else None,
+            "protocol_versions": list(protocol_versions) if protocol_versions is not None else None,
+            "max_concurrency": max_concurrency,
+        }
+        metadata_json = json.dumps(
+            metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        )
+        digest = hashlib.sha256(metadata_json.encode("utf-8")).hexdigest()
+        event = AuditEvent(
+            uuid4().hex,
+            datetime.now(timezone.utc).isoformat(),
+            principal_id,
+            event_type,
+            digest,
+            status,
+            error_code,
+            "worker",
+            worker_id,
+            task_id,
+            metadata_json,
+        )
+        try:
+            sink.write(event)
+        except Exception:
+            self._worker_audit_healthy = False
+            raise HostRuntimeError(
+                "worker lifecycle audit persistence failed; worker registry is disabled"
+            ) from None
+
     def register_worker(self, credential: Any, descriptor: WorkerDescriptor) -> WorkerSnapshot:
         """Register a worker only after the trusted host transport resolves its identity."""
+        self._require_worker_audit_healthy()
         identity = self._worker_identity(credential)
         try:
             approved = self._worker_descriptor_resolver(identity, descriptor)
@@ -397,13 +488,23 @@ class CapriHostRuntime:
         if type(approved) is not WorkerDescriptor or approved.worker_id != identity:
             raise HostRuntimeError("host worker descriptor approval returned an invalid identity")
         try:
-            return self._worker_registry.register(
+            snapshot = self._worker_registry.register(
                 approved, authenticated_worker_id=identity,
             )
         except WorkerRegistryError:
             raise HostRuntimeError("worker registration was rejected") from None
+        self._record_worker_lifecycle_event(
+            "worker.registered",
+            identity,
+            descriptor_revision=snapshot.descriptor.revision,
+            capabilities=snapshot.descriptor.capabilities,
+            protocol_versions=snapshot.descriptor.protocol_versions,
+            max_concurrency=snapshot.descriptor.max_concurrency,
+        )
+        return snapshot
 
     def _authorize_worker_observer(self, credential: Any, worker_id: str) -> None:
+        self._require_worker_audit_healthy()
         if self._worker_registry is None or self._worker_observer_authorizer is None:
             raise HostRuntimeError("no host worker observer is configured")
         try:
@@ -431,11 +532,20 @@ class CapriHostRuntime:
         self._authorize_worker_observer(observer_credential, worker_id)
         in_flight = self._worker_in_flight(worker_id)
         try:
-            return self._worker_registry.heartbeat(
+            snapshot = self._worker_registry.heartbeat(
                 worker_id, authenticated_worker_id=worker_id, in_flight=in_flight,
             )
         except WorkerRegistryError:
             raise HostRuntimeError("worker heartbeat was rejected") from None
+        self._record_worker_lifecycle_event(
+            "worker.heartbeat",
+            worker_id,
+            descriptor_revision=snapshot.descriptor.revision,
+            observed_in_flight=in_flight,
+            health_state=snapshot.health.state,
+            health_revision=snapshot.health.revision,
+        )
+        return snapshot
 
     def record_worker_failure(
         self, observer_credential: Any, worker_id: str,
@@ -443,11 +553,19 @@ class CapriHostRuntime:
         """Record failure only from a trusted host supervisor/monitor."""
         self._authorize_worker_observer(observer_credential, worker_id)
         try:
-            return self._worker_registry.record_failure(
+            snapshot = self._worker_registry.record_failure(
                 worker_id, authenticated_worker_id=worker_id,
             )
         except WorkerRegistryError:
             raise HostRuntimeError("worker failure observation was rejected") from None
+        self._record_worker_lifecycle_event(
+            "worker.failure",
+            worker_id,
+            descriptor_revision=snapshot.descriptor.revision,
+            health_state=snapshot.health.state,
+            health_revision=snapshot.health.revision,
+        )
+        return snapshot
 
     def _worker_policy_allowlist(
         self, principal_id: str, task_id: str, capability: str,
@@ -499,6 +617,7 @@ class CapriHostRuntime:
         self, credential: Any, task_id: str, capability: str, protocol_version: int,
     ) -> tuple[WorkerSnapshot, ...]:
         """Return advisory candidates filtered by a separate host task-policy decision."""
+        self._require_worker_audit_healthy()
         context = self._context(credential)
         if self._worker_registry is None or self._worker_policy_resolver is None:
             raise HostRuntimeError("no host worker registry is configured")
@@ -522,6 +641,7 @@ class CapriHostRuntime:
         self, credential: Any, task_id: str, capability: str, protocol_version: int,
     ) -> HostWorkerReservation | None:
         """Reserve one candidate for an authenticated principal-owned task."""
+        self._require_worker_audit_healthy()
         context = self._context(credential)
         if self._worker_registry is None or self._worker_policy_resolver is None:
             raise HostRuntimeError("no host worker registry is configured")
@@ -556,6 +676,17 @@ class CapriHostRuntime:
                     pass
                 raise HostRuntimeError("worker reservation context collision")
             self._worker_reservation_contexts[reservation.token] = wrapped
+            self._record_worker_lifecycle_event(
+                "worker.reservation.created",
+                reservation.worker_id,
+                principal_id=context.principal_id,
+                task_id=task_id,
+                capability=capability,
+                protocol_version=protocol_version,
+                descriptor_revision=reservation.descriptor_revision,
+                reservation_token=reservation.token,
+                expires_at_ns=reservation.expires_at_ns,
+            )
             return wrapped
 
     def commit_worker_reservation(
@@ -567,6 +698,7 @@ class CapriHostRuntime:
         """Recheck principal/task policy and commit a pending hold under supervisor authority."""
         if type(reservation) is not HostWorkerReservation:
             raise HostRuntimeError("an exact host worker reservation is required")
+        self._require_worker_audit_healthy()
         context = self._context(credential)
         if context.principal_id != reservation.principal_id:
             raise HostRuntimeError("worker reservation belongs to another principal")
@@ -607,7 +739,7 @@ class CapriHostRuntime:
                     pass
                 self._worker_reservation_contexts.pop(stored.reservation.token, None)
                 raise HostRuntimeError("worker reservation is no longer authorized for this task")
-            self.heartbeat_worker(observer_credential, worker_id)
+            heartbeat_snapshot = self.heartbeat_worker(observer_credential, worker_id)
             try:
                 committed = self._worker_registry.commit_reservation(
                     stored.reservation, authenticated_worker_id=worker_id,
@@ -623,6 +755,17 @@ class CapriHostRuntime:
                 stored.protocol_version, committed,
             )
             self._worker_reservation_contexts[committed.token] = wrapped
+            self._record_worker_lifecycle_event(
+                "worker.reservation.committed",
+                worker_id,
+                principal_id=stored.principal_id,
+                task_id=stored.task_id,
+                capability=stored.capability,
+                protocol_version=stored.protocol_version,
+                descriptor_revision=committed.descriptor_revision,
+                reservation_token=committed.token,
+                observed_in_flight=heartbeat_snapshot.health.in_flight,
+            )
             return wrapped
 
     def release_worker_reservation(
@@ -631,6 +774,7 @@ class CapriHostRuntime:
         """Release a pending hold or reconcile committed load under supervisor authority."""
         if type(reservation) is not HostWorkerReservation:
             raise HostRuntimeError("an exact host worker reservation is required")
+        self._require_worker_audit_healthy()
         worker_id = reservation.reservation.worker_id
         self._authorize_worker_observer(observer_credential, worker_id)
         if self._worker_registry is None:
@@ -642,6 +786,7 @@ class CapriHostRuntime:
                 return False
             if not self._same_host_reservation_context(stored, reservation):
                 raise HostRuntimeError("worker reservation belongs to another task")
+            observed_in_flight = None
             try:
                 if stored.reservation.committed:
                     observed_in_flight = self._worker_in_flight(worker_id)
@@ -657,6 +802,18 @@ class CapriHostRuntime:
             except WorkerRegistryError:
                 raise HostRuntimeError("worker reservation release was rejected") from None
             self._worker_reservation_contexts.pop(stored.reservation.token, None)
+            self._record_worker_lifecycle_event(
+                "worker.reservation.released",
+                worker_id,
+                principal_id=stored.principal_id,
+                task_id=stored.task_id,
+                capability=stored.capability,
+                protocol_version=stored.protocol_version,
+                descriptor_revision=stored.reservation.descriptor_revision,
+                reservation_token=stored.reservation.token,
+                observed_in_flight=observed_in_flight,
+                status="success" if released else "not_found",
+            )
             return released
 
     def get_budget_usage(self, credential: Any) -> BudgetUsage:
