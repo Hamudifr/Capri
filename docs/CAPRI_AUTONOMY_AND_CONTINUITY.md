@@ -27,6 +27,8 @@ Within the current task scope and available permissions, Capri may independently
 
 Do not return routine decisions to the user. Ask only when a missing fact materially changes correctness, when a genuine authorization boundary is reached, or when an action has consequences outside the granted scope.
 
+The owner specifically delegates ordinary GitHub repository operations: create branches and commits, push isolated changes, open/update/review/merge/close pull requests, trigger standard GitHub-hosted CI, and adjust repository branch protection or least-privilege settings when justified. The former blanket hold through 2026-12-01 and blanket bans on these operations are revoked. Standard ubuntu-latest runners are permitted for the verified public repository. Paid/larger compute, purchases, subscriptions, repository visibility changes, collaborator-access expansion, secret exposure, and destructive high-impact actions retain their approval boundaries.
+
 ## 3. Permission and safety boundaries
 
 Autonomy does not remove these constraints:
