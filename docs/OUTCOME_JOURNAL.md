@@ -15,7 +15,7 @@ Each immutable `OutcomeRecord` contains:
 - optional idempotency key;
 - optional correction lineage (`supersedes_id`, `correction_reason`).
 
-Allowed source types distinguish user reports, host observations, tool results, verification, system reconciliation, and explicit user corrections. Confidence is descriptive metadata, not a cryptographic proof or automatic truth score.
+Allowed source types distinguish user reports, host observations, tool results, verification, system reconciliation, model inferences, and explicit user corrections. Confidence is descriptive metadata, not a cryptographic proof or automatic truth score.
 
 ## Append and correction semantics
 
