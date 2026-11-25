@@ -44,8 +44,14 @@ int main(void) {
     assert(capri_session_get_for_principal(store,legacy.session_id,"principal-alice",&bob)==CAPRI_SESSION_NOT_FOUND);
     assert(capri_session_get(store,alice.session_id,&bob)==CAPRI_SESSION_NOT_FOUND);
     const char *legacy_turn="[{\"role\":\"user\",\"content\":\"legacy\"},{\"role\":\"assistant\",\"content\":\"compatible\"}]";
-    assert(capri_session_commit_turn(store,legacy.session_id,0,legacy_turn,NULL,&legacy_committed)==CAPRI_SESSION_OK);
+    assert(capri_session_claim_turn_lease(store,legacy.session_id,"legacy-worker",30.0)==CAPRI_SESSION_OK);
+    assert(capri_session_renew_turn_lease(store,legacy.session_id,"legacy-worker",30.0)==CAPRI_SESSION_OK);
+    assert(capri_session_claim_turn_lease_for_principal(store,legacy.session_id,"principal-alice","other-worker",30.0)==CAPRI_SESSION_NOT_FOUND);
+    assert(capri_session_commit_turn(store,legacy.session_id,0,legacy_turn,"wrong-worker",&legacy_committed)==CAPRI_SESSION_CONFLICT);
+    assert(capri_session_commit_turn(store,legacy.session_id,0,legacy_turn,"legacy-worker",&legacy_committed)==CAPRI_SESSION_OK);
     assert(legacy_committed.version==1);
+    int legacy_released=0;
+    assert(capri_session_release_turn_lease(store,legacy.session_id,"legacy-worker",&legacy_released)==CAPRI_SESSION_OK&&legacy_released==1);
     assert(capri_session_close(store,legacy.session_id,&legacy_closed)==CAPRI_SESSION_OK&&legacy_closed.closed);
     assert(capri_session_commit_turn(store,legacy.session_id,1,legacy_turn,NULL,&bob)==CAPRI_SESSION_CLOSED);
     capri_session_free(&legacy);capri_session_free(&legacy_read);capri_session_free(&legacy_committed);capri_session_free(&legacy_closed);
