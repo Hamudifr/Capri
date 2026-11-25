@@ -46,6 +46,18 @@ CapriSessionStore *capri_session_store_open(
     CapriSessionError *error);
 void capri_session_store_close(CapriSessionStore *store);
 
+/* Compatibility operations are restricted to sessions with no principal-owner
+ * row. They cannot read or mutate principal-owned sessions.
+ */
+CapriSessionError capri_session_create(CapriSessionStore *store, CapriSession *out);
+CapriSessionError capri_session_get(
+    CapriSessionStore *store, const char *session_id, CapriSession *out);
+CapriSessionError capri_session_commit_turn(
+    CapriSessionStore *store, const char *session_id, int64_t expected_version,
+    const char *turn_json, const char *lease_owner, CapriSession *out);
+CapriSessionError capri_session_close(
+    CapriSessionStore *store, const char *session_id, CapriSession *out);
+
 /* Creates the session and immutable principal ownership in one transaction. */
 CapriSessionError capri_session_create_for_principal(
     CapriSessionStore *store, const char *principal_id, CapriSession *out);
