@@ -1008,7 +1008,8 @@ class SQLiteStrategyStore:
         rows = connection.execute(
             """SELECT event_id,principal_id,strategy_class,generation,action,
             from_strategy_id,from_version,to_strategy_id,to_version,to_config_sha256,
-            evaluation_id,approval_id,approver_id,created_at,previous_hash,event_hash
+            evaluation_id,approval_id,approver_id,created_at,previous_hash,event_hash,
+            promotion_assessment_sha256
             FROM strategy_events WHERE principal_id=? AND strategy_class=?
             ORDER BY generation""",
             (principal_id, strategy_class),
@@ -1024,6 +1025,8 @@ class SQLiteStrategyStore:
                 "approval_id": row[11], "approver_id": row[12],
                 "created_at": row[13], "previous_hash": row[14],
             }
+            if row[16] is not None:
+                payload["promotion_assessment_sha256"] = row[16]
             if row[3] != expected_generation or row[14] != previous_hash:
                 raise StrategyIntegrityError("strategy event sequence or previous hash is invalid")
             digest = hashlib.sha256(json.dumps(
