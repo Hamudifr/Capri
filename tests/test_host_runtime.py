@@ -293,7 +293,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
             host.commit_worker_reservation("alice-token", "monitor-token", pending)
         self.assertIsNone(registry.get_reservation(pending.reservation.token))
 
-    def test_host_worker_reservation_release_uses_host_observed_load(self):
+    def test_host_worker_reservation_start_handoff_prevents_double_count(self):
         registry = InMemoryWorkerRegistry()
         load = {"worker-1": 0}
         host = self.make_host(
@@ -303,7 +303,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
                 "worker-1" if credential == "worker-token" else None
             ),
             worker_descriptor_resolver=lambda worker_id, proposed: WorkerDescriptor(
-                worker_id, (1,), ("math.factorial",), max_concurrency=1,
+                worker_id, (1,), ("math.factorial",), max_concurrency=2,
             ),
             worker_observer_authorizer=lambda credential, worker_id: (
                 credential == "monitor-token" and worker_id == "worker-1"
@@ -313,39 +313,58 @@ class CapriHostRuntimeTests(unittest.TestCase):
         )
         host.register_worker(
             "worker-token",
-            WorkerDescriptor("worker-1", (1,), ("math.factorial",), max_concurrency=1),
+            WorkerDescriptor("worker-1", (1,), ("math.factorial",), max_concurrency=2),
         )
         host.heartbeat_worker("monitor-token", "worker-1")
-        task = self.task_store.create_for_principal(
-            "alice", [{"tool": "collect", "input": {}}],
-        )
-        pending = host.reserve_worker_candidate(
-            "alice-token", task.task_id, "math.factorial", 1,
-        )
-        committed = host.commit_worker_reservation(
-            "alice-token", "monitor-token", pending,
-        )
+        tasks = [
+            self.task_store.create_for_principal(
+                "alice", [{"tool": "collect", "input": {"index": index}}],
+            )
+            for index in range(2)
+        ]
+        pending = [
+            host.reserve_worker_candidate("alice-token", task.task_id, "math.factorial", 1)
+            for task in tasks
+        ]
+        self.assertTrue(all(item is not None for item in pending))
+        committed = [
+            host.commit_worker_reservation("alice-token", "monitor-token", item)
+            for item in pending
+        ]
 
-        # A different task remains active after the committed task completes.
+        # Worker 1 accepts its task. Its committed hold is atomically replaced
+        # by total host-observed load; the not-yet-started second hold remains.
         load["worker-1"] = 1
-        self.assertTrue(host.release_worker_reservation("monitor-token", committed))
+        self.assertTrue(host.mark_worker_reservation_started("monitor-token", committed[0]))
         self.assertEqual(registry.get("worker-1").health.in_flight, 1)
-        self.assertEqual(
-            registry.eligible(
-                "math.factorial", protocol_version=1,
-                authorized_worker_ids={"worker-1"},
-            ),
-            (),
-        )
-        load["worker-1"] = 0
+        self.assertFalse(host.release_worker_reservation("monitor-token", committed[0]))
+        self.assertEqual(registry.eligible(
+            "math.factorial", protocol_version=1,
+            authorized_worker_ids={"worker-1"},
+        ), ())
+
+        # The second task starts and is likewise represented only by host load.
+        load["worker-1"] = 2
+        self.assertTrue(host.mark_worker_reservation_started("monitor-token", committed[1]))
+        self.assertEqual(registry.get("worker-1").health.in_flight, 2)
+        self.assertEqual(registry.eligible(
+            "math.factorial", protocol_version=1,
+            authorized_worker_ids={"worker-1"},
+        ), ())
+
+        # One task completes. The remaining active task is counted once, leaving
+        # exactly one slot available for a new reservation.
+        load["worker-1"] = 1
         host.heartbeat_worker("monitor-token", "worker-1")
-        self.assertEqual(
-            len(registry.eligible(
-                "math.factorial", protocol_version=1,
-                authorized_worker_ids={"worker-1"},
-            )),
-            1,
+        next_task = self.task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {"next": True}}],
         )
+        next_reservation = host.reserve_worker_candidate(
+            "alice-token", next_task.task_id, "math.factorial", 1,
+        )
+        self.assertIsNotNone(next_reservation)
+        self.assertTrue(host.release_worker_reservation("monitor-token", next_reservation))
+
 
     def test_host_worker_reservation_expiry_purges_host_context(self):
         now = {"value": 10_000_000_000}

@@ -625,10 +625,41 @@ class CapriHostRuntime:
             self._worker_reservation_contexts[committed.token] = wrapped
             return wrapped
 
+    def mark_worker_reservation_started(
+        self, observer_credential: Any, reservation: HostWorkerReservation,
+    ) -> bool:
+        """Handoff a committed hold after worker acceptance under supervisor authority."""
+        if type(reservation) is not HostWorkerReservation:
+            raise HostRuntimeError("an exact host worker reservation is required")
+        worker_id = reservation.reservation.worker_id
+        self._authorize_worker_observer(observer_credential, worker_id)
+        if self._worker_registry is None:
+            raise HostRuntimeError("no host worker registry is configured")
+        with self._worker_reservation_lock:
+            self._purge_worker_reservation_contexts()
+            stored = self._worker_reservation_contexts.get(reservation.reservation.token)
+            if stored is None:
+                return False
+            if not self._same_host_reservation_context(stored, reservation):
+                raise HostRuntimeError("worker reservation belongs to another task")
+            if not stored.reservation.committed:
+                raise HostRuntimeError("worker reservation must be committed before worker start")
+            observed_in_flight = self._worker_in_flight(worker_id)
+            try:
+                started = self._worker_registry.handoff_reservation_to_in_flight(
+                    stored.reservation,
+                    authenticated_worker_id=worker_id,
+                    observed_in_flight=observed_in_flight,
+                )
+            except WorkerRegistryError:
+                raise HostRuntimeError("worker reservation start handoff was rejected") from None
+            self._worker_reservation_contexts.pop(stored.reservation.token, None)
+            return started
+
     def release_worker_reservation(
         self, observer_credential: Any, reservation: HostWorkerReservation,
     ) -> bool:
-        """Release a pending hold or reconcile committed load under supervisor authority."""
+        """Release a reservation only when dispatch did not start or was rejected."""
         if type(reservation) is not HostWorkerReservation:
             raise HostRuntimeError("an exact host worker reservation is required")
         worker_id = reservation.reservation.worker_id
@@ -643,17 +674,9 @@ class CapriHostRuntime:
             if not self._same_host_reservation_context(stored, reservation):
                 raise HostRuntimeError("worker reservation belongs to another task")
             try:
-                if stored.reservation.committed:
-                    observed_in_flight = self._worker_in_flight(worker_id)
-                    released = self._worker_registry.release_reservation(
-                        stored.reservation,
-                        authenticated_worker_id=worker_id,
-                        observed_in_flight=observed_in_flight,
-                    )
-                else:
-                    released = self._worker_registry.release_reservation(
-                        stored.reservation, authenticated_worker_id=worker_id,
-                    )
+                released = self._worker_registry.release_reservation(
+                    stored.reservation, authenticated_worker_id=worker_id,
+                )
             except WorkerRegistryError:
                 raise HostRuntimeError("worker reservation release was rejected") from None
             self._worker_reservation_contexts.pop(stored.reservation.token, None)

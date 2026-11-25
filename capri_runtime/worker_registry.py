@@ -495,11 +495,11 @@ class InMemoryWorkerRegistry:
         authenticated_worker_id: str,
         now_ns: int | None = None,
     ) -> WorkerReservation | None:
-        """Convert a pending expiring hold into a non-expiring in-flight hold.
+        """Convert a pending expiring hold into a non-expiring pre-start hold.
 
-        Commit before dispatch. The returned token remains capacity-accounted
-        until explicitly released after host-observed load has been updated,
-        or until trusted host reconciliation revokes it.
+        Commit immediately before dispatch. After the worker accepts the task,
+        atomically hand the hold into host-observed in-flight load. If dispatch
+        never starts, release the committed hold without changing host load.
         """
         if type(reservation) is not WorkerReservation:
             raise WorkerRegistryError("reservation must be an exact WorkerReservation")
@@ -543,30 +543,26 @@ class InMemoryWorkerRegistry:
             self._reservations[current.token] = committed
             return committed
 
-    def release_reservation(
+    def handoff_reservation_to_in_flight(
         self,
         reservation: WorkerReservation,
         *,
         authenticated_worker_id: str,
-        observed_in_flight: int | None = None,
+        observed_in_flight: int,
         now_ns: int | None = None,
     ) -> bool:
-        """Release a pending hold or atomically hand off a committed hold to load.
+        """Atomically replace a committed hold with host-observed active load.
 
-        Pending holds may be released before dispatch without a load observation.
-        A committed hold can only be released together with the host-observed
-        in-flight count after completion/reconciliation. The load update and
-        token removal occur under the same registry lock, so capacity is never
-        temporarily unaccounted.
+        Call only after the worker has accepted/started the reserved task. The
+        observed count must include that task. The hold is removed under the
+        same lock that updates health, so each started task is counted once.
         """
         if type(reservation) is not WorkerReservation:
             raise WorkerRegistryError("reservation must be an exact WorkerReservation")
         identity = _identifier(authenticated_worker_id, "authenticated_worker_id")
         if identity != reservation.worker_id:
             raise WorkerRegistryError("authenticated identity does not match reservation worker")
-        if observed_in_flight is not None and (
-            type(observed_in_flight) is not int or observed_in_flight < 0
-        ):
+        if type(observed_in_flight) is not int or observed_in_flight < 0:
             raise WorkerRegistryError("observed_in_flight must be a non-negative integer")
         timestamp = _now_ns(now_ns, self._clock_ns)
         with self._lock:
@@ -576,24 +572,46 @@ class InMemoryWorkerRegistry:
                 return False
             if current != reservation:
                 raise WorkerConflictError("reservation token does not match current reservation")
-            if current.committed:
-                if observed_in_flight is None:
-                    raise WorkerRegistryError(
-                        "committed reservation release requires host-observed in-flight load"
-                    )
-                snapshot = self._workers.get(identity)
-                if snapshot is None:
-                    raise WorkerNotFoundError("worker is not registered")
-                updated_health = replace(
-                    snapshot.health,
-                    in_flight=observed_in_flight,
-                    revision=snapshot.health.revision + 1,
-                )
-                self._workers[identity] = WorkerSnapshot(snapshot.descriptor, updated_health)
-            elif observed_in_flight is not None:
-                raise WorkerRegistryError(
-                    "pending reservation release must not include an in-flight observation"
-                )
+            if not current.committed:
+                raise WorkerRegistryError("only a committed reservation can be handed off")
+            snapshot = self._workers.get(identity)
+            if snapshot is None:
+                raise WorkerNotFoundError("worker is not registered")
+            updated_health = replace(
+                snapshot.health,
+                in_flight=observed_in_flight,
+                revision=snapshot.health.revision + 1,
+            )
+            self._workers[identity] = WorkerSnapshot(snapshot.descriptor, updated_health)
+            del self._reservations[reservation.token]
+            return True
+
+    def release_reservation(
+        self,
+        reservation: WorkerReservation,
+        *,
+        authenticated_worker_id: str,
+        now_ns: int | None = None,
+    ) -> bool:
+        """Release a hold when dispatch did not start or was rejected.
+
+        This may release either a pending or committed hold, but it does not
+        update host load. After worker acceptance, call the handoff method
+        instead; the token is then removed.
+        """
+        if type(reservation) is not WorkerReservation:
+            raise WorkerRegistryError("reservation must be an exact WorkerReservation")
+        identity = _identifier(authenticated_worker_id, "authenticated_worker_id")
+        if identity != reservation.worker_id:
+            raise WorkerRegistryError("authenticated identity does not match reservation worker")
+        timestamp = _now_ns(now_ns, self._clock_ns)
+        with self._lock:
+            self._purge_expired_reservations(timestamp)
+            current = self._reservations.get(reservation.token)
+            if current is None:
+                return False
+            if current != reservation:
+                raise WorkerConflictError("reservation token does not match current reservation")
             del self._reservations[reservation.token]
             return True
 
