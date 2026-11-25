@@ -73,6 +73,39 @@ class SQLiteSecurityStoreTests(unittest.TestCase):
             )
         )
 
+    def test_expired_worker_reservation_closes_durable_reconciliation_state(self):
+        store = SQLiteSecurityStore(self.path)
+        token_hash = "b" * 64
+        for event_type in (
+            "worker.reservation.created",
+            "worker.reservation.expired",
+        ):
+            metadata_json = json.dumps(
+                {
+                    "event_type": event_type,
+                    "worker_id": "worker-1",
+                    "reservation_token_sha256": token_hash,
+                },
+                sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+            )
+            event = AuditEvent(
+                f"worker-{event_type.rsplit('.', 1)[-1]}",
+                self.now.isoformat(),
+                "alice",
+                event_type,
+                hashlib.sha256(metadata_json.encode("utf-8")).hexdigest(),
+                "success",
+                None,
+                "worker",
+                "worker-1",
+                "task-1",
+                metadata_json,
+            )
+            store.write(event)
+            if event_type.endswith(".created"):
+                self.assertTrue(store.worker_lifecycle_reconciliation_required())
+        self.assertFalse(store.worker_lifecycle_reconciliation_required())
+
     def test_enriched_audit_metadata_roundtrips_with_digest_binding(self):
         store = SQLiteSecurityStore(self.path)
         metadata = {
