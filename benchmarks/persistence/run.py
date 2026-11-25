@@ -206,6 +206,14 @@ def run(*, warmup: int = 10, samples: int = 50, workers: int = 4, queue_size: in
 
         results.append(_measure("task_create_api", create_task, warmup, samples))
         results.append(_measure("task_get_api", lambda: tasks.get(task_ids[-1]), warmup, samples))
+        principal_task = tasks.create_for_principal(
+            _PRINCIPAL, _PLAN, idempotency_key="principal-task-read", now=now,
+        )
+        results.append(_measure(
+            "task_get_for_principal",
+            lambda: tasks.get_for_principal(principal_task.task_id, _PRINCIPAL),
+            warmup, samples,
+        ))
 
         serialized = json.dumps(_PLAN, separators=(",", ":"), sort_keys=True)
         results.append(_measure("plan_json_encode", lambda: json.dumps(_PLAN, separators=(",", ":"), sort_keys=True), warmup, samples))
