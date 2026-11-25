@@ -268,7 +268,10 @@ def _validate_skill_directory(skill_dir: Path) -> dict[str, Any]:
 
     for target in _LINK_PATTERN.findall(body):
         parsed = urlsplit(target)
-        if parsed.scheme or target.startswith(("#", "//")):
+        if target.startswith(("#", "//")) or parsed.scheme in {"http", "https", "mailto"}:
+            continue
+        if parsed.scheme:
+            errors.append(f"unsupported linked resource scheme: {target}")
             continue
         relative = unquote(parsed.path)
         if not relative:
