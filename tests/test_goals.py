@@ -166,6 +166,31 @@ class SQLiteGoalStoreTests(unittest.TestCase):
                 now=NOW,
             )
 
+    def test_goal_events_and_private_backup_survive_restore(self):
+        goal = self.create()
+        planning = self.store.transition_for_principal(
+            goal.goal_id, "alice", "planning", expected_version=1, now=NOW,
+        )
+        planned = self.store.save_plan_for_principal(
+            goal.goal_id, "alice", PLAN, frozenset({"collect", "summarize"}),
+            expected_version=planning.version, now=NOW,
+        )
+        events = self.store.events_for_principal(goal.goal_id, "alice")
+        self.assertEqual([event["event_type"] for event in events], [
+            "created", "transition", "plan_saved",
+        ])
+        backup = os.path.join(self.temp.name, "goal-backup.sqlite3")
+        self.assertEqual(self.store.backup_to(backup), backup)
+        if os.name == "posix":
+            import stat
+            self.assertEqual(stat.S_IMODE(os.stat(backup).st_mode), 0o600)
+        restored = SQLiteGoalStore(backup)
+        self.assertEqual(restored.integrity_check(), "ok")
+        self.assertEqual(restored.get_for_principal(goal.goal_id, "alice"), planned)
+        self.assertEqual(restored.events_for_principal(goal.goal_id, "alice"), events)
+        with self.assertRaises(FileExistsError):
+            self.store.backup_to(backup)
+
     def test_goal_database_rejects_symlink_path(self):
         if not hasattr(os, "symlink"):
             self.skipTest("symlinks are unavailable")
