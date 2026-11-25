@@ -278,7 +278,6 @@ class SQLiteSessionStore(SessionStore):
                             "SELECT count(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"
                         ).fetchone()[0]
                         if schema_object_count > 0:
-                            connection.execute("PRAGMA user_version=1")
                             self._validate_schema(connection)
                             connection.execute("COMMIT")
                         else:
@@ -337,6 +336,7 @@ class SQLiteSessionStore(SessionStore):
                                     SELECT RAISE(ABORT, 'session owner is immutable');
                                 END"""
                             )
+                            connection.execute("PRAGMA user_version=1")
                             self._validate_schema(connection)
                             connection.execute("COMMIT")
                     except Exception:
