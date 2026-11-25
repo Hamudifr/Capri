@@ -62,7 +62,7 @@ def _safe_text(value: object, name: str, maximum: int = 128) -> str:
         or not value
         or len(value) > maximum
         or value != value.strip()
-        or any(ord(char) < 0x20 or 0xD800 <= ord(char) <= 0xDFFF for char in value)
+        or any(ord(char) < 0x20 or 0x7F <= ord(char) <= 0x9F or 0xD800 <= ord(char) <= 0xDFFF for char in value)
     ):
         raise ProviderUsageJournalError(f"{name} is invalid")
     return value

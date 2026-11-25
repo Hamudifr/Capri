@@ -66,7 +66,9 @@ class SQLiteProviderUsageJournalTests(unittest.TestCase):
         self.journal.record_usage("session-1", "principal-1", self.usage)
         self.clock_value = datetime(2026, 11, 25, 17, 1, 0, tzinfo=timezone.utc)
         self.journal.record_usage("session-1", "principal-1", self.usage)
-        self.assertEqual(len(self.journal.usage_for_session("principal-1", "session-1")), 1)
+        records = self.journal.usage_for_session("principal-1", "session-1")
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].recorded_at, "2026-11-25T17:00:00+00:00")
 
     def test_reused_response_id_with_different_usage_is_rejected(self):
         self.journal.record_usage("session-1", "principal-1", self.usage)
@@ -156,6 +158,24 @@ class SQLiteProviderUsageJournalTests(unittest.TestCase):
             connection.execute(
                 "UPDATE provider_usage_events SET event_sha256=?",
                 ("0" * 64,),
+            )
+            connection.execute(
+                """CREATE TRIGGER provider_usage_immutable_update
+                BEFORE UPDATE ON provider_usage_events
+                BEGIN SELECT RAISE(ABORT, 'provider usage events are append-only'); END"""
+            )
+        finally:
+            connection.close()
+        self.assertEqual(self.task_store.integrity_check(), "task store validation failed")
+
+    def test_integrity_check_rejects_tampered_usage_timestamp(self):
+        self.journal.record_usage("session-1", "principal-1", self.usage)
+        connection = self.task_store._connect()
+        try:
+            connection.execute("DROP TRIGGER provider_usage_immutable_update")
+            connection.execute(
+                "UPDATE provider_usage_events SET recorded_at=?",
+                ("2026-11-25T18:00:00+00:00",),
             )
             connection.execute(
                 """CREATE TRIGGER provider_usage_immutable_update
