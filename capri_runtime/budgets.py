@@ -324,13 +324,16 @@ class SQLiteBudgetStore:
                 reset_at = datetime.fromtimestamp(
                     window_epoch + policy.window_seconds, timezone.utc
                 )
+                usage_rows = connection.execute(
+                    """SELECT dimension,used FROM budget_usage
+                    WHERE principal_id=? AND window_start=?""",
+                    (principal_id, window_start),
+                ).fetchall()
+                used_by_dimension = {
+                    dimension: used for dimension, used in usage_rows
+                }
                 for dimension, amount in normalized.items():
-                    used_row = connection.execute(
-                        """SELECT used FROM budget_usage
-                        WHERE principal_id=? AND window_start=? AND dimension=?""",
-                        (principal_id, window_start, dimension),
-                    ).fetchone()
-                    used = used_row[0] if used_row else 0
+                    used = used_by_dimension.get(dimension, 0)
                     limit = getattr(policy, _DIMENSIONS[dimension])
                     if amount > limit:
                         connection.execute("ROLLBACK")
