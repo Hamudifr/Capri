@@ -128,8 +128,8 @@ class StrategyEvaluationTests(unittest.TestCase):
         result = evaluate_strategies("baseline", "candidate", records)
         self.assertFalse(result.eligible_for_manual_review)
         self.assertIn("unmatched_cohort", result.blocked_reasons)
-        self.assertEqual(result.baseline_unmatched, 1)
-        self.assertEqual(result.candidate_unmatched, 0)
+        self.assertEqual(result.baseline_unmatched, 0)
+        self.assertEqual(result.candidate_unmatched, 1)
 
     def test_matched_task_must_have_same_scenario(self):
         records = cohort()
