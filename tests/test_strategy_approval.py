@@ -86,6 +86,21 @@ class HostStrategyApprovalAuthorityTests(unittest.TestCase):
         with self.assertRaises(StrategyAuthorizationError):
             self.authority.issue_grant("valid", self.request, ttl_seconds=301)
 
+    def test_store_contract_validation_precedes_signing(self):
+        malformed = replace(self.request, strategy_class="not a valid identifier")
+        with self.assertRaises(StrategyAuthorizationError):
+            self.authority.issue_grant("valid", malformed)
+
+    def test_clock_failure_fails_closed(self):
+        authority = HostStrategyApprovalAuthority(
+            self.keyring,
+            authenticate_approver=lambda credential: self.identity,
+            authorize_approver=lambda identity, request: True,
+            clock=lambda: (_ for _ in ()).throw(RuntimeError("clock unavailable")),
+        )
+        with self.assertRaisesRegex(StrategyAuthorizationError, "clock is unavailable"):
+            authority.issue_grant("valid", self.request)
+
     def test_key_rotation_keeps_old_grant_verifiable(self):
         grant = self.authority.issue_grant("valid", self.request)
         rotated = HmacApprovalKeyRing(
