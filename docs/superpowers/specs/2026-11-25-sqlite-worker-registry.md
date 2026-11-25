@@ -1,6 +1,6 @@
 # Durable SQLite Worker Registry and Reservation Lifecycle
 
-**Status:** implementation design for PR #233  
+**Status:** implementation design for PR #237 (test-first draft)  
 **Baseline:** `dda020f465b3ed4724683cac46c3d01bf91689bf`  
 **Scope:** durable worker state, task-bound reservation lifecycle, and append-only audit in the existing private SQLite task database.
 
