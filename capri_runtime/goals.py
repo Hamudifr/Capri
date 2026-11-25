@@ -618,6 +618,8 @@ class SQLiteGoalStore:
         self, goal_id: str, principal_id: str, evidence_type: str,
         reference: str, step_index: int, *, now: datetime | None = None,
     ) -> GoalRecord:
+        _text(goal_id, "goal_id", 64)
+        principal_id = _text(principal_id, "principal_id", 128)
         _text(evidence_type, "evidence_type", 64)
         _text(reference, "evidence reference", 512)
         if type(step_index) is not int or not 0 <= step_index < 32:
