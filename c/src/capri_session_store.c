@@ -308,9 +308,9 @@ CapriSessionError capri_session_backup_to(CapriSessionStore *s,const char *desti
 }
 CapriSessionError capri_session_create_for_principal(CapriSessionStore *s,const char *principal,CapriSession *out) {
     if(!s||!out||!text_ok(principal,256u,true))return CAPRI_SESSION_INVALID;
+    char id[37],now[32];if(!random_uuid(id)||!utc_now(now))return CAPRI_SESSION_IO;
     pthread_mutex_lock(&s->mutex);
     if(!store_path_safe(s)) RETURN_UNLOCK(s,CAPRI_SESSION_IO);
-    char id[37],now[32];if(!random_uuid(id)||!utc_now(now)) RETURN_UNLOCK(s,CAPRI_SESSION_IO);
     char *empty_json=strdup("[]");if(!empty_json) RETURN_UNLOCK(s,CAPRI_SESSION_NO_MEMORY);
     if(!exec_sql(s->db,"BEGIN IMMEDIATE")){free(empty_json);RETURN_UNLOCK(s,CAPRI_SESSION_DATABASE);}
     sqlite3_stmt *st=NULL;int rc=sqlite3_prepare_v2(s->db,"INSERT INTO sessions VALUES(?1,?2,?2,0,0,'[]')",-1,&st,NULL);
