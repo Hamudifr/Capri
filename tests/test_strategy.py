@@ -48,23 +48,8 @@ class StrategyEvaluationTests(unittest.TestCase):
         self.assertIn("not a causal proof", result.interpretation)
 
     def test_higher_verified_success_with_no_resource_regression_is_eligible(self):
-        records = cohort(candidate_overrides={
-            0: {"outcome": "verified_success"},
-        })
-        records[1] = StrategyObservation(
-            task_id="task-000", scenario="research", strategy_id="candidate",
-            outcome="verified_success", evidence_ref="test://evidence/task-000",
-            tool_calls=5, context_tokens=1000, estimated_cost_units=100, latency_ms=2000,
-        )
-        records[3] = StrategyObservation(
-            task_id="task-001", scenario="research", strategy_id="candidate",
-            outcome="verified_success", evidence_ref="test://evidence/task-001",
-            tool_calls=5, context_tokens=1000, estimated_cost_units=100, latency_ms=2000,
-        )
-        records[2] = StrategyObservation(
-            task_id="task-001", scenario="research", strategy_id="baseline",
-            outcome="verified_failure", evidence_ref="test://evidence/task-001",
-            tool_calls=5, context_tokens=1000, estimated_cost_units=100, latency_ms=2000,
+        records = cohort(
+            baseline_overrides={1: {"outcome": "verified_failure"}},
         )
         result = evaluate_strategies("baseline", "candidate", records)
         self.assertTrue(result.eligible_for_manual_review)
