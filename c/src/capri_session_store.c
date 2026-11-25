@@ -463,6 +463,22 @@ static bool schema_is_empty(sqlite3 *db,bool *empty) {
     return valid;
 }
 
+static bool table_matches(sqlite3 *db,const char *name,const char *expected_sql) {
+    sqlite3_stmt *st=NULL;
+    if(sqlite3_prepare_v2(
+        db,
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name=?1",
+        -1,&st,NULL
+    )!=SQLITE_OK)return false;
+    sqlite3_bind_text(st,1,name,-1,SQLITE_STATIC);
+    int rc=sqlite3_step(st);
+    bool matches=rc==SQLITE_ROW
+        &&sqlite3_column_type(st,0)==SQLITE_TEXT
+        &&normalized_sql_equal((const char*)sqlite3_column_text(st,0),expected_sql);
+    sqlite3_finalize(st);
+    return matches;
+}
+
 static bool schema_objects_valid(sqlite3 *db) {
     static const struct { const char *type,*name,*table; } expected[] = {
         {"table","sessions","sessions"},
@@ -506,6 +522,12 @@ static bool schema_objects_valid(sqlite3 *db) {
 
 static bool session_schema_valid(sqlite3 *db) {
     return schema_objects_valid(db)
+        &&table_matches(db,"sessions",
+            "CREATE TABLE sessions(session_id TEXT PRIMARY KEY,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,version INTEGER NOT NULL CHECK(version>=0),closed INTEGER NOT NULL CHECK(closed IN(0,1)),messages_json TEXT NOT NULL CHECK(json_valid(messages_json) AND json_type(messages_json)='array'))")
+        &&table_matches(db,"session_owners",
+            "CREATE TABLE session_owners(session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,principal_id TEXT NOT NULL,created_at TEXT NOT NULL)")
+        &&table_matches(db,"session_turn_leases",
+            "CREATE TABLE session_turn_leases(session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,owner_token TEXT NOT NULL,expires_at TEXT NOT NULL)")
         &&table_primary_key_is(db,"sessions","session_id")
         &&table_primary_key_is(db,"session_owners","session_id")
         &&table_primary_key_is(db,"session_turn_leases","session_id")
