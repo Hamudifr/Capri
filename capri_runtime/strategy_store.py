@@ -1207,6 +1207,8 @@ class SQLiteStrategyStore:
                     "approver_id": grant.approver_id, "created_at": created,
                     "previous_hash": previous_hash,
                 }
+                if grant.promotion_assessment_sha256 is not None:
+                    payload["promotion_assessment_sha256"] = grant.promotion_assessment_sha256
                 event_hash = hashlib.sha256(json.dumps(
                     payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
                 ).encode("utf-8")).hexdigest()
@@ -1214,12 +1216,14 @@ class SQLiteStrategyStore:
                     """INSERT INTO strategy_events
                     (event_id,principal_id,strategy_class,generation,action,
                      from_strategy_id,from_version,to_strategy_id,to_version,to_config_sha256,
-                     evaluation_id,approval_id,approver_id,created_at,previous_hash,event_hash)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                     evaluation_id,approval_id,approver_id,created_at,previous_hash,event_hash,
+                     promotion_assessment_sha256)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (event_id, principal, grant.strategy_class, next_generation,
                      required_action, from_id, from_version, grant.strategy_id,
                      grant.version, config_hash, evaluation_id, grant.grant_id,
-                     grant.approver_id, created, previous_hash, event_hash),
+                     grant.approver_id, created, previous_hash, event_hash,
+                     grant.promotion_assessment_sha256),
                 )
                 connection.execute(
                     """INSERT INTO strategy_active
