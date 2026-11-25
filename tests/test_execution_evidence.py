@@ -198,6 +198,40 @@ class SQLiteExecutionEvidenceJournalTests(unittest.TestCase):
         self.assertEqual(record.state, "reconciliation_required")
         self.assertEqual(record.error_code, "execution_evidence_unavailable")
 
+    def test_evidence_and_task_result_roll_back_atomically_on_finish_failure(self):
+        original_finish = self.tasks._finish_step_in_transaction
+
+        def fail_after_evidence_insert(connection, claim, result, stamp):
+            raise RuntimeError("injected task completion failure")
+
+        self.tasks._finish_step_in_transaction = fail_after_evidence_insert
+        try:
+            engine = TaskEngine(
+                self.tasks,
+                {},
+                "worker-1",
+                principal_handlers={"research": lambda inputs, key, principal: self.result},
+                execution_evidence_journal=self.journal,
+                execution_evidence_credential=lambda claim: "host-credential",
+            )
+            record = engine.execute_claim(self.claim)
+        finally:
+            self.tasks._finish_step_in_transaction = original_finish
+
+        self.assertEqual(record.state, "reconciliation_required")
+        self.assertEqual(record.error_code, "execution_evidence_unavailable")
+        with self.tasks._lock:
+            connection = self.tasks._connect()
+            try:
+                event_count = connection.execute(
+                    "SELECT COUNT(*) FROM execution_evidence_events WHERE task_id=?",
+                    (self.claim.task_id,),
+                ).fetchone()[0]
+            finally:
+                connection.close()
+        self.assertEqual(event_count, 0)
+        self.assertEqual(record.result, ())
+
     def test_execution_record_is_idempotent_for_same_claim_and_result(self):
         first = self.journal.record_execution("host-credential", self.claim, self.result)
         second = self.journal.record_execution("host-credential", self.claim, self.result)
