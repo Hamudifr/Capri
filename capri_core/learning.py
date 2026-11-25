@@ -13,6 +13,7 @@ import re
 import sqlite3
 import stat
 import tempfile
+import threading
 import uuid
 import zipfile
 from contextlib import contextmanager
@@ -20,6 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Iterable, Literal
+
 
 Outcome = Literal["verified_success", "verified_failure", "unverified"]
 Split = Literal["train", "validation", "test"]
@@ -170,6 +172,7 @@ class LearningStore:
     ) -> None:
         if consent_verifier is not None and not callable(consent_verifier):
             raise LearningDataError("consent_verifier must be callable")
+        self._backup_lock = threading.RLock()
         self._consent_verifier = consent_verifier
         path = Path(database)
         _require_private_directory(path.parent)
@@ -284,12 +287,13 @@ class LearningStore:
 
     @contextmanager
     def _connection(self):
-        connection = self._connect()
-        try:
-            with connection:
-                yield connection
-        finally:
-            connection.close()
+        with self._backup_lock:
+            connection = self._connect()
+            try:
+                with connection:
+                    yield connection
+            finally:
+                connection.close()
 
     @staticmethod
     def _validate_consent(consent: LearningConsent) -> None:
@@ -682,6 +686,296 @@ class LearningStore:
                 "SELECT outcome, COUNT(*) AS n FROM learning_examples GROUP BY outcome"
             ).fetchall()
         return {row["outcome"]: row["n"] for row in rows}
+
+    def _validate_backup_snapshot(self, connection: sqlite3.Connection) -> None:
+        """Validate all four Learning Engine tables before a backup is published."""
+        connection.row_factory = sqlite3.Row
+        required_columns = {
+            "learning_examples": {
+                "example_id", "task_id", "capability", "prompt", "completion",
+                "outcome", "evidence_ref", "quality_score", "consent",
+                "privacy_reviewed", "sensitive", "source", "schema_version",
+                "content_hash", "consent_id", "created_at",
+            },
+            "learning_consents": {
+                "consent_id", "scope", "policy_version", "evidence_ref",
+                "granted_at", "revoked_at",
+            },
+            "learning_exports": {
+                "export_id", "bundle_sha256", "manifest_json", "status",
+                "created_at", "export_kind", "artifact_path", "staging_path",
+            },
+            "learning_export_consents": {"export_id", "consent_id"},
+        }
+        for table, expected in required_columns.items():
+            actual = {
+                row["name"] for row in connection.execute(
+                    f"PRAGMA table_info({table})"
+                ).fetchall()
+            }
+            if not expected.issubset(actual):
+                raise LearningDataError("backup is missing required Learning Engine columns")
+
+        def parse_timestamp(value: object, label: str, *, aware: bool) -> datetime:
+            if not isinstance(value, str) or not value or len(value) > 64:
+                raise LearningDataError(f"backup contains an invalid {label}")
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                raise LearningDataError(f"backup contains an invalid {label}") from None
+            if aware and (parsed.tzinfo is None or parsed.utcoffset() is None):
+                raise LearningDataError(f"backup {label} must be timezone-aware")
+            return parsed
+
+        consents: dict[str, dict[str, object]] = {}
+        for row in connection.execute(
+            """SELECT consent_id, scope, policy_version, evidence_ref, granted_at, revoked_at
+               FROM learning_consents"""
+        ).fetchall():
+            consent = LearningConsent(
+                row["consent_id"], row["scope"], row["policy_version"],
+                row["evidence_ref"], row["granted_at"],
+            )
+            self._validate_consent(consent)
+            granted = parse_timestamp(row["granted_at"], "consent grant timestamp", aware=True)
+            revoked_at = row["revoked_at"]
+            if revoked_at is not None:
+                revoked = parse_timestamp(revoked_at, "consent revocation timestamp", aware=True)
+                if revoked < granted:
+                    raise LearningDataError("backup contains a revocation before its consent grant")
+            consents[consent.consent_id] = {
+                "scope": consent.scope,
+                "policy_version": consent.policy_version,
+                "revoked_at": revoked_at,
+            }
+
+        for row in connection.execute(
+            """SELECT example_id, task_id, capability, prompt, completion, outcome,
+                      evidence_ref, quality_score, consent, privacy_reviewed, sensitive,
+                      source, schema_version, content_hash, consent_id, created_at
+               FROM learning_examples"""
+        ).fetchall():
+            flags = (row["consent"], row["privacy_reviewed"], row["sensitive"])
+            if any(type(flag) is not int or flag not in (0, 1) for flag in flags):
+                raise LearningDataError("backup contains invalid Learning Engine consent flags")
+            consent_id = row["consent_id"]
+            if not isinstance(consent_id, str):
+                raise LearningDataError("backup contains an invalid example consent reference")
+            example_record = LearningExample(
+                example_id=row["example_id"],
+                task_id=row["task_id"],
+                capability=row["capability"],
+                prompt=row["prompt"],
+                completion=row["completion"],
+                outcome=row["outcome"],
+                evidence_ref=row["evidence_ref"],
+                quality_score=row["quality_score"],
+                consent=row["consent"] == 1,
+                privacy_reviewed=row["privacy_reviewed"] == 1,
+                sensitive=row["sensitive"] == 1,
+                source=row["source"],
+                schema_version=row["schema_version"],
+                # Empty IDs are retained only for legacy rows. They are excluded
+                # from export because the consent join cannot match them.
+                consent_id=consent_id or "legacy-unlinked",
+            )
+            self._validate(example_record)
+            parse_timestamp(row["created_at"], "example creation timestamp", aware=False)
+            content_hash = row["content_hash"]
+            if not isinstance(content_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", content_hash):
+                raise LearningDataError("backup contains an invalid example content hash")
+            if consent_id:
+                consent = consents.get(consent_id)
+                if consent is None or consent["scope"] != "curated_training_examples":
+                    raise LearningDataError("backup contains an example without matching consent")
+                if consent["revoked_at"] is not None:
+                    raise LearningDataError("backup retains examples after consent revocation")
+                normalized = json.dumps(
+                    [example_record.prompt.strip(), example_record.completion.strip()],
+                    ensure_ascii=False, separators=(",", ":"),
+                )
+                expected_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+                if content_hash != expected_hash:
+                    raise LearningDataError("backup contains an example content-hash mismatch")
+
+        exports: dict[str, dict[str, object]] = {}
+        for row in connection.execute(
+            """SELECT export_id, bundle_sha256, manifest_json, status, created_at,
+                      export_kind, artifact_path, staging_path
+               FROM learning_exports"""
+        ).fetchall():
+            export_id = row["export_id"]
+            status = row["status"]
+            export_kind = row["export_kind"]
+            if not isinstance(export_id, str) or not re.fullmatch(
+                r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+                export_id,
+            ):
+                raise LearningDataError("backup contains an invalid export ID")
+            if status not in {"publishing", "active", "invalidated", "failed"}:
+                raise LearningDataError("backup contains an unsupported export status")
+            if export_kind not in {"jsonl", "zip"}:
+                raise LearningDataError("backup contains an unsupported export kind")
+            bundle_hash = row["bundle_sha256"]
+            if not isinstance(bundle_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", bundle_hash):
+                raise LearningDataError("backup contains an invalid export hash")
+            created_at = row["created_at"]
+            parse_timestamp(created_at, "export creation timestamp", aware=True)
+            artifact_path = row["artifact_path"]
+            staging_path = row["staging_path"]
+            for value, label in ((artifact_path, "artifact path"), (staging_path, "staging path")):
+                if not isinstance(value, str) or len(value) > 4096:
+                    raise LearningDataError(f"backup contains an invalid {label}")
+                if any(0xD800 <= ord(char) <= 0xDFFF for char in value):
+                    raise LearningDataError(f"backup contains an invalid {label}")
+                if value and not Path(value).is_absolute():
+                    raise LearningDataError(f"backup contains a non-absolute {label}")
+            if status == "active" and (not artifact_path or staging_path):
+                raise LearningDataError("active export has an incomplete publication record")
+            if artifact_path and staging_path:
+                artifact = Path(artifact_path)
+                staging = Path(staging_path)
+                if (
+                    artifact.parent != staging.parent
+                    or not staging.name.startswith(f".{artifact.name}.")
+                ):
+                    raise LearningDataError("backup contains an unsafe export staging relationship")
+
+            try:
+                manifest = json.loads(row["manifest_json"])
+            except (TypeError, ValueError, json.JSONDecodeError):
+                raise LearningDataError("backup contains an invalid export manifest") from None
+            if type(manifest) is not dict:
+                raise LearningDataError("backup contains an invalid export manifest")
+            if "export_id" in manifest and manifest["export_id"] != export_id:
+                raise LearningDataError("backup export manifest identity does not match its registry row")
+
+            if status in {"active", "publishing"}:
+                if (
+                    type(manifest.get("manifest_version")) is not int
+                    or manifest.get("manifest_version") != 1
+                    or manifest.get("export_id") != export_id
+                    or manifest.get("created_at") != created_at
+                ):
+                    raise LearningDataError("backup contains an incomplete active export manifest")
+                row_count = manifest.get("row_count")
+                split_counts = manifest.get("split_counts")
+                consent_ids = manifest.get("consent_ids")
+                policy_versions = manifest.get("consent_policy_versions")
+                if type(row_count) is not int or row_count < 0:
+                    raise LearningDataError("backup contains an invalid export row count")
+                if type(split_counts) is not dict or set(split_counts) != {
+                    "train", "validation", "test"
+                }:
+                    raise LearningDataError("backup contains invalid export split counts")
+                if any(type(value) is not int or value < 0 for value in split_counts.values()):
+                    raise LearningDataError("backup contains invalid export split counts")
+                if sum(split_counts.values()) != row_count:
+                    raise LearningDataError("backup export split counts do not match its row count")
+                for values, label in (
+                    (consent_ids, "consent IDs"),
+                    (policy_versions, "consent policy versions"),
+                ):
+                    if (
+                        type(values) is not list
+                        or any(not isinstance(value, str) or not value for value in values)
+                        or values != sorted(set(values))
+                    ):
+                        raise LearningDataError(f"backup contains invalid export {label}")
+                if export_kind == "jsonl":
+                    if (
+                        manifest.get("artifact_kind") != "jsonl"
+                        or manifest.get("artifact_sha256") != bundle_hash
+                    ):
+                        raise LearningDataError("backup JSONL manifest does not match its artifact hash")
+                elif (
+                    manifest.get("dataset_file") != "dataset.jsonl"
+                    or not isinstance(manifest.get("dataset_sha256"), str)
+                    or not re.fullmatch(r"[0-9a-f]{64}", manifest["dataset_sha256"])
+                ):
+                    raise LearningDataError("backup ZIP manifest is incomplete")
+                if row_count > 0 and not consent_ids:
+                    raise LearningDataError("non-empty export has no consent dependencies")
+                manifest_ids = set(consent_ids)
+                manifest_versions = set(policy_versions)
+            else:
+                manifest_ids = set()
+                manifest_versions = set()
+
+            exports[export_id] = {
+                "status": status,
+                "manifest_ids": manifest_ids,
+                "manifest_versions": manifest_versions,
+            }
+
+        dependencies: dict[str, set[str]] = {}
+        for row in connection.execute(
+            "SELECT export_id, consent_id FROM learning_export_consents"
+        ).fetchall():
+            export_id = row["export_id"]
+            consent_id = row["consent_id"]
+            if export_id not in exports or consent_id not in consents:
+                raise LearningDataError("backup contains an orphaned export-consent dependency")
+            dependencies.setdefault(export_id, set()).add(consent_id)
+
+        for export_id, record in exports.items():
+            if record["status"] not in {"active", "publishing"}:
+                continue
+            dependency_ids = dependencies.get(export_id, set())
+            if dependency_ids != record["manifest_ids"]:
+                raise LearningDataError("backup export consent dependencies do not match its manifest")
+            policy_versions = {
+                str(consents[consent_id]["policy_version"]) for consent_id in dependency_ids
+            }
+            if policy_versions != record["manifest_versions"]:
+                raise LearningDataError("backup export consent policies do not match its manifest")
+            if record["status"] == "active" and any(
+                consents[consent_id]["revoked_at"] is not None
+                for consent_id in dependency_ids
+            ):
+                raise LearningDataError("backup contains an active export with revoked consent")
+
+    def backup_to(self, destination_path: str | Path) -> str:
+        """Create a private, consistent snapshot of all four Learning Engine tables.
+
+        The SQLite registry and source examples are included. Published JSONL/ZIP
+        artifacts are separate files and must be backed up independently; after
+        restore, verify every artifact against the restored authoritative registry
+        before allowing it to be consumed.
+        """
+        # Import lazily: capri_runtime.__init__ imports the consent adapter,
+        # which itself imports LearningConsent from this module.
+        from capri_runtime.sqlite_backup import backup_sqlite_database
+
+        return backup_sqlite_database(
+            self.database,
+            str(destination_path),
+            lock=self._backup_lock,
+            connect=self._connect,
+            validate_snapshot=self._validate_backup_snapshot,
+            error_type=LearningDataError,
+            prefix=".capri-learning-backup-",
+        )
+
+    def integrity_check(self) -> str:
+        """Return a generic integrity result without exposing stored learning content."""
+        with self._backup_lock:
+            connection = self._connect()
+            try:
+                integrity = connection.execute("PRAGMA integrity_check").fetchone()
+                if not integrity or integrity[0] != "ok":
+                    return "SQLite integrity check failed"
+                if connection.execute("PRAGMA foreign_key_check").fetchall():
+                    return "foreign key check failed"
+                try:
+                    self._validate_backup_snapshot(connection)
+                except LearningDataError:
+                    return "semantic validation failed"
+                return "ok"
+            except sqlite3.Error:
+                return "SQLite integrity check failed"
+            finally:
+                connection.close()
 
 
     def export_bundle(

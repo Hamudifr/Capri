@@ -1,4 +1,5 @@
 import json
+import multiprocessing
 import os
 import sqlite3
 import stat
@@ -27,6 +28,31 @@ def example(**overrides):
     )
     values.update(overrides)
     return LearningExample(**values)
+
+
+def _reconcile_learning_exports_worker(database, start_event, result_queue):
+    if not start_event.wait(10):
+        result_queue.put(("error", "start_timeout"))
+        return
+    try:
+        store = LearningStore(database)
+        result_queue.put(("reconciled", store.reconcile_pending_exports()))
+    except Exception as exc:
+        result_queue.put(("error", type(exc).__name__))
+
+
+def _revoke_learning_consent_worker(database, consent_id, start_event, result_queue):
+    if not start_event.wait(10):
+        result_queue.put(("error", "start_timeout"))
+        return
+    try:
+        store = LearningStore(database)
+        deleted = store.revoke_consent(
+            consent_id, "2026-11-25T00:30:00+00:00"
+        )
+        result_queue.put(("revoked", deleted))
+    except Exception as exc:
+        result_queue.put(("error", type(exc).__name__))
 
 
 class LearningStoreTests(unittest.TestCase):
@@ -738,6 +764,147 @@ class LearningStoreTests(unittest.TestCase):
                 ("learning_consents", "consent_id", "consent_id"),
             },
         )
+
+    def test_backup_round_trip_preserves_all_four_tables_and_export_dependencies(self):
+        self.store.record(example())
+        jsonl_path = self.root / "backup-source.jsonl"
+        jsonl_result = self.store.export_jsonl(jsonl_path, minimum_quality=0.0)
+        bundle_path = self.root / "backup-source.zip"
+        bundle_result = self.store.export_bundle(bundle_path, minimum_quality=0.0)
+        backup_path = self.root / "learning-backup.sqlite3"
+
+        self.assertEqual(self.store.integrity_check(), "ok")
+        self.assertEqual(
+            self.store.backup_to(backup_path), str(backup_path.absolute())
+        )
+        self.assertEqual(stat.S_IMODE(backup_path.stat().st_mode), 0o600)
+
+        restored = LearningStore(backup_path)
+        self.assertEqual(restored.integrity_check(), "ok")
+        self.assertEqual(restored.counts(), {"verified_success": 1})
+        self.assertTrue(restored.verify_export(jsonl_result["export_id"], jsonl_path)["valid"])
+        self.assertTrue(restored.verify_export(bundle_result["export_id"], bundle_path)["valid"])
+
+        connection = sqlite3.connect(backup_path)
+        try:
+            counts = {
+                table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                for table in (
+                    "learning_examples", "learning_consents",
+                    "learning_exports", "learning_export_consents",
+                )
+            }
+        finally:
+            connection.close()
+        self.assertEqual(
+            counts,
+            {
+                "learning_examples": 1,
+                "learning_consents": 1,
+                "learning_exports": 2,
+                "learning_export_consents": 2,
+            },
+        )
+
+    def test_backup_refuses_existing_destination_and_live_database(self):
+        destination = self.root / "private-backup.sqlite3"
+        self.store.backup_to(destination)
+        with self.assertRaises(LearningDataError):
+            self.store.backup_to(destination)
+        with self.assertRaises(LearningDataError):
+            self.store.backup_to(self.store.database)
+
+    def test_backup_rejects_example_content_hash_corruption(self):
+        self.store.record(example())
+        with self.store._connection() as connection:
+            connection.execute(
+                "UPDATE learning_examples SET content_hash=? WHERE example_id=?",
+                ("0" * 64, "ex-001"),
+            )
+        self.assertEqual(self.store.integrity_check(), "semantic validation failed")
+        with self.assertRaises(LearningDataError):
+            self.store.backup_to(self.root / "corrupt-example-backup.sqlite3")
+        self.assertFalse((self.root / "corrupt-example-backup.sqlite3").exists())
+
+    def test_backup_rejects_export_dependency_manifest_mismatch(self):
+        self.store.record(example())
+        output = self.root / "dependency-mismatch.zip"
+        result = self.store.export_bundle(output, minimum_quality=0.0)
+        with self.store._connection() as connection:
+            row = connection.execute(
+                "SELECT manifest_json FROM learning_exports WHERE export_id=?",
+                (result["export_id"],),
+            ).fetchone()
+            manifest = json.loads(row["manifest_json"])
+            manifest["consent_ids"] = []
+            connection.execute(
+                "UPDATE learning_exports SET manifest_json=? WHERE export_id=?",
+                (json.dumps(manifest, sort_keys=True, separators=(",", ":")), result["export_id"]),
+            )
+        self.assertEqual(self.store.integrity_check(), "semantic validation failed")
+        with self.assertRaises(LearningDataError):
+            self.store.backup_to(self.root / "corrupt-export-backup.sqlite3")
+
+    def test_backup_rejects_active_export_with_revoked_consent(self):
+        self.store.record(example())
+        output = self.root / "revoked-active.zip"
+        result = self.store.export_bundle(output, minimum_quality=0.0)
+        self.store.revoke_consent("consent-001", "2026-11-24T12:00:00+00:00")
+        with self.store._connection() as connection:
+            connection.execute(
+                "UPDATE learning_exports SET status='active' WHERE export_id=?",
+                (result["export_id"],),
+            )
+        self.assertEqual(self.store.integrity_check(), "semantic validation failed")
+        with self.assertRaises(LearningDataError):
+            self.store.backup_to(self.root / "revoked-export-backup.sqlite3")
+
+    def test_multiprocess_reconciliation_never_reactivates_revoked_export(self):
+        self.store.record(example())
+        output = self.root / "multiprocess-reconcile.zip"
+        result = self.store.export_bundle(output, minimum_quality=0.0)
+        with self.store._connection() as connection:
+            connection.execute(
+                "UPDATE learning_exports SET status='publishing' WHERE export_id=?",
+                (result["export_id"],),
+            )
+
+        context = multiprocessing.get_context("spawn")
+        start_event = context.Event()
+        result_queue = context.Queue()
+        reconcile = context.Process(
+            target=_reconcile_learning_exports_worker,
+            args=(self.store.database, start_event, result_queue),
+        )
+        revoke = context.Process(
+            target=_revoke_learning_consent_worker,
+            args=(self.store.database, "consent-001", start_event, result_queue),
+        )
+        reconcile.start()
+        revoke.start()
+        start_event.set()
+        reconcile.join(20)
+        revoke.join(20)
+        if reconcile.is_alive():
+            reconcile.terminate()
+            reconcile.join()
+        if revoke.is_alive():
+            revoke.terminate()
+            revoke.join()
+        results = [result_queue.get(timeout=5) for _ in range(2)]
+        exitcodes = (reconcile.exitcode, revoke.exitcode)
+        result_queue.close()
+        result_queue.join_thread()
+        reconcile.close()
+        revoke.close()
+
+        self.assertEqual(exitcodes, (0, 0))
+        self.assertEqual({result[0] for result in results}, {"reconciled", "revoked"})
+        self.assertNotIn("error", {result[0] for result in results})
+        status = self.store.get_export_status(result["export_id"])
+        self.assertEqual(status["status"], "invalidated")
+        self.assertFalse(self.store.verify_export(result["export_id"], output)["valid"])
+        self.assertEqual(self.store.counts(), {})
 
 
 if __name__ == "__main__":
