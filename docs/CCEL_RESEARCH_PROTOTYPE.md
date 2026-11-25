@@ -2,7 +2,7 @@
 
 ## Rust implementation
 
-The canonical CCEL computational core is implemented in Rust in `rust/ccel-core` and integrated into `main` by PR #143 (squash commit `08dbb878941501ca9cdc02afceb1ba68db3877b1`). It uses the standard library only and follows the latest stable toolchain through `rust-toolchain.toml`. Python remains available for Capri orchestration and integrations, not as the canonical CCEL search engine. Python CI tests 3.11, 3.12, 3.13 and 3.15; the package floor remains 3.11.
+The canonical CCEL computational core is implemented in Rust in `rust/ccel-core` and integrated into `main` by PR #143 (squash commit `08dbb878941501ca9cdc02afceb1ba68db3877b1`). It uses the standard library only and follows the latest stable toolchain through `rust-toolchain.toml`. Python remains available for Capri orchestration and integrations, not as the canonical CCEL search engine. The current support policy targets Python 3.15.x only; earlier multi-version runs are historical verification, not ongoing support.
 
 A same-runner synthetic microbenchmark has now measured Rust against a Python reference. It demonstrates a speed advantage on that specific task only, not a general system-wide speedup. Rust is not itself an intelligence breakthrough.
 
@@ -65,4 +65,4 @@ Search is bounded by depth and candidate count. Inputs are limited to 30x30 grid
 - Exact pre-merge four-language benchmark #24 (run 45475772478) passed with shared checksum `61ba73df36b48d49`: C 7.540 ms, C++ 6.953 ms, Rust 5.184 ms, Python 1,365.941 ms for the same Game of Life kernel. These are single-runner medians, not a universal language ranking.
 - Matched CCEL synthesis microbenchmark on the same runner: Rust 12.877806 ms per 10,000 rounds (776,529.79 ops/s); Python 0.929720 s (10,755.93 ops/s), about 72.2x on this one task. This is a narrow implementation benchmark, not a general system speedup claim.
 - Transfer pilot v1.1: current synthesizer 10/11 total (8/8 unique, 1/2 ambiguity, 1/1 out-of-DSL rejection); single-operation baseline 9/11 (6/8 unique, 2/2 ambiguity, 1/1 rejection); identity baseline 1/11. All returned programs reproduce demonstrations. The cross-depth ambiguity miss is documented in `benchmarks/ccel-transfer/README.md`. This is a narrow synthetic diagnostic, not broad generalization evidence.
-- Python package compatibility remains `>=3.11`; the expanded 3.15 matrix exposed and fixed a nondeterministic test fixture that sometimes failed to alter a signature's final hex digit.
+- Historical compatibility floor at that checkpoint was `>=3.11`; the current support policy supersedes it with `>=3.15,<3.16`. The expanded 3.15 matrix exposed and fixed a nondeterministic test fixture that sometimes failed to alter a signature's final hex digit.

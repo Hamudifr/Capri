@@ -17,7 +17,7 @@ Important invariants:
 
 ## Development setup
 
-Python 3.11 or newer is required. The CI matrix currently covers Python 3.11 through 3.15.
+Python 3.15.x is the only supported runtime. CI runs one Python version, 3.15, rather than a multi-version matrix.
 
 ```bash
 python -m venv .venv

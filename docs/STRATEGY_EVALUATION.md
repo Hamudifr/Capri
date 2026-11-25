@@ -68,4 +68,4 @@ Before wiring this into a runtime selector:
 
 ## Tests
 
-`tests/test_strategy.py` covers matched cohorts, evidence requirements, sample floor, success/safety/resource regressions, malformed inputs, deterministic results, and the absence of an activation side effect. The normal repository quality workflow runs the full unittest suite across Python 3.11–3.15.
+`tests/test_strategy.py` covers matched cohorts, evidence requirements, sample floor, success/safety/resource regressions, malformed inputs, deterministic results, and the absence of an activation side effect. The normal repository quality workflow runs the full unittest suite on Python 3.15 only.
