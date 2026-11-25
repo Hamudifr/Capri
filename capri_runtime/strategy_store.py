@@ -939,7 +939,7 @@ class SQLiteStrategyStore:
                     ) or existing[10:14] != (summary_json, refs_json, hashes_json, metric):
                         raise StrategyConflictError("promotion assessment fingerprint already belongs to different evidence")
                     assessment_id = existing[0]
-                    created = existing[13]
+                    created = existing[14]
                 connection.execute("COMMIT")
             except Exception:
                 if connection.in_transaction:
