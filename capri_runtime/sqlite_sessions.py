@@ -213,6 +213,26 @@ class SQLiteSessionStore(SessionStore):
             if not cls._schema_sql_matches(connection, "trigger", name, "session_owners", sql):
                 raise ValidationError("SQLite session ownership trigger is invalid")
 
+        schema_version = connection.execute("PRAGMA user_version").fetchone()[0]
+        if schema_version not in (0, 1):
+            raise ValidationError("SQLite session schema version is unsupported")
+        if schema_version == 1 and not cls._schema_sql_matches(
+            connection,
+            "table",
+            "sessions",
+            "sessions",
+            """CREATE TABLE sessions (
+                session_id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                version INTEGER NOT NULL CHECK(version >= 0),
+                closed INTEGER NOT NULL CHECK(closed IN (0, 1)),
+                messages_json TEXT NOT NULL
+                    CHECK(json_valid(messages_json) AND json_type(messages_json) = 'array')
+            )""",
+        ):
+            raise ValidationError("SQLite session schema constraints are invalid")
+
     def _initialize(self, *, fresh_database: bool) -> None:
         with self._lock:
             connection = self._connect()
@@ -231,6 +251,7 @@ class SQLiteSessionStore(SessionStore):
                             "SELECT count(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"
                         ).fetchone()[0]
                         if schema_object_count > 0:
+                            connection.execute("PRAGMA user_version=1")
                             self._validate_schema(connection)
                             connection.execute("COMMIT")
                         else:
@@ -242,6 +263,7 @@ class SQLiteSessionStore(SessionStore):
                                     version INTEGER NOT NULL CHECK(version >= 0),
                                     closed INTEGER NOT NULL CHECK(closed IN (0, 1)),
                                     messages_json TEXT NOT NULL
+                                        CHECK(json_valid(messages_json) AND json_type(messages_json) = 'array')
                                 )"""
                             )
                             connection.execute(
