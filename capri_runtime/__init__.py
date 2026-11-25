@@ -138,6 +138,13 @@ from .tasks import (
     RetryableTaskError,
     TaskWorker,
 )
+from .provider_usage_store import (
+    ProviderUsageAggregate,
+    ProviderUsageConflictError,
+    ProviderUsageJournalError,
+    ProviderUsageRecord,
+    SQLiteProviderUsageJournal,
+)
 
 __all__ = [
     "BudgetError",
@@ -171,6 +178,11 @@ __all__ = [
     "validate_goal_plan",
     "AssistantTurn",
     "ProviderUsage",
+    "ProviderUsageAggregate",
+    "ProviderUsageConflictError",
+    "ProviderUsageJournalError",
+    "ProviderUsageRecord",
+    "SQLiteProviderUsageJournal",
     "CommittedOrchestration",
     "OrchestrationResult",
     "SessionTurnCoordinator",
