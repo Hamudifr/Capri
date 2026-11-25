@@ -1329,6 +1329,16 @@ class SQLiteTaskStore:
                 raise TaskValidationError("backup contains invalid task event progress")
             if error_code is not None:
                 _text(error_code, "event error_code", 64)
+        if connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='strategy_evidence_manifests'"
+        ).fetchone() is not None:
+            try:
+                from .strategy_evidence_store import validate_strategy_evidence_snapshot
+                validate_strategy_evidence_snapshot(connection)
+            except Exception:
+                raise TaskValidationError(
+                    "backup contains invalid strategy evidence manifests"
+                ) from None
 
     def backup_to(self, destination_path: str) -> str:
         """Create a private, consistent task-state snapshot without overwriting."""
