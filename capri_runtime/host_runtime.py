@@ -713,7 +713,20 @@ class CapriHostRuntime:
         with self._worker_reservation_lock:
             self._purge_worker_reservation_contexts()
             stored = self._worker_reservation_contexts.get(reservation.reservation.token)
-            if stored is None or not self._same_host_reservation_context(stored, reservation):
+            if stored is None:
+                self._record_worker_lifecycle_event(
+                    "worker.reservation.commit_missing",
+                    worker_id,
+                    principal_id=reservation.principal_id,
+                    task_id=reservation.task_id,
+                    capability=reservation.capability,
+                    protocol_version=reservation.protocol_version,
+                    reservation_token=reservation.reservation.token,
+                    status="not_found",
+                    error_code="reservation_missing_or_expired",
+                )
+                raise HostRuntimeError("worker reservation is unavailable or belongs to another task")
+            if not self._same_host_reservation_context(stored, reservation):
                 raise HostRuntimeError("worker reservation is unavailable or belongs to another task")
             if stored.reservation.committed:
                 return stored
@@ -729,6 +742,18 @@ class CapriHostRuntime:
                 except WorkerRegistryError:
                     pass
                 self._worker_reservation_contexts.pop(stored.reservation.token, None)
+                self._record_worker_lifecycle_event(
+                    "worker.reservation.denied",
+                    worker_id,
+                    principal_id=stored.principal_id,
+                    task_id=stored.task_id,
+                    capability=stored.capability,
+                    protocol_version=stored.protocol_version,
+                    descriptor_revision=stored.reservation.descriptor_revision,
+                    reservation_token=stored.reservation.token,
+                    status="denied",
+                    error_code="policy_resolution_failed",
+                )
                 raise
             if worker_id not in allowed:
                 try:
@@ -738,6 +763,18 @@ class CapriHostRuntime:
                 except WorkerRegistryError:
                     pass
                 self._worker_reservation_contexts.pop(stored.reservation.token, None)
+                self._record_worker_lifecycle_event(
+                    "worker.reservation.denied",
+                    worker_id,
+                    principal_id=stored.principal_id,
+                    task_id=stored.task_id,
+                    capability=stored.capability,
+                    protocol_version=stored.protocol_version,
+                    descriptor_revision=stored.reservation.descriptor_revision,
+                    reservation_token=stored.reservation.token,
+                    status="denied",
+                    error_code="policy_changed",
+                )
                 raise HostRuntimeError("worker reservation is no longer authorized for this task")
             heartbeat_snapshot = self.heartbeat_worker(observer_credential, worker_id)
             try:
@@ -783,6 +820,17 @@ class CapriHostRuntime:
             self._purge_worker_reservation_contexts()
             stored = self._worker_reservation_contexts.get(reservation.reservation.token)
             if stored is None:
+                self._record_worker_lifecycle_event(
+                    "worker.reservation.release_missing",
+                    worker_id,
+                    principal_id=reservation.principal_id,
+                    task_id=reservation.task_id,
+                    capability=reservation.capability,
+                    protocol_version=reservation.protocol_version,
+                    reservation_token=reservation.reservation.token,
+                    status="not_found",
+                    error_code="reservation_missing_or_expired",
+                )
                 return False
             if not self._same_host_reservation_context(stored, reservation):
                 raise HostRuntimeError("worker reservation belongs to another task")
