@@ -5,6 +5,7 @@ owns authentication callbacks, process supervision, credentials, and lifecycle.
 """
 from __future__ import annotations
 
+from types import MethodType
 from typing import Any, Callable
 
 from capri_core.validation import contains_surrogate
@@ -44,10 +45,11 @@ class HostRuntimeError(Exception):
 
 
 def _is_bound_authority_method(callback: Any, authority: Any, method_name: str) -> bool:
-    """Check that a store verifier is bound to the exact host authority instance."""
+    """Check that a store verifier is a genuine bound method of the exact host authority."""
     return (
-        getattr(callback, "__self__", None) is authority
-        and getattr(callback, "__func__", None) is getattr(type(authority), method_name, None)
+        type(callback) is MethodType
+        and callback.__self__ is authority
+        and callback.__func__ is getattr(type(authority), method_name, None)
     )
 
 
