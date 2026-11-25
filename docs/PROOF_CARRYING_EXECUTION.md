@@ -20,7 +20,7 @@ Failure outcomes are REJECTED, EXPIRED, CANCELLED, and INDETERMINATE.
 - VERIFIED requires evidence references and an identified verifier/version.
 - ACCEPTED is possible only after VERIFIED.
 - EXPIRED is permitted only from AUTHORIZED, before dispatch, once an authorization deadline has elapsed.
-- An undispatched DRAFT may still be closed as CANCELLED after its deadline; it never acquired authority or created an external side effect.
+- An undispatched DRAFT may still be closed as CANCELLED or REJECTED after its deadline; it never acquired authority or created an external side effect.
 - The lifecycle is acyclic and has at most five transition events. History verification enforces that bound before materializing an untrusted iterable.
 - A dispatched action that times out or has an ambiguous external effect becomes INDETERMINATE, never simply EXPIRED or CANCELLED. Reconcile the external system before retrying.
 - Terminal states cannot be reopened by this state machine.
