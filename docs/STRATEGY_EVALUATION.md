@@ -2,7 +2,7 @@
 
 ## Status
 
-Implemented as an offline, deterministic comparison primitive. It is not connected to the task engine and does not change the active strategy. No model weights, permissions, tool capabilities, or safety policies are modified.
+Implemented as an offline, deterministic comparison primitive, with a principal-scoped registry and host approval-gated activation/rollback API described in [STRATEGY_REGISTRY.md](STRATEGY_REGISTRY.md). The registry independently recomputes candidate evaluations from supplied observations, binds exact strategy versions and configuration hashes, and keeps an append-only activation history. The active strategy is not automatically consumed by task execution. No model weights, permissions, tool capabilities, budgets, or safety policies are modified.
 
 ## Why this slice exists
 
@@ -16,13 +16,13 @@ Import `StrategyObservation` and `evaluate_strategies` from `capri_core`.
 
 Each observation contains:
 - task ID and scenario label;
-- strategy ID;
+- strategy ID and explicit strategy version;
 - outcome: `verified_success`, `verified_failure`, or `unverified`;
 - a non-empty evidence reference;
 - safety-violation flag;
 - tool-call count, context-token count, estimated-cost units, and latency in milliseconds.
 
-The evaluator compares exactly two named strategies: a fixed baseline and one candidate. It requires the exact same task-ID cohort for both strategies and rejects a task whose scenario labels differ. Duplicate task/strategy observations and malformed records fail closed.
+The evaluator compares exactly two named strategies: a fixed baseline and one candidate. It requires exactly one version per strategy across the cohort, fingerprints those versions with every observation, requires the exact same task-ID cohort for both strategies, and rejects a task whose scenario labels differ. Legacy offline comparisons may use the default `unversioned` marker; the durable registry rejects it and requires explicit, registered baseline and candidate versions. Duplicate task/strategy observations and malformed records fail closed.
 
 ## Decision contract
 
