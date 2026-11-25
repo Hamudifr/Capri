@@ -31,9 +31,10 @@ class BudgetValidationError(BudgetError):
 class BudgetExceededError(BudgetError):
     """A principal exhausted a hard budget dimension for the current window."""
 
-    def __init__(self, dimension: str, reset_at: datetime) -> None:
+    def __init__(self, dimension: str, reset_at: datetime, *, permanent: bool = False) -> None:
         self.dimension = dimension
         self.reset_at = reset_at
+        self.permanent = permanent
         super().__init__(f"execution budget exhausted: {dimension}")
 
 
@@ -198,6 +199,12 @@ class SQLiteBudgetStore:
                     "CREATE INDEX IF NOT EXISTS budget_usage_principal_window_idx "
                     "ON budget_usage(principal_id,window_start)"
                 )
+                connection.execute("""CREATE TRIGGER IF NOT EXISTS budget_reservation_immutable_update
+                    BEFORE UPDATE ON budget_reservations
+                    BEGIN SELECT RAISE(ABORT, 'budget reservations are append-only'); END""")
+                connection.execute("""CREATE TRIGGER IF NOT EXISTS budget_reservation_immutable_delete
+                    BEFORE DELETE ON budget_reservations
+                    BEGIN SELECT RAISE(ABORT, 'budget reservations are append-only'); END""")
             finally:
                 connection.close()
 
@@ -296,6 +303,9 @@ class SQLiteBudgetStore:
                     ).fetchone()
                     used = used_row[0] if used_row else 0
                     limit = getattr(policy, _DIMENSIONS[dimension])
+                    if amount > limit:
+                        connection.execute("ROLLBACK")
+                        raise BudgetExceededError(dimension, reset_at, permanent=True)
                     if used + amount > limit:
                         connection.execute("ROLLBACK")
                         raise BudgetExceededError(dimension, reset_at)
