@@ -55,7 +55,7 @@ def validate_record(record: EvaluationRecord) -> None:
         if value is not None:
             if not isinstance(value, str) or not value.strip():
                 errors.append(f"{field} must be a non-empty string when supplied")
-            elif _contains_surrogate(value):
+            elif contains_surrogate(value):
                 errors.append(f"{field} must contain valid Unicode scalar values")
 
     # Enum-specific rules are evaluated only after enum types are confirmed.
