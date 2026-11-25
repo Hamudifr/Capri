@@ -88,6 +88,32 @@ class SQLiteSessionStoreTests(unittest.TestCase):
         with self.assertRaises(SessionNotFoundError):
             self.store.get_for_principal(session.session_id, "principal-bob")
 
+    def test_principal_commit_authorization_and_write_share_one_connection(self):
+        session = self.store.create_for_principal("principal-alice")
+        turn = (
+            Message(role="user", content="hello"),
+            Message(role="assistant", content="hello back"),
+        )
+        original_connect = self.store._connect
+        with patch.object(self.store, "_connect", wraps=original_connect) as connect:
+            with self.assertRaises(SessionNotFoundError):
+                self.store.commit_turn_messages_for_principal(
+                    session.session_id, "principal-bob", 0, turn,
+                )
+        self.assertEqual(connect.call_count, 1)
+        self.assertEqual(self.store.get(session.session_id).version, 0)
+
+        with patch.object(self.store, "_connect", wraps=original_connect) as connect:
+            updated = self.store.commit_turn_messages_for_principal(
+                session.session_id, "principal-alice", 0, turn,
+            )
+        self.assertEqual(connect.call_count, 1)
+        self.assertEqual(updated.version, 1)
+        self.assertEqual(
+            self.store.get_for_principal(session.session_id, "principal-alice"),
+            updated,
+        )
+
     def test_principal_ownership_guards_durable_turn_leases(self):
         session = self.store.create_for_principal("principal-alice")
         with self.assertRaises(SessionNotFoundError):
