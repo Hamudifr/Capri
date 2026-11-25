@@ -112,7 +112,17 @@ This is a new schema version. Existing task databases with no registry tables re
 
 Schema version 2 records complete worker descriptor and health snapshots in append-only lifecycle events. Validation replays those projections and compares the resulting descriptor/health state to the current worker rows. Heartbeat revisions are audited even when the worker state and reported load remain unchanged. Active reservation rows are checked against their unique creation event, principal/task/worker/capability/protocol binding, creation timestamp, configured expiry, revision and any commit event. This detects valid-looking row edits that SQLite structural checks and event-chain hashes alone cannot detect.
 
-Schema version 1 snapshots are rejected rather than silently trusted because their audit events do not contain enough state to reconstruct the current worker projection. No automatic migration is provided in this draft; there is no production data migration or cutover.
+### Selected compatibility policy — schema v2 fresh-install only
+
+Schema v2 is the first durable worker-registry schema merged into `main`. The earlier schema-v1 implementation existed only on unmerged draft branches and was never a supported mainline or production release. There is therefore no supported production v1 dataset to migrate.
+
+- A database with no worker-registry tables is a valid task database; constructing `SQLiteWorkerRegistry` creates the complete v2 schema atomically.
+- An existing registry snapshot must have the exact v2 schema and metadata version. Partial table sets, schema v1, unknown versions, or invalid projections are rejected without automatic repair, reset, or history rewrite.
+- A regression test changes a synthetic registry's version marker to v1, attempts to reopen it, and verifies the version marker, worker projection and audit event hashes remain unchanged after rejection.
+- Do not automatically delete, overwrite or convert an earlier draft v1 database. Preserve it for operator review. If a real retention requirement appears, create a separately reviewed, backup-first export/import migration with explicit source validation, identity mapping and audit provenance.
+- Future schema upgrades must introduce a new explicit versioned migration, validate the source, create a consistent backup first, apply the migration transactionally, and verify the resulting state/audit projection before accepting writes.
+
+No production data migration or cutover is included. This is a deliberate fresh-install-only policy for the first supported mainline schema, not a claim that arbitrary legacy snapshots can be migrated.
 
 
 ## Host restart and audit reconciliation gate
