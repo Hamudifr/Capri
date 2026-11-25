@@ -413,7 +413,7 @@ class InMemoryWorkerRegistry:
         """Atomically select and reserve one eligible worker capacity slot.
 
         The caller must independently authorize the task and re-check policy at
-        dispatch. Reservations are process-local, expire automatically, and are
+        dispatch. Reservations are process-local, expire lazily on subsequent selection/release operations, and are
         invalidated by worker failure, quarantine, retirement or descriptor change.
         """
         if type(capability) is not str or _CAPABILITY.fullmatch(capability) is None:
