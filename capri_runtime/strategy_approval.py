@@ -131,7 +131,7 @@ class HostStrategyApprovalAuthority:
             raise StrategyAuthorizationError("config fingerprint is invalid")
         if type(request.expected_generation) is not int or not 0 <= request.expected_generation < 2**63 - 1:
             raise StrategyAuthorizationError("expected_generation is invalid")
-        if request.action not in {"activate", "rollback"}:
+        if type(request.action) is not str or request.action not in {"activate", "rollback"}:
             raise StrategyAuthorizationError("action must be activate or rollback")
 
     def issue_grant(
@@ -220,6 +220,9 @@ class HostStrategyApprovalAuthority:
         if type(grant) is not StrategyActivationGrant:
             return False
         try:
+            _grant_payload(grant)
+            if type(grant.signature) is not str or len(grant.signature) > 2048:
+                return False
             key_id, separator, encoded_tag = grant.signature.partition(":")
             if not separator or not _KEY_ID.fullmatch(key_id) or not re.fullmatch(r"[0-9a-f]{64}", encoded_tag):
                 return False
