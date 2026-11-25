@@ -184,6 +184,7 @@ class CapriHostRuntime:
         configured_budgets = [
             item for item in (
                 budget_store, orchestrator.budget_store,
+                orchestrator.bridge.executor.budget_store,
                 task_worker.engine.budget_store if task_worker is not None else None,
             ) if item is not None
         ]
