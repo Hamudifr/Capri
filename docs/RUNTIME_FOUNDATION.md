@@ -1,4 +1,4 @@
-# Runtime runtime foundation — proposed design
+# Capri runtime foundation — proposed design
 
 **Status: IMPLEMENTED FOUNDATION / PROPOSED PRODUCT DEFAULTS / NOT A COMPLETE PRODUCT SPECIFICATION**
 
