@@ -123,7 +123,7 @@ This is a strong component foundation. It is not yet a complete autonomous agent
 | Order | Work package | Milestone | Exit evidence |
 |---|---|---|---|
 | 1 | Principal-scoped durable task ownership and safe task recovery | X7 | **Implemented:** immutable owner rows, scoped idempotency/read/cancel/events, handler allowlists, explicit retries, uncertain-outcome quarantine, backup validation, and adversarial tests |
-| 2 | Durable goal record and goal planner protocol | X7 | Typed goal schema, owner binding, constraints/deadline/definition-of-done validation |
+| 2 | Durable goal record and goal planner protocol | X7 | **Implemented in PR candidate:** principal-owned SQLite goal contracts, constraints/deadline/acceptance criteria, versioned lifecycle, data-only planner protocol and allowlist validator; host API tests pending CI |
 | 3 | Deterministic goal-plan validator and coordinator linking planner, task engine, session, and evidence | X7 | Adversarial planner-output tests; end-to-end fake-adapter tests across restart; no permission escalation |
 | 4 | Execution budget and provider spend guard | X7 | Over-budget rejection before model/tool invocation |
 | 5 | Supervised host service and health lifecycle | X7 | Startup/shutdown, health, worker recovery tests |
@@ -145,4 +145,4 @@ This is a strong component foundation. It is not yet a complete autonomous agent
 
 ## Immediate next engineering action
 
-Start with **X7.2: durable goal records and the goal planner protocol**. Principal-scoped task ownership and safe task recovery are now implemented. The next gap is a durable goal contract and coordinator that bind one user outcome to bounded tasks, evidence, deadlines, and acceptance checks without granting model output authority.
+X7.2 goal-contract implementation is in progress on `feat/x7-goal-contract-2026-11-25`: durable principal-owned goal records, immutable owner rows, idempotent creation, versioned lifecycle transitions, and a data-only planner proposal contract with trusted-handler allowlist validation. The planner does not execute tools. Next is X7.3: deterministic coordinator linking validated plans to durable tasks, checkpoints and evidence, followed by X7.4 hard execution/provider budgets.

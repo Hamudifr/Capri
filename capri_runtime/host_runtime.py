@@ -19,6 +19,9 @@ from .orchestration import (
 from .runtime import Message, Session, SessionClosedError, SessionStore
 from .sqlite_sessions import SQLiteSessionStore
 from .tasks import SQLiteTaskStore, TaskRecord, TaskWorker
+from .goals import (
+    GoalPlanProposal, GoalRecord, SQLiteGoalStore,
+)
 from .tools import ExecutionContext, HostAuthorityResolver
 
 
@@ -122,6 +125,7 @@ class CapriHostRuntime:
         ] | None = None,
         task_worker: TaskWorker | None = None,
         task_store: SQLiteTaskStore | None = None,
+        goal_store: SQLiteGoalStore | None = None,
     ) -> None:
         if not isinstance(authority, HostAuthorityResolver):
             raise HostRuntimeError("a trusted HostAuthorityResolver is required")
@@ -153,6 +157,8 @@ class CapriHostRuntime:
             raise HostRuntimeError("task_worker must be a TaskWorker")
         if task_store is not None and not isinstance(task_store, SQLiteTaskStore):
             raise HostRuntimeError("task_store must be a SQLiteTaskStore")
+        if goal_store is not None and not isinstance(goal_store, SQLiteGoalStore):
+            raise HostRuntimeError("goal_store must be a SQLiteGoalStore")
         if (
             task_store is not None and task_worker is not None
             and task_store.path != task_worker.engine.store.path
@@ -169,6 +175,7 @@ class CapriHostRuntime:
             task_store if task_store is not None
             else (task_worker.engine.store if task_worker is not None else None)
         )
+        self._goal_store = goal_store
 
     def _context(self, credential: Any) -> ExecutionContext:
         return self._authority.resolve(credential)
@@ -225,6 +232,59 @@ class CapriHostRuntime:
             raise HostRuntimeError("no task store is configured")
         return self._task_store.request_cancel_for_principal(
             task_id, context.principal_id
+        )
+
+    def create_goal(
+        self, credential: Any, outcome: str, *,
+        acceptance_criteria: list[str] | tuple[str, ...],
+        constraints: dict[str, Any] | None = None,
+        deadline: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> GoalRecord:
+        """Create a durable goal owned by the authenticated principal."""
+        context = self._context(credential)
+        if self._goal_store is None:
+            raise HostRuntimeError("no goal store is configured")
+        return self._goal_store.create_for_principal(
+            context.principal_id, outcome, constraints=constraints,
+            deadline=deadline, acceptance_criteria=acceptance_criteria,
+            idempotency_key=idempotency_key,
+        )
+
+    def get_goal(self, credential: Any, goal_id: str) -> GoalRecord:
+        """Read only a goal owned by the authenticated principal."""
+        context = self._context(credential)
+        if self._goal_store is None:
+            raise HostRuntimeError("no goal store is configured")
+        return self._goal_store.get_for_principal(goal_id, context.principal_id)
+
+    def save_goal_plan(
+        self, credential: Any, goal_id: str, proposal: GoalPlanProposal, *,
+        expected_version: int,
+    ) -> GoalRecord:
+        """Persist a validated data-only plan; this method never executes it."""
+        context = self._context(credential)
+        if self._goal_store is None:
+            raise HostRuntimeError("no goal store is configured")
+        if self._task_worker is None:
+            raise HostRuntimeError("goal planning requires a configured principal task registry")
+        return self._goal_store.save_plan_for_principal(
+            goal_id, context.principal_id, proposal,
+            frozenset(self._task_worker.engine.principal_handlers),
+            expected_version=expected_version,
+        )
+
+    def transition_goal(
+        self, credential: Any, goal_id: str, new_state: str, *,
+        expected_version: int,
+    ) -> GoalRecord:
+        """Apply an owner-scoped, compare-and-swap goal lifecycle transition."""
+        context = self._context(credential)
+        if self._goal_store is None:
+            raise HostRuntimeError("no goal store is configured")
+        return self._goal_store.transition_for_principal(
+            goal_id, context.principal_id, new_state,
+            expected_version=expected_version,
         )
 
     def run_turn(
