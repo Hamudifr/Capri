@@ -288,6 +288,31 @@ int main(void) {
     assert(symlink(path,linkpath)==0);
     store=capri_session_store_open(linkpath,200,16000,64000,131072,&error); assert(store==NULL);
     unlink(linkpath);
+    /* Startup, integrity checks and backup must all reject weakened owner triggers. */
+    store=capri_session_store_open(path,200,16000,64000,131072,&error);
+    assert(store!=NULL && error==CAPRI_SESSION_OK);
+    sqlite3 *trigger_tamper=NULL;
+    assert(sqlite3_open(path,&trigger_tamper)==SQLITE_OK);
+    assert(sqlite3_exec(
+        trigger_tamper,
+        "DROP TRIGGER session_owners_immutable_update;"
+        "CREATE TRIGGER session_owners_immutable_update "
+        "BEFORE UPDATE ON session_owners WHEN 0 "
+        "BEGIN SELECT RAISE(ABORT,'session owner is immutable'); END;",
+        NULL,NULL,NULL
+    )==SQLITE_OK);
+    sqlite3_close(trigger_tamper);
+    assert(capri_session_integrity_check(store)==CAPRI_SESSION_CORRUPT);
+    char weak_trigger_backup_path[512];
+    snprintf(weak_trigger_backup_path,sizeof weak_trigger_backup_path,
+             "%s/weak-trigger-backup.sqlite3",dir);
+    assert(capri_session_backup_to(store,weak_trigger_backup_path)==CAPRI_SESSION_CORRUPT);
+    struct stat weak_backup_missing;
+    assert(lstat(weak_trigger_backup_path,&weak_backup_missing)!=0);
+    CapriSessionStore *tampered_reopen=capri_session_store_open(path,200,16000,64000,131072,&error);
+    assert(tampered_reopen==NULL && error==CAPRI_SESSION_DATABASE);
+    capri_session_store_close(store);
+
     unlink(backup_path); unlink(restored_path); unlink(corrupt_backup_path); unlink(corrupt_restore_path); unlink(path); char wal[520],shm[520];snprintf(wal,sizeof wal,"%s-wal",path);snprintf(shm,sizeof shm,"%s-shm",path);unlink(wal);unlink(shm);rmdir(dir);
     puts("native SQLite session tests: ok"); return 0;
 }
