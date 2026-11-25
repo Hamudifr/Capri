@@ -11,6 +11,13 @@ from .strategy import (
     evaluate_strategies,
     verify_strategy_evaluation,
 )
+from .strategy_promotion import (
+    CohortPromotionResult,
+    PromotionCohort,
+    StrategyPromotionAssessment,
+    StrategyPromotionError,
+    assess_strategy_canary,
+)
 from .validation import RecordValidationError, contains_surrogate, validate_record
 
 __all__ = [
@@ -19,4 +26,6 @@ __all__ = [
     "LedgerIntegrityError", "HealthState", "build_health_report",
     "StrategyEvaluation", "StrategyEvaluationError", "StrategyMetrics",
     "StrategyObservation", "evaluate_strategies", "verify_strategy_evaluation",
+    "PromotionCohort", "CohortPromotionResult", "StrategyPromotionAssessment",
+    "StrategyPromotionError", "assess_strategy_canary",
 ]
