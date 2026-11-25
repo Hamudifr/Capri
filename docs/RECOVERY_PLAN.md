@@ -133,15 +133,15 @@ The recovery foundation and first tool-execution gate are integrated and CI-veri
 
 - [x] Add repository purpose, operating model, and evaluation data contract.
 - [x] Add deterministic structural tests.
-- [x] Add CI for non-protected checks.
+- [x] Add CI for routine checks.
 - [x] Perform Capri's internal review, validate the integrated PR, and merge the recovery foundation into `main` through PR #1.
 
 ## Phase 2 — Reconcile evaluation evidence
 
-- [ ] Obtain a fresh, authorized, metadata-only export of non-protected records.
+- [ ] Obtain a fresh, authorized, metadata-only export of evaluation records.
 - [ ] Reconcile run count versus unique scenario count and retest lineage.
 - [ ] Validate evidence-stage completeness without opening protected material.
-- [ ] Perform Capri's own review of non-protected evaluation metadata, evidence completeness, and retest lineage.
+- [ ] Perform Capri's own review of evaluation metadata, evidence completeness, and retest lineage.
 - [ ] Use an independent evaluator only if a specific evaluation protocol or external requirement explicitly requires one; never label self-review as independent.
 
 Known historical snapshot (2026-11-05, metadata-only, protected scenario excluded): 36 database records, all marked Pass, Self evaluator, Self-Scored stage; 16 records were marked as retests. This is 36 records, not 36 proven unique scenarios. No independent reviews were recorded. Evidence content could not be safely audited because protected-evaluation indicators appeared in retrieved material; inspection was stopped. The 2026-11-06 snapshot above supersedes these historical counts. Re-query and re-verify before relying on either snapshot.
@@ -164,7 +164,7 @@ Known historical snapshot (2026-11-05, metadata-only, protected scenario exclude
 - [x] Require injected stores to match the runtime history-limit configuration.
 - [x] Pin GitHub Actions dependencies to immutable commit SHAs.
 - [x] Add a runtime foundation security review with trust boundaries, unresolved risks, and an abuse-case test plan.
-- [ ] Obtain an authorized, completed non-protected product specification and ratify proposed defaults.
+- [ ] Obtain an authorized, completed runtime product specification and ratify proposed defaults.
 - [ ] Define durable memory, tool authorization, identity/tenant isolation, and deployment from that specification.
 - [x] Implement the provider-neutral permissioned tool-execution gate with strict schemas, host permissions, action-bound approvals, bounded JSON, redacted audit, and regression tests.
 - [ ] Implement concrete model/tool adapters, durable user memory, task orchestration, persistence strategy, and deployment packaging.
