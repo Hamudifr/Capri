@@ -150,8 +150,12 @@ class SQLiteWorkerRegistryTests(unittest.TestCase):
             pending, authenticated_worker_id="worker-1",
         ))
         self.assertIsNone(self.registry.get_reservation(pending.token))
-        event_types = [event["event_type"] for event in self.registry.events_for_worker("worker-1")]
-        self.assertIn("reservation_revoked_capacity", event_types)
+        events = self.registry.events_for_worker("worker-1")
+        self.assertTrue(any(
+            event["event_type"] == "reservation_revoked"
+            and event["payload"]["reason"] == "commit_reservation"
+            for event in events
+        ))
 
     def test_pending_expiry_is_persisted_and_committed_holds_do_not_expire(self):
         self.register_healthy(max_concurrency=2)
