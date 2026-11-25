@@ -434,8 +434,50 @@ static bool index_matches(sqlite3 *db,const char *name,const char *table,const c
     return matches;
 }
 
+static bool schema_objects_valid(sqlite3 *db) {
+    static const struct { const char *type,*name,*table; } expected[] = {
+        {"table","sessions","sessions"},
+        {"table","session_turn_leases","session_turn_leases"},
+        {"table","session_owners","session_owners"},
+        {"index","sessions_updated_at","sessions"},
+        {"index","session_owners_principal_id","session_owners"},
+        {"trigger","session_owners_immutable_update","session_owners"},
+        {"trigger","session_owners_immutable_delete","session_owners"},
+        {"trigger","session_owners_immutable_insert","session_owners"}
+    };
+    bool seen[sizeof expected/sizeof expected[0]]={false};
+    sqlite3_stmt *st=NULL;
+    if(sqlite3_prepare_v2(
+        db,
+        "SELECT type,name,tbl_name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'",
+        -1,&st,NULL
+    )!=SQLITE_OK)return false;
+    int rc;size_t count=0u;
+    while((rc=sqlite3_step(st))==SQLITE_ROW){
+        const unsigned char *type=sqlite3_column_text(st,0);
+        const unsigned char *name=sqlite3_column_text(st,1);
+        const unsigned char *table=sqlite3_column_text(st,2);
+        bool found=false;
+        if(!type||!name||!table)break;
+        for(size_t i=0u;i<sizeof expected/sizeof expected[0];++i){
+            if(strcmp((const char*)type,expected[i].type)==0
+                &&strcmp((const char*)name,expected[i].name)==0
+                &&strcmp((const char*)table,expected[i].table)==0){
+                if(seen[i]){rc=SQLITE_ERROR;found=true;break;}
+                seen[i]=true;++count;found=true;break;
+            }
+        }
+        if(!found){rc=SQLITE_ERROR;break;}
+        if(rc==SQLITE_ERROR)break;
+    }
+    bool valid=rc==SQLITE_DONE&&count==sizeof expected/sizeof expected[0];
+    sqlite3_finalize(st);
+    return valid;
+}
+
 static bool session_schema_valid(sqlite3 *db) {
-    return table_primary_key_is(db,"sessions","session_id")
+    return schema_objects_valid(db)
+        &&table_primary_key_is(db,"sessions","session_id")
         &&table_primary_key_is(db,"session_owners","session_id")
         &&table_primary_key_is(db,"session_turn_leases","session_id")
         &&table_session_foreign_key_is_valid(db,"session_owners")
