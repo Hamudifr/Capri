@@ -219,6 +219,12 @@ class SQLiteBudgetStore:
                 connection.execute("""CREATE TRIGGER IF NOT EXISTS budget_meta_immutable_delete
                     BEFORE DELETE ON budget_meta
                     BEGIN SELECT RAISE(ABORT, 'budget metadata is immutable'); END""")
+                connection.execute("""CREATE TRIGGER IF NOT EXISTS budget_meta_immutable_update
+                    BEFORE UPDATE ON budget_meta
+                    BEGIN SELECT RAISE(ABORT, 'budget metadata is immutable'); END""")
+                connection.execute("""CREATE TRIGGER IF NOT EXISTS budget_meta_immutable_delete
+                    BEFORE DELETE ON budget_meta
+                    BEGIN SELECT RAISE(ABORT, 'budget metadata is immutable'); END""")
                 connection.execute("""CREATE TRIGGER IF NOT EXISTS budget_reservation_immutable_update
                     BEFORE UPDATE ON budget_reservations
                     BEGIN SELECT RAISE(ABORT, 'budget reservations are append-only'); END""")
