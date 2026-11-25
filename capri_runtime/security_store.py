@@ -15,6 +15,8 @@ import threading
 import tempfile
 from datetime import datetime
 
+from capri_core.validation import contains_surrogate
+
 from .atomic_publish import publish_no_replace
 from .tools import ApprovalGrant, ApprovalStore, AuditEvent, AuditSink, ToolValidationError
 
@@ -26,7 +28,7 @@ _OPERATION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 def _valid_text(value: object, limit: int) -> bool:
     return (
         isinstance(value, str) and 0 < len(value) <= limit
-        and not any(0xD800 <= ord(character) <= 0xDFFF for character in value)
+        and not contains_surrogate(value)
     )
 
 
