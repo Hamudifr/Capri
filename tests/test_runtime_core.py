@@ -26,7 +26,7 @@ def passing(run_id="r1", parent=None):
         run_id=run_id, scenario_id="scenario-a", dimension="Agency",
         status=Status.PASS, evaluator_type=EvaluatorType.SELF,
         evidence_stage=EvidenceStage.SELF_SCORED,
-        evidence_ref="evidence://non-x5/example", run_at="2026-11-05T08:00:00Z",
+        evidence_ref="evidence://continuity/example", run_at="2026-11-05T08:00:00Z",
         parent_run_id=parent,
     )
 
@@ -350,7 +350,7 @@ class DoctorTests(unittest.TestCase):
             "  push:\n"
             '    branches: ["main"]\n'
             "  pull_request:\n"
-            '    branches: ["main", "recovery/non-x5-foundation"]\n'
+            '    branches: ["main"]\n'
             "permissions:\n"
             "  contents: read\n"
             "jobs:\n"
@@ -380,7 +380,7 @@ class DoctorTests(unittest.TestCase):
             workflow = root / ".github/workflows/quality.yml"
             content = workflow.read_text(encoding="utf-8")
             self.assertIn('branches: ["main"]', content)
-            self.assertIn('branches: ["main", "recovery/non-x5-foundation"]', content)
+            self.assertIn('branches: ["main"]', content)
             output = io.StringIO()
             with redirect_stdout(output):
                 code = cli_main(["doctor", "--root", str(root)])
@@ -393,7 +393,7 @@ class DoctorTests(unittest.TestCase):
             workflow = root / ".github/workflows/quality.yml"
             content = workflow.read_text(encoding="utf-8")
             content = content.replace(
-                'branches: ["main", "recovery/non-x5-foundation"]',
+                'branches: ["main"]',
                 'branches: ["main"]',
             )
             workflow.write_text(content, encoding="utf-8")
@@ -473,15 +473,15 @@ class DoctorTests(unittest.TestCase):
             self._make_repository(root)
             workflow = root / ".github/workflows/quality.yml"
             content = workflow.read_text(encoding="utf-8").replace(
-                'branches: ["main", "recovery/non-x5-foundation"]',
+                'branches: ["main"]',
                 'branches: ["main"]',
             )
             content += (
                 "    strategy:\n"
                 "      matrix:\n"
                 "        include:\n"
-                '          - branches: ["main", "recovery/non-x5-foundation"]\n'
-                '          - branches: ["main", "recovery/non-x5-foundation"]\n'
+                '          - branches: ["main"]\n'
+                '          - branches: ["main"]\n'
             )
             workflow.write_text(content, encoding="utf-8")
             output = io.StringIO()
@@ -496,10 +496,10 @@ class DoctorTests(unittest.TestCase):
             self._make_repository(root)
             workflow = root / ".github/workflows/quality.yml"
             content = workflow.read_text(encoding="utf-8").replace(
-                'branches: ["main", "recovery/non-x5-foundation"]',
+                'branches: ["main"]',
                 'branches:\n'
                 '      - "main"\n'
-                '      - "recovery/non-x5-foundation"',
+                '      - "main"',
             )
             workflow.write_text(content, encoding="utf-8")
             output = io.StringIO()
@@ -522,9 +522,9 @@ class DoctorTests(unittest.TestCase):
                 "  workflow_dispatch:\n"
                 "    inputs:\n"
                 '      push:\n'
-                '        branches: ["main", "recovery/non-x5-foundation"]\n'
+                '        branches: ["main"]\n'
                 '      pull_request:\n'
-                '        branches: ["main", "recovery/non-x5-foundation"]\n'
+                '        branches: ["main"]\n'
             )
             workflow.write_text(content[:start] + nested + content[end:], encoding="utf-8")
             output = io.StringIO()
@@ -710,11 +710,11 @@ class DoctorTests(unittest.TestCase):
             self._make_repository(root)
             workflow = root / ".github/workflows/quality.yml"
             content = workflow.read_text(encoding="utf-8").replace(
-                'branches: ["main", "recovery/non-x5-foundation"]',
+                'branches: ["main"]',
                 "branches:\n"
                 "      - include:\n"
                 "          - main\n"
-                "          - recovery/non-x5-foundation",
+                "          - main",
             )
             workflow.write_text(content, encoding="utf-8")
             output = io.StringIO()
@@ -748,7 +748,7 @@ class DoctorTests(unittest.TestCase):
             content = workflow.read_text(encoding="utf-8")
             duplicate = (
                 "  push:\n"
-                '    branches: ["main", "recovery/non-x5-foundation"]\n'
+                '    branches: ["main"]\n'
             )
             workflow.write_text(content.replace("  pull_request:\n", duplicate + "  pull_request:\n"), encoding="utf-8")
             output = io.StringIO()
