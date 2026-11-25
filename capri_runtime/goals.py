@@ -243,7 +243,8 @@ class SQLiteGoalStore:
             raise GoalValidationError("database parent changed")
         if os.name == "posix":
             info = os.lstat(self.path)
-            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_nlink != 1:
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                    or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) & 0o077):
                 raise GoalValidationError("database file identity changed")
         connection = sqlite3.connect(self.path, timeout=10, isolation_level=None)
         connection.execute("PRAGMA foreign_keys=ON")
