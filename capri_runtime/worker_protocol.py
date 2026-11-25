@@ -221,11 +221,20 @@ class WorkerResponse:
         return response
 
     def validate_for(self, request: WorkerRequest, *, expected_worker_id: str) -> None:
+        if type(request) is not WorkerRequest:
+            raise WorkerProtocolError("request must be a validated WorkerRequest")
+        if type(self) is not WorkerResponse:
+            raise WorkerProtocolError("response must be a validated WorkerResponse")
+        # Validate in-memory instances too; callers must not bypass the wire contract.
+        request.to_json()
+        self.to_json()
         _identifier(expected_worker_id, "expected_worker_id")
         if self.request_id != request.request_id:
             raise WorkerProtocolError("response request_id does not match the request")
         if self.worker_id != expected_worker_id:
             raise WorkerProtocolError("response worker_id does not match the selected worker")
+        if self.duration_ms > request.deadline_ms:
+            raise WorkerProtocolError("response duration exceeds the request deadline")
 
 
 __all__ = [
