@@ -311,6 +311,68 @@ class CapriHostRuntimeTests(unittest.TestCase):
                 expected_version=2,
             )
 
+    def test_host_coordinates_goal_task_and_reconciles_evidence(self):
+        goal_store = SQLiteGoalStore(os.path.join(self.temp.name, "coordinated-goals.sqlite3"))
+        worker = TaskWorker(TaskEngine(
+            self.task_store, {}, "goal-worker",
+            principal_handlers={
+                "collect": lambda data, key, principal: {
+                    "owner": principal, "collected": True,
+                },
+            },
+        ))
+        host = self.make_host(task_worker=worker, goal_store=goal_store)
+        goal = host.create_goal(
+            "alice-token", "Collect verified information",
+            acceptance_criteria=["Evidence is recorded"],
+        )
+        planned = host.save_goal_plan(
+            "alice-token", goal.goal_id,
+            GoalPlanProposal(({"tool": "collect", "input": {}},)),
+            expected_version=goal.version,
+        )
+        execution = host.prepare_goal(
+            "alice-token", goal.goal_id, expected_version=planned.version,
+        )
+        self.assertEqual(execution.goal.state, "running")
+        self.assertEqual(execution.task.state, "queued")
+        self.assertEqual(host.get_goal_events("alice-token", goal.goal_id)[-1]["event_type"], "task_linked")
+        self.assertEqual(worker.run_once().state, "succeeded")
+        reconciled = host.reconcile_goal("alice-token", goal.goal_id)
+        self.assertEqual(reconciled.goal.state, "succeeded")
+        self.assertEqual(len(reconciled.goal.evidence), 1)
+        with self.assertRaises(GoalNotFoundError):
+            host.get_goal_events("bob-token", goal.goal_id)
+
+    def test_host_cancellation_uses_coordinator_for_linked_goal(self):
+        goal_store = SQLiteGoalStore(os.path.join(self.temp.name, "cancel-goals.sqlite3"))
+        worker = TaskWorker(TaskEngine(
+            self.task_store, {}, "cancel-worker",
+            principal_handlers={"collect": lambda data, key, principal: {"ok": True}},
+        ))
+        host = self.make_host(task_worker=worker, goal_store=goal_store)
+        goal = host.create_goal(
+            "alice-token", "Do one safe task", acceptance_criteria=["Done"],
+        )
+        planned = host.save_goal_plan(
+            "alice-token", goal.goal_id,
+            GoalPlanProposal(({"tool": "collect", "input": {}},)),
+            expected_version=goal.version,
+        )
+        execution = host.prepare_goal(
+            "alice-token", goal.goal_id, expected_version=planned.version,
+        )
+        with self.assertRaises(HostRuntimeError):
+            host.transition_goal(
+                "alice-token", goal.goal_id, "cancelled",
+                expected_version=execution.goal.version,
+            )
+        cancelled = host.cancel_goal(
+            "alice-token", goal.goal_id, expected_version=execution.goal.version,
+        )
+        self.assertEqual(cancelled.goal.state, "cancelled")
+        self.assertEqual(cancelled.task.state, "cancelled")
+
     def test_goal_api_requires_configured_store_and_authentication(self):
         host = self.make_host()
         with self.assertRaises(HostRuntimeError):
