@@ -72,6 +72,7 @@ class HostServiceTests(unittest.TestCase):
         self.assertEqual(initial.service_state, HostServiceState.NEW)
         self.assertEqual(initial.status, RuntimeHealthState.UNAVAILABLE)
         self.assertFalse(initial.worker_alive)
+        self.assertTrue(service.shutdown_complete)
 
         started = service.start()
         self.assertEqual(started.service_state, HostServiceState.RUNNING)
