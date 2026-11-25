@@ -159,6 +159,7 @@ class StrategyPromotionRecord:
     assessment_sha256: str
     summary: dict[str, Any]
     evidence_manifest_refs: tuple[tuple[str, str], ...]
+    cohort_sha256s: tuple[tuple[str, str], ...]
     created_at: str
 
 
@@ -299,16 +300,18 @@ def _promotion_json(value: object, *, field: str, maximum: int) -> str:
     return encoded
 
 
-def _promotion_record_digest(summary_json: str, refs_json: str) -> str:
+def _promotion_record_digest(summary_json: str, refs_json: str, hashes_json: str) -> str:
     try:
         summary = json.loads(summary_json)
         refs = json.loads(refs_json)
-        if type(summary) is not dict or type(refs) is not dict:
+        hashes = json.loads(hashes_json)
+        if type(summary) is not dict or type(refs) is not dict or type(hashes) is not dict:
             raise ValueError("promotion record payloads must be JSON objects")
         payload = {
             "schema": "capri.strategy-promotion-record.v1",
             "summary": summary,
             "evidence_manifest_refs": refs,
+            "cohort_sha256s": hashes,
         }
         encoded = json.dumps(
             payload, ensure_ascii=False, sort_keys=True,
@@ -320,24 +323,41 @@ def _promotion_record_digest(summary_json: str, refs_json: str) -> str:
 
 
 def _promotion_record_from_row(row: tuple[Any, ...]) -> StrategyPromotionRecord:
-    summary_json, refs_json = row[10], row[11]
-    digest = _promotion_record_digest(summary_json, refs_json)
+    summary_json, refs_json, hashes_json = row[10], row[11], row[12]
+    if (
+        len(summary_json.encode("utf-8")) > 32_768
+        or len(refs_json.encode("utf-8")) > 4_096
+        or len(hashes_json.encode("utf-8")) > 2_048
+    ):
+        raise StrategyIntegrityError("stored promotion assessment exceeds its size bounds")
+    digest = _promotion_record_digest(summary_json, refs_json, hashes_json)
     if digest != row[9]:
         raise StrategyIntegrityError("promotion assessment fingerprint does not match its stored evidence")
     try:
         summary = json.loads(summary_json)
         refs = json.loads(refs_json)
-        if type(summary) is not dict or type(refs) is not dict:
+        hashes = json.loads(hashes_json)
+        if type(summary) is not dict or type(refs) is not dict or type(hashes) is not dict:
             raise ValueError("invalid promotion record")
         normalized_refs = tuple(sorted(
             (_text(key, "cohort_id", 128), _text(value, "evidence_manifest_ref", 512))
             for key, value in refs.items()
         ))
+        normalized_hashes = tuple(sorted(
+            (_text(key, "cohort_id", 128), value)
+            for key, value in hashes.items()
+            if type(value) is str and _SHA256.fullmatch(value)
+        ))
+        if len(normalized_hashes) != len(hashes):
+            raise ValueError("invalid cohort fingerprint")
+        if {key for key, _ in normalized_refs} != {key for key, _ in normalized_hashes}:
+            raise ValueError("cohort evidence bindings are inconsistent")
     except (TypeError, ValueError, json.JSONDecodeError):
         raise StrategyIntegrityError("stored promotion assessment payload is invalid") from None
     return StrategyPromotionRecord(
         row[0], row[1], row[2], row[3], row[4], row[5], row[6],
-        row[7], row[8], row[12], row[9], summary, normalized_refs, row[13],
+        row[7], row[8], row[13], row[9], summary, normalized_refs,
+        normalized_hashes, row[14],
     )
 
 
@@ -447,6 +467,7 @@ class SQLiteStrategyStore:
                     assessment_sha256 TEXT NOT NULL CHECK(length(assessment_sha256)=64),
                     summary_json TEXT NOT NULL CHECK(length(summary_json)<=32768),
                     evidence_manifest_refs_json TEXT NOT NULL CHECK(length(evidence_manifest_refs_json)<=4096),
+                    cohort_sha256s_json TEXT NOT NULL CHECK(length(cohort_sha256s_json)<=2048),
                     eligible_for_canary INTEGER NOT NULL CHECK(eligible_for_canary=1),
                     created_at TEXT NOT NULL,
                     UNIQUE(principal_id,strategy_class,candidate_id,candidate_version,assessment_sha256),
