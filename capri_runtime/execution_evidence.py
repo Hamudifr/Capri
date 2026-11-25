@@ -196,7 +196,7 @@ class SQLiteExecutionEvidenceJournal:
             principal = self._authenticate(credential)
         except Exception:
             raise StrategyAuthorizationError("execution collector authentication failed") from None
-        principal = _text(principal, "authenticated principal")
+        principal = _text(principal, "authenticated principal", 256)
         if type(claim) is not TaskClaim or claim.principal_id != principal:
             raise StrategyAuthorizationError("authenticated principal does not own this task claim")
         try:
@@ -769,7 +769,7 @@ def validate_execution_evidence_snapshot(connection: Any) -> None:
             ):
                 raise StrategyStoreError("execution evidence payload does not match its immutable row")
             _text(event_id, "event_id", 32)
-            _text(principal, "principal_id", 128)
+            _text(principal, "principal_id", 256)
             _text(task_id, "task_id", 64)
             if not re.fullmatch(r"[0-9a-f]{32}", event_id):
                 raise StrategyStoreError("execution evidence event identifier is invalid")
