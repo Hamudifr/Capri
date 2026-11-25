@@ -764,6 +764,60 @@ class SQLiteSessionStore(SessionStore):
             finally:
                 connection.close()
 
+    def _validate_backup_snapshot(self, connection: sqlite3.Connection) -> None:
+        """Validate session rows, immutable owners and durable turn leases."""
+        check = connection.execute("PRAGMA integrity_check").fetchone()
+        foreign_key_errors = connection.execute("PRAGMA foreign_key_check").fetchall()
+        if not check or check[0] != "ok":
+            raise ValidationError("SQLite session backup integrity check failed")
+        if foreign_key_errors:
+            raise ValidationError("SQLite session backup foreign key check failed")
+
+        rows = connection.execute(
+            """SELECT session_id, created_at, updated_at, version, closed, messages_json
+            FROM sessions ORDER BY created_at, session_id"""
+        ).fetchall()
+        for row in rows:
+            self._decode(row)
+
+        owners = connection.execute(
+            "SELECT session_id, principal_id, created_at FROM session_owners"
+        ).fetchall()
+        for session_id, principal_id, created_at in owners:
+            if (
+                not isinstance(session_id, str)
+                or not session_id.strip()
+                or len(session_id) > 256
+                or _contains_surrogate(session_id)
+            ):
+                raise ValidationError("SQLite session backup contains invalid ownership data")
+            self._validate_principal_id(principal_id)
+            try:
+                created = datetime.fromisoformat(created_at)
+            except (TypeError, ValueError):
+                raise ValidationError("SQLite session backup contains an invalid owner timestamp") from None
+            if created.tzinfo is None or created.utcoffset() is None:
+                raise ValidationError("SQLite session backup contains an invalid owner timestamp")
+
+        leases = connection.execute(
+            "SELECT session_id, owner_token, expires_at FROM session_turn_leases"
+        ).fetchall()
+        for session_id, owner_token, expires_at in leases:
+            if (
+                not isinstance(session_id, str)
+                or not session_id.strip()
+                or len(session_id) > 256
+                or _contains_surrogate(session_id)
+            ):
+                raise ValidationError("SQLite session backup contains an invalid lease session ID")
+            self._lease_parameters(owner_token, 30.0)
+            try:
+                expiry = datetime.fromisoformat(expires_at)
+            except (TypeError, ValueError):
+                raise ValidationError("SQLite session backup contains an invalid lease expiry") from None
+            if expiry.tzinfo is None or expiry.utcoffset() is None:
+                raise ValidationError("SQLite session backup contains an invalid lease expiry")
+
     def backup_to(self, destination_path: str) -> str:
         """Create a consistent private snapshot without overwriting an existing file.
 
@@ -807,23 +861,7 @@ class SQLiteSessionStore(SessionStore):
                 destination.execute("PRAGMA trusted_schema=OFF")
                 destination.execute("PRAGMA synchronous=FULL")
                 source.backup(destination)
-                check = destination.execute("PRAGMA integrity_check").fetchone()
-                foreign_key_errors = destination.execute("PRAGMA foreign_key_check").fetchall()
-                if not check or check[0] != "ok" or foreign_key_errors:
-                    raise ValidationError("SQLite session backup integrity check failed")
-                rows = destination.execute(
-                    """SELECT session_id, created_at, updated_at, version, closed, messages_json
-                    FROM sessions ORDER BY created_at, session_id"""
-                ).fetchall()
-                for row in rows:
-                    self._decode(row)
-                owners = destination.execute(
-                    "SELECT session_id, principal_id FROM session_owners"
-                ).fetchall()
-                for session_id, principal_id in owners:
-                    self._validate_principal_id(principal_id)
-                    if not isinstance(session_id, str) or not session_id:
-                        raise ValidationError("SQLite session backup contains invalid ownership data")
+                self._validate_backup_snapshot(destination)
                 destination.close()
                 destination = None
                 source.close()
@@ -883,14 +921,10 @@ class SQLiteSessionStore(SessionStore):
         with self._lock:
             connection = self._connect()
             try:
-                row = connection.execute("PRAGMA integrity_check").fetchone()
-                foreign_key_errors = connection.execute("PRAGMA foreign_key_check").fetchall()
-                if not row:
-                    return "no result"
-                if row[0] != "ok":
-                    return str(row[0])
-                if foreign_key_errors:
-                    return "foreign key check failed"
+                try:
+                    self._validate_backup_snapshot(connection)
+                except ValidationError:
+                    return "semantic validation failed"
                 return "ok"
             finally:
                 connection.close()
