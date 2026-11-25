@@ -1362,6 +1362,69 @@ class CapriHostRuntimeTests(unittest.TestCase):
         ))
         self.assertEqual(reopened_host.storage_health()["worker_registry"], "healthy")
 
+    def test_sqlite_worker_reservation_restart_requires_durable_audit_reconciliation(self):
+        audit = SQLiteSecurityStore(os.path.join(self.temp.name, "durable-restart-audit.sqlite3"))
+        identities = {"worker-token": "worker-1"}
+        registry = SQLiteWorkerRegistry(self.task_store)
+        host = self.make_worker_host(
+            registry, identities, lambda *args: {"worker-1"}, audit_sink=audit,
+        )
+        host.register_worker(
+            "worker-token",
+            WorkerDescriptor("worker-1", (1,), ("math.factorial",), max_concurrency=1),
+        )
+        host.heartbeat_worker("monitor-token", "worker-1")
+        task = self.task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {"scope": "durable-restart"}}],
+        )
+        pending = host.reserve_worker_candidate(
+            "alice-token", task.task_id, "math.factorial", 1,
+        )
+        self.assertIsNotNone(pending)
+        self.assertTrue(audit.worker_lifecycle_reconciliation_required())
+
+        # A durable audit store must block a recreated host until the supervisor
+        # explicitly reconciles the surviving worker/load state.
+        with self.assertRaisesRegex(HostRuntimeError, "reconcile and acknowledge"):
+            self.make_worker_host(
+                SQLiteWorkerRegistry(self.task_store),
+                identities,
+                lambda *args: {"worker-1"},
+                audit_sink=audit,
+            )
+        self.assertTrue(audit.worker_lifecycle_reconciliation_required())
+        self.assertTrue(audit.acknowledge_worker_lifecycle_reconciliation(
+            "Supervisor verified worker load and reconciled the surviving durable reservation",
+        ))
+        self.assertFalse(audit.worker_lifecycle_reconciliation_required())
+
+        reopened_registry = SQLiteWorkerRegistry(self.task_store)
+        reopened_host = self.make_worker_host(
+            reopened_registry, identities, lambda *args: {"worker-1"}, audit_sink=audit,
+        )
+        recovered = reopened_host.get_worker_reservation_for_task(
+            "alice-token", task.task_id,
+        )
+        self.assertIsNotNone(recovered)
+        self.assertEqual(recovered.reservation.token, pending.reservation.token)
+        self.assertEqual(recovered.principal_id, "alice")
+        self.assertEqual(recovered.task_id, task.task_id)
+
+        committed = reopened_host.commit_worker_reservation(
+            "alice-token", "monitor-token", recovered,
+        )
+        self.assertTrue(committed.reservation.committed)
+        self.assertTrue(audit.worker_lifecycle_reconciliation_required())
+        self.assertTrue(reopened_host.release_worker_reservation(
+            "monitor-token", committed,
+        ))
+        self.assertFalse(audit.worker_lifecycle_reconciliation_required())
+        event_types = [event.tool_name for event in audit.events()]
+        self.assertIn("worker.reconciliation.acknowledged", event_types)
+        self.assertIn("worker.reservation.created", event_types)
+        self.assertIn("worker.reservation.committed", event_types)
+        self.assertIn("worker.reservation.released", event_types)
+
     def test_sqlite_expired_reservation_context_is_pruned_before_next_reserve(self):
         now = {"value": 1_000_000_000}
         registry = SQLiteWorkerRegistry(
