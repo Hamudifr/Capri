@@ -240,6 +240,12 @@ class WorkerRegistryTests(unittest.TestCase):
                 "worker-1", authenticated_worker_id="worker-1",
                 in_flight=0, now_ns=self.now,
             )
+        with self.assertRaises(WorkerConflictError):
+            self.registry.update_descriptor(
+                self.descriptor(enabled=True, revision=2),
+                authenticated_worker_id="worker-1",
+                expected_revision=1,
+            )
 
     def test_descriptor_updates_use_revision_compare_and_swap(self):
         self.register_healthy()
