@@ -93,6 +93,18 @@ class CapriHostRuntimeTests(unittest.TestCase):
             **kwargs,
         )
 
+    @staticmethod
+    def approve_worker_descriptor(worker_id, proposed):
+        return WorkerDescriptor(
+            worker_id,
+            proposed.protocol_versions,
+            ("math.factorial",),
+            priority=proposed.priority,
+            max_concurrency=proposed.max_concurrency,
+            enabled=proposed.enabled,
+            revision=proposed.revision,
+        )
+
     def test_worker_registry_requires_host_identity_and_policy_callbacks(self):
         with self.assertRaises(HostRuntimeError):
             self.make_host(worker_registry=InMemoryWorkerRegistry())
@@ -104,6 +116,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
             task_store=self.task_store,
             worker_registry=registry,
             worker_identity_resolver=identities.get,
+            worker_descriptor_resolver=self.approve_worker_descriptor,
             worker_policy_resolver=lambda principal, task_id, capability: set(),
         )
         descriptor = WorkerDescriptor(
@@ -136,6 +149,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
             task_store=self.task_store,
             worker_registry=registry,
             worker_identity_resolver=identities.get,
+            worker_descriptor_resolver=self.approve_worker_descriptor,
             worker_policy_resolver=policy,
         )
         for worker_id, token in (
@@ -175,6 +189,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
             task_store=self.task_store,
             worker_registry=registry,
             worker_identity_resolver=identity,
+            worker_descriptor_resolver=self.approve_worker_descriptor,
             worker_policy_resolver=lambda *args: (_ for _ in ()).throw(RuntimeError("private policy error")),
         )
         failing.register_worker(
@@ -190,12 +205,31 @@ class CapriHostRuntimeTests(unittest.TestCase):
             task_store=self.task_store,
             worker_registry=registry,
             worker_identity_resolver=identity,
+            worker_descriptor_resolver=self.approve_worker_descriptor,
             worker_policy_resolver=lambda *args: ["worker-1"],
         )
         with self.assertRaisesRegex(HostRuntimeError, "invalid allow-list"):
             invalid.get_worker_candidates(
                 "alice-token", task.task_id, "math.factorial", 1,
             )
+
+    def test_worker_descriptor_capabilities_are_host_approved_not_self_advertised(self):
+        registry = InMemoryWorkerRegistry()
+        host = self.make_host(
+            task_store=self.task_store,
+            worker_registry=registry,
+            worker_identity_resolver=lambda credential: (
+                "worker-1" if credential == "worker-token" else None
+            ),
+            worker_descriptor_resolver=self.approve_worker_descriptor,
+            worker_policy_resolver=lambda *args: {"worker-1"},
+        )
+        proposed = WorkerDescriptor(
+            "worker-1", (1,), ("math.factorial", "admin.execute"),
+        )
+        host.register_worker("worker-token", proposed)
+        stored = registry.get("worker-1")
+        self.assertEqual(stored.descriptor.capabilities, ("math.factorial",))
 
     def test_worker_failure_observation_requires_matching_host_identity(self):
         registry = InMemoryWorkerRegistry()
@@ -205,6 +239,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
             worker_identity_resolver=lambda credential: (
                 "worker-1" if credential == "worker-token" else None
             ),
+            worker_descriptor_resolver=self.approve_worker_descriptor,
             worker_policy_resolver=lambda *args: set(),
         )
         host.register_worker(
