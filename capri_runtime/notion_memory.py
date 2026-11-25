@@ -31,6 +31,7 @@ from .memory import (
     _validate_expiry,
     _validate_tags,
     _validate_text,
+    _rank_memory_records,
 )
 
 _TYPE_TO_LABEL = {
@@ -414,7 +415,7 @@ class NotionMemoryAdapter:
         terms = tuple(dict.fromkeys(part.casefold() for part in query.split() if part))
         if not terms:
             raise MemoryValidationError("query must contain at least one search term")
-        ranked = []
+        eligible = []
         for record in self._list_all():
             if record.status not in {"active", "review"}:
                 continue
@@ -424,20 +425,9 @@ class NotionMemoryAdapter:
                 continue
             if record.expires_at is not None and record.expires_at <= _iso(_now()):
                 continue
-            haystack = (record.title + "\n" + record.content + "\n" + record.scope + "\n" + " ".join(record.tags)).casefold()
-            matched = sum(term in haystack for term in terms)
-            if matched == len(terms):
-                exact = int(record.title.casefold() == query.casefold())
-                ranked.append((exact, matched, record.updated_at, record))
-        ranked.sort(
-            key=lambda item: (
-                -item[0],
-                -item[1],
-                -datetime.fromisoformat(item[2]).timestamp(),
-                item[3].memory_id,
-            )
-        )
-        return tuple(item[3] for item in ranked[offset:offset + limit])
+            eligible.append(record)
+        ranked = _rank_memory_records(eligible, query)
+        return ranked[offset:offset + limit]
 
     def correct(self, memory_id: str, **changes: object) -> MemoryRecord:
         allowed = {"title", "content", "record_type", "scope", "source", "confidence", "retention", "tags", "expires_at"}

@@ -204,6 +204,20 @@ class NotionMemoryAdapterTests(unittest.TestCase):
         with self.assertRaises(MemoryValidationError):
             self.store.search("untrusted", limit=101)
 
+    def test_search_ranks_title_relevance_above_newer_body_only_match(self):
+        relevant = self.create(
+            title="Notion correction recovery",
+            content="Recover interrupted page transitions by readback.",
+            tags=("memory", "delivery"),
+        )
+        self.create(
+            title="Transport retry notes",
+            content="Notion correction may need readback after an interrupted request.",
+            tags=("tooling",),
+        )
+        results = self.store.search("Notion correction", limit=2)
+        self.assertEqual(results[0].memory_id, relevant.memory_id)
+
     def test_search_prefers_newer_records_when_relevance_is_equal(self):
         older = self.create(title="Shared Project", content="same stable facts")
         newer = self.create(title="Shared Project", content="same stable facts")
