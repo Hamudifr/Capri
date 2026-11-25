@@ -260,7 +260,7 @@ def validate_worker_registry_snapshot(connection: sqlite3.Connection) -> None:
 
     previous_hash = _ZERO_HASH
     expected_sequence = 0
-    events_by_token: dict[str, list[str]] = {}
+    events_by_token: dict[str, list[dict[str, Any]]] = {}
     registered_workers: set[str] = set()
     worker_projections: dict[str, dict[str, Any]] = {}
     health_event_types = {
@@ -334,7 +334,13 @@ def validate_worker_registry_snapshot(connection: sqlite3.Connection) -> None:
         if token_hash is not None:
             if type(token_hash) is not str or len(token_hash) != 64:
                 raise WorkerRegistryError("worker registry audit token digest is invalid")
-            events_by_token.setdefault(token_hash, []).append(row["event_type"])
+            events_by_token.setdefault(token_hash, []).append({
+                "event_type": row["event_type"],
+                "worker_id": row["worker_id"],
+                "principal_id": row["principal_id"],
+                "task_id": row["task_id"],
+                "payload": event_data,
+            })
         previous_hash = digest
 
     if meta["last_sequence"] != expected_sequence or meta["head_sha256"] != previous_hash:
@@ -409,13 +415,41 @@ def validate_worker_registry_snapshot(connection: sqlite3.Connection) -> None:
         active_tasks.add(task_key)
         token_hash = hashlib.sha256(reservation.token.encode("utf-8")).hexdigest()
         token_events = events_by_token.get(token_hash, [])
-        if "reservation_created" not in token_events:
-            raise WorkerRegistryError("active reservation has no creation audit event")
-        if reservation.committed != ("reservation_committed" in token_events):
+        created_events = [
+            event for event in token_events if event["event_type"] == "reservation_created"
+        ]
+        if len(created_events) != 1:
+            raise WorkerRegistryError("active reservation must have exactly one creation audit event")
+        created = created_events[0]
+        created_payload = created["payload"]
+        if (
+            created["worker_id"] != reservation.worker_id
+            or created["principal_id"] != reservation.principal_id
+            or created["task_id"] != reservation.task_id
+            or created_payload.get("capability") != reservation.capability
+            or created_payload.get("protocol_version") != reservation.protocol_version
+            or created_payload.get("descriptor_revision") != reservation.descriptor_revision
+            or created_payload.get("committed") is not False
+            or created_payload.get("revision") != 1
+        ):
+            raise WorkerRegistryError("active reservation does not match its creation audit event")
+        commit_events = [
+            event for event in token_events if event["event_type"] == "reservation_committed"
+        ]
+        if len(commit_events) > 1:
+            raise WorkerRegistryError("reservation has duplicate commit audit events")
+        if reservation.committed != bool(commit_events):
             raise WorkerRegistryError("active reservation state disagrees with audit events")
-        if any(event in token_events for event in (
+        if commit_events and (
+            commit_events[0]["worker_id"] != reservation.worker_id
+            or commit_events[0]["principal_id"] != reservation.principal_id
+            or commit_events[0]["task_id"] != reservation.task_id
+            or commit_events[0]["payload"].get("revision") != reservation.revision
+        ):
+            raise WorkerRegistryError("committed reservation does not match its audit event")
+        if any(event["event_type"] in {
             "reservation_released", "reservation_expired", "reservation_revoked",
-        )):
+        } for event in token_events):
             raise WorkerRegistryError("active reservation has a terminal audit event")
 
 
@@ -850,6 +884,7 @@ class SQLiteWorkerRegistry:
                         "protocol_version": current.protocol_version,
                         "descriptor_revision": current.descriptor_revision,
                         "committed": current.committed,
+                        "revision": current.revision,
                     },
                 )
             elif not previous.committed and current.committed:
