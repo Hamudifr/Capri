@@ -23,6 +23,7 @@ from capri_runtime import (
     HostAuthorityResolver,
     InMemoryAuditSink,
     InMemoryWorkerRegistry,
+    SQLiteWorkerRegistry,
     WorkerDescriptor,
     SessionClosedError,
     SessionNotFoundError,
@@ -1322,6 +1323,75 @@ class CapriHostRuntimeTests(unittest.TestCase):
 
         with self.assertRaises(HostRuntimeError):
             self.make_host(task_store=self.task_store, task_worker=worker)
+
+
+    def test_sqlite_worker_registry_recovers_reservation_after_host_restart(self):
+        audit = InMemoryAuditSink()
+        registry = SQLiteWorkerRegistry(self.task_store)
+        host = self.make_worker_host(
+            registry, {"worker-token": "worker-1"}, lambda *args: {"worker-1"},
+            audit_sink=audit,
+        )
+        host.register_worker(
+            "worker-token", WorkerDescriptor("worker-1", (1,), ("math.factorial",)),
+        )
+        host.heartbeat_worker("monitor-token", "worker-1")
+        task = self.task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {}}],
+        )
+        pending = host.reserve_worker_candidate(
+            "alice-token", task.task_id, "math.factorial", 1,
+        )
+        self.assertIsNotNone(pending)
+        self.assertEqual(
+            registry.get_reservation_for_task("alice", task.task_id),
+            pending.reservation,
+        )
+
+        # A restart requires explicit reconciliation of the independent lifecycle sink.
+        self.assertTrue(audit.worker_lifecycle_reconciliation_required())
+        self.assertTrue(audit.acknowledge_worker_lifecycle_reconciliation(
+            "verified durable registry state before host restart",
+        ))
+        reopened_registry = SQLiteWorkerRegistry(self.task_store)
+        reopened_host = self.make_worker_host(
+            reopened_registry, {"worker-token": "worker-1"}, lambda *args: {"worker-1"},
+            audit_sink=audit,
+        )
+        committed = reopened_host.commit_worker_reservation(
+            "alice-token", "monitor-token", pending,
+        )
+        self.assertTrue(committed.reservation.committed)
+        self.assertEqual(
+            reopened_registry.get_reservation_for_task("alice", task.task_id),
+            committed.reservation,
+        )
+        self.assertTrue(reopened_host.release_worker_reservation(
+            "monitor-token", committed,
+        ))
+        self.assertIsNone(
+            reopened_registry.get_reservation_for_task("alice", task.task_id),
+        )
+
+    def test_sqlite_worker_registry_host_requires_exact_task_store_instance(self):
+        other_store = SQLiteTaskStore(
+            os.path.join(self.temp.name, "other-tasks.sqlite3")
+        )
+        registry = SQLiteWorkerRegistry(other_store)
+        with self.assertRaisesRegex(HostRuntimeError, "exact same SQLiteTaskStore instance"):
+            self.make_worker_host(
+                registry, {"worker-token": "worker-1"}, lambda *args: {"worker-1"},
+            )
+
+    def test_sqlite_worker_registry_rejects_duck_typed_store(self):
+        class DuckTypedStore:
+            _lock = object()
+
+            def _connect(self):
+                raise AssertionError("duck-typed store must be rejected before use")
+
+        with self.assertRaisesRegex(ValueError, "actual SQLiteTaskStore"):
+            SQLiteWorkerRegistry(DuckTypedStore())
 
 if __name__ == "__main__":
     unittest.main()
