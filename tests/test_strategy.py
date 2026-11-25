@@ -43,6 +43,7 @@ class StrategyEvaluationTests(unittest.TestCase):
         result = evaluate_strategies("baseline", "candidate", records)
         self.assertTrue(result.eligible_for_manual_review)
         self.assertEqual(result.matched_pairs, 20)
+        self.assertRegex(result.input_fingerprint_sha256, r"^[0-9a-f]{64}$")
         self.assertEqual(result.improved_dimensions, ("estimated_cost_units",))
         self.assertEqual(result.blocked_reasons, ())
         self.assertIn("not a causal proof", result.interpretation)
@@ -212,6 +213,32 @@ class StrategyEvaluationTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertNotIn("active_strategy", first)
         self.assertNotIn("permissions", first)
+
+    def test_input_fingerprint_is_order_independent_and_binds_all_records(self):
+        records = cohort()
+        first = evaluate_strategies("baseline", "candidate", records)
+        reordered = evaluate_strategies("baseline", "candidate", reversed(records))
+        self.assertEqual(
+            first.input_fingerprint_sha256, reordered.input_fingerprint_sha256
+        )
+
+        changed = cohort(candidate_overrides={
+            0: {"estimated_cost_units": 99},
+        })
+        changed_result = evaluate_strategies("baseline", "candidate", changed)
+        self.assertNotEqual(
+            first.input_fingerprint_sha256, changed_result.input_fingerprint_sha256
+        )
+
+        unmatched = cohort()
+        unmatched.append(StrategyObservation(
+            task_id="baseline-only", scenario="research", strategy_id="baseline",
+            outcome="verified_success", evidence_ref="test://evidence/baseline-only",
+        ))
+        unmatched_result = evaluate_strategies("baseline", "candidate", unmatched)
+        self.assertNotEqual(
+            first.input_fingerprint_sha256, unmatched_result.input_fingerprint_sha256
+        )
 
     def test_non_iterable_and_string_inputs_are_rejected(self):
         for records in (None, "not records"):
