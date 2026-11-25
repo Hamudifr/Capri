@@ -152,6 +152,26 @@ class SQLiteStrategyStoreTests(unittest.TestCase):
             with self.subTest(grant=grant), self.assertRaises(StrategyAuthorizationError):
                 self.store.activate_for_principal("alice", grant)
 
+    def test_approval_expiring_during_host_verification_is_rejected(self):
+        now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        clock_state = {"now": now}
+
+        def verifier(grant):
+            clock_state["now"] = now + timedelta(minutes=6)
+            return True
+
+        store = SQLiteStrategyStore(
+            self.task_store,
+            approval_verifier=verifier,
+            clock=lambda: clock_state["now"],
+        )
+        grant = self.grant(now=now)
+        with self.assertRaisesRegex(
+            StrategyAuthorizationError, "expired before the transition"
+        ):
+            store.activate_for_principal("alice", grant)
+        self.assertEqual(store.events_for_principal("alice", "reasoning"), ())
+
     def test_wrong_principal_action_or_signature_is_rejected(self):
         cases = (
             (self.grant(principal="bob"), "alice", "principal"),
