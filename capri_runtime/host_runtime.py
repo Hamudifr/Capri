@@ -30,6 +30,9 @@ from .strategy_store import (
     ActiveStrategyRecord, SQLiteStrategyStore, StrategyActivationEvent,
     StrategyActivationGrant, StrategyVersionRecord,
 )
+from .execution_evidence import SQLiteExecutionEvidenceJournal
+from .strategy_approval import HostStrategyApprovalAuthority, StrategyApprovalRequest
+from .strategy_evidence import HostStrategyEvidenceAuthority
 from .tools import ExecutionContext, HostAuthorityResolver
 from .worker_registry import (
     InMemoryWorkerRegistry, WorkerDescriptor, WorkerRegistryError, WorkerSnapshot,
@@ -38,6 +41,14 @@ from .worker_registry import (
 
 class HostRuntimeError(Exception):
     """A trusted host composition or retrieved-context resolution operation failed."""
+
+
+def _is_bound_authority_method(callback: Any, authority: Any, method_name: str) -> bool:
+    """Check that a store verifier is bound to the exact host authority instance."""
+    return (
+        getattr(callback, "__self__", None) is authority
+        and getattr(callback, "__func__", None) is getattr(type(authority), method_name, None)
+    )
 
 
 class PrincipalBoundSessionStore(SessionStore):
@@ -142,6 +153,9 @@ class CapriHostRuntime:
         goal_store: SQLiteGoalStore | None = None,
         budget_store: SQLiteBudgetStore | None = None,
         strategy_store: SQLiteStrategyStore | None = None,
+        execution_evidence_journal: SQLiteExecutionEvidenceJournal | None = None,
+        strategy_approval_authority: HostStrategyApprovalAuthority | None = None,
+        strategy_evidence_authority: HostStrategyEvidenceAuthority | None = None,
         worker_registry: InMemoryWorkerRegistry | None = None,
         worker_identity_resolver: Callable[[Any], str | None] | None = None,
         worker_descriptor_resolver: Callable[[str, WorkerDescriptor], WorkerDescriptor] | None = None,
@@ -185,6 +199,25 @@ class CapriHostRuntime:
             raise HostRuntimeError("budget_store must be a SQLiteBudgetStore")
         if strategy_store is not None and not isinstance(strategy_store, SQLiteStrategyStore):
             raise HostRuntimeError("strategy_store must be a SQLiteStrategyStore")
+        if (
+            execution_evidence_journal is not None
+            and not isinstance(execution_evidence_journal, SQLiteExecutionEvidenceJournal)
+        ):
+            raise HostRuntimeError("execution_evidence_journal must be a SQLiteExecutionEvidenceJournal")
+        if (
+            strategy_approval_authority is not None
+            and not isinstance(strategy_approval_authority, HostStrategyApprovalAuthority)
+        ):
+            raise HostRuntimeError("strategy_approval_authority must be a HostStrategyApprovalAuthority")
+        if (
+            strategy_evidence_authority is not None
+            and not isinstance(strategy_evidence_authority, HostStrategyEvidenceAuthority)
+        ):
+            raise HostRuntimeError("strategy_evidence_authority must be a HostStrategyEvidenceAuthority")
+        if (strategy_approval_authority is None) != (strategy_evidence_authority is None):
+            raise HostRuntimeError(
+                "strategy approval and evidence authorities must be configured together"
+            )
         if worker_registry is not None and not isinstance(worker_registry, InMemoryWorkerRegistry):
             raise HostRuntimeError("worker_registry must be an InMemoryWorkerRegistry")
         if worker_identity_resolver is not None and not callable(worker_identity_resolver):
@@ -231,10 +264,57 @@ class CapriHostRuntime:
             task_store if task_store is not None
             else (task_worker.engine.store if task_worker is not None else None)
         )
-        if strategy_store is not None and (
+        engine = task_worker.engine if task_worker is not None else None
+        engine_journal = engine.execution_evidence_journal if engine is not None else None
+        if execution_evidence_journal is None and engine_journal is not None:
+            raise HostRuntimeError(
+                "host runtime must receive the exact execution evidence journal configured on TaskEngine"
+            )
+        if execution_evidence_journal is not None:
+            if self._task_store is None or engine is None:
+                raise HostRuntimeError(
+                    "execution evidence requires the configured principal task store and task worker"
+                )
+            if (
+                engine.store is not self._task_store
+                or engine_journal is not execution_evidence_journal
+                or not callable(engine.execution_evidence_credential)
+                or getattr(execution_evidence_journal, "_tasks", None) is not self._task_store
+            ):
+                raise HostRuntimeError(
+                    "execution evidence journal, TaskEngine, TaskWorker and host runtime must share exact trusted components"
+                )
+        if strategy_approval_authority is not None:
+            if self._task_store is None:
+                raise HostRuntimeError("strategy authorities require the configured principal task store")
+            if strategy_store is None:
+                try:
+                    strategy_store = SQLiteStrategyStore(
+                        self._task_store,
+                        approval_verifier=strategy_approval_authority.verify,
+                        evidence_verifier=strategy_evidence_authority.verify,
+                    )
+                except Exception:
+                    raise HostRuntimeError("trusted strategy store could not be composed") from None
+            if (
+                strategy_store.task_store is not self._task_store
+                or not _is_bound_authority_method(
+                    strategy_store._approval_verifier, strategy_approval_authority, "verify",
+                )
+                or not _is_bound_authority_method(
+                    strategy_store._evidence_verifier, strategy_evidence_authority, "verify",
+                )
+            ):
+                raise HostRuntimeError(
+                    "strategy store must use the exact host approval and evidence authority verifiers"
+                )
+        elif strategy_store is not None and (
             self._task_store is None or strategy_store.task_store is not self._task_store
         ):
             raise HostRuntimeError("strategy_store must share the exact configured task store")
+        self._execution_evidence_journal = execution_evidence_journal
+        self._strategy_approval_authority = strategy_approval_authority
+        self._strategy_evidence_authority = strategy_evidence_authority
         self._strategy_store = strategy_store
         self._worker_registry = worker_registry
         self._worker_identity_resolver = worker_identity_resolver
@@ -419,6 +499,21 @@ class CapriHostRuntime:
             raise HostRuntimeError("no task store is configured")
         return self._task_store.get_for_principal(task_id, context.principal_id)
 
+    def get_execution_evidence_ref(
+        self, credential: Any, task_id: str, step_index: int, attempt: int,
+    ) -> str | None:
+        """Return a verified completed event reference for the authenticated task owner."""
+        context = self._context(credential)
+        if self._task_store is None or self._execution_evidence_journal is None:
+            raise HostRuntimeError("host execution evidence is not configured")
+        try:
+            self._task_store.get_for_principal(task_id, context.principal_id)
+            return self._execution_evidence_journal.get_completed_event_ref(
+                context.principal_id, task_id, step_index, attempt,
+            )
+        except Exception:
+            raise HostRuntimeError("execution evidence is unavailable to the authenticated principal") from None
+
     def register_strategy_baseline(
         self, credential: Any, strategy_class: str, strategy_id: str,
         version: str, config: dict[str, Any],
@@ -457,6 +552,24 @@ class CapriHostRuntime:
         return self._strategy_store.get_active_for_principal(
             context.principal_id, strategy_class,
         )
+
+    def issue_strategy_activation_grant(
+        self, credential: Any, request: StrategyApprovalRequest,
+    ) -> StrategyActivationGrant:
+        """Issue a one-use grant only through the configured host approval authority.
+
+        This is a trusted host API. Do not register it as a model-visible tool.
+        The authority re-authenticates the approver and applies host approval policy.
+        """
+        context = self._context(credential)
+        if self._strategy_approval_authority is None:
+            raise HostRuntimeError("trusted strategy approval authority is not configured")
+        if type(request) is not StrategyApprovalRequest or request.principal_id != context.principal_id:
+            raise HostRuntimeError("strategy approval request is unavailable to the authenticated principal")
+        try:
+            return self._strategy_approval_authority.issue_grant(credential, request)
+        except Exception:
+            raise HostRuntimeError("host strategy approval was denied") from None
 
     def activate_strategy(
         self, credential: Any, grant: StrategyActivationGrant,
@@ -682,6 +795,7 @@ class CapriHostRuntime:
         stores = {
             "sessions": self._session_store,
             "tasks": self._task_store,
+            "execution_evidence": self._execution_evidence_journal,
             "goals": self._goal_store,
             "budgets": self._budget_store,
         }
