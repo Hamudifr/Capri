@@ -529,12 +529,12 @@ static bool sessions_constraints_valid(sqlite3 *db) {
     sqlite3_finalize(version_st);
     const char *strict_sql=
         "CREATE TABLE sessions(session_id TEXT PRIMARY KEY,created_at TEXT NOT NULL,"
-        "updated_at TEXT NOT NULL,version INTEGER NOT NULL,"
+        "updated_at TEXT NOT NULL,version INTEGER NOT NULL CHECK(version>=0),"
         "closed INTEGER NOT NULL CHECK(closed IN(0,1)),messages_json TEXT NOT NULL "
         "CHECK(json_valid(messages_json) AND json_type(messages_json)='array'))";
     const char *legacy_sql=
         "CREATE TABLE sessions(session_id TEXT PRIMARY KEY,created_at TEXT NOT NULL,"
-        "updated_at TEXT NOT NULL,version INTEGER NOT NULL CHECK(version>=0),"
+        "updated_at TEXT NOT NULL,version INTEGER NOT NULL,"
         "closed INTEGER NOT NULL CHECK(closed IN(0,1)),messages_json TEXT NOT NULL)";
     if(version==0){
         /* Existing Python stores predate the versioned JSON CHECK. Accept that
