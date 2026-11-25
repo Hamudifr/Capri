@@ -1548,7 +1548,7 @@ class TaskEngine:
                 claim, "handler_outcome_uncertain", now=now
             )
         try:
-            _json(result, label="handler result")
+            _, result_snapshot = _json(result, label="handler result")
         except Exception:
             return self.store.require_reconciliation(
                 claim, "handler_result_invalid", now=now
@@ -1557,7 +1557,7 @@ class TaskEngine:
             try:
                 credential = self.execution_evidence_credential(claim)
                 self.execution_evidence_journal.record_execution(
-                    credential, claim, result,
+                    credential, claim, result_snapshot,
                 )
             except Exception:
                 # The handler may already have caused an external side effect.
@@ -1565,7 +1565,7 @@ class TaskEngine:
                 return self.store.require_reconciliation(
                     claim, "execution_evidence_unavailable", now=now,
                 )
-        return self.store.finish_step(claim, result, now=now)
+        return self.store.finish_step(claim, result_snapshot, now=now)
 
     def run_once(self, now: datetime | None = None) -> TaskRecord | None:
         claim = self.store.claim_next(
