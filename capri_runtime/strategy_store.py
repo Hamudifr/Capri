@@ -424,6 +424,8 @@ class SQLiteStrategyStore:
         try:
             baseline_id = _identifier(evaluation.baseline_id, "baseline_id")
             candidate_id = _identifier(evaluation.candidate_id, "candidate_id")
+            baseline_version = _version(evaluation.baseline_version)
+            candidate_version = _version(evaluation.candidate_version)
             recomputed = evaluate_strategies(
                 baseline_id, candidate_id, observations, min_pairs=20
             )
@@ -431,6 +433,7 @@ class SQLiteStrategyStore:
             raise StrategyStoreError("candidate evaluation could not be independently recomputed") from None
         if (
             candidate_id != strategy
+            or candidate_version != version
             or evaluation.eligible_for_manual_review is not True
             or evaluation.blocked_reasons
             or not evaluation.improved_dimensions
@@ -462,8 +465,8 @@ class SQLiteStrategyStore:
                 connection.execute("BEGIN IMMEDIATE")
                 baseline = connection.execute(
                     """SELECT 1 FROM strategy_versions WHERE principal_id=?
-                    AND strategy_class=? AND strategy_id=? AND is_baseline=1""",
-                    (principal, category, baseline_id),
+                    AND strategy_class=? AND strategy_id=? AND version=? AND is_baseline=1""",
+                    (principal, category, baseline_id, baseline_version),
                 ).fetchone()
                 if baseline is None:
                     raise StrategyNotFoundError("the evaluated baseline is not registered for this principal")
