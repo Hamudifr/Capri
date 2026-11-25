@@ -172,19 +172,33 @@ def validate_worker_registry_snapshot(connection: sqlite3.Connection) -> None:
         ),
     }
     for table, columns in expected_columns.items():
-        actual = tuple(
-            row["name"] for row in connection.execute(f"PRAGMA table_info({table})")
-        )
+        table_info = connection.execute(f"PRAGMA table_info({table})").fetchall()
+        actual = tuple(row["name"] for row in table_info)
         if actual != columns:
             raise WorkerRegistryError(f"worker registry table {table} has an unexpected schema")
 
+    expected_primary_keys = {
+        "worker_registry_meta": ("singleton",),
+        "worker_registry_state": ("worker_id",),
+        "worker_registry_reservations": ("token",),
+        "worker_registry_events": ("sequence",),
+    }
+    for table, expected in expected_primary_keys.items():
+        table_info = connection.execute(f"PRAGMA table_info({table})").fetchall()
+        actual = tuple(
+            row["name"] for row in sorted(table_info, key=lambda item: item["pk"])
+            if row["pk"]
+        )
+        if actual != expected:
+            raise WorkerRegistryError(f"worker registry primary key for {table} is missing or invalid")
+
     expected_indexes = {
         "worker_registry_reservations": {
-            "worker_registry_one_active_task_reservation": (True, ("principal_id", "task_id")),
-            "worker_registry_reservations_worker_idx": (False, ("worker_id",)),
+            "worker_registry_one_active_task_reservation": (True, ("principal_id", "task_id"), False),
+            "worker_registry_reservations_worker_idx": (False, ("worker_id",), False),
         },
         "worker_registry_events": {
-            "worker_registry_events_worker_idx": (False, ("worker_id", "sequence")),
+            "worker_registry_events_worker_idx": (False, ("worker_id", "sequence"), False),
         },
     }
     for table, expected in expected_indexes.items():
@@ -194,22 +208,22 @@ def validate_worker_registry_snapshot(connection: sqlite3.Connection) -> None:
                 row["name"]
                 for row in connection.execute(f"PRAGMA index_info({index['name']})")
             )
-            actual[index["name"]] = (bool(index["unique"]), columns)
+            actual[index["name"]] = (bool(index["unique"]), columns, bool(index["partial"]))
         for name, signature in expected.items():
             if actual.get(name) != signature:
                 raise WorkerRegistryError(f"worker registry required index {name} is missing or invalid")
 
     # event_id is a table-level UNIQUE constraint, represented by an auto-index.
-    event_unique_indexes = []
+    event_unique_constraints = []
     for index in connection.execute("PRAGMA index_list(worker_registry_events)"):
         columns = tuple(
             row["name"]
             for row in connection.execute(f"PRAGMA index_info({index['name']})")
         )
-        if bool(index["unique"]):
-            event_unique_indexes.append(columns)
-    if ("event_id",) not in event_unique_indexes:
-        raise WorkerRegistryError("worker registry event identifier uniqueness constraint is missing")
+        if bool(index["unique"]) and index["origin"] == "u" and not bool(index["partial"]):
+            event_unique_constraints.append(columns)
+    if ("event_id",) not in event_unique_constraints:
+        raise WorkerRegistryError("worker registry event identifier uniqueness constraint is missing or invalid")
 
     expected_foreign_keys = {
         "worker_registry_reservations": {
