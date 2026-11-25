@@ -140,8 +140,12 @@ class SQLiteGoalStoreTests(unittest.TestCase):
         running = self.store.transition_for_principal(
             goal.goal_id, "alice", "running", expected_version=planned.version, now=NOW,
         )
+        awaiting = self.store.transition_for_principal(
+            goal.goal_id, "alice", "awaiting_verification",
+            expected_version=running.version, now=NOW,
+        )
         succeeded = self.store.transition_for_principal(
-            goal.goal_id, "alice", "succeeded", expected_version=running.version, now=NOW,
+            goal.goal_id, "alice", "succeeded", expected_version=awaiting.version, now=NOW,
         )
         with self.assertRaises(GoalConflictError):
             self.store.transition_for_principal(
