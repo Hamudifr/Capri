@@ -12,8 +12,9 @@ typedef struct CapriSessionStore CapriSessionStore;
 
 typedef struct {
     char session_id[37];
-    char created_at[32];
-    char updated_at[32];
+    /* Up to 64 UTF-8 bytes plus NUL; accepts Python datetime.isoformat() timestamps. */
+    char created_at[65];
+    char updated_at[65];
     int64_t version;
     int closed;
     char *messages_json;
