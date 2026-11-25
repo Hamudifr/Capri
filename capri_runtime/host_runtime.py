@@ -657,6 +657,10 @@ class CapriHostRuntime:
             current = self._worker_registry.get_reservation(token)
             if current is None:
                 self._worker_reservation_contexts.pop(token, None)
+                self._worker_audit_healthy = False
+                raise HostRuntimeError(
+                    "worker reservation expired or disappeared outside the trusted host gateway; reconciliation is required"
+                )
             elif current != context.reservation:
                 self._worker_reservation_contexts.pop(token, None)
                 self._worker_audit_healthy = False
