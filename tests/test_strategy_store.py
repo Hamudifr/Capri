@@ -401,21 +401,33 @@ class SQLiteStrategyStoreTests(unittest.TestCase):
         self.assertEqual(count, 0)
 
     def test_candidate_evidence_verifier_fails_closed(self):
-        for index, verifier in enumerate((
+        verifiers = (
             lambda context: False,
+            lambda context: 1,
+            lambda context: None,
             lambda context: (_ for _ in ()).throw(RuntimeError("unavailable")),
-        )):
+        )
+        for index, verifier in enumerate(verifiers):
             principal = f"carol{index}"
             store = SQLiteStrategyStore(self.task_store, evidence_verifier=verifier)
             store.register_baseline_for_principal(
                 principal, "reasoning", "baseline", "1.0", {"mode": "standard"},
             )
-            with self.subTest(verifier=verifier), self.assertRaises(StrategyAuthorizationError):
+            with self.subTest(verifier=index), self.assertRaises(StrategyAuthorizationError):
                 store.register_candidate_for_principal(
                     principal, "reasoning", "candidate", "1.0", {"mode": "candidate"},
                     self.evaluation, observations=self.observations,
                     evidence_manifest_ref=f"test://manifests/{principal}",
                 )
+            connection = self.task_store._connect()
+            try:
+                count = connection.execute(
+                    "SELECT COUNT(*) FROM strategy_evaluations WHERE principal_id=?",
+                    (principal,),
+                ).fetchone()[0]
+            finally:
+                connection.close()
+            self.assertEqual(count, 0)
 
     def test_candidate_evidence_verifier_receives_exact_immutable_binding(self):
         captured = []
