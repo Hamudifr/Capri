@@ -1371,8 +1371,10 @@ class CapriHostRuntimeTests(unittest.TestCase):
             clock_ns=lambda: now["value"],
             clock_wall_ns=lambda: now["value"],
         )
+        audit = InMemoryAuditSink()
         host = self.make_worker_host(
             registry, {"worker-token": "worker-1"}, lambda *args: {"worker-1"},
+            audit_sink=audit,
         )
         host.register_worker(
             "worker-token",
