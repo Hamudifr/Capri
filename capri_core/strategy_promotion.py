@@ -237,23 +237,9 @@ def assess_strategy_canary(
         if len(cohort.observations) > _MAX_OBSERVATIONS_PER_COHORT:
             raise StrategyPromotionError("cohort observations exceed the bounded maximum of 20000")
 
-        local_tasks = {
-            item.task_id for item in cohort.observations
-            if type(item) is StrategyObservation
-        }
-        local_evidence = {
-            item.evidence_ref for item in cohort.observations
-            if type(item) is StrategyObservation
-        }
-        if seen_tasks & local_tasks:
-            blocked.append("overlapping_task_ids_between_cohorts")
-        if len(local_evidence) != len(cohort.observations):
-            blocked.append("duplicate_evidence_refs_within_cohort")
-        if seen_evidence & local_evidence:
-            blocked.append("overlapping_evidence_refs_between_cohorts")
-        seen_tasks.update(local_tasks)
-        seen_evidence.update(local_evidence)
-
+        # Validate every record before hashing caller-controlled task/evidence
+        # fields. StrategyObservation is a public dataclass and can be directly
+        # constructed with malformed, unhashable values despite its annotations.
         try:
             evaluation = evaluate_strategies(
                 baseline_id, candidate_id, cohort.observations, min_pairs=_MIN_PAIRS,
@@ -265,6 +251,17 @@ def assess_strategy_canary(
             ))
             blocked.append("invalid_or_inconsistent_cohort")
             continue
+
+        local_tasks = {item.task_id for item in cohort.observations}
+        local_evidence = {item.evidence_ref for item in cohort.observations}
+        if seen_tasks & local_tasks:
+            blocked.append("overlapping_task_ids_between_cohorts")
+        if len(local_evidence) != len(cohort.observations):
+            blocked.append("duplicate_evidence_refs_within_cohort")
+        if seen_evidence & local_evidence:
+            blocked.append("overlapping_evidence_refs_between_cohorts")
+        seen_tasks.update(local_tasks)
+        seen_evidence.update(local_evidence)
 
         by_strategy = {
             baseline_id: {
