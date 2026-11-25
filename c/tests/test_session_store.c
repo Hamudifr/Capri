@@ -58,6 +58,22 @@ int main(void) {
     assert(store!=NULL && error==CAPRI_SESSION_OK);
     CapriSession alice={0}, bob={0}, committed={0};
     assert(capri_session_create_for_principal(store,"principal-alice",&alice)==CAPRI_SESSION_OK);
+    /* Python bounds principal IDs and lease tokens by Unicode characters, not UTF-8 bytes. */
+    char unicode_principal[401]={0},unicode_token[401]={0};
+    for(size_t unicode_index=0u;unicode_index<100u;++unicode_index){
+        memcpy(unicode_principal+unicode_index*4u,"\xF0\x9F\xA7\xAA",4u);
+        memcpy(unicode_token+unicode_index*4u,"\xF0\x9F\x94\x90",4u);
+    }
+    CapriSession unicode_session={0},unicode_committed={0};
+    assert(capri_session_create_for_principal(store,unicode_principal,&unicode_session)==CAPRI_SESSION_OK);
+    assert(capri_session_claim_turn_lease_for_principal(store,unicode_session.session_id,unicode_principal,unicode_token,30.0)==CAPRI_SESSION_OK);
+    const char *unicode_turn="[{\\"role\\":\\"user\\",\\"content\\":\\"unicode principal\\"},{\\"role\\":\\"assistant\\",\\"content\\":\\"unicode lease token\\"}]";
+    assert(capri_session_commit_turn_for_principal(store,unicode_session.session_id,unicode_principal,0,unicode_turn,unicode_token,&unicode_committed)==CAPRI_SESSION_OK);
+    assert(unicode_committed.version==1);
+    int unicode_released=0;
+    assert(capri_session_release_turn_lease_for_principal(store,unicode_session.session_id,unicode_principal,unicode_token,&unicode_released)==CAPRI_SESSION_OK&&unicode_released==1);
+    assert(capri_session_integrity_check(store)==CAPRI_SESSION_OK);
+    capri_session_free(&unicode_session);capri_session_free(&unicode_committed);
     assert(alice.version==0 && !alice.closed && strcmp(alice.messages_json,"[]")==0);
     CapriSession legacy={0},legacy_read={0},legacy_committed={0},legacy_closed={0};
     assert(capri_session_create(store,&legacy)==CAPRI_SESSION_OK);
