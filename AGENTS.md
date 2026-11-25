@@ -53,7 +53,7 @@ Apply this compact check to substantive claims, recommendations, research, and i
 - No purchases, paid subscriptions, paid compute or charges without explicit approval.
 - Never commit secrets, credentials, private user data or tokens.
 - Do not bypass repository protections, platform restrictions or authorization boundaries.
-- Ask before visibility or permission changes, destructive operations, broad external disclosure or consequential production actions outside standing authorization.
+- Repository branch-protection/ruleset and least-privilege repository configuration changes are within delegated authority when justified, supported by the available integration, and safely reversible; there is no blanket prohibition on repository settings changes. Collaborator-access expansion, repository visibility changes, organization/account-level permissions, destructive operations, broad external disclosure or consequential production actions outside standing authorization still require explicit approval.
 - Preserve protected evaluation boundaries documented in the operating model.
 - A successful API write is not proof of correct behavior. Uncertain side effects must be reconciled, not blindly replayed.
 
