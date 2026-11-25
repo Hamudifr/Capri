@@ -25,6 +25,7 @@ _MAX_SCOPE_ITEMS = 128
 _MAX_EVIDENCE_REFS = 128
 _MAX_BUDGET_ITEMS = 32
 _MAX_BUDGET_VALUE = 10**12
+_MAX_EVENTS = 5
 
 
 class ActionCapsuleError(ValueError):
@@ -196,8 +197,8 @@ def _validate_capsule(capsule: object) -> ActionCapsule:
         raise ActionCapsuleError("capsule timestamps are not chronologically valid")
     if type(capsule.state) is not CapsuleState:
         raise ActionCapsuleError("state must be a CapsuleState")
-    if type(capsule.event_sequence) is not int or capsule.event_sequence < 0:
-        raise ActionCapsuleError("event_sequence must be a non-negative integer")
+    if type(capsule.event_sequence) is not int or not 0 <= capsule.event_sequence <= _MAX_EVENTS:
+        raise ActionCapsuleError("event_sequence must be between 0 and the maximum lifecycle length")
     if type(capsule.last_event_hash) is not str or not _SHA256.fullmatch(capsule.last_event_hash):
         raise ActionCapsuleError("last_event_hash must be a SHA-256 digest")
     for field in ("approval_ref", "worker_binding", "verifier_id", "verifier_version"):
@@ -437,8 +438,11 @@ def transition_action_capsule(
     if target_state is CapsuleState.EXPIRED:
         if current.state is not CapsuleState.AUTHORIZED or when < deadline:
             raise ActionCapsuleError("only an authorized capsule may expire at or after its deadline")
-    elif when >= deadline and target_state is not CapsuleState.INDETERMINATE:
-        raise ActionCapsuleError("an overdue action must expire or be reconciled as indeterminate")
+    elif when >= deadline and not (
+        target_state is CapsuleState.INDETERMINATE
+        or (current.state is CapsuleState.DRAFT and target_state is CapsuleState.CANCELLED)
+    ):
+        raise ActionCapsuleError("an overdue action must expire, close an undispatched draft, or be reconciled as indeterminate")
 
     _identifier(actor, "actor")
     next_approval = current.approval_ref
@@ -538,7 +542,12 @@ def verify_action_capsule_history(
     if isinstance(events, (str, bytes)):
         raise CapsuleIntegrityError("events must be an iterable of CapsuleEvent records")
     try:
-        history = tuple(events)
+        collected: list[CapsuleEvent] = []
+        for event in events:
+            if len(collected) >= _MAX_EVENTS:
+                raise CapsuleIntegrityError("event history exceeds the maximum lifecycle length")
+            collected.append(event)
+        history = tuple(collected)
     except TypeError:
         raise CapsuleIntegrityError("events must be iterable") from None
     if len(history) != current.event_sequence:
@@ -572,8 +581,11 @@ def verify_action_capsule_history(
         if event.to_state is CapsuleState.EXPIRED:
             if state is not CapsuleState.AUTHORIZED or event_time < deadline:
                 raise CapsuleIntegrityError("expiry event is inconsistent with the capsule deadline")
-        elif event_time >= deadline and event.to_state is not CapsuleState.INDETERMINATE:
-            raise CapsuleIntegrityError("overdue action must be indeterminate, not accepted or completed")
+        elif event_time >= deadline and not (
+            event.to_state is CapsuleState.INDETERMINATE
+            or (state is CapsuleState.DRAFT and event.to_state is CapsuleState.CANCELLED)
+        ):
+            raise CapsuleIntegrityError("overdue action must expire, close an undispatched draft, or be indeterminate")
         if event.previous_event_hash != previous_hash:
             raise CapsuleIntegrityError("event previous hash does not match")
         expected_hash = hashlib.sha256(_canonical(_event_payload(event))).hexdigest()
