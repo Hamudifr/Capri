@@ -178,6 +178,7 @@ static bool store_path_safe(const CapriSessionStore *store) {
 }
 
 static CapriSessionError validate_backup_snapshot(CapriSessionStore *store,sqlite3 *db);
+static bool owner_triggers_valid(sqlite3 *db);
 
 static bool schema(sqlite3 *db) {
     const char *sql=
@@ -216,7 +217,7 @@ CapriSessionStore *capri_session_store_open(const char *path,size_t max_messages
     if(rc==SQLITE_OK && sqlite3_db_config(s->db,SQLITE_DBCONFIG_DEFENSIVE,1,NULL)!=SQLITE_OK) rc=SQLITE_ERROR;
 #endif
     if(rc!=SQLITE_OK || !schema(s->db) || !store_path_safe(s) ||
-       validate_backup_snapshot(s,s->db)!=CAPRI_SESSION_OK){
+       !owner_triggers_valid(s->db)){
         if(s->db)sqlite3_close(s->db);
         pthread_mutex_destroy(&s->mutex);free(s->path);free(s);
         if(error)*error=CAPRI_SESSION_DATABASE;
@@ -323,17 +324,21 @@ static bool owner_trigger_matches(sqlite3 *db,const char *name,const char *expec
     return matches;
 }
 
-static CapriSessionError validate_backup_snapshot(CapriSessionStore *store,sqlite3 *db) {
-    if(!owner_trigger_matches(
+
+static bool owner_triggers_valid(sqlite3 *db) {
+    return owner_trigger_matches(
         db,"session_owners_immutable_update",
         "CREATE TRIGGER session_owners_immutable_update BEFORE UPDATE ON session_owners BEGIN SELECT RAISE(ABORT,'session owner is immutable'); END"
-    ) || !owner_trigger_matches(
+    ) && owner_trigger_matches(
         db,"session_owners_immutable_delete",
         "CREATE TRIGGER session_owners_immutable_delete BEFORE DELETE ON session_owners BEGIN SELECT RAISE(ABORT,'session owner is immutable'); END"
-    ) || !owner_trigger_matches(
+    ) && owner_trigger_matches(
         db,"session_owners_immutable_insert",
         "CREATE TRIGGER session_owners_immutable_insert BEFORE INSERT ON session_owners WHEN EXISTS(SELECT 1 FROM session_owners WHERE session_id=NEW.session_id) BEGIN SELECT RAISE(ABORT,'session owner is immutable'); END"
-    ))return CAPRI_SESSION_CORRUPT;
+    );
+}
+static CapriSessionError validate_backup_snapshot(CapriSessionStore *store,sqlite3 *db) {
+    if(!owner_triggers_valid(db))return CAPRI_SESSION_CORRUPT;
     sqlite3_stmt *st=NULL;int rc=sqlite3_prepare_v2(db,"PRAGMA integrity_check",-1,&st,NULL);
     if(rc!=SQLITE_OK)return map_sqlite(rc);
     rc=sqlite3_step(st);bool integrity=rc==SQLITE_ROW&&sqlite3_column_text(st,0)&&strcmp((const char*)sqlite3_column_text(st,0),"ok")==0;sqlite3_finalize(st);
