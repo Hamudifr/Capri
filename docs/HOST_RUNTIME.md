@@ -26,6 +26,25 @@ The task worker may share the same task database. Principal-owned claims carry t
 
 `SQLiteSessionStore.backup_to()` creates a consistent private snapshot that includes ownership records, immutable-owner triggers, and semantically validated durable turn leases. The backup is also plaintext; see [SQLITE_SESSION_BACKUP.md](SQLITE_SESSION_BACKUP.md). Task, memory, security, and session stores now expose private consistent backup methods; the backups remain plaintext and no scheduler, retention policy, or automated restore workflow is provided. See [SQLITE_STORE_BACKUP.md](SQLITE_STORE_BACKUP.md).
 
+## Trusted execution evidence and strategy authorities
+
+The optional execution-evidence path is an explicit host composition. The embedding host constructs one `SQLiteExecutionEvidenceJournal` over the exact `SQLiteTaskStore` used by `TaskEngine`, injects it into `TaskEngine(execution_evidence_journal=..., execution_evidence_credential=...)`, wraps that engine in `TaskWorker`, and passes the same journal to `CapriHostRuntime`.
+
+At construction, CapriHostRuntime rejects a journal that differs from the engine's journal, a worker using a different task-store object, or an engine without a callable host-only evidence-credential resolver. If the engine is evidence-enabled, the exact journal must also be supplied to the runtime. This prevents a host from recording evidence in one store while retrieving or health-checking another.
+
+- `get_execution_evidence_ref(credential, task_id, step_index, attempt)` authenticates the user, verifies task ownership, and returns only a completed, cryptographically verified opaque event reference. It never returns raw results, prompts, tool payloads, or credentials.
+- `storage_health()` includes the execution-evidence journal's integrity status when configured.
+- The host-only execution-evidence credential resolver is separate from the user's session credential. It must not be exposed as a model tool or copied into task inputs.
+- A task result and its execution event are committed atomically. A pending standalone event is not eligible for a strategy evidence cohort until the task, exact attempt, and persisted result digest all verify.
+
+When both `HostStrategyApprovalAuthority` and `HostStrategyEvidenceAuthority` are supplied, CapriHostRuntime composes a `SQLiteStrategyStore` over the same task store. If a strategy store is supplied instead, its approval and evidence verifier callbacks must be bound to those exact authority instances. A partial authority pair is rejected. The strategy registry, approval authority, evidence authority, manifest store, task store and host identity resolver all enforce the same 256-character principal-ID bound.
+
+The embedding host should construct `SQLiteStrategyEvidenceManifestStore` with the execution journal's `classify_task_family` and `validate_source_events` callbacks, then bind its `attest_manifest` and `verify_manifest` methods into `HostStrategyEvidenceAuthority`. The strategy store is therefore wired to a host-verified manifest and a host-signed approval verifier rather than model-supplied assertions.
+
+`issue_strategy_activation_grant()` is a trusted host API. It re-authenticates the approver through `HostStrategyApprovalAuthority`, checks that the request belongs to the authenticated principal, and delegates to host approval policy. Do not register this method as a model-visible tool. Actual activation still requires an explicit one-use grant and remains separate from task execution and evidence collection.
+
+The runtime does not generate, persist, or provision production HMAC keys or collector credentials. The embedding host must supply non-exportable host-held MAC providers and authentication, classification, strategy-resolution, and result-verification callbacks. Tests may use ephemeral in-memory keys; that is not production key management.
+
 ## Goal reports and owner acceptance
 
 Authenticated hosts can call `get_goal_report(credential, goal_id)` for a read-only, principal-scoped `GoalReport`. The projection separates task completion from the owner's acceptance decision and reports progress, partial work, cancellation, reconciliation, and uncertain outcomes.

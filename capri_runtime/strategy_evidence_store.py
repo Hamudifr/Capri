@@ -91,7 +91,7 @@ def _decode_manifest_blob(
     except Exception:
         raise StrategyStoreError("strategy evidence manifest payload is malformed") from None
 
-    principal = _text(manifest["principal_id"], "principal_id", 128)
+    principal = _text(manifest["principal_id"], "principal_id", 256)
     category = _text(manifest["strategy_class"], "strategy_class", 64)
     baseline = _text(manifest["baseline_id"], "baseline_id", 64)
     candidate = _text(manifest["candidate_id"], "candidate_id", 64)
@@ -272,7 +272,7 @@ class SQLiteStrategyEvidenceManifestStore:
             principal_id = self._authenticate(credential)
         except Exception:
             raise StrategyAuthorizationError("evidence collector authentication failed") from None
-        principal_id = _text(principal_id, "authenticated principal", 128)
+        principal_id = _text(principal_id, "authenticated principal", 256)
         records = self._validate_observations(baseline_id, candidate_id, observations)
         evaluation = evaluate_strategies(baseline_id, candidate_id, records, min_pairs=20)
         baseline_version = evaluation.baseline_version

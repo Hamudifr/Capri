@@ -231,7 +231,7 @@ def _grant_payload(grant: StrategyActivationGrant) -> None:
     if type(grant) is not StrategyActivationGrant:
         raise StrategyAuthorizationError("a host-issued StrategyActivationGrant is required")
     _text(grant.grant_id, "grant_id", 128)
-    _text(grant.principal_id, "principal_id", 128)
+    _text(grant.principal_id, "principal_id", 256)
     _identifier(grant.strategy_class, "strategy_class")
     _identifier(grant.strategy_id, "strategy_id")
     _version(grant.version)
@@ -407,7 +407,7 @@ class SQLiteStrategyStore:
         version: str, config: dict[str, Any], *,
         created_at: datetime | None = None,
     ) -> StrategyVersionRecord:
-        principal = _text(principal_id, "principal_id", 128)
+        principal = _text(principal_id, "principal_id", 256)
         category = _identifier(strategy_class, "strategy_class")
         strategy = _identifier(strategy_id, "strategy_id")
         version = _version(version)
@@ -458,7 +458,7 @@ class SQLiteStrategyStore:
         evidence_manifest_ref: str,
         created_at: datetime | None = None,
     ) -> StrategyVersionRecord:
-        principal = _text(principal_id, "principal_id", 128)
+        principal = _text(principal_id, "principal_id", 256)
         category = _identifier(strategy_class, "strategy_class")
         strategy = _identifier(strategy_id, "strategy_id")
         version = _version(version)
@@ -639,7 +639,7 @@ class SQLiteStrategyStore:
         self, principal_id: str, grant: StrategyActivationGrant, *,
         required_action: str, now: datetime | None = None,
     ) -> ActiveStrategyRecord:
-        principal = _text(principal_id, "principal_id", 128)
+        principal = _text(principal_id, "principal_id", 256)
         _grant_payload(grant)
         if grant.principal_id != principal or grant.action != required_action:
             raise StrategyAuthorizationError("approval grant is not bound to this principal and action")
@@ -793,7 +793,7 @@ class SQLiteStrategyStore:
     def get_active_for_principal(
         self, principal_id: str, strategy_class: str,
     ) -> ActiveStrategyRecord | None:
-        principal = _text(principal_id, "principal_id", 128)
+        principal = _text(principal_id, "principal_id", 256)
         category = _identifier(strategy_class, "strategy_class")
         with self._lock:
             connection = self._connect()
@@ -827,7 +827,7 @@ class SQLiteStrategyStore:
     def events_for_principal(
         self, principal_id: str, strategy_class: str,
     ) -> tuple[StrategyActivationEvent, ...]:
-        principal = _text(principal_id, "principal_id", 128)
+        principal = _text(principal_id, "principal_id", 256)
         category = _identifier(strategy_class, "strategy_class")
         with self._lock:
             connection = self._connect()

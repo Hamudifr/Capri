@@ -1,8 +1,21 @@
 import os
 import tempfile
 import unittest
+from dataclasses import replace
 
+from capri_core.strategy import StrategyObservation
 from capri_runtime import (
+    HmacApprovalKeyRing,
+    HostStrategyApprovalAuthority,
+    HostStrategyEvidenceAuthority,
+    SQLiteExecutionEvidenceJournal,
+    SQLiteStrategyEvidenceManifestStore,
+    SQLiteStrategyStore,
+    StrategyApprovalIdentity,
+    StrategyApprovalRequest,
+    StrategyBinding,
+    TaskClassification,
+    VerifiedExecutionResult,
     AssistantTurn,
     HostAuthorityError,
     HostAuthorityResolver,
@@ -756,6 +769,175 @@ class CapriHostRuntimeTests(unittest.TestCase):
         self.assertEqual(final.completion_status, "completed")
         self.assertEqual(final.owner_acceptance_status, "accepted")
 
+
+    def test_trusted_host_composes_execution_evidence_and_signed_strategy_authorities(self):
+        principal_id = "p" * 256
+        authority = HostAuthorityResolver(
+            authenticate=lambda credential: (
+                principal_id if credential == "host-token"
+                else ("bob" if credential == "bob-token" else None)
+            ),
+            permissions_for=lambda _principal: (),
+        )
+        execution_mac = HmacApprovalKeyRing(
+            {"execution-v1": b"e" * 32}, active_key_id="execution-v1",
+        )
+        journal = SQLiteExecutionEvidenceJournal(
+            self.task_store,
+            execution_mac,
+            authenticate_collector=lambda credential: (
+                principal_id if credential == "execution-token" else None
+            ),
+            classify_task=lambda principal, task_id: TaskClassification(
+                "research", "bounded-research",
+            ),
+            resolve_strategy=lambda principal, claim: StrategyBinding(
+                "reasoning", "baseline", "1.0",
+            ),
+            verify_result=lambda principal, claim, result, digest: VerifiedExecutionResult(
+                digest, "verified_success", False, 1, 128, 1, 25,
+            ),
+        )
+        engine = TaskEngine(
+            self.task_store,
+            {},
+            "evidence-worker",
+            principal_handlers={
+                "research": lambda inputs, key, principal: {"status": "verified"},
+            },
+            execution_evidence_journal=journal,
+            execution_evidence_credential=lambda claim: "execution-token",
+        )
+        worker = TaskWorker(engine)
+
+        manifest_store = SQLiteStrategyEvidenceManifestStore(
+            self.task_store,
+            authenticate_collector=lambda credential: (
+                principal_id if credential == "manifest-token" else None
+            ),
+            classify_task_family=lambda principal, task_id: "research",
+            validate_source_events=lambda principal, strategy_class, observations, families: (
+                principal == principal_id and len(observations) == 40
+                and all(families[item.task_id] == "research" for item in observations)
+            ),
+        )
+        evidence_authority = HostStrategyEvidenceAuthority(
+            HmacApprovalKeyRing(
+                {"evidence-v1": b"v" * 32}, active_key_id="evidence-v1",
+            ),
+            authenticate_collector=lambda credential: (
+                principal_id if credential == "manifest-token" else None
+            ),
+            attest_manifest=manifest_store.attest_manifest,
+            verify_manifest=manifest_store.verify_manifest,
+        )
+        approval_authority = HostStrategyApprovalAuthority(
+            HmacApprovalKeyRing(
+                {"approval-v1": b"a" * 32}, active_key_id="approval-v1",
+            ),
+            authenticate_approver=lambda credential: (
+                StrategyApprovalIdentity(principal_id, "host-admin")
+                if credential == "host-token" else None
+            ),
+            authorize_approver=lambda identity, request: (
+                identity.principal_id == principal_id
+                and identity.approver_id == "host-admin"
+                and request.principal_id == principal_id
+            ),
+        )
+        untrusted_store = SQLiteStrategyStore(
+            self.task_store,
+            approval_verifier=lambda grant: True,
+            evidence_verifier=lambda context: True,
+        )
+        with self.assertRaises(HostRuntimeError):
+            CapriHostRuntime(
+                authority,
+                self.store,
+                self.orchestrator,
+                task_store=self.task_store,
+                strategy_store=untrusted_store,
+                strategy_approval_authority=approval_authority,
+                strategy_evidence_authority=evidence_authority,
+            )
+
+        host = CapriHostRuntime(
+            authority,
+            self.store,
+            self.orchestrator,
+            task_worker=worker,
+            task_store=self.task_store,
+            execution_evidence_journal=journal,
+            strategy_approval_authority=approval_authority,
+            strategy_evidence_authority=evidence_authority,
+        )
+
+        task = host.create_task(
+            "host-token", [{"tool": "research", "input": {"query": "bounded"}}],
+        )
+        completed = worker.run_once()
+        self.assertEqual(completed.state, "succeeded")
+        reference = host.get_execution_evidence_ref(
+            "host-token", task.task_id, 0, 1,
+        )
+        self.assertTrue(reference.startswith("host-execution-event:"))
+        self.assertEqual(host.storage_health()["execution_evidence"], "healthy")
+        with self.assertRaises(HostRuntimeError):
+            host.get_execution_evidence_ref("bob-token", task.task_id, 0, 1)
+
+        observations = []
+        for index in range(20):
+            task_id = f"task-{index:03d}"
+            base = {
+                "task_id": task_id,
+                "scenario": "research",
+                "evidence_ref": f"host-execution-event:baseline:{task_id}",
+                "tool_calls": 5,
+                "context_tokens": 1000,
+                "estimated_cost_units": 100,
+                "latency_ms": 2000,
+            }
+            observations.append(StrategyObservation(
+                strategy_id="baseline", strategy_version="1.0",
+                outcome="verified_success", **base,
+            ))
+            candidate = dict(base)
+            candidate["evidence_ref"] = f"host-execution-event:candidate:{task_id}"
+            candidate["estimated_cost_units"] = 90
+            observations.append(StrategyObservation(
+                strategy_id="candidate", strategy_version="2.0",
+                outcome="verified_success", **candidate,
+            ))
+        context = manifest_store.register_manifest(
+            "manifest-token",
+            strategy_class="reasoning",
+            baseline_id="baseline",
+            candidate_id="candidate",
+            observations=tuple(observations),
+        )
+        attestation = evidence_authority.issue("manifest-token", context)
+        verified_context = replace(context, evidence_manifest_ref=attestation)
+        self.assertTrue(evidence_authority.verify(verified_context))
+        self.assertTrue(host._strategy_store._evidence_verifier(verified_context))
+        baseline = host.register_strategy_baseline(
+            "host-token", "reasoning", "baseline", "1.0", {"mode": "safe"},
+        )
+        self.assertEqual(baseline.principal_id, principal_id)
+        request = StrategyApprovalRequest(
+            principal_id=principal_id,
+            strategy_class="reasoning",
+            strategy_id="candidate",
+            version="2.0",
+            evaluation_sha256="b" * 64,
+            config_sha256="c" * 64,
+            expected_generation=0,
+            action="activate",
+        )
+        grant = host.issue_strategy_activation_grant("host-token", request)
+        self.assertTrue(host._strategy_store._approval_verifier(grant))
+
+        with self.assertRaises(HostRuntimeError):
+            self.make_host(task_store=self.task_store, task_worker=worker)
 
 if __name__ == "__main__":
     unittest.main()
