@@ -149,7 +149,7 @@ class StrategyApprovalBridge:
             principal, category, strategy, strategy_version, evaluation_hash,
             config_hash, generation, normalized_action,
         ) = fields
-        op_id = operation_id or f"strategy-{uuid4().hex}"
+        op_id = f"strategy-{uuid4().hex}" if operation_id is None else operation_id
         if type(op_id) is not str or not _OPERATION_ID.fullmatch(op_id):
             raise StrategyAuthorizationError("strategy approval operation ID is invalid")
         digest = _argument_digest(
