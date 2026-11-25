@@ -790,6 +790,7 @@ class CapriHostRuntime:
             self._purge_worker_reservation_contexts()
             stored = self._worker_reservation_contexts.get(reservation.reservation.token)
             if stored is None:
+                self._begin_worker_audit_operation()
                 self._record_worker_lifecycle_event(
                     "worker.reservation.commit_missing",
                     worker_id,
@@ -801,6 +802,7 @@ class CapriHostRuntime:
                     status="not_found",
                     error_code="reservation_missing_or_expired",
                 )
+                self._finish_worker_audit_operation()
                 raise HostRuntimeError("worker reservation is unavailable or belongs to another task")
             if not self._same_host_reservation_context(stored, reservation):
                 raise HostRuntimeError("worker reservation is unavailable or belongs to another task")
@@ -811,12 +813,14 @@ class CapriHostRuntime:
                     stored.principal_id, stored.task_id, stored.capability,
                 )
             except HostRuntimeError:
+                self._begin_worker_audit_operation()
                 try:
                     self._worker_registry.release_reservation(
                         stored.reservation, authenticated_worker_id=worker_id,
                     )
                 except WorkerRegistryError:
-                    pass
+                    self._worker_audit_healthy = False
+                    raise HostRuntimeError("worker reservation policy cleanup failed") from None
                 self._worker_reservation_contexts.pop(stored.reservation.token, None)
                 self._record_worker_lifecycle_event(
                     "worker.reservation.denied",
@@ -830,14 +834,17 @@ class CapriHostRuntime:
                     status="denied",
                     error_code="policy_resolution_failed",
                 )
+                self._finish_worker_audit_operation()
                 raise
             if worker_id not in allowed:
+                self._begin_worker_audit_operation()
                 try:
                     self._worker_registry.release_reservation(
                         stored.reservation, authenticated_worker_id=worker_id,
                     )
                 except WorkerRegistryError:
-                    pass
+                    self._worker_audit_healthy = False
+                    raise HostRuntimeError("worker reservation policy cleanup failed") from None
                 self._worker_reservation_contexts.pop(stored.reservation.token, None)
                 self._record_worker_lifecycle_event(
                     "worker.reservation.denied",
@@ -851,16 +858,32 @@ class CapriHostRuntime:
                     status="denied",
                     error_code="policy_changed",
                 )
+                self._finish_worker_audit_operation()
                 raise HostRuntimeError("worker reservation is no longer authorized for this task")
             heartbeat_snapshot = self.heartbeat_worker(observer_credential, worker_id)
+            self._begin_worker_audit_operation()
             try:
                 committed = self._worker_registry.commit_reservation(
                     stored.reservation, authenticated_worker_id=worker_id,
                 )
             except WorkerRegistryError:
+                self._finish_worker_audit_operation()
                 self._purge_worker_reservation_contexts()
                 raise HostRuntimeError("worker reservation commit was rejected") from None
             if committed is None:
+                self._record_worker_lifecycle_event(
+                    "worker.reservation.commit_rejected",
+                    worker_id,
+                    principal_id=stored.principal_id,
+                    task_id=stored.task_id,
+                    capability=stored.capability,
+                    protocol_version=stored.protocol_version,
+                    descriptor_revision=stored.reservation.descriptor_revision,
+                    reservation_token=stored.reservation.token,
+                    status="rejected",
+                    error_code="expired_or_ineligible",
+                )
+                self._finish_worker_audit_operation()
                 self._purge_worker_reservation_contexts()
                 raise HostRuntimeError("worker reservation expired or is no longer eligible")
             wrapped = HostWorkerReservation(
@@ -879,6 +902,7 @@ class CapriHostRuntime:
                 reservation_token=committed.token,
                 observed_in_flight=heartbeat_snapshot.health.in_flight,
             )
+            self._finish_worker_audit_operation()
             return wrapped
 
     def release_worker_reservation(
