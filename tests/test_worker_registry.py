@@ -510,7 +510,7 @@ class WorkerRegistryTests(unittest.TestCase):
         )
         self.assertIsNotNone(committed)
         self.registry.update_descriptor(
-            self.descriptor(priority=10, revision=2),
+            self.descriptor(priority=10, revision=2, max_concurrency=1),
             authenticated_worker_id="worker-1",
             expected_revision=1,
         )
