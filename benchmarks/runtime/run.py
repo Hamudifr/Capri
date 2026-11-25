@@ -251,10 +251,13 @@ def run_benchmarks(*, warmup: int = 50, samples: int = 250) -> dict[str, Any]:
 
     peak_rss = _peak_rss_bytes()
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "benchmark": "capri_runtime_baseline",
         "measured_at_utc": datetime.now(timezone.utc).isoformat(),
-        "commit_sha": os.environ.get("GITHUB_SHA"),
+        "commit_sha": os.environ.get("CAPRI_BENCHMARK_HEAD_SHA") or os.environ.get("GITHUB_SHA"),
+        "workflow_sha": os.environ.get("GITHUB_SHA"),
+        "base_sha": os.environ.get("CAPRI_BENCHMARK_BASE_SHA") or None,
+        "branch": os.environ.get("CAPRI_BENCHMARK_HEAD_REF") or os.environ.get("GITHUB_REF_NAME"),
         "workflow_run_id": os.environ.get("GITHUB_RUN_ID"),
         "environment": {
             "os": platform.platform(),
