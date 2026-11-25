@@ -251,3 +251,26 @@ def evaluate_strategies(
         blocked_reasons=blocked_reasons,
         eligible_for_manual_review=eligible,
     )
+
+
+def verify_strategy_evaluation(
+    expected: StrategyEvaluation,
+    baseline_id: str,
+    candidate_id: str,
+    observations: Iterable[StrategyObservation],
+    *,
+    min_pairs: int = 20,
+) -> bool:
+    """Replay a comparison and verify its complete deterministic result.
+
+    This checks that the supplied result exactly matches a fresh evaluation of
+    the supplied inputs, including the versioned cohort fingerprint. It does
+    not authenticate evidence references or prove that recorded observations
+    describe real executions.
+    """
+    if type(expected) is not StrategyEvaluation:
+        raise StrategyEvaluationError("expected must be a StrategyEvaluation")
+    actual = evaluate_strategies(
+        baseline_id, candidate_id, observations, min_pairs=min_pairs
+    )
+    return actual == expected
