@@ -28,8 +28,8 @@ Unknown fields, duplicate JSON keys, non-standard numeric constants, invalid UTF
 The host owns the deadline. It must:
 1. Record a monotonic start timestamp immediately before dispatch.
 2. Enforce cancellation/termination at the deadline where the execution environment supports it.
-3. Measure elapsed time using the host monotonic clock when the response is received and again at the final acceptance boundary if verification can take time.
-4. Pass the host-measured elapsed milliseconds to `WorkerResponse.validate_for(..., elapsed_ms=...)`.
+3. Measure elapsed time using the host monotonic nanosecond clock when the response is received and again at the final acceptance boundary if verification can take time.
+4. Pass host-measured elapsed nanoseconds to `WorkerResponse.validate_for(..., elapsed_ns=...)`.
 5. Reject a response when host-measured elapsed time exceeds the request budget.
 
 The worker-reported `duration_ms` is untrusted telemetry. It may be useful for diagnostics, but it is never proof that the deadline was met. A worker cannot grant itself more time by changing the reported duration.
@@ -49,14 +49,14 @@ This package currently validates and serializes messages only. It does not launc
 ```python
 import time
 
-started = time.monotonic()
+started_ns = time.monotonic_ns()
 # Dispatch request through a host-authenticated worker channel.
 # Receive and decode response.
-elapsed_ms = int((time.monotonic() - started) * 1000)
+elapsed_ns = time.monotonic_ns() - started_ns
 response.validate_for(
     request,
     expected_worker_id=authenticated_worker_id,
-    elapsed_ms=elapsed_ms,
+    elapsed_ns=elapsed_ns,
 )
 ```
 
