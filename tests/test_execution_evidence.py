@@ -84,7 +84,16 @@ class SQLiteExecutionEvidenceJournalTests(unittest.TestCase):
         # A pending but correctly signed event is structurally sound. It is
         # simply not eligible for strategy evidence until task completion.
         self.assertEqual(self.journal.integrity_check(), "ok")
+        self.assertIsNone(self.journal.get_completed_event_ref(
+            "alice", self.claim.task_id, self.claim.step_index, self.claim.attempt,
+        ))
         self.tasks.finish_step(self.claim, self.result)
+        self.assertEqual(
+            self.journal.get_completed_event_ref(
+                "alice", self.claim.task_id, self.claim.step_index, self.claim.attempt,
+            ),
+            reference,
+        )
         self.assertTrue(self.journal.validate_source_events(
             "alice", "reasoning", (observation,),
             {self.claim.task_id: "research"},
@@ -123,18 +132,13 @@ class SQLiteExecutionEvidenceJournalTests(unittest.TestCase):
             finally:
                 connection.close()
         self.assertEqual(count, 1)
-        with self.tasks._lock:
-            connection = self.tasks._connect()
-            try:
-                event_id = connection.execute(
-                    "SELECT event_id FROM execution_evidence_events WHERE task_id=?",
-                    (self.claim.task_id,),
-                ).fetchone()[0]
-            finally:
-                connection.close()
+        reference = self.journal.get_completed_event_ref(
+            "alice", self.claim.task_id, self.claim.step_index, self.claim.attempt,
+        )
+        self.assertIsNotNone(reference)
         self.assertTrue(self.journal.validate_source_events(
             "alice", "reasoning",
-            (self.observation(f"host-execution-event:{event_id}"),),
+            (self.observation(reference),),
             {self.claim.task_id: "research"},
         ))
 

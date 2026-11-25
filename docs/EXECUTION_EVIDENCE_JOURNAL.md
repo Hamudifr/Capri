@@ -26,12 +26,12 @@ The task claim is revalidated against the authoritative `SQLiteTaskStore` and pr
 4. The journal authenticates the collector, classifies the task, resolves the strategy, hashes a bounded canonical result snapshot, and asks the injected verifier to derive outcome/metrics. The verifier receives its own decoded copy and cannot mutate the result snapshot that will be persisted.
 5. In one `BEGIN IMMEDIATE` transaction, the journal revalidates the live task lease, appends the signed evidence event, updates the task result/state, and appends the task lifecycle event. These writes commit or roll back together. A crash cannot leave a newly written evidence event without the matching task completion.
 6. If any evidence or task-completion write fails after the handler may have caused a side effect, the transaction rolls back and `TaskEngine` moves the still-live task to `reconciliation_required`. Hosts must implement reconciliation procedures for this state.
-7. Only after the task reaches `succeeded` can the returned `host-execution-event:<uuid>` reference be admitted into a strategy cohort. Admission rechecks principal ownership, the exact completed task step/attempt, and the canonical digest of the result persisted at that step.
+7. After the task reaches `succeeded`, the host can retrieve its verified source reference with `get_completed_event_ref(principal_id, task_id, step_index, attempt)`. Admission rechecks principal ownership, the exact completed task step/attempt, and the canonical digest of the result persisted at that step.
 8. The existing `SQLiteStrategyEvidenceManifestStore` can use the journal's `classify_task_family` and `validate_source_events` methods as its trusted callbacks.
 
 A task step attempt admits at most one evidence event, regardless of strategy ID. A repeated write is idempotent only when the claim/result digests, principal, strategy class/version, task classification, verified outcome, and all measured metrics match. Any drift is rejected as conflicting evidence.
 
-The lower-level `record_execution()` method can append a pending event without completing a task; such an event is integrity-checkable but is not eligible for strategy evidence until it matches a successful task result. The production `TaskEngine` integration uses `record_execution_and_finish()` to avoid the split-transaction window.
+The lower-level `record_execution()` method can append a pending event without completing a task; such an event is integrity-checkable but is not eligible for strategy evidence until it matches a successful task result. The production `TaskEngine` integration uses `record_execution_and_finish()` to avoid the split-transaction window. Use `get_completed_event_ref()` after completion to retrieve the verified reference without querying journal internals.
 
 ## Data minimization and integrity
 
