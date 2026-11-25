@@ -334,7 +334,7 @@ def run_skill_validation(root: Path, *, json_output: bool = False) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="capri",
-        description="Read-only tools for the Capri execution ledger.",
+        description="Read-only Capri diagnostics, ledger verification, and skill validation.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
     doctor_parser = commands.add_parser("doctor", help="run read-only repository health checks")
