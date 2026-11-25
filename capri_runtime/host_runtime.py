@@ -23,6 +23,7 @@ from .goals import (
     GoalPlanProposal, GoalRecord, SQLiteGoalStore,
 )
 from .goal_coordinator import GoalCoordinator, GoalExecution
+from .budgets import BudgetUsage, SQLiteBudgetStore
 from .tools import ExecutionContext, HostAuthorityResolver
 
 
@@ -127,6 +128,7 @@ class CapriHostRuntime:
         task_worker: TaskWorker | None = None,
         task_store: SQLiteTaskStore | None = None,
         goal_store: SQLiteGoalStore | None = None,
+        budget_store: SQLiteBudgetStore | None = None,
     ) -> None:
         if not isinstance(authority, HostAuthorityResolver):
             raise HostRuntimeError("a trusted HostAuthorityResolver is required")
@@ -160,6 +162,8 @@ class CapriHostRuntime:
             raise HostRuntimeError("task_store must be a SQLiteTaskStore")
         if goal_store is not None and not isinstance(goal_store, SQLiteGoalStore):
             raise HostRuntimeError("goal_store must be a SQLiteGoalStore")
+        if budget_store is not None and not isinstance(budget_store, SQLiteBudgetStore):
+            raise HostRuntimeError("budget_store must be a SQLiteBudgetStore")
         if (
             task_store is not None and task_worker is not None
             and task_store.path != task_worker.engine.store.path
@@ -177,9 +181,32 @@ class CapriHostRuntime:
             else (task_worker.engine.store if task_worker is not None else None)
         )
         self._goal_store = goal_store
+        configured_budgets = [
+            item for item in (
+                budget_store, orchestrator.budget_store,
+                task_worker.engine.budget_store if task_worker is not None else None,
+            ) if item is not None
+        ]
+        if configured_budgets and any(item is not configured_budgets[0] for item in configured_budgets):
+            raise HostRuntimeError("provider, tool and task execution must share one budget store")
+        self._budget_store = configured_budgets[0] if configured_budgets else None
+        if self._budget_store is not None:
+            try:
+                orchestrator.set_budget_store(self._budget_store)
+                if task_worker is not None:
+                    task_worker.engine.set_budget_store(self._budget_store)
+            except Exception:
+                raise HostRuntimeError("execution budget store could not be applied consistently") from None
 
     def _context(self, credential: Any) -> ExecutionContext:
         return self._authority.resolve(credential)
+
+    def get_budget_usage(self, credential: Any) -> BudgetUsage:
+        """Return only the authenticated principal's current budget-window usage."""
+        context = self._context(credential)
+        if self._budget_store is None:
+            raise HostRuntimeError("no execution budget store is configured")
+        return self._budget_store.usage_for_principal(context.principal_id)
 
     def create_session(self, credential: Any) -> Session:
         """Authenticate and atomically create a session owned by that principal."""
