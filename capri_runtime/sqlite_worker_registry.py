@@ -10,6 +10,7 @@ import uuid
 from contextlib import contextmanager
 from typing import Any, Callable, Iterator
 
+from .tasks import SQLiteTaskStore
 from .worker_registry import (
     InMemoryWorkerRegistry,
     WorkerConflictError,
@@ -374,8 +375,8 @@ class SQLiteWorkerRegistry:
         clock_ns: Callable[[], int] = time.monotonic_ns,
         clock_wall_ns: Callable[[], int] = time.time_ns,
     ) -> None:
-        if not callable(getattr(task_store, "_connect", None)) or not hasattr(task_store, "_lock"):
-            raise WorkerRegistryError("SQLiteWorkerRegistry requires a SQLiteTaskStore")
+        if not isinstance(task_store, SQLiteTaskStore):
+            raise WorkerRegistryError("SQLiteWorkerRegistry requires an actual SQLiteTaskStore instance")
         self.task_store = task_store
         self._tasks = task_store
         self._heartbeat_ttl_ms = heartbeat_ttl_ms
