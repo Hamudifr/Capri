@@ -458,7 +458,7 @@ class SQLiteMemoryStoreTests(unittest.TestCase):
             ))
         self.assertEqual(sum(item is not None for item in results), 1)
         self.assertEqual(
-            len([row for row in self.store.export_records() if row.supersedes_id == original.memory_id]),
+            len([row for row in json.loads(self.store.export_json()) if row["supersedes_id"] == original.memory_id]),
             1,
         )
         self.assertEqual(self.store.integrity_check(), "ok")
