@@ -12,7 +12,7 @@ import secrets
 import threading
 import time
 from dataclasses import dataclass, replace
-from typing import Callable
+from typing import Callable, Protocol, runtime_checkable
 
 _WORKER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _CAPABILITY = re.compile(r"^[a-z][a-z0-9_.:-]{0,127}$")
@@ -89,7 +89,7 @@ class WorkerDescriptor:
 
 @dataclass(frozen=True, slots=True)
 class WorkerHealth:
-    """Health observations supplied by trusted host code, never by worker payloads."""
+    """Trusted host health; in_flight excludes work represented by active reservations."""
 
     state: str
     last_heartbeat_ns: int | None
@@ -100,13 +100,18 @@ class WorkerHealth:
 
 @dataclass(frozen=True, slots=True)
 class WorkerReservation:
-    """Opaque host capacity hold; pending holds expire, committed holds do not."""
+    """Opaque host reservation identifier; authorization is enforced separately."""
 
     token: str
     worker_id: str
     expires_at_ns: int
     descriptor_revision: int
     committed: bool = False
+    principal_id: str | None = None
+    task_id: str | None = None
+    capability: str | None = None
+    protocol_version: int | None = None
+    revision: int = 1
 
     def __post_init__(self) -> None:
         if type(self.token) is not str or re.fullmatch(r"[A-Za-z0-9_-]{32,128}", self.token) is None:
@@ -118,12 +123,52 @@ class WorkerReservation:
             raise WorkerRegistryError("reservation descriptor revision must be positive")
         if type(self.committed) is not bool:
             raise WorkerRegistryError("reservation committed state must be a boolean")
+        if type(self.revision) is not int or self.revision < 1:
+            raise WorkerRegistryError("reservation revision must be positive")
+        context = (self.principal_id, self.task_id, self.capability, self.protocol_version)
+        if all(value is None for value in context):
+            return
+        if any(value is None for value in context):
+            raise WorkerRegistryError("reservation task context must be complete")
+        if (
+            type(self.principal_id) is not str or not self.principal_id
+            or len(self.principal_id) > 256
+            or any(ord(char) < 0x20 or 0xD800 <= ord(char) <= 0xDFFF for char in self.principal_id)
+        ):
+            raise WorkerRegistryError("reservation principal_id is invalid")
+        _identifier(self.task_id, "reservation task_id")
+        if type(self.capability) is not str or _CAPABILITY.fullmatch(self.capability) is None:
+            raise WorkerRegistryError("reservation capability is invalid")
+        if type(self.protocol_version) is not int or not 1 <= self.protocol_version <= 255:
+            raise WorkerRegistryError("reservation protocol_version is invalid")
 
 
 @dataclass(frozen=True, slots=True)
 class WorkerSnapshot:
     descriptor: WorkerDescriptor
     health: WorkerHealth
+
+
+@runtime_checkable
+class WorkerRegistry(Protocol):
+    """Common worker/reservation interface implemented by ephemeral and SQLite registries."""
+
+    def register(self, descriptor: WorkerDescriptor, *, authenticated_worker_id: str, now_ns: int | None = None) -> WorkerSnapshot: ...
+    def get(self, worker_id: str) -> WorkerSnapshot: ...
+    def get_reservation(self, token: str, *, now_ns: int | None = None) -> WorkerReservation | None: ...
+    def get_reservation_for_task(self, principal_id: str, task_id: str, *, now_ns: int | None = None) -> WorkerReservation | None: ...
+    def update_descriptor(self, descriptor: WorkerDescriptor, *, authenticated_worker_id: str, expected_revision: int) -> WorkerSnapshot: ...
+    def heartbeat(self, worker_id: str, *, authenticated_worker_id: str, in_flight: int, now_ns: int | None = None) -> WorkerSnapshot: ...
+    def record_failure(self, worker_id: str, *, authenticated_worker_id: str) -> WorkerSnapshot: ...
+    def quarantine(self, worker_id: str, *, expected_health_revision: int) -> WorkerSnapshot: ...
+    def retire(self, worker_id: str, *, expected_health_revision: int) -> WorkerSnapshot: ...
+    def clear_quarantine(self, worker_id: str, *, expected_health_revision: int) -> WorkerSnapshot: ...
+    def reserve_eligible(self, capability: str, *, protocol_version: int, authorized_worker_ids: set[str] | frozenset[str], principal_id: str, task_id: str, now_ns: int | None = None) -> WorkerReservation | None: ...
+    def commit_reservation(self, reservation: WorkerReservation, *, authenticated_worker_id: str, now_ns: int | None = None) -> WorkerReservation | None: ...
+    def release_reservation(self, reservation: WorkerReservation, *, authenticated_worker_id: str, observed_unreserved_in_flight: int | None = None, observed_in_flight: int | None = None, now_ns: int | None = None) -> bool: ...
+    def expire_reservations(self, *, now_ns: int | None = None) -> tuple[WorkerReservation, ...]: ...
+    def eligible(self, capability: str, *, protocol_version: int, authorized_worker_ids: set[str] | frozenset[str], now_ns: int | None = None, limit: int = 20) -> tuple[WorkerSnapshot, ...]: ...
+    def integrity_check(self) -> str: ...
 
 
 class InMemoryWorkerRegistry:
@@ -213,6 +258,35 @@ class InMemoryWorkerRegistry:
         with self._lock:
             self._purge_expired_reservations(timestamp)
             return self._reservations.get(token)
+
+    def get_reservation_for_task(
+        self, principal_id: str, task_id: str, *, now_ns: int | None = None,
+    ) -> WorkerReservation | None:
+        """Recover the one active task-bound reservation, if any."""
+        if (
+            type(principal_id) is not str or not principal_id or len(principal_id) > 256
+            or any(ord(char) < 0x20 or 0xD800 <= ord(char) <= 0xDFFF for char in principal_id)
+        ):
+            raise WorkerRegistryError("principal_id is invalid")
+        _identifier(task_id, "task_id")
+        timestamp = _now_ns(now_ns, self._clock_ns)
+        with self._lock:
+            self._purge_expired_reservations(timestamp)
+            for reservation in self._reservations.values():
+                if reservation.principal_id == principal_id and reservation.task_id == task_id:
+                    return reservation
+        return None
+
+    def expire_reservations(self, *, now_ns: int | None = None) -> tuple[WorkerReservation, ...]:
+        """Explicitly expire and return pending reservations whose TTL elapsed."""
+        timestamp = _now_ns(now_ns, self._clock_ns)
+        with self._lock:
+            return self._purge_expired_reservations(timestamp)
+
+    def integrity_check(self) -> str:
+        """The in-memory implementation is intentionally ephemeral."""
+        with self._lock:
+            return "ephemeral"
 
     def update_descriptor(
         self,
@@ -398,14 +472,15 @@ class InMemoryWorkerRegistry:
             return updated
 
 
-    def _purge_expired_reservations(self, now_ns: int) -> None:
-        """Remove expired capacity holds. Caller must hold _lock."""
-        expired = [
-            token for token, reservation in self._reservations.items()
+    def _purge_expired_reservations(self, now_ns: int) -> tuple[WorkerReservation, ...]:
+        """Remove expired capacity holds and return them. Caller must hold _lock."""
+        expired = tuple(
+            reservation for reservation in self._reservations.values()
             if not reservation.committed and now_ns >= reservation.expires_at_ns
-        ]
-        for token in expired:
-            del self._reservations[token]
+        )
+        for reservation in expired:
+            del self._reservations[reservation.token]
+        return expired
 
     def _revoke_worker_reservations(self, worker_id: str) -> None:
         """Invalidate pending holds, preserving committed in-flight work. Caller holds _lock."""
@@ -422,6 +497,8 @@ class InMemoryWorkerRegistry:
         *,
         protocol_version: int,
         authorized_worker_ids: set[str] | frozenset[str],
+        principal_id: str | None = None,
+        task_id: str | None = None,
         now_ns: int | None = None,
     ) -> WorkerReservation | None:
         """Atomically select and reserve one eligible worker capacity slot.
@@ -441,9 +518,23 @@ class InMemoryWorkerRegistry:
         allowed = frozenset(
             _identifier(item, "authorized worker ID") for item in authorized_worker_ids
         )
+        if (principal_id is None) != (task_id is None):
+            raise WorkerRegistryError("principal_id and task_id must be supplied together")
+        if principal_id is not None:
+            if (
+                type(principal_id) is not str or not principal_id or len(principal_id) > 256
+                or any(ord(char) < 0x20 or 0xD800 <= ord(char) <= 0xDFFF for char in principal_id)
+            ):
+                raise WorkerRegistryError("principal_id is invalid")
+            _identifier(task_id, "task_id")
         timestamp = _now_ns(now_ns, self._clock_ns)
         with self._lock:
             self._purge_expired_reservations(timestamp)
+            if principal_id is not None and any(
+                item.principal_id == principal_id and item.task_id == task_id
+                for item in self._reservations.values()
+            ):
+                raise WorkerConflictError("task already has an active worker reservation")
             reserved_counts: dict[str, int] = {}
             for reservation in self._reservations.values():
                 reserved_counts[reservation.worker_id] = (
@@ -484,6 +575,10 @@ class InMemoryWorkerRegistry:
                 worker_id=snapshot.descriptor.worker_id,
                 expires_at_ns=timestamp + self._reservation_ttl_ns,
                 descriptor_revision=snapshot.descriptor.revision,
+                principal_id=principal_id,
+                task_id=task_id,
+                capability=capability if principal_id is not None else None,
+                protocol_version=protocol_version if principal_id is not None else None,
             )
             self._reservations[token] = reservation
             return reservation
@@ -539,7 +634,7 @@ class InMemoryWorkerRegistry:
             ):
                 del self._reservations[current.token]
                 return None
-            committed = replace(current, committed=True)
+            committed = replace(current, committed=True, revision=current.revision + 1)
             self._reservations[current.token] = committed
             return committed
 
@@ -548,26 +643,31 @@ class InMemoryWorkerRegistry:
         reservation: WorkerReservation,
         *,
         authenticated_worker_id: str,
+        observed_unreserved_in_flight: int | None = None,
         observed_in_flight: int | None = None,
         now_ns: int | None = None,
     ) -> bool:
-        """Release a pending hold or atomically hand off a committed hold to load.
+        """Release a pending hold or atomically hand off a committed hold to unreserved load.
 
-        Pending holds may be released before dispatch without a load observation.
-        A committed hold can only be released together with the host-observed
-        in-flight count after completion/reconciliation. The load update and
-        token removal occur under the same registry lock, so capacity is never
-        temporarily unaccounted.
+        `observed_unreserved_in_flight` excludes every other active reservation.
+        The registry counts those reservations separately; the handoff count
+        includes only work no longer represented by a reservation token.
+
+        `observed_in_flight` remains a compatibility alias for existing callers.
         """
+        if observed_unreserved_in_flight is not None and observed_in_flight is not None:
+            raise WorkerRegistryError("supply only one observed in-flight load value")
+        if observed_unreserved_in_flight is None:
+            observed_unreserved_in_flight = observed_in_flight
         if type(reservation) is not WorkerReservation:
             raise WorkerRegistryError("reservation must be an exact WorkerReservation")
         identity = _identifier(authenticated_worker_id, "authenticated_worker_id")
         if identity != reservation.worker_id:
             raise WorkerRegistryError("authenticated identity does not match reservation worker")
-        if observed_in_flight is not None and (
-            type(observed_in_flight) is not int or observed_in_flight < 0
+        if observed_unreserved_in_flight is not None and (
+            type(observed_unreserved_in_flight) is not int or observed_unreserved_in_flight < 0
         ):
-            raise WorkerRegistryError("observed_in_flight must be a non-negative integer")
+            raise WorkerRegistryError("observed_unreserved_in_flight must be a non-negative integer")
         timestamp = _now_ns(now_ns, self._clock_ns)
         with self._lock:
             self._purge_expired_reservations(timestamp)
@@ -577,20 +677,20 @@ class InMemoryWorkerRegistry:
             if current != reservation:
                 raise WorkerConflictError("reservation token does not match current reservation")
             if current.committed:
-                if observed_in_flight is None:
+                if observed_unreserved_in_flight is None:
                     raise WorkerRegistryError(
-                        "committed reservation release requires host-observed in-flight load"
+                        "committed reservation release requires host-observed unreserved in-flight load"
                     )
                 snapshot = self._workers.get(identity)
                 if snapshot is None:
                     raise WorkerNotFoundError("worker is not registered")
                 updated_health = replace(
                     snapshot.health,
-                    in_flight=observed_in_flight,
+                    in_flight=observed_unreserved_in_flight,
                     revision=snapshot.health.revision + 1,
                 )
                 self._workers[identity] = WorkerSnapshot(snapshot.descriptor, updated_health)
-            elif observed_in_flight is not None:
+            elif observed_unreserved_in_flight is not None:
                 raise WorkerRegistryError(
                     "pending reservation release must not include an in-flight observation"
                 )

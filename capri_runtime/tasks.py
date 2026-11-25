@@ -1399,6 +1399,16 @@ class SQLiteTaskStore:
                 raise TaskValidationError(
                     "task store contains invalid execution evidence events"
                 ) from None
+        if connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name LIKE 'worker_registry_%' LIMIT 1"
+        ).fetchone() is not None:
+            try:
+                from .sqlite_worker_registry import validate_worker_registry_snapshot
+                validate_worker_registry_snapshot(connection)
+            except Exception:
+                raise TaskValidationError(
+                    "task store contains an invalid worker registry snapshot"
+                ) from None
 
     def backup_to(self, destination_path: str) -> str:
         """Create a private, consistent task-state snapshot without overwriting."""
