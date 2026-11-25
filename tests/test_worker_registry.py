@@ -361,10 +361,11 @@ class WorkerRegistryTests(unittest.TestCase):
         ))
 
     def test_reservation_is_revoked_when_worker_fails(self):
+        self.register_healthy()
         reservation = self.registry.reserve_eligible(
             "math.factorial", protocol_version=1,
             authorized_worker_ids={"worker-1"}, now_ns=self.now,
-        ) if self.register_healthy() else None
+        )
         self.assertIsNotNone(reservation)
         self.registry.record_failure(
             "worker-1", authenticated_worker_id="worker-1",
