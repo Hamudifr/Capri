@@ -10,6 +10,7 @@ import json
 import math
 import os
 import re
+import time
 import urllib.error
 import urllib.request
 from typing import Any, Sequence
@@ -18,7 +19,7 @@ from capri_core.validation import contains_surrogate
 
 from .memory import UntrustedMemoryContext, serialize_untrusted_memory_context
 from .knowledge_graph import UntrustedKnowledgeContext, serialize_untrusted_knowledge_context
-from .orchestration import AssistantTurn
+from .orchestration import AssistantTurn, ProviderUsage
 from .runtime import Message
 from .tool_bridge import ToolCallRequest, ToolDefinition
 
@@ -322,7 +323,9 @@ class OpenAIResponsesAdapter:
         return items
 
     @staticmethod
-    def _parse_response(payload: Any) -> AssistantTurn:
+    def _parse_response(
+        payload: Any, *, model: str = "unknown", provider_latency_ms: int | None = None
+    ) -> AssistantTurn:
         if type(payload) is not dict or payload.get("status") != "completed":
             raise OpenAIResponsesAdapterError("provider response did not complete successfully")
         output = payload.get("output")
@@ -379,10 +382,48 @@ class OpenAIResponsesAdapter:
         if not content.strip() and not calls:
             raise OpenAIResponsesAdapterError("provider response contains neither text nor tool calls")
         provider_state = tuple(output) if calls else ()
+        provider_usage = None
+        usage = payload.get("usage")
+        if usage is not None:
+            if type(usage) is not dict:
+                raise OpenAIResponsesAdapterError("provider usage metadata is malformed")
+            response_id = payload.get("id")
+            if not _valid_text(response_id, maximum=128):
+                raise OpenAIResponsesAdapterError("provider usage response ID is invalid")
+            input_tokens = usage.get("input_tokens")
+            output_tokens = usage.get("output_tokens")
+            total_tokens = usage.get("total_tokens")
+            input_details = usage.get("input_tokens_details", {})
+            output_details = usage.get("output_tokens_details", {})
+            if input_details is None:
+                input_details = {}
+            if output_details is None:
+                output_details = {}
+            if type(input_details) is not dict or type(output_details) is not dict:
+                raise OpenAIResponsesAdapterError("provider usage detail objects are malformed")
+            cached_tokens = input_details.get("cached_tokens", 0)
+            cache_write_tokens = input_details.get("cache_write_tokens", 0)
+            reasoning_tokens = output_details.get("reasoning_tokens", 0)
+            try:
+                provider_usage = ProviderUsage(
+                    provider="openai",
+                    model=model,
+                    response_id=response_id,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    total_tokens=total_tokens,
+                    cached_input_tokens=cached_tokens,
+                    cache_write_tokens=cache_write_tokens,
+                    reasoning_tokens=reasoning_tokens,
+                    provider_latency_ms=provider_latency_ms,
+                )
+            except (TypeError, ValueError):
+                raise OpenAIResponsesAdapterError("provider usage metadata is invalid") from None
         return AssistantTurn(
             content=content,
             tool_calls=tuple(calls),
             provider_state=provider_state,
+            provider_usage=provider_usage,
         )
 
     def _post(self, body: dict[str, Any]) -> AssistantTurn:
@@ -405,6 +446,7 @@ class OpenAIResponsesAdapter:
             },
             method="POST",
         )
+        started_ns = time.monotonic_ns()
         try:
             with self._opener.open(request, timeout=self.timeout_seconds) as response:
                 status = response.getcode()
@@ -428,11 +470,14 @@ class OpenAIResponsesAdapter:
             ) from None
         if len(raw) > self.max_response_bytes:
             raise OpenAIResponsesAdapterError("provider response exceeds the configured byte limit")
+        provider_latency_ms = max(0, (time.monotonic_ns() - started_ns) // 1_000_000)
         try:
             payload = _loads_json(raw.decode("utf-8", errors="strict"))
         except (UnicodeDecodeError, TypeError, ValueError, json.JSONDecodeError, RecursionError):
             raise OpenAIResponsesAdapterError("provider response is not valid JSON") from None
-        return self._parse_response(payload)
+        return self._parse_response(
+            payload, model=self.model, provider_latency_ms=provider_latency_ms
+        )
 
     def _complete(
         self,

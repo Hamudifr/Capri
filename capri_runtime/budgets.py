@@ -1,7 +1,7 @@
 """Principal-scoped, fail-closed execution budgets with conservative reservations.
 
 Budgets count provider calls/input bytes, tool calls, and task steps/input bytes.
-They do not claim to measure provider tokens, money, or wall-clock handler time.
+They do not measure provider tokens, money, or wall-clock handler time. Provider token and latency telemetry is surfaced separately and is not enforced as a budget.
 """
 from __future__ import annotations
 

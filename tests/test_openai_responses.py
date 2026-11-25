@@ -18,6 +18,7 @@ from capri_runtime import (
     Message,
     OpenAIResponsesAdapter,
     OpenAIResponsesAdapterError,
+    ToolOrchestrationError,
     GraphNeuron,
     UntrustedKnowledgeContext,
     ToolCallRequest,
@@ -423,6 +424,136 @@ class OpenAIResponsesAdapterTests(unittest.TestCase):
             OpenAIResponsesAdapter("sk-test\r\nInjected: yes", "gpt-6-astra")
         with self.assertRaises(OpenAIResponsesAdapterError):
             OpenAIResponsesAdapter("sk-test", "invalid model name")
+
+
+    def test_provider_usage_is_parsed_and_propagated_to_host_observer(self):
+        payload = {
+            "id": "resp_usage_123",
+            "status": "completed",
+            "model": "gpt-6-astra",
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "Usage recorded."}],
+            }],
+            "usage": {
+                "input_tokens": 120,
+                "input_tokens_details": {"cached_tokens": 20, "cache_write_tokens": 10},
+                "output_tokens": 30,
+                "output_tokens_details": {"reasoning_tokens": 12},
+                "total_tokens": 150,
+            },
+        }
+        opener = FakeOpener(json.dumps(payload).encode("utf-8"))
+        adapter = self.make_adapter(opener)
+        registry = ToolRegistry()
+        bridge = ToolExecutionBridge(ToolExecutor(registry, InMemoryAuditSink()))
+        observed = []
+        orchestrator = ToolOrchestrator(
+            adapter,
+            bridge,
+            usage_observer=lambda session_id, principal_id, usage: observed.append(
+                (session_id, principal_id, usage)
+            ),
+        )
+        result = orchestrator.run(
+            "usage-session",
+            "Record provider usage.",
+            (),
+            ExecutionContext("trusted-principal", frozenset()),
+        )
+        self.assertEqual(result.final_text, "Usage recorded.")
+        self.assertEqual(len(result.provider_usage), 1)
+        usage = result.provider_usage[0]
+        self.assertEqual(usage.provider, "openai")
+        self.assertEqual(usage.model, "gpt-6-astra")
+        self.assertEqual(usage.response_id, "resp_usage_123")
+        self.assertEqual(usage.input_tokens, 120)
+        self.assertEqual(usage.output_tokens, 30)
+        self.assertEqual(usage.total_tokens, 150)
+        self.assertEqual(usage.cached_input_tokens, 20)
+        self.assertEqual(usage.cache_write_tokens, 10)
+        self.assertEqual(usage.reasoning_tokens, 12)
+        self.assertGreaterEqual(usage.provider_latency_ms, 0)
+        self.assertEqual(observed, [("usage-session", "trusted-principal", usage)])
+
+    def test_provider_usage_observer_failure_blocks_tool_execution(self):
+        registry = ToolRegistry()
+        calls = []
+        registry.register(
+            ToolSpec(
+                "safe_tool",
+                "tools:safe",
+                {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
+            ),
+            lambda arguments: calls.append(arguments) or {"ok": True},
+        )
+        payload = {
+            "id": "resp_usage_tool",
+            "status": "completed",
+            "model": "gpt-6-astra",
+            "output": [{
+                "type": "function_call",
+                "call_id": "call_usage",
+                "name": "safe_tool",
+                "arguments": "{}",
+            }],
+            "usage": {
+                "input_tokens": 10,
+                "input_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
+                "output_tokens": 2,
+                "output_tokens_details": {"reasoning_tokens": 0},
+                "total_tokens": 12,
+            },
+        }
+        adapter = self.make_adapter(FakeOpener(json.dumps(payload).encode("utf-8")))
+        bridge = ToolExecutionBridge(ToolExecutor(registry, InMemoryAuditSink()))
+        orchestrator = ToolOrchestrator(
+            adapter,
+            bridge,
+            usage_observer=lambda *args: (_ for _ in ()).throw(RuntimeError("storage unavailable")),
+        )
+        with self.assertRaisesRegex(ToolOrchestrationError, "tool execution was blocked"):
+            orchestrator.run(
+                "usage-failure-session",
+                "Call the tool.",
+                (),
+                ExecutionContext("trusted-principal", frozenset({"tools:safe"})),
+            )
+        self.assertEqual(calls, [])
+
+    def test_malformed_provider_usage_is_rejected(self):
+        base = {
+            "id": "resp_bad_usage",
+            "status": "completed",
+            "model": "gpt-6-astra",
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "Not accepted."}],
+            }],
+            "usage": {
+                "input_tokens": 10,
+                "input_tokens_details": {"cached_tokens": 0},
+                "output_tokens": 2,
+                "output_tokens_details": {"reasoning_tokens": 0},
+                "total_tokens": 12,
+            },
+        }
+        malformed = []
+        bad = json.loads(json.dumps(base))
+        bad["usage"]["input_tokens"] = True
+        malformed.append(bad)
+        bad = json.loads(json.dumps(base))
+        bad["usage"]["total_tokens"] = 99
+        malformed.append(bad)
+        bad = json.loads(json.dumps(base))
+        bad["usage"]["input_tokens_details"] = []
+        malformed.append(bad)
+        for payload in malformed:
+            adapter = self.make_adapter(FakeOpener(json.dumps(payload).encode("utf-8")))
+            with self.subTest(payload=payload), self.assertRaises(OpenAIResponsesAdapterError):
+                adapter.complete_with_tools("bad-usage", (Message("user", "Go"),), ())
 
 
 if __name__ == "__main__":

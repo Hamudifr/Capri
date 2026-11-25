@@ -60,6 +60,7 @@ from .tool_bridge import (
 )
 from .orchestration import (
     AssistantTurn,
+    ProviderUsage,
     CommittedOrchestration,
     OrchestrationResult,
     SessionTurnCoordinator,
@@ -168,6 +169,7 @@ __all__ = [
     "SQLiteGoalStore",
     "validate_goal_plan",
     "AssistantTurn",
+    "ProviderUsage",
     "CommittedOrchestration",
     "OrchestrationResult",
     "SessionTurnCoordinator",

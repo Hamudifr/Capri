@@ -9,7 +9,7 @@ import json
 import math
 import threading
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Callable, Protocol
 from uuid import uuid4
 
 from capri_core.validation import contains_surrogate
@@ -33,12 +33,56 @@ class ToolOrchestrationError(Exception):
 
 
 @dataclass(frozen=True, slots=True)
+class ProviderUsage:
+    """Validated provider token and request-latency telemetry; never a price estimate."""
+
+    provider: str
+    model: str
+    response_id: str
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    cached_input_tokens: int = 0
+    cache_write_tokens: int = 0
+    reasoning_tokens: int = 0
+    provider_latency_ms: int | None = None
+
+    def __post_init__(self) -> None:
+        for name, value, maximum in (
+            ("provider", self.provider, 32),
+            ("model", self.model, 128),
+            ("response_id", self.response_id, 128),
+        ):
+            if type(value) is not str or not value.strip() or len(value) > maximum or contains_surrogate(value):
+                raise ValueError(f"{name} must be bounded valid text")
+        for name in (
+            "input_tokens", "output_tokens", "total_tokens",
+            "cached_input_tokens", "cache_write_tokens", "reasoning_tokens",
+        ):
+            value = getattr(self, name)
+            if type(value) is not int or not 0 <= value <= 1_000_000_000:
+                raise ValueError(f"{name} must be a bounded non-negative integer")
+        if self.total_tokens != self.input_tokens + self.output_tokens:
+            raise ValueError("total_tokens must equal input_tokens plus output_tokens")
+        if self.cached_input_tokens + self.cache_write_tokens > self.input_tokens:
+            raise ValueError("input token detail counts exceed input_tokens")
+        if self.reasoning_tokens > self.output_tokens:
+            raise ValueError("reasoning_tokens exceed output_tokens")
+        if self.provider_latency_ms is not None and (
+            type(self.provider_latency_ms) is not int
+            or not 0 <= self.provider_latency_ms <= 600_000
+        ):
+            raise ValueError("provider_latency_ms must be a bounded non-negative integer")
+
+
+@dataclass(frozen=True, slots=True)
 class AssistantTurn:
     """Structured adapter output; all fields are treated as untrusted."""
 
     content: str = ""
     tool_calls: tuple[ToolCallRequest, ...] = ()
     provider_state: tuple[dict[str, object], ...] = ()
+    provider_usage: ProviderUsage | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +93,7 @@ class OrchestrationResult:
     messages: tuple[Message, ...]
     tool_outcomes: tuple[ToolCallOutcome, ...]
     tool_rounds: int
+    provider_usage: tuple[ProviderUsage, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,6 +193,7 @@ class ToolOrchestrator:
         max_tool_message_bytes: int = 131_072,
         max_history_bytes: int = 2_097_152,
         budget_store: SQLiteBudgetStore | None = None,
+        usage_observer: Callable[[str, str, ProviderUsage], None] | None = None,
     ) -> None:
         if not any(callable(getattr(adapter, name, None)) for name in (
             "complete_with_tools",
@@ -187,6 +233,9 @@ class ToolOrchestrator:
         self.max_tool_message_bytes = max_tool_message_bytes
         self.max_history_bytes = max_history_bytes
         self.budget_store: SQLiteBudgetStore | None = self.bridge.executor.budget_store
+        if usage_observer is not None and not callable(usage_observer):
+            raise ToolOrchestrationError("usage_observer must be callable")
+        self.usage_observer = usage_observer
         if budget_store is not None:
             self.set_budget_store(budget_store)
 
@@ -281,6 +330,7 @@ class ToolOrchestrator:
         if max_total_messages is not None and len(working) + 1 > max_total_messages:
             raise ToolOrchestrationError("session message capacity is exhausted")
         outcomes: list[ToolCallOutcome] = []
+        provider_usage_records: list[ProviderUsage] = []
         seen_call_ids: set[str] = set()
         tool_rounds = 0
         try:
@@ -329,6 +379,23 @@ class ToolOrchestrator:
                 raise ToolOrchestrationError("orchestration cancelled after model invocation")
             if not isinstance(response, AssistantTurn):
                 raise ToolOrchestrationError("adapter must return an AssistantTurn")
+            if response.provider_usage is not None:
+                if type(response.provider_usage) is not ProviderUsage:
+                    raise ToolOrchestrationError("adapter provider_usage is invalid")
+                provider_usage_records.append(response.provider_usage)
+                if self.usage_observer is not None:
+                    try:
+                        observer_result = self.usage_observer(
+                            session_id, context.principal_id, response.provider_usage
+                        )
+                    except Exception:
+                        raise ToolOrchestrationError(
+                            "provider usage could not be recorded; tool execution was blocked"
+                        ) from None
+                    if observer_result is not None:
+                        raise ToolOrchestrationError(
+                            "usage_observer must synchronously return None; tool execution was blocked"
+                        )
             if not _valid_text(response.content) or len(response.content) > self.max_output_chars:
                 raise ToolOrchestrationError("adapter content is invalid or oversized")
             if not isinstance(response.tool_calls, tuple):
@@ -386,6 +453,7 @@ class ToolOrchestrator:
                     tuple(working),
                     tuple(outcomes),
                     tool_rounds,
+                    tuple(provider_usage_records),
                 )
 
             if turn_index >= self.max_tool_rounds:
