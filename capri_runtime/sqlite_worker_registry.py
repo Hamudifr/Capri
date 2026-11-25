@@ -995,11 +995,15 @@ class SQLiteWorkerRegistry:
         event_context: dict[str, Any] | None = None,
         include_expired: bool = False,
     ) -> Any:
-        mono_now = now_ns if now_ns is not None else self._clock_ns()
-        if type(mono_now) is not int or mono_now < 0:
+        if now_ns is not None and (type(now_ns) is not int or now_ns < 0):
             raise WorkerRegistryError("monotonic clock must return a non-negative integer")
-        wall_now = self._wall_now()
         with self._transaction() as connection:
+            # Sample clocks only after BEGIN IMMEDIATE succeeds. Lock contention
+            # must not let an operation use stale time and resurrect an expired hold.
+            mono_now = now_ns if now_ns is not None else self._clock_ns()
+            if type(mono_now) is not int or mono_now < 0:
+                raise WorkerRegistryError("monotonic clock must return a non-negative integer")
+            wall_now = self._wall_now()
             memory = self._load_memory(connection, wall_now, mono_now)
             before_workers = dict(memory._workers)
             before_reservations = dict(memory._reservations)
