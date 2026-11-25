@@ -59,7 +59,7 @@ python -m capri_core skills validate --root . --json
 
 The validator checks:
 - frontmatter delimiters, duplicate keys, required metadata, supported fields and scalar types;
-- lowercase kebab-case names, 64-character name limit, and exact directory/name match;
+- lowercase ASCII kebab-case names, 64-character name limit, and exact directory/name match;
 - non-empty descriptions up to 1024 characters and optional compatibility up to 500 characters;
 - a non-empty instruction body, with advisory warnings for missing H1 titles, descriptions without a clear "when" trigger, and files above 500 lines;
 - flat string-to-string `metadata` mappings;
