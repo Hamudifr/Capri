@@ -34,3 +34,21 @@ The Python tests are finite sanity checks only. They do not prove the asymptotic
 - Published version: https://doi.org/10.1145/3801091
 - Ježil–Tsintsilidas, *Parallelism and Adaptivity in Student-Teacher Witnessing* (2026): https://arxiv.org/abs/2602.19934
 - Chen–Li–Oliveira–Williams, APX1: https://arxiv.org/abs/2602.09302
+
+
+# R37: OPS selector and verified Lean kernel
+
+## Additional artifacts
+
+- `OPS_SELECTOR_ROUTE.md`: OPS Lemma 4.1 / Theorem 1.4 hardness-magnification route, the fixed-family versus input-dependent anti-checker distinction, the APC₁ relative-counting obstruction, and the soft-weight floor experiment.
+- `ops_selector_toy.py` and `test_ops_selector_toy.py`: finite adaptive-selector example; 3 tests.
+- `soft_weights_floor_test.py` and `test_soft_weights_floor_test.py`: finite counterexample to naive raw per-expert polynomial floors in multiplicative weights; 2 tests.
+- `formalization/`: Lean 4.24.0 proof of the abstract finite causal-game terminal-package lemma. GitHub Actions run 45696083281 passed; axiom audit checked five declarations under the allowlist `propext`, `Classical.choice`, `Quot.sound`.
+
+## R37 mathematical status
+
+OPS gives a near-linear-in-truth-table-length selector under NP ⊆ Circuit[poly]. Its construction uses relative approximate counting of the circuits still consistent with the growing sample. This does not directly transfer to APC₁'s polynomial-precision additive counting, because late survivor sets can be exponentially sparse. A naive raw-weight floor also fails in a finite expert game: a polynomial floor destroys concentration, while a normalized floor is exponentially small per expert.
+
+The Lean result formalizes only the abstract causal-game terminal lemma. It does not formalize the bounded-arithmetic KPT theorem, SAT-specific package predicates, the search-circuit branch, or EF translation. No P-vs-NP proof is claimed.
+
+All five Python tests pass. Main remains untouched; the R37 work is isolated on this research branch.
