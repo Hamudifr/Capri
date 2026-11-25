@@ -1274,7 +1274,7 @@ class SQLiteStrategyStore:
                 self._verify_chain(connection, principal, category)
                 row = connection.execute(
                     """SELECT a.strategy_id,a.version,a.generation,a.event_id,
-                    e.created_at,v.config_json,v.config_sha256,v.is_baseline,ev.evidence_verified
+                    e.created_at,v.config_json,v.config_sha256,v.is_baseline,ev.evidence_verified,e.promotion_assessment_sha256
                     FROM strategy_active a
                     JOIN strategy_events e ON e.event_id=a.event_id
                     JOIN strategy_versions v ON v.principal_id=a.principal_id
@@ -1290,9 +1290,27 @@ class SQLiteStrategyStore:
                     raise StrategyAuthorizationError(
                         "active candidate evidence is unverified; restore a verified baseline before serving it"
                     )
+                if row[9] is not None:
+                    promotion = connection.execute(
+                        """SELECT assessment_id,principal_id,strategy_class,baseline_id,baseline_version,
+                        candidate_id,candidate_version,policy_version,task_family,assessment_sha256,
+                        summary_json,evidence_manifest_refs_json,cohort_sha256s_json,primary_metric,created_at
+                        FROM strategy_promotion_assessments
+                        WHERE principal_id=? AND strategy_class=? AND candidate_id=?
+                        AND candidate_version=? AND assessment_sha256=?""",
+                        (principal, category, row[0], row[1], row[9]),
+                    ).fetchone()
+                    if promotion is None:
+                        raise StrategyIntegrityError("active strategy references a missing promotion assessment")
+                    record = _promotion_record_from_row(promotion)
+                    if (
+                        record.policy_version != STRATEGY_PROMOTION_POLICY_VERSION
+                        or record.summary.get("eligible_for_canary") is not True
+                    ):
+                        raise StrategyIntegrityError("active strategy promotion assessment is no longer valid")
                 return ActiveStrategyRecord(
                     principal, category, row[0], row[1], row[2],
-                    _decode_config(row[5], row[6]), row[6], row[4], row[3],
+                    _decode_config(row[5], row[6]), row[6], row[4], row[3], row[9],
                 )
             finally:
                 connection.close()
