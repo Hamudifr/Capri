@@ -95,7 +95,7 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str, list[str]]:
             errors.append(f"line {line_number}: unsupported YAML frontmatter syntax")
             index += 1
             continue
-        key, raw_value = match.group(1), (match.group(2) or "").strip()
+        key, raw_value = match.group(1), _strip_comment((match.group(2) or "").strip()).strip()
         if key in seen:
             errors.append(f"line {line_number}: duplicate frontmatter key {key!r}")
             index += 1
@@ -261,7 +261,7 @@ def _validate_skill_directory(skill_dir: Path) -> dict[str, Any]:
 
     for target in _LINK_PATTERN.findall(body):
         parsed = urlsplit(target)
-        if parsed.scheme or target.startswith("#"):
+        if parsed.scheme or target.startswith(("#", "//")):
             continue
         relative = unquote(parsed.path)
         if not relative:
