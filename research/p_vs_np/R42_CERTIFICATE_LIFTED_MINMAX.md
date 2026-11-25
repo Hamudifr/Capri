@@ -88,8 +88,7 @@ KPS explicitly note that nonuniform anticheckers exist by Lipton–Young. No nov
 
 ## 5. Scope cautions
 
-- This construction assumes **canonical-pair hardness** for (U_n,V_{n,w}), not merely SAT (
-otin P/poly).
+- This construction assumes **canonical-pair hardness** for (U_n,V_{n,w}), not merely SAT not in P/poly.
 - It does not show canonical-pair hardness for EF.
 - It does not prove the KPS condition-2 EF proofs of the universal antichecker statement.
 - APC1-provability does not imply APX1-provability.
@@ -101,3 +100,22 @@ otin P/poly).
 - Pich–Santhanam, *Towards P ≠ NP from Extended Frege lower bounds*: https://arxiv.org/abs/2312.08163
 - Müller–Pich, *Feasibly Constructive Proofs of Succinct Weak Circuit Lower Bounds*, Theorem 4.12: https://eccc.weizmann.ac.il/report/2017/144/download/
 - Lipton–Young, *Simple Strategies for Large Zero-Sum Games with Applications to Complexity Theory*: https://arxiv.org/abs/cs/0205035
+
+
+## R42-S1: constant-zero antichecker reformulation
+
+For each decision circuit C on formula inputs, define a total circuit on certificate strings:
+[
+E_C(z)=Vld_{n,w}(z)land[C(x)\ne b],
+]
+and take the target function Q(z)=0. Then E_C(z)=1 exactly on valid certificate encodings mislabelled by C, and E_C(z)=0 on invalid encodings.
+
+For an odd list C_1,...,C_M, let D be their pointwise majority on x. On invalid z all E_{C_j}(z)=0. On valid z, E_{C_j}(z)=1 iff C_j(x) differs from b. Hence
+[
+Majority(E_{C_1},...,E_{C_M})(z)=E_D(z).
+]
+The detector family is closed under majority, with underlying circuit size O(Ms) and a fixed polynomial-in-N verifier overhead. Parameter padding absorbs this overhead.
+
+No size-s^3 separator of the canonical pair implies that no corresponding larger detector E_D computes the constant-zero target. A Lipton–Young antichecker for Q=0 and this polynomial-time-defined circuit class yields, for every E_C, a support point z with E_C(z)=1. Such a point is automatically valid; filtering invalid points from the support preserves the antichecker property.
+
+This matches the syntactic shape of Müller–Pich Theorem 4.12 (a Σ0/PV target and a polynomial-time-defined circuit class) more directly. The theorem is classical, not itself an APC1 proof. Remaining obligations: APC1 polynomial-precision MinMax formalization, parameter synchronization, proof-system translation, and canonical-pair hardness. No P≠NP proof.
