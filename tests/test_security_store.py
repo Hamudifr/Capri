@@ -194,6 +194,24 @@ class SQLiteSecurityStoreTests(unittest.TestCase):
         )
         self.assertFalse(SQLiteSecurityStore(self.path).consume(expired, self.now))
 
+    def test_audit_write_rejects_surrogate_metadata(self):
+        store = SQLiteSecurityStore(self.path)
+        event = AuditEvent(
+            "bad" + chr(0xD800), self.now.isoformat(), "principal-1",
+            "search", "a" * 64, "succeeded", None,
+        )
+        with self.assertRaises(ToolValidationError):
+            store.write(event)
+
+    def test_approval_consumption_rejects_surrogate_identifiers(self):
+        store = SQLiteSecurityStore(self.path)
+        grant = ApprovalGrant(
+            "grant-" + chr(0xD800), "principal-1", "delete_item",
+            argument_digest({"item": "item-1"}),
+            (self.now + timedelta(minutes=5)).isoformat(),
+        )
+        self.assertFalse(store.consume(grant, self.now))
+
     def test_executor_uses_durable_approval_store_across_restarts(self):
         calls = []
         registry = ToolRegistry()
