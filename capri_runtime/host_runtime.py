@@ -5,7 +5,7 @@ owns authentication callbacks, process supervision, credentials, and lifecycle.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import json
 import threading
@@ -681,7 +681,7 @@ class CapriHostRuntime:
                 raise HostRuntimeError(
                     "worker reservation expired or disappeared outside the trusted host gateway; reconciliation is required"
                 )
-            elif current != context.reservation:
+            elif replace(current, expires_at_ns=context.reservation.expires_at_ns) != context.reservation:
                 self._worker_reservation_contexts.pop(token, None)
                 self._worker_audit_healthy = False
                 raise HostRuntimeError(
