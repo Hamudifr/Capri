@@ -128,9 +128,19 @@ class WorkerProtocolTests(unittest.TestCase):
 
     def test_validate_for_rejects_reported_duration_over_deadline(self):
         short_request = WorkerRequest("req-17", "math.factorial", {}, 10)
-        late_response = WorkerResponse("req-17", "worker-1", "succeeded", 11, output={"value": 1})
+        late_report = WorkerResponse("req-17", "worker-1", "succeeded", 11, output={"value": 1})
         with self.assertRaises(WorkerProtocolError):
-            late_response.validate_for(short_request, expected_worker_id="worker-1", elapsed_ns=11_000_000)
+            late_report.validate_for(
+                short_request, expected_worker_id="worker-1", elapsed_ns=1_000_000
+            )
+
+    def test_host_elapsed_time_overrides_fast_worker_duration_claim(self):
+        short_request = WorkerRequest("req-17", "math.factorial", {}, 10)
+        fast_claim = WorkerResponse("req-17", "worker-1", "succeeded", 1, output={"value": 1})
+        with self.assertRaises(WorkerProtocolError):
+            fast_claim.validate_for(
+                short_request, expected_worker_id="worker-1", elapsed_ns=10_000_001
+            )
 
 
     def test_validate_for_requires_trusted_host_elapsed_time(self):
