@@ -434,21 +434,24 @@ class SQLiteSessionStore(SessionStore):
         self, session_id: str, principal_id: str, owner_token: str,
         lease_seconds: float = 30.0,
     ) -> str:
-        self._require_owner(session_id, principal_id)
-        return self.claim_turn_lease(session_id, owner_token, lease_seconds)
+        return self._claim_turn_lease(
+            session_id, owner_token, lease_seconds, principal_id=principal_id,
+        )
 
     def renew_turn_lease_for_principal(
         self, session_id: str, principal_id: str, owner_token: str,
         lease_seconds: float = 30.0,
     ) -> str:
-        self._require_owner(session_id, principal_id)
-        return self.renew_turn_lease(session_id, owner_token, lease_seconds)
+        return self._renew_turn_lease(
+            session_id, owner_token, lease_seconds, principal_id=principal_id,
+        )
 
     def release_turn_lease_for_principal(
         self, session_id: str, principal_id: str, owner_token: str,
     ) -> bool:
-        self._require_owner(session_id, principal_id)
-        return self.release_turn_lease(session_id, owner_token)
+        return self._release_turn_lease(
+            session_id, owner_token, principal_id=principal_id,
+        )
 
     def get(self, session_id: str) -> Session:
         if not isinstance(session_id, str) or not session_id.strip():
