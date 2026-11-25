@@ -243,7 +243,7 @@ def run_doctor(root: Path, json_output: bool = False) -> int:
                 if least_privilege else "expected explicit contents: read permission",
             ))
             required_push_branches = {"main"}
-            required_pull_request_branches = {"main", "recovery/non-x5-foundation"}
+            required_pull_request_branches = {"main"}
             push_branches = _workflow_event_branches(workflow, "push")
             pull_request_branches = _workflow_event_branches(workflow, "pull_request")
             triggers_verified = (
