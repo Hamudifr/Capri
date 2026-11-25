@@ -26,7 +26,7 @@ These are reusable engineering components. Their presence does not mean Capri is
 
 ## Quick start
 
-Capri supports Python 3.11 and newer. The Python package declares no runtime dependencies.
+Capri currently supports Python 3.15.x only. Older and newer Python minor versions are intentionally outside the supported range until the support policy is updated. The Python package declares no runtime dependencies.
 
 Install from a checkout:
 
