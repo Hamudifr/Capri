@@ -97,7 +97,7 @@ class GoalCompletionReport:
     task_current_step: int | None
     task_total_steps: int
     task_completed_steps: int
-    task_attempts: int
+    current_step_attempts: int
     task_cancel_requested: bool
     task_failure_code: str | None
     task_created_at: str | None
@@ -126,7 +126,7 @@ class GoalCompletionReport:
             "task_current_step": self.task_current_step,
             "task_total_steps": self.task_total_steps,
             "task_completed_steps": self.task_completed_steps,
-            "task_attempts": self.task_attempts,
+            "current_step_attempts": self.current_step_attempts,
             "task_cancel_requested": self.task_cancel_requested,
             "task_failure_code": self.task_failure_code,
             "task_created_at": self.task_created_at,
@@ -347,6 +347,8 @@ class GoalCoordinator:
             completion_status = "cancelled"
         elif goal.state == "paused":
             completion_status = "paused"
+        elif task is not None and task.state == "blocked":
+            completion_status = "activation_pending"
         elif task is not None and task.state in {"succeeded", "failed", "cancelled"}:
             completion_status = "reconciliation_pending"
         elif task is not None:
@@ -358,6 +360,7 @@ class GoalCoordinator:
             "awaiting_owner_acceptance": "owner_acceptance_required",
             "uncertain": "owner_or_host_reconciliation_required",
             "reconciliation_pending": "host_reconciliation_required",
+            "activation_pending": "host_recovery_required",
             "partial": "owner_review_required",
             "failed": "owner_review_required",
             "inconsistent": "owner_review_required",
@@ -390,7 +393,7 @@ class GoalCoordinator:
             task_current_step=task.current_step if task is not None else None,
             task_total_steps=total_steps,
             task_completed_steps=completed_steps,
-            task_attempts=task.attempts if task is not None else 0,
+            current_step_attempts=task.attempts if task is not None else 0,
             task_cancel_requested=task.cancel_requested if task is not None else False,
             task_failure_code=task.error_code if task is not None else None,
             task_created_at=task.created_at if task is not None else None,
