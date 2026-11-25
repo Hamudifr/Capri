@@ -494,7 +494,7 @@ class NotionMemoryAdapter:
                     raise MemoryConflictError("predecessor already has a different correction successor")
                 if child.status == "archived":
                     return child
-                return self.reconcile_correction(child.memory_id)
+                return self._reconcile_correction_locked(child.memory_id)
             if old.status != "active":
                 raise MemoryConflictError("only the active Notion memory head can be corrected")
             new = self._create(**expected, status="review", supersedes_id=old.memory_id)
@@ -542,48 +542,51 @@ class NotionMemoryAdapter:
 
     def reconcile_correction(self, replacement_id: str) -> MemoryRecord:
         """Idempotently finish a Review → archive predecessor → activate replacement flow."""
-        _validate_memory_id(replacement_id, "replacement_id")
         with self._lock:
-            replacement = self.get(replacement_id)
-            if replacement.supersedes_id is None:
-                raise MemoryConflictError("replacement has no predecessor")
-            predecessor = self.get(replacement.supersedes_id)
-            children = tuple(
-                record for record in self._list_all()
-                if record.supersedes_id == predecessor.memory_id
-            )
-            if len(children) != 1 or children[0].memory_id != replacement.memory_id:
-                raise MemoryConflictError("correction lineage is missing or has competing successors")
-            try:
-                if predecessor.status == "active" and replacement.status == "review":
-                    self.archive(predecessor.memory_id)
-                    predecessor = self.get(predecessor.memory_id)
-                if predecessor.status == "archived" and replacement.status == "review":
-                    activated = self._record_from_page(
-                        self._transport.update_page(replacement.memory_id, {"Status": "Active"})
-                    )
-                    if (
-                        activated.memory_id != replacement.memory_id
-                        or activated.status != "active"
-                        or not self._same_memory_payload(activated, replacement)
-                    ):
-                        raise MemoryValidationError("Notion replacement activation was not confirmed")
-                    replacement = self.get(replacement.memory_id)
+            return self._reconcile_correction_locked(replacement_id)
+
+    def _reconcile_correction_locked(self, replacement_id: str) -> MemoryRecord:
+        _validate_memory_id(replacement_id, "replacement_id")
+        replacement = self.get(replacement_id)
+        if replacement.supersedes_id is None:
+            raise MemoryConflictError("replacement has no predecessor")
+        predecessor = self.get(replacement.supersedes_id)
+        children = tuple(
+            record for record in self._list_all()
+            if record.supersedes_id == predecessor.memory_id
+        )
+        if len(children) != 1 or children[0].memory_id != replacement.memory_id:
+            raise MemoryConflictError("correction lineage is missing or has competing successors")
+        try:
+            if predecessor.status == "active" and replacement.status == "review":
+                self.archive(predecessor.memory_id)
+                predecessor = self.get(predecessor.memory_id)
+            if predecessor.status == "archived" and replacement.status == "review":
+                activated = self._record_from_page(
+                    self._transport.update_page(replacement.memory_id, {"Status": "Active"})
+                )
                 if (
-                    predecessor.status == "archived"
-                    and replacement.status == "active"
-                    and self._same_memory_payload(self.get(predecessor.memory_id), predecessor)
-                    and self._same_memory_payload(self.get(replacement.memory_id), replacement)
+                    activated.memory_id != replacement.memory_id
+                    or activated.status != "active"
+                    or not self._same_memory_payload(activated, replacement)
                 ):
-                    return replacement
-                raise MemoryValidationError("Notion correction remains incomplete or ambiguous")
-            except Exception as exc:
-                if isinstance(exc, MemorySyncError):
-                    raise
-                raise MemorySyncError(
-                    "Notion correction reconciliation is incomplete; retry with the same replacement ID",
-                    replacement.memory_id,
-                ) from exc
+                    raise MemoryValidationError("Notion replacement activation was not confirmed")
+                replacement = self.get(replacement.memory_id)
+            if (
+                predecessor.status == "archived"
+                and replacement.status == "active"
+                and self._same_memory_payload(self.get(predecessor.memory_id), predecessor)
+                and self._same_memory_payload(self.get(replacement.memory_id), replacement)
+            ):
+                return replacement
+            raise MemoryValidationError("Notion correction remains incomplete or ambiguous")
+        except Exception as exc:
+            if isinstance(exc, MemorySyncError):
+                raise
+            raise MemorySyncError(
+                "Notion correction reconciliation is incomplete; retry with the same replacement ID",
+                replacement.memory_id,
+            ) from exc
 
     def domain_events(self, memory_id: str | None = None) -> tuple[DomainEvent, ...]:
         """Project immutable record identity and supersession links from Notion pages.
