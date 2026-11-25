@@ -700,5 +700,49 @@ class WorkerRegistryTests(unittest.TestCase):
         self.assertEqual(registry.get("worker-1").health.state, "starting")
 
 
+    def test_task_bound_reservations_are_unique_and_recoverable_by_task(self):
+        self.register_healthy(max_concurrency=2)
+        pending = self.registry.reserve_eligible(
+            "math.factorial",
+            protocol_version=1,
+            authorized_worker_ids={"worker-1"},
+            principal_id="alice",
+            task_id="task-1",
+            now_ns=self.now,
+        )
+        self.assertEqual(pending.principal_id, "alice")
+        self.assertEqual(pending.task_id, "task-1")
+        self.assertEqual(
+            self.registry.get_reservation_for_task("alice", "task-1"),
+            pending,
+        )
+        with self.assertRaises(WorkerConflictError):
+            self.registry.reserve_eligible(
+                "math.factorial",
+                protocol_version=1,
+                authorized_worker_ids={"worker-1"},
+                principal_id="alice",
+                task_id="task-1",
+                now_ns=self.now,
+            )
+        self.assertEqual(self.registry.integrity_check(), "ephemeral")
+
+    def test_expire_reservations_returns_expired_pending_holds(self):
+        self.register_healthy()
+        pending = self.registry.reserve_eligible(
+            "math.factorial",
+            protocol_version=1,
+            authorized_worker_ids={"worker-1"},
+            principal_id="alice",
+            task_id="task-expiring",
+            now_ns=self.now,
+        )
+        expired = self.registry.expire_reservations(
+            now_ns=self.now + 10_000_000_001,
+        )
+        self.assertEqual(expired, (pending,))
+        self.assertIsNone(self.registry.get_reservation(pending.token, now_ns=self.now + 10_000_000_001))
+
+
 if __name__ == "__main__":
     unittest.main()
