@@ -22,6 +22,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Iterable, Literal
 
+from .validation import contains_surrogate
+
 
 Outcome = Literal["verified_success", "verified_failure", "unverified"]
 Split = Literal["train", "validation", "test"]
@@ -309,7 +311,7 @@ class LearningStore:
         for value, limit, label in fields:
             if (
                 not isinstance(value, str) or not value or len(value) > limit
-                or any(0xD800 <= ord(ch) <= 0xDFFF for ch in value)
+                or contains_surrogate(value)
             ):
                 raise LearningDataError(f"{label} must be bounded valid text")
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", consent.consent_id):
@@ -826,7 +828,7 @@ class LearningStore:
             for value, label in ((artifact_path, "artifact path"), (staging_path, "staging path")):
                 if not isinstance(value, str) or len(value) > 4096:
                     raise LearningDataError(f"backup contains an invalid {label}")
-                if any(0xD800 <= ord(char) <= 0xDFFF for char in value):
+                if contains_surrogate(value):
                     raise LearningDataError(f"backup contains an invalid {label}")
                 if value and not Path(value).is_absolute():
                     raise LearningDataError(f"backup contains a non-absolute {label}")
