@@ -985,48 +985,58 @@ class SQLiteTaskStore:
             finally:
                 connection.close()
 
+    def _finish_step_in_transaction(
+        self, connection: sqlite3.Connection, claim: TaskClaim,
+        result: Any, stamp: str,
+    ) -> None:
+        """Apply a task result using the caller's already-open write transaction."""
+        if type(claim) is not TaskClaim:
+            raise TaskValidationError("claim must be a TaskClaim")
+        _, decoded = _json(result, label="step result")
+        row = connection.execute(
+            """SELECT tasks.state,tasks.lease_owner,tasks.lease_until,
+            tasks.current_step,tasks.attempts,tasks.plan_json,
+            task_owners.principal_id,tasks.cancel_requested,tasks.results_json
+            FROM tasks LEFT JOIN task_owners
+            ON task_owners.task_id=tasks.task_id WHERE tasks.task_id=?""",
+            (claim.task_id,),
+        ).fetchone()
+        if not row:
+            raise TaskNotFoundError("task does not exist")
+        plan = self._assert_claim_matches(claim, row[:7], stamp)
+        cancel, results_json = row[7], row[8]
+        index = claim.step_index
+        results = json.loads(results_json)
+        results.append(decoded)
+        next_index = index + 1
+        if cancel:
+            next_state = "cancelled"
+        elif next_index >= len(plan):
+            next_state = "succeeded"
+        else:
+            next_state = "queued"
+        connection.execute(
+            """UPDATE tasks SET state=?,current_step=?,attempts=0,results_json=?,updated_at=?,
+            available_at=?,lease_owner=NULL,lease_until=NULL,error_code=NULL WHERE task_id=?""",
+            (next_state, next_index, json.dumps(results, ensure_ascii=False, allow_nan=False,
+             sort_keys=True, separators=(",", ":")), stamp, stamp, claim.task_id),
+        )
+        connection.execute(
+            "INSERT INTO task_events(task_id,timestamp,state,step_index,attempt) VALUES(?,?,?,?,?)",
+            (claim.task_id, stamp, next_state, index, claim.attempt),
+        )
+
     def finish_step(self, claim: TaskClaim, result: Any,
                     now: datetime | None = None) -> TaskRecord:
         if type(claim) is not TaskClaim:
             raise TaskValidationError("claim must be a TaskClaim")
-        result_json, decoded = _json(result, label="step result")
+        _, decoded = _json(result, label="step result")
         stamp = _iso(now or _now())
         with self._lock:
             connection = self._connect()
             try:
                 connection.execute("BEGIN IMMEDIATE")
-                row = connection.execute(
-                    """SELECT tasks.state,tasks.lease_owner,tasks.lease_until,
-                    tasks.current_step,tasks.attempts,tasks.plan_json,
-                    task_owners.principal_id,tasks.cancel_requested,tasks.results_json
-                    FROM tasks LEFT JOIN task_owners
-                    ON task_owners.task_id=tasks.task_id WHERE tasks.task_id=?""",
-                    (claim.task_id,),
-                ).fetchone()
-                if not row:
-                    raise TaskNotFoundError("task does not exist")
-                plan = self._assert_claim_matches(claim, row[:7], stamp)
-                cancel, results_json = row[7], row[8]
-                index = claim.step_index
-                results = json.loads(results_json)
-                results.append(decoded)
-                next_index = index + 1
-                if cancel:
-                    next_state = "cancelled"
-                elif next_index >= len(plan):
-                    next_state = "succeeded"
-                else:
-                    next_state = "queued"
-                connection.execute(
-                    """UPDATE tasks SET state=?,current_step=?,attempts=0,results_json=?,updated_at=?,
-                    available_at=?,lease_owner=NULL,lease_until=NULL,error_code=NULL WHERE task_id=?""",
-                    (next_state, next_index, json.dumps(results, ensure_ascii=False, allow_nan=False,
-                     sort_keys=True, separators=(",", ":")), stamp, stamp, claim.task_id),
-                )
-                connection.execute(
-                    "INSERT INTO task_events(task_id,timestamp,state,step_index,attempt) VALUES(?,?,?,?,?)",
-                    (claim.task_id, stamp, next_state, index, claim.attempt),
-                )
+                self._finish_step_in_transaction(connection, claim, decoded, stamp)
                 connection.execute("COMMIT")
                 return self.get(claim.task_id)
             except Exception:
