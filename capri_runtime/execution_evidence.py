@@ -476,3 +476,145 @@ class SQLiteExecutionEvidenceJournal:
             return "ok"
         except Exception:
             return "execution evidence integrity failed"
+
+
+def validate_execution_evidence_snapshot(connection: Any) -> None:
+    """Validate journal structure and signed-payload bindings in a task-store backup.
+
+    The host journal's integrity_check additionally verifies each HMAC with the
+    live key provider. Backup validation deliberately does not require key
+    material to be copied into the database or backup artifact.
+    """
+    table = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='execution_evidence_events'"
+    ).fetchone()
+    if table is None:
+        return
+    columns_info = connection.execute("PRAGMA table_info(execution_evidence_events)").fetchall()
+    columns = {row[1] for row in columns_info}
+    required = {
+        "event_id", "principal_id", "task_id", "step_index", "attempt",
+        "claim_sha256", "strategy_class", "strategy_id", "strategy_version",
+        "task_family", "scenario", "outcome", "safety_violation", "tool_calls",
+        "context_tokens", "estimated_cost_units", "latency_ms", "result_sha256",
+        "created_at", "key_id", "event_sha256", "signature", "payload_json",
+    }
+    if not required.issubset(columns):
+        raise StrategyStoreError("execution evidence journal schema is incomplete")
+    if [row[1] for row in columns_info if row[5]] != ["event_id"]:
+        raise StrategyStoreError("execution evidence journal primary key is invalid")
+    triggers = {
+        row[0]: (row[1] or "").upper()
+        for row in connection.execute(
+            "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND tbl_name='execution_evidence_events'"
+        ).fetchall()
+    }
+    for name, operation in (
+        ("execution_evidence_immutable_update", "UPDATE"),
+        ("execution_evidence_immutable_delete", "DELETE"),
+    ):
+        sql = triggers.get(name, "")
+        if f"BEFORE {operation} ON EXECUTION_EVIDENCE_EVENTS" not in sql or "RAISE(ABORT" not in sql:
+            raise StrategyStoreError("execution evidence append-only protections are missing")
+    unique_constraint = False
+    for index in connection.execute("PRAGMA index_list(execution_evidence_events)").fetchall():
+        if index[2] != 1 or index[4] != 0:
+            continue
+        name = str(index[1]).replace('"', '""')
+        indexed = [
+            row[2] for row in connection.execute(f'PRAGMA index_info("{name}")').fetchall()
+        ]
+        if indexed == ["task_id", "step_index", "attempt", "strategy_id"]:
+            unique_constraint = True
+            break
+    if not unique_constraint:
+        raise StrategyStoreError("execution evidence idempotency constraint is missing")
+
+    rows = connection.execute(
+        """SELECT event_id,principal_id,task_id,step_index,attempt,claim_sha256,
+        strategy_class,strategy_id,strategy_version,task_family,scenario,outcome,
+        safety_violation,tool_calls,context_tokens,estimated_cost_units,latency_ms,
+        result_sha256,created_at,key_id,event_sha256,signature,payload_json
+        FROM execution_evidence_events"""
+    ).fetchall()
+    expected_keys = {
+        "event_schema", "event_id", "principal_id", "task_id", "step_index",
+        "attempt", "claim_sha256", "strategy_class", "strategy_id",
+        "strategy_version", "task_family", "scenario", "outcome",
+        "safety_violation", "tool_calls", "context_tokens",
+        "estimated_cost_units", "latency_ms", "result_sha256", "created_at", "key_id",
+    }
+    for row in rows:
+        (
+            event_id, principal, task_id, step_index, attempt, claim_sha,
+            strategy_class, strategy_id, strategy_version, task_family, scenario,
+            outcome, safety, tool_calls, context_tokens, cost_units, latency,
+            result_sha, created_at, key_id, event_sha, signature, payload_json,
+        ) = row
+        try:
+            encoded = payload_json.encode("utf-8", errors="strict")
+            if len(encoded) > 16_384 or hashlib.sha256(encoded).hexdigest() != event_sha:
+                raise StrategyStoreError("execution evidence payload digest is invalid")
+            payload = json.loads(payload_json)
+            if type(payload) is not dict or set(payload) != expected_keys or _canonical(payload) != payload_json:
+                raise StrategyStoreError("execution evidence payload is not canonical")
+            if (
+                payload["event_schema"] != "capri.execution-evidence.v1"
+                or payload["event_id"] != event_id
+                or payload["principal_id"] != principal
+                or payload["task_id"] != task_id
+                or payload["step_index"] != step_index
+                or payload["attempt"] != attempt
+                or payload["claim_sha256"] != claim_sha
+                or payload["strategy_class"] != strategy_class
+                or payload["strategy_id"] != strategy_id
+                or payload["strategy_version"] != strategy_version
+                or payload["task_family"] != task_family
+                or payload["scenario"] != scenario
+                or payload["outcome"] != outcome
+                or payload["safety_violation"] is not (safety == 1)
+                or payload["tool_calls"] != tool_calls
+                or payload["context_tokens"] != context_tokens
+                or payload["estimated_cost_units"] != cost_units
+                or payload["latency_ms"] != latency
+                or payload["result_sha256"] != result_sha
+                or payload["created_at"] != created_at
+                or payload["key_id"] != key_id
+            ):
+                raise StrategyStoreError("execution evidence payload does not match its immutable row")
+            _text(event_id, "event_id", 32)
+            _text(principal, "principal_id", 128)
+            _text(task_id, "task_id", 64)
+            if not re.fullmatch(r"[0-9a-f]{32}", event_id):
+                raise StrategyStoreError("execution evidence event identifier is invalid")
+            if type(step_index) is not int or step_index < 0 or type(attempt) is not int or attempt < 1:
+                raise StrategyStoreError("execution evidence task progress is invalid")
+            for digest in (claim_sha, result_sha, event_sha):
+                if type(digest) is not str or not _SHA256.fullmatch(digest):
+                    raise StrategyStoreError("execution evidence digest is invalid")
+            if (
+                not _IDENTIFIER.fullmatch(strategy_class)
+                or not _IDENTIFIER.fullmatch(strategy_id)
+                or not _VERSION.fullmatch(strategy_version)
+                or strategy_version == "unversioned"
+                or task_family not in _ALLOWED_FAMILIES
+                or outcome not in _ALLOWED_OUTCOMES
+                or type(safety) is not int or safety not in (0, 1)
+                or type(tool_calls) is not int or not 0 <= tool_calls <= 10**12
+                or type(context_tokens) is not int or not 0 <= context_tokens <= 10**12
+                or type(cost_units) is not int or not 0 <= cost_units <= 10**12
+                or type(latency) is not int or not 0 <= latency <= 10**12
+                or type(signature) is not str or not re.fullmatch(r"[0-9a-f]{64}", signature)
+                or type(key_id) is not str or not _KEY_ID.fullmatch(key_id)
+            ):
+                raise StrategyStoreError("execution evidence row metadata is invalid")
+            _text(scenario, "scenario", 128)
+            _text(strategy_version, "strategy_version", 64)
+            _text(created_at, "created_at", 64)
+            parsed = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+            if parsed.tzinfo is None or parsed.utcoffset() is None:
+                raise StrategyStoreError("execution evidence timestamp must include a timezone")
+        except StrategyStoreError:
+            raise
+        except Exception:
+            raise StrategyStoreError("execution evidence backup contains malformed records") from None
