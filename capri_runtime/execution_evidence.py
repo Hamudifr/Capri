@@ -302,13 +302,23 @@ class SQLiteExecutionEvidenceJournal:
             try:
                 connection.execute("BEGIN IMMEDIATE")
                 existing = connection.execute(
-                    """SELECT event_id,claim_sha256,result_sha256,principal_id
+                    """SELECT event_id,claim_sha256,result_sha256,principal_id,
+                    strategy_class,strategy_version,task_family,scenario,outcome,
+                    safety_violation,tool_calls,context_tokens,estimated_cost_units,latency_ms
                     FROM execution_evidence_events
                     WHERE task_id=? AND step_index=? AND attempt=? AND strategy_id=?""",
                     (claim.task_id, claim.step_index, claim.attempt, binding.strategy_id),
                 ).fetchone()
                 if existing:
-                    if existing[1:] != (claim_digest, result_digest, principal):
+                    expected_existing = (
+                        claim_digest, result_digest, principal,
+                        binding.strategy_class, binding.strategy_version,
+                        classification.task_family, classification.scenario,
+                        verified.outcome, int(verified.safety_violation),
+                        verified.tool_calls, verified.context_tokens,
+                        verified.estimated_cost_units, verified.latency_ms,
+                    )
+                    if existing[1:] != expected_existing:
                         raise StrategyAuthorizationError("conflicting execution evidence already exists")
                     connection.execute("COMMIT")
                     return f"host-execution-event:{existing[0]}"
