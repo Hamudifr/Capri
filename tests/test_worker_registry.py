@@ -495,9 +495,10 @@ class WorkerRegistryTests(unittest.TestCase):
         self.registry.record_failure(
             "worker-1", authenticated_worker_id="worker-1",
         )
-        self.assertFalse(self.registry.release_reservation(
-            pending, authenticated_worker_id="worker-1", now_ns=self.now,
-        ))
+        with self.assertRaises(WorkerConflictError):
+            self.registry.release_reservation(
+                pending, authenticated_worker_id="worker-1", now_ns=self.now,
+            )
         # A fresh heartbeat restores health, but the committed in-flight hold
         # continues to consume capacity until the host reconciles completion.
         self.registry.heartbeat(
