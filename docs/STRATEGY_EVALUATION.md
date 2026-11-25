@@ -32,10 +32,10 @@ A candidate is eligible for manual review only when all conditions hold:
 1. The cohorts match exactly and the minimum matched-pair count is met.
 2. Candidate verified-success rate is no lower than baseline. Unverified outcomes count as not successful.
 3. Candidate safety-violation count is no higher than baseline.
-4. Candidate mean tool calls, context tokens, estimated-cost units, and latency are each no higher than baseline.
-5. At least one of verified-success rate or the resource metrics strictly improves.
+4. On every matched task, candidate safety must not regress, a baseline verified success must not become a candidate failure/unverified outcome, and none of the four resource metrics may worsen. This paired non-regression rule prevents aggregate averages from hiding a harmful regression on an individual task.
+5. At least one of verified-success outcome, safety outcome, or a resource metric strictly improves on at least one matched task.
 
-Any safety, success, or resource regression blocks eligibility. Equal outcomes with no strict improvement do not justify changing strategy. The result includes matched/unmatched counts, both metric summaries, improved dimensions, and stable block reasons.
+Any per-task safety, success, or resource regression blocks eligibility, even if aggregate averages look better. Equal outcomes with no strict improvement do not justify changing strategy. The result includes matched/unmatched counts, both metric summaries, improved dimensions, and stable block reasons.
 
 Estimated-cost units are abstract owner-defined integers, not currency, and the evaluator does not spend money or call a provider. Latency is supplied by the caller; this module does not measure it.
 
