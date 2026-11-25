@@ -319,6 +319,18 @@ class SQLiteGoalStore:
                     BEFORE INSERT ON goal_task_links
                     WHEN EXISTS (SELECT 1 FROM goal_task_links WHERE goal_id=NEW.goal_id OR task_id=NEW.task_id)
                     BEGIN SELECT RAISE(ABORT, 'goal task links are immutable'); END""")
+                connection.execute("""CREATE TRIGGER IF NOT EXISTS goal_evidence_immutable_update
+                    BEFORE UPDATE ON goal_evidence
+                    BEGIN SELECT RAISE(ABORT, 'goal evidence is append-only'); END""")
+                connection.execute("""CREATE TRIGGER IF NOT EXISTS goal_evidence_immutable_delete
+                    BEFORE DELETE ON goal_evidence
+                    BEGIN SELECT RAISE(ABORT, 'goal evidence is append-only'); END""")
+                connection.execute("""CREATE TRIGGER IF NOT EXISTS goal_event_immutable_update
+                    BEFORE UPDATE ON goal_events
+                    BEGIN SELECT RAISE(ABORT, 'goal events are append-only'); END""")
+                connection.execute("""CREATE TRIGGER IF NOT EXISTS goal_event_immutable_delete
+                    BEFORE DELETE ON goal_events
+                    BEGIN SELECT RAISE(ABORT, 'goal events are append-only'); END""")
                 connection.execute("""CREATE TRIGGER IF NOT EXISTS goal_owner_immutable_update
                     BEFORE UPDATE ON goal_owners
                     BEGIN SELECT RAISE(ABORT, 'goal ownership is immutable'); END""")
