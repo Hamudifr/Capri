@@ -37,6 +37,9 @@ build/test_core: tests/test_core.c build/capri_core.o
 build/test_session_store: tests/test_session_store.c build/capri_session_store.o
 	$(CC) $(CPPFLAGS) $(CFLAGS) -pthread $^ $(LDLIBS) -o $@
 
+build/session_store_parity: tests/session_store_parity.c build/libcapri_runtime.a
+	$(CC) $(CPPFLAGS) $(CFLAGS) $^ $(LDLIBS) -o $@
+
 test: build/test_ccel build/test_core build/test_session_store
 	./build/test_ccel
 	./build/test_core
