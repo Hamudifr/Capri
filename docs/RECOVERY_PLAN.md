@@ -44,8 +44,8 @@ This is a timestamped snapshot of the repository state observed before this docu
 - Draft PR #121: memory-to-model input ordering mitigation; source/test/docs readback verified, but no local tests or exact-head CI. It is 0 commits behind current main.
 - Draft PR #122: runtime architecture/lifecycle documentation reconciliation; docs-only. This branch is synchronized to current main; no exact-head CI.
 - Draft PR #124: principal-owned durable task execution and claim-tampering hardening; source/test readback verified, but the latest prior code-parent run failed with unavailable logs and the current head has no CI. It is 0 commits behind current main.
-- Keep all three PRs Draft/unmerged until their relevant exact-head validation is complete. Do not trigger private Actions until cost-free execution is established.
-- Branch-protection state is unknown through the current integration (403); rulesets require GitHub Pro or public visibility. Do not upgrade or expose the repository to enable protection.
+- Keep all three PRs Draft/unmerged until their relevant exact-head validation is complete. The repository is now public, and standard GitHub-hosted `ubuntu-latest` CI is permitted for exact-head validation. Merge only after required checks pass, the exact diff is reviewed, and recovery is practical. Paid/larger runners remain approval-gated.
+- Historical checkpoint: branch-protection state was not readable through the connected integration while the repository was private. The repository is now public, so public-repository branch protection/rulesets may be configured without upgrading. Current `main` metadata reports `protected=false`; this connector exposes no branch-protection write action, so no protection change is claimed here.
 
 ### Remaining work, ordered
 
@@ -64,7 +64,7 @@ The owner explicitly authorizes Capri to choose, implement, test, self-review, b
 
 This engineering authorization does not itself approve unresolved product/runtime scope decisions. Keep product requirements marked unapproved until the owner explicitly approves them.
 
-The retained financial boundary is strict: no purchases, paid subscriptions, upgrades, charges, or personal/payment information for transactions. Verify any potentially billable operation is free before triggering it; if cost is uncertain, do not trigger it. Keep the repository private. Do not expose credentials, bypass platform controls, perform destructive bulk deletion, rotate secrets, change account permissions, or rewrite history without a concrete security need and a safely scoped plan. Preserve the protected X5 clean-room boundary absolutely.
+The retained financial boundary is strict: no purchases, paid subscriptions, upgrades, charges, or personal/payment information for transactions without explicit approval. The repository is currently public; do not change its visibility without explicit approval. Standard public-repository GitHub-hosted `ubuntu-latest` workflows are permitted. Paid/larger runners or any billable compute remain approval-gated, and if a workflow's runner or billing behavior is uncertain, inspect it before triggering. Do not expose credentials, bypass platform controls, perform destructive bulk deletion, rotate secrets, expand account/collaborator permissions, or rewrite history without a concrete security need and a safely scoped plan. Do not revive superseded workstreams solely because they appear in historical records; require explicit owner reintroduction.
 
 
 ---
