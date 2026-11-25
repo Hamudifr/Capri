@@ -150,7 +150,7 @@ class NotionMemoryAdapter:
             raise MemoryValidationError("correction_lock must be a context-manager lock")
         self._transport = transport
         self._max_records = max_records
-        self._lock = correction_lock or _shared_transport_lock(transport)
+        self._lock = correction_lock if correction_lock is not None else _shared_transport_lock(transport)
 
     @staticmethod
     def _timestamp(value: object, field: str) -> str:
