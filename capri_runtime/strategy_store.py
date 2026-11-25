@@ -250,13 +250,17 @@ class SQLiteStrategyStore:
         task_store: SQLiteTaskStore,
         *,
         approval_verifier: Callable[[StrategyActivationGrant], bool] | None = None,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         if type(task_store) is not SQLiteTaskStore:
             raise StrategyStoreError("SQLiteStrategyStore requires the exact trusted SQLiteTaskStore")
         if approval_verifier is not None and not callable(approval_verifier):
             raise StrategyStoreError("approval_verifier must be callable")
+        if clock is not None and not callable(clock):
+            raise StrategyStoreError("clock must be callable")
         self._task_store = task_store
         self._approval_verifier = approval_verifier
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = task_store._lock
         self._initialize()
 
@@ -267,6 +271,15 @@ class SQLiteStrategyStore:
 
     def _connect(self) -> sqlite3.Connection:
         return self._task_store._connect()
+
+    def _now(self) -> datetime:
+        try:
+            value = self._clock()
+        except Exception:
+            raise StrategyAuthorizationError("trusted strategy clock is unavailable") from None
+        if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+            raise StrategyAuthorizationError("trusted strategy clock must return an aware datetime")
+        return value.astimezone(timezone.utc)
 
     def _initialize(self) -> None:
         with self._lock:
@@ -574,7 +587,7 @@ class SQLiteStrategyStore:
         _grant_payload(grant)
         if grant.principal_id != principal or grant.action != required_action:
             raise StrategyAuthorizationError("approval grant is not bound to this principal and action")
-        current_time = now or datetime.now(timezone.utc)
+        current_time = now.astimezone(timezone.utc) if now is not None else self._now()
         if not isinstance(current_time, datetime) or current_time.tzinfo is None or current_time.utcoffset() is None:
             raise StrategyAuthorizationError("current time must be timezone-aware")
         current_time = current_time.astimezone(timezone.utc)
@@ -595,6 +608,9 @@ class SQLiteStrategyStore:
             connection = self._connect()
             try:
                 connection.execute("BEGIN IMMEDIATE")
+                current_time = self._now()
+                if issued > current_time or expires <= current_time:
+                    raise StrategyAuthorizationError("approval grant expired before the transition")
                 last_event = self._verify_chain(connection, principal, grant.strategy_class)
                 active = connection.execute(
                     """SELECT strategy_id,version,generation FROM strategy_active
@@ -687,6 +703,9 @@ class SQLiteStrategyStore:
                     (principal, grant.strategy_class, grant.strategy_id, grant.version,
                      next_generation, event_id),
                 )
+                commit_check_time = self._now()
+                if issued > commit_check_time or expires <= commit_check_time:
+                    raise StrategyAuthorizationError("approval grant expired before commit")
                 connection.execute("COMMIT")
             except Exception:
                 if connection.in_transaction:
