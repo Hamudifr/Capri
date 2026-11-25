@@ -249,6 +249,32 @@ class SQLiteStrategyStoreTests(unittest.TestCase):
                     "bob", "reasoning", "baseline", "1.0", config,
                 )
 
+    def test_strategy_versions_and_evaluations_are_append_only(self):
+        connection = self.task_store._connect()
+        try:
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    "UPDATE strategy_versions SET config_json='{}' "
+                    "WHERE principal_id='alice' AND strategy_id='baseline'"
+                )
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    "UPDATE strategy_evaluations SET summary_json='{}' "
+                    "WHERE principal_id='alice'"
+                )
+        finally:
+            connection.close()
+
+    def test_approval_grant_lifetime_cannot_exceed_fifteen_minutes(self):
+        now = datetime.now(timezone.utc)
+        grant = replace(
+            self.grant(now=now),
+            issued_at=(now - timedelta(seconds=1)).isoformat(),
+            expires_at=(now + timedelta(minutes=16)).isoformat(),
+        )
+        with self.assertRaises(StrategyAuthorizationError):
+            self.store.activate_for_principal("alice", grant)
+
     def test_baseline_version_is_immutable(self):
         with self.assertRaises(StrategyConflictError):
             self.store.register_baseline_for_principal(
