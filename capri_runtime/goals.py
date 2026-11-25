@@ -42,15 +42,16 @@ class GoalIdempotencyConflict(GoalError):
 
 _GOAL_STATES = {
     "accepted", "planning", "planned", "running", "paused", "cancelling",
-    "succeeded", "failed", "cancelled", "reconciliation_required",
+    "awaiting_verification", "succeeded", "failed", "cancelled", "reconciliation_required",
 }
 _TRANSITIONS = {
     "accepted": {"planning", "cancelled"},
     "planning": {"planned", "paused", "failed", "cancelled"},
     "planned": {"running", "paused", "cancelled"},
-    "running": {"paused", "succeeded", "failed", "cancelled", "cancelling", "reconciliation_required"},
+    "running": {"paused", "awaiting_verification", "failed", "cancelled", "cancelling", "reconciliation_required"},
     "paused": {"planning", "planned", "running", "cancelled"},
-    "cancelling": {"cancelled", "reconciliation_required", "failed", "succeeded"},
+    "cancelling": {"cancelled", "reconciliation_required", "failed", "awaiting_verification"},
+    "awaiting_verification": {"succeeded", "failed", "cancelled", "reconciliation_required"},
     "reconciliation_required": {"running", "failed", "cancelled"},
     "succeeded": set(), "failed": set(), "cancelled": set(),
 }
@@ -622,7 +623,7 @@ class SQLiteGoalStore:
         principal_id = _text(principal_id, "principal_id", 128)
         _text(evidence_type, "evidence_type", 64)
         _text(reference, "evidence reference", 512)
-        if type(step_index) is not int or not 0 <= step_index < 32:
+        if type(step_index) is not int or not -1 <= step_index < 32:
             raise GoalValidationError("evidence step_index must be between 0 and 31")
         stamp = _stamp(now)
         with self._lock:
@@ -726,7 +727,7 @@ class SQLiteGoalStore:
             _text(evidence_type, "evidence type", 64)
             _text(reference, "evidence reference", 512)
             _text(created_at, "evidence timestamp", 64)
-            if type(step_index) is not int or not 0 <= step_index < 32:
+            if type(step_index) is not int or not -1 <= step_index < 32:
                 raise GoalValidationError("goal backup contains invalid evidence step index")
         event_rows = connection.execute(
             "SELECT state,version,event_type FROM goal_events"
