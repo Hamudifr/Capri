@@ -203,6 +203,43 @@ class StrategyEvaluationTests(unittest.TestCase):
         with self.assertRaises(StrategyEvaluationError):
             evaluate_strategies("baseline", "candidate", cohort(), min_pairs=True)
 
+    def test_cohort_fingerprint_is_order_independent_and_evidence_sensitive(self):
+        records = cohort(candidate_overrides={
+            index: {"estimated_cost_units": 90} for index in range(20)
+        })
+        first = evaluate_strategies("baseline", "candidate", records)
+        reordered = evaluate_strategies("baseline", "candidate", reversed(records))
+        self.assertEqual(first.cohort_sha256, reordered.cohort_sha256)
+        self.assertEqual(len(first.cohort_sha256), 64)
+        self.assertTrue(all(char in "0123456789abcdef" for char in first.cohort_sha256))
+
+        changed = list(records)
+        changed[0] = StrategyObservation(
+            task_id="task-000", scenario="research", strategy_id="baseline",
+            outcome="verified_success", evidence_ref="test://evidence/changed",
+            tool_calls=5, context_tokens=1_000,
+            estimated_cost_units=100, latency_ms=2_000,
+        )
+        changed_result = evaluate_strategies("baseline", "candidate", changed)
+        self.assertEqual(first.to_dict()["baseline"], changed_result.to_dict()["baseline"])
+        self.assertNotEqual(first.cohort_sha256, changed_result.cohort_sha256)
+
+    def test_cohort_fingerprint_includes_unmatched_observations(self):
+        records = cohort()
+        records.pop(-2)
+        first = evaluate_strategies("baseline", "candidate", records)
+        changed = list(records)
+        changed[-1] = StrategyObservation(
+            task_id="task-019", scenario="research", strategy_id="candidate",
+            outcome="verified_success", evidence_ref="test://evidence/changed",
+            tool_calls=5, context_tokens=1_000,
+            estimated_cost_units=100, latency_ms=2_000,
+        )
+        second = evaluate_strategies("baseline", "candidate", changed)
+        self.assertFalse(first.eligible_for_manual_review)
+        self.assertFalse(second.eligible_for_manual_review)
+        self.assertNotEqual(first.cohort_sha256, second.cohort_sha256)
+
     def test_result_is_deterministic_and_does_not_activate_strategy(self):
         records = cohort(candidate_overrides={
             index: {"estimated_cost_units": 90} for index in range(20)

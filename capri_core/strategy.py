@@ -5,6 +5,8 @@ permissions, changes active configuration, or trains/modifies a model.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import asdict, dataclass
 from statistics import fmean
 from typing import Iterable, Literal
@@ -53,6 +55,7 @@ class StrategyEvaluation:
 
     baseline_id: str
     candidate_id: str
+    cohort_sha256: str
     matched_pairs: int
     baseline_unmatched: int
     candidate_unmatched: int
@@ -157,6 +160,25 @@ def evaluate_strategies(
             raise StrategyEvaluationError("duplicate task_id for a strategy")
         cohort[item.task_id] = item
 
+    # Fingerprint the complete validated input, including unmatched records.
+    # Sorting makes the digest independent of caller iteration order.
+    canonical_observations = [
+        asdict(record)
+        for strategy_id in sorted(by_strategy)
+        for _, record in sorted(by_strategy[strategy_id].items())
+    ]
+    manifest = {
+        "schema": "capri.strategy-cohort.v1",
+        "baseline_id": baseline_id,
+        "candidate_id": candidate_id,
+        "observations": canonical_observations,
+    }
+    cohort_sha256 = hashlib.sha256(
+        json.dumps(
+            manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    ).hexdigest()
+
     baseline_records = by_strategy[baseline_id]
     candidate_records = by_strategy[candidate_id]
     if not baseline_records or not candidate_records:
@@ -219,6 +241,7 @@ def evaluate_strategies(
     return StrategyEvaluation(
         baseline_id=baseline_id,
         candidate_id=candidate_id,
+        cohort_sha256=cohort_sha256,
         matched_pairs=len(common_tasks),
         baseline_unmatched=len(baseline_tasks - candidate_tasks),
         candidate_unmatched=len(candidate_tasks - baseline_tasks),
