@@ -17,6 +17,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Mapping
 from uuid import uuid4
 
+from capri_core.validation import contains_surrogate
+
 from .sqlite_backup import backup_sqlite_database
 from .tools import ToolCancelledError
 
@@ -71,7 +73,7 @@ def _assert_json_value(value: Any, depth: int = 0) -> None:
     if value is None or type(value) in (bool, int, float):
         return
     if type(value) is str:
-        if any(0xD800 <= ord(ch) <= 0xDFFF for ch in value):
+        if contains_surrogate(value):
             raise TaskValidationError("JSON strings must contain Unicode scalar values")
         return
     if type(value) is list:
@@ -108,7 +110,7 @@ def _json(value: Any, *, label: str, limit: int = 65_536) -> tuple[str, Any]:
 
 def _text(value: Any, label: str, limit: int) -> str:
     if (type(value) is not str or not value or len(value) > limit
-            or any(0xD800 <= ord(ch) <= 0xDFFF for ch in value)):
+            or contains_surrogate(value)):
         raise TaskValidationError(f"{label} is invalid")
     return value
 
