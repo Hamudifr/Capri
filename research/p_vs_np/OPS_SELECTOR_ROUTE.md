@@ -96,3 +96,8 @@ The soft-weight alternative was tested against an explicit finite expert game.
 This is a finite counterexample to the naive polynomial raw-weight floor, not a no-go theorem for every soft-weight regularizer. It exposes the trade-off precisely: a floor large enough to keep each expert visible ruins concentration; a floor small enough to preserve regret is exponentially small per expert and does not solve the additive-counting problem.
 
 Reproducible artifact: soft_weights_floor_test.py with two unit tests. Across the OPS selector toy and this experiment, all five Python tests pass locally.
+
+
+## Lean formalization status
+
+A separate standard-library-only Lean 4.24.0 package now formalizes the abstract causal-game terminal lemma from the KPT analysis. The GitHub Actions build passed, and axiom-audit checked five declarations under the allowlist {propext, Classical.choice, Quot.sound} (run 45696083281, 2026-11-25). This is an abstract game kernel only; it does not formalize the bounded-arithmetic KPT formula, SAT-specific predicates, search branch, or EF translation.
