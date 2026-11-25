@@ -217,7 +217,10 @@ class SQLiteSessionStore(SessionStore):
         with self._lock:
             connection = self._connect()
             try:
-                if fresh_database:
+                schema_object_count = connection.execute(
+                    "SELECT count(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"
+                ).fetchone()[0]
+                if schema_object_count == 0 and fresh_database:
                     connection.execute("PRAGMA journal_mode=WAL")
                     connection.execute("BEGIN IMMEDIATE")
                     try:
@@ -281,11 +284,15 @@ class SQLiteSessionStore(SessionStore):
                         if connection.in_transaction:
                             connection.execute("ROLLBACK")
                         raise
-                else:
+                elif schema_object_count > 0:
                     # Existing snapshots are validation-only. Never recreate a
                     # missing ownership table or immutable trigger on reopen.
                     self._validate_schema(connection)
                     connection.execute("PRAGMA journal_mode=WAL")
+                else:
+                    # A non-empty database file with no application schema is
+                    # not a fresh database. This also catches dropped schemas.
+                    raise ValidationError("SQLite session database has no supported schema")
             finally:
                 connection.close()
 
