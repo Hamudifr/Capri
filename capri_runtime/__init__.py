@@ -14,6 +14,7 @@ from .worker_registry import (
     InMemoryWorkerRegistry, WorkerConflictError, WorkerDescriptor,
     WorkerHealth, WorkerNotFoundError, WorkerRegistryError, WorkerReservation, WorkerSnapshot,
 )
+from .sqlite_worker_registry import SQLiteWorkerRegistry
 from .runtime import (
     Message,
     ModelAdapter,
@@ -171,6 +172,7 @@ __all__ = [
     "WorkerRequest",
     "WorkerResponse",
     "InMemoryWorkerRegistry",
+    "SQLiteWorkerRegistry",
     "WorkerConflictError",
     "WorkerDescriptor",
     "WorkerHealth",
