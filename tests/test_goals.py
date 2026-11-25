@@ -216,8 +216,9 @@ class SQLiteGoalStoreTests(unittest.TestCase):
             goal.goal_id, "alice", PLAN, frozenset({"collect", "summarize"}),
             expected_version=planning.version, now=NOW,
         )
-        self.store.transition_for_principal(
-            goal.goal_id, "alice", "running", expected_version=planned.version, now=NOW,
+        self.store.link_task_for_principal(
+            goal.goal_id, "alice", "task-projection-1",
+            expected_version=planned.version, now=NOW,
         )
         self.store.record_evidence_for_principal(
             goal.goal_id, "alice", "task_result", "sha256:" + "a" * 64, 0, now=NOW,
