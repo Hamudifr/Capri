@@ -61,7 +61,7 @@ class DomainEvent:
             raise DomainEventValidationError("only CloudEvents specversion 1.0 is supported")
         if re.fullmatch(r"urn:capri:[a-z0-9-]+:[A-Za-z0-9._:-]+", self.source) is None:
             raise DomainEventValidationError("event source must use a bounded Capri URN")
-        if re.fullmatch(r"com\\.capri\\.[a-z0-9]+(?:[.-][a-z0-9]+)*", self.type) is None:
+        if re.fullmatch(r"com\.capri\.[a-z0-9]+(?:[.-][a-z0-9]+)*", self.type) is None:
             raise DomainEventValidationError("event type must use a bounded com.capri name")
         if type(self.time) is not str:
             raise DomainEventValidationError("event time must be a timezone-aware ISO timestamp")
