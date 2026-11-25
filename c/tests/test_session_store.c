@@ -201,32 +201,38 @@ int main(void) {
     capri_session_store_close(store);
 
     /* A concurrent schema opener must wait for an existing writer lock. */
+    int start_pipe[2],result_pipe[2];
+    assert(pipe(start_pipe)==0&&pipe(result_pipe)==0);
+    pid_t opener=fork(); assert(opener>=0);
+    if(opener==0){
+        close(start_pipe[1]); close(result_pipe[0]);
+        unsigned char go=0;
+        if(read(start_pipe[0],&go,sizeof go)!=(ssize_t)sizeof go)_exit(3);
+        close(start_pipe[0]);
+        CapriSessionError child_error=CAPRI_SESSION_INVALID;
+        CapriSessionStore *child_store=capri_session_store_open(path,200,16000,64000,131072,&child_error);
+        int child_result=child_store?CAPRI_SESSION_OK:(int)child_error;
+        if(child_store)capri_session_store_close(child_store);
+        ssize_t written=write(result_pipe[1],&child_result,sizeof child_result);
+        close(result_pipe[1]);
+        _exit(written==(ssize_t)sizeof child_result&&child_result==CAPRI_SESSION_OK?0:1);
+    }
+    close(start_pipe[0]); close(result_pipe[1]);
     sqlite3 *lock_db=NULL;
     assert(sqlite3_open(path,&lock_db)==SQLITE_OK);
     assert(sqlite3_exec(lock_db,"PRAGMA journal_mode=DELETE; BEGIN EXCLUSIVE;",NULL,NULL,NULL)==SQLITE_OK);
-    int result_pipe[2]; assert(pipe(result_pipe)==0);
-    pid_t opener=fork(); assert(opener>=0);
-    if(opener==0){
-        close(result_pipe[0]);
-        CapriSessionError child_error=CAPRI_SESSION_INVALID;
-        CapriSessionStore *child_store=capri_session_store_open(path,200,16000,64000,131072,&child_error);
-        unsigned char opened=(unsigned char)(child_store!=NULL&&child_error==CAPRI_SESSION_OK);
-        if(child_store)capri_session_store_close(child_store);
-        ssize_t written=write(result_pipe[1],&opened,sizeof opened);
-        close(result_pipe[1]);
-        if(written!=(ssize_t)sizeof opened)_exit(2);
-        _exit(opened?0:1);
-    }
-    close(result_pipe[1]);
+    unsigned char go=1;
+    assert(write(start_pipe[1],&go,sizeof go)==(ssize_t)sizeof go);
+    close(start_pipe[1]);
     struct timespec lock_delay={0,200000000};
     assert(nanosleep(&lock_delay,NULL)==0);
     assert(sqlite3_exec(lock_db,"COMMIT",NULL,NULL,NULL)==SQLITE_OK);
     assert(sqlite3_close(lock_db)==SQLITE_OK);
-    unsigned char child_opened=0;
-    assert(read(result_pipe[0],&child_opened,sizeof child_opened)==(ssize_t)sizeof child_opened);
+    int child_result=-1;
+    assert(read(result_pipe[0],&child_result,sizeof child_result)==(ssize_t)sizeof child_result);
     close(result_pipe[0]);
     int child_status=0; assert(waitpid(opener,&child_status,0)==opener);
-    assert(WIFEXITED(child_status)&&WEXITSTATUS(child_status)==0&&child_opened==1);
+    assert(WIFEXITED(child_status)&&WEXITSTATUS(child_status)==0&&child_result==CAPRI_SESSION_OK);
 
     char linkpath[512]; snprintf(linkpath,sizeof linkpath,"%s/symlink.sqlite3",dir);
     assert(symlink(path,linkpath)==0);
