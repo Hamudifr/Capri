@@ -219,3 +219,33 @@ deployed secret management. The callbacks are trusted application code, not
 proof supplied by this package. Do not enable real-data learning until an actual
 host application wires and independently tests those controls. The default
 LearningStore remains fail-closed when no verifier is injected.
+
+## SQLite backup, integrity and restore
+
+`LearningStore.backup_to(destination)` creates a consistent SQLite online backup of all four
+Learning Engine tables: `learning_examples`, `learning_consents`, `learning_exports`,
+and `learning_export_consents`. The destination parent must already exist and be private.
+The backup is created with owner-only permissions, validated before atomic no-overwrite
+publication, and includes committed SQLite state without copying live WAL sidecars.
+
+Backup validation checks SQLite integrity and foreign keys, then verifies the application
+invariants for consent timestamps and scope, example admission flags and content hashes,
+export manifests and hashes, and export-to-consent dependencies. An active export cannot
+reference revoked consent. Legacy examples without a consent ID remain preserved but are
+not eligible for export; their historical content hashes are not reinterpreted.
+
+A database backup does **not** contain the separately published JSONL or ZIP artifact files.
+To restore, open the backup file as a new store:
+
+```python
+restored = LearningStore(
+    "/private/backup/learning-backup.sqlite3",
+    consent_verifier=trusted_consent_authority.verify,
+)
+assert restored.integrity_check() == "ok"
+```
+
+Back up the artifact files separately. After restore, consumers must call
+`verify_export(export_id, artifact_path)` against the restored registry before using any
+artifact. Missing or mismatched files fail closed. Do not treat a SQLite backup alone as a
+portable training dataset.
