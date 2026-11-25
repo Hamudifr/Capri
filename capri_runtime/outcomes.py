@@ -479,6 +479,13 @@ class SQLiteOutcomeStore:
     @staticmethod
     def _validate_backup_snapshot(connection: sqlite3.Connection) -> None:
         connection.row_factory = sqlite3.Row
+        triggers = {
+            row[0] for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name='outcomes'"
+            ).fetchall()
+        }
+        if not {"outcomes_immutable_update", "outcomes_immutable_delete"} <= triggers:
+            raise OutcomeValidationError("outcome journal append-only triggers are missing")
         rows = connection.execute("SELECT * FROM outcomes ORDER BY recorded_at,outcome_id").fetchall()
         if len(rows) > _MAX_RECORDS:
             raise OutcomeValidationError("outcome backup exceeds journal capacity")
