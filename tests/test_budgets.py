@@ -74,6 +74,34 @@ class SQLiteBudgetStoreTests(unittest.TestCase):
         self.assertEqual(usage.used["tool_calls"], 1)
         self.assertEqual(usage.reset_at.timestamp() - NOW.timestamp(), 120)
 
+    def test_multi_dimension_reservation_reads_usage_with_one_query(self):
+        statements = []
+        original_connect = self.store._connect
+
+        def traced_connect():
+            connection = original_connect()
+            connection.set_trace_callback(statements.append)
+            return connection
+
+        with patch.object(self.store, "_connect", side_effect=traced_connect):
+            self.store.reserve_for_principal(
+                "alice",
+                {"provider_calls": 1, "provider_input_bytes": 100, "tool_calls": 1,
+                 "task_steps": 1, "task_input_bytes": 100},
+                now=NOW,
+            )
+        usage_reads = [
+            statement for statement in statements
+            if "SELECT dimension,used FROM budget_usage" in statement
+        ]
+        self.assertEqual(len(usage_reads), 1)
+        usage = self.store.usage_for_principal("alice", now=NOW)
+        self.assertEqual(usage.used["provider_calls"], 1)
+        self.assertEqual(usage.used["provider_input_bytes"], 100)
+        self.assertEqual(usage.used["tool_calls"], 1)
+        self.assertEqual(usage.used["task_steps"], 1)
+        self.assertEqual(usage.used["task_input_bytes"], 100)
+
     def test_multi_dimension_reservation_is_atomic_and_principal_scoped(self):
         self.store.reserve_for_principal(
             "alice", {"provider_calls": 1, "provider_input_bytes": 100}, now=NOW,
