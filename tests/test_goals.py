@@ -101,6 +101,16 @@ class SQLiteGoalStoreTests(unittest.TestCase):
                 frozenset({"collect"}),
             )
 
+    def test_planner_output_has_an_aggregate_byte_limit(self):
+        steps = tuple(
+            {"tool": "collect", "input": {"payload": "x" * 3_000}}
+            for _ in range(32)
+        )
+        with self.assertRaises(GoalValidationError):
+            validate_goal_plan(
+                GoalPlanProposal(steps), frozenset({"collect"}),
+            )
+
     def test_plan_persistence_uses_compare_and_swap_and_does_not_execute(self):
         executions = []
         goal = self.create()
