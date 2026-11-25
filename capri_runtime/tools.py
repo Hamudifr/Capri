@@ -463,7 +463,7 @@ class HmacApprovalAuthority:
                     or len(grant.approver_id) > 256
                     or _contains_surrogate(grant.approver_id)
                 ))
-                or (grant.issued_at is not None and not isinstance(grant.issued_at, str))):
+                or (grant.issued_at is not None and (not isinstance(grant.issued_at, str) or len(grant.issued_at) > 64))):
             return False
         try:
             if grant.issued_at is not None:
