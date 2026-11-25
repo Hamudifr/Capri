@@ -80,8 +80,9 @@ CcelError ccel_operation_apply(CcelOperation op, const CcelGrid *in, CcelGrid *o
 }
 
 CcelError ccel_program_init(CcelProgram *out, const CcelOperation *ops, size_t n) {
-    if (!out || (n && !ops)) return CCEL_ERR_ALLOCATION;
+    if (!out) return CCEL_ERR_ALLOCATION;
     if (n > CCEL_MAX_PROGRAM_DEPTH) return CCEL_ERR_PROGRAM_TOO_DEEP;
+    if (n && !ops) return CCEL_ERR_ALLOCATION;
     out->length = n;
     for (size_t i = 0; i < n; ++i) {
         if ((unsigned)ops[i] >= 5u) return CCEL_ERR_INVALID_OPERATION;
