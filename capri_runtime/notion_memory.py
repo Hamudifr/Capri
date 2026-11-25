@@ -493,7 +493,14 @@ class NotionMemoryAdapter:
                 if not matches:
                     raise MemoryConflictError("predecessor already has a different correction successor")
                 if child.status == "archived":
-                    return child
+                    if any(
+                        record.supersedes_id == child.memory_id
+                        for record in self._list_all()
+                    ):
+                        return child
+                    raise MemoryConflictError(
+                        "archived replacement has no successor; activation cannot be established"
+                    )
                 return self._reconcile_correction_locked(child.memory_id)
             if old.status != "active":
                 raise MemoryConflictError("only the active Notion memory head can be corrected")
