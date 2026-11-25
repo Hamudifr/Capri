@@ -78,10 +78,11 @@ Before connecting this catalogue to a dispatcher, implement host-authenticated t
 `CapriHostRuntime` can optionally expose the registry through three injected host callbacks:
 
 - `worker_identity_resolver(credential)`: authenticates a supervisor/worker transport credential and returns the worker ID bound to that authenticated channel. It must not read an ID from an unauthenticated worker payload.
+- `worker_descriptor_resolver(worker_id, proposed_descriptor)`: returns the exact host-approved `WorkerDescriptor` for that identity. It must derive protocol versions, capabilities, priority and concurrency from host configuration/policy rather than blindly trusting worker self-advertisements.
 - `worker_policy_resolver(principal_id, task_id, capability)`: returns a set/frozenset of worker IDs authorized by the host for this exact principal, task and capability. The embedding host must include all applicable resource, approval, budget and policy checks; the registry does not infer them.
 - `worker_registry`: the process-local catalogue instance.
 
-The runtime gateway exposes registration, heartbeat, host-observed failure recording and principal/task-scoped candidate lookup. Registration and heartbeat require the worker identity resolver. Candidate lookup first verifies that the task belongs to the authenticated principal, then calls the separate host policy resolver, then applies registry compatibility/health filters.
+The runtime gateway exposes registration, heartbeat, host-observed failure recording and principal/task-scoped candidate lookup. Registration requires both the worker identity resolver and the host descriptor-approval resolver; the caller-proposed descriptor is never inserted directly. Heartbeat requires the worker identity resolver. Candidate lookup first verifies that the task belongs to the authenticated principal, then calls the separate host policy resolver, then applies registry compatibility/health filters.
 
 The gateway returns candidate snapshots only. It does not dispatch, reserve capacity, run a process, or accept a worker response. A dispatcher must re-evaluate policy and identity immediately before use. Callback exceptions and invalid policy results fail closed and are surfaced as redacted host errors.
 
@@ -95,6 +96,7 @@ host = CapriHostRuntime(
     task_store=task_store,
     worker_registry=registry,
     worker_identity_resolver=authenticate_worker_transport,
+    worker_descriptor_resolver=approve_worker_descriptor_from_host_config,
     worker_policy_resolver=authorized_workers_for_task,
 )
 ```
