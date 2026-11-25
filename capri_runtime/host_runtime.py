@@ -22,6 +22,7 @@ from .tasks import SQLiteTaskStore, TaskRecord, TaskWorker
 from .goals import (
     GoalPlanProposal, GoalRecord, SQLiteGoalStore,
 )
+from .goal_coordinator import GoalCoordinator, GoalExecution
 from .tools import ExecutionContext, HostAuthorityResolver
 
 
@@ -274,6 +275,44 @@ class CapriHostRuntime:
             expected_version=expected_version,
         )
 
+    def _goal_coordinator(self) -> GoalCoordinator:
+        if self._goal_store is None or self._task_store is None or self._task_worker is None:
+            raise HostRuntimeError("goal coordination requires goal and principal task stores plus a task worker")
+        return GoalCoordinator(
+            self._goal_store,
+            self._task_store,
+            frozenset(self._task_worker.engine.principal_handlers),
+        )
+
+    def prepare_goal(
+        self, credential: Any, goal_id: str, *, expected_version: int,
+    ) -> GoalExecution:
+        """Durably link a planned goal to a deferred task, then activate it."""
+        context = self._context(credential)
+        return self._goal_coordinator().prepare(
+            goal_id, context.principal_id, expected_version=expected_version,
+        )
+
+    def reconcile_goal(self, credential: Any, goal_id: str) -> GoalExecution:
+        """Reconcile a terminal task outcome and persist hashed step evidence."""
+        context = self._context(credential)
+        return self._goal_coordinator().reconcile(goal_id, context.principal_id)
+
+    def cancel_goal(
+        self, credential: Any, goal_id: str, *, expected_version: int,
+    ) -> GoalExecution | GoalRecord:
+        """Cancel a linked task safely, retaining uncertainty for reconciliation."""
+        context = self._context(credential)
+        return self._goal_coordinator().cancel(
+            goal_id, context.principal_id, expected_version=expected_version,
+        )
+
+    def get_goal_events(self, credential: Any, goal_id: str) -> tuple[dict[str, Any], ...]:
+        context = self._context(credential)
+        if self._goal_store is None:
+            raise HostRuntimeError("no goal store is configured")
+        return self._goal_store.events_for_principal(goal_id, context.principal_id)
+
     def transition_goal(
         self, credential: Any, goal_id: str, new_state: str, *,
         expected_version: int,
@@ -282,6 +321,10 @@ class CapriHostRuntime:
         context = self._context(credential)
         if self._goal_store is None:
             raise HostRuntimeError("no goal store is configured")
+        if new_state == "cancelled":
+            current = self._goal_store.get_for_principal(goal_id, context.principal_id)
+            if current.task_id is not None:
+                raise HostRuntimeError("use cancel_goal so linked task cancellation is coordinated")
         return self._goal_store.transition_for_principal(
             goal_id, context.principal_id, new_state,
             expected_version=expected_version,
