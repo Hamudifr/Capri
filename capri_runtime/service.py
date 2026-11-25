@@ -120,6 +120,8 @@ class CapriHostService:
             if self._state is not HostServiceState.RUNNING:
                 if self._state in {HostServiceState.STOPPING, HostServiceState.FAILED}:
                     raise HostServiceError("service cannot start from its current state")
+                if self._worker_thread is not None and self._worker_thread.is_alive():
+                    raise HostServiceError("previous task worker has not fully exited")
                 self._stop_event = threading.Event()
                 self._worker_thread = None
                 self._failure_code = None
