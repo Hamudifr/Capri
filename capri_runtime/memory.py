@@ -69,34 +69,32 @@ def _rank_memory_records(records: Sequence[MemoryRecord], query: str) -> tuple[M
     """Rank all-term lexical matches by field relevance, then freshness.
 
     Title and tag matches outweigh body mentions; inverse document frequency
-    reduces the influence of terms common to nearly every candidate. The
-    all-terms retrieval contract is retained, so this does not become a loose
-    OR search or silently broaden retrieval.
+    is calculated over the complete filtered corpus, not only matching rows.
+    The all-terms retrieval contract is retained, so this does not become a
+    loose OR search or silently broaden retrieval.
     """
     terms = tuple(dict.fromkeys(part.casefold() for part in query.split() if part))
     if not terms:
         return ()
-    candidates: list[tuple[MemoryRecord, str, str, str, str]] = []
+    documents: list[tuple[MemoryRecord, str, str, str, str, str]] = []
     for record in records:
         title = record.title.casefold()
         content = record.content.casefold()
         scope = record.scope.casefold()
         tags = " ".join(record.tags).casefold()
         combined = "\n".join((title, content, scope, tags))
-        if all(term in combined for term in terms):
-            candidates.append((record, title, content, scope, tags))
-    if not candidates:
+        documents.append((record, title, content, scope, tags, combined))
+    if not documents:
         return ()
-    document_count = len(candidates)
+    document_count = len(documents)
     document_frequency = {
-        term: sum(
-            term in "\n".join((title, content, scope, tags))
-            for _, title, content, scope, tags in candidates
-        )
+        term: sum(term in combined for _, _, _, _, _, combined in documents)
         for term in terms
     }
     ranked: list[tuple[float, float, str, MemoryRecord]] = []
-    for record, title, content, scope, tags in candidates:
+    for record, title, content, scope, tags, combined in documents:
+        if not all(term in combined for term in terms):
+            continue
         score = 0.0
         for term in terms:
             frequency = document_frequency[term]
@@ -115,7 +113,6 @@ def _rank_memory_records(records: Sequence[MemoryRecord], query: str) -> tuple[M
         ranked.append((score, updated, record.memory_id, record))
     ranked.sort(key=lambda item: (-item[0], -item[1], item[2]))
     return tuple(item[3] for item in ranked)
-
 
 @dataclass(frozen=True, slots=True)
 class UntrustedMemoryContext:
