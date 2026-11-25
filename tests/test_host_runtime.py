@@ -7,6 +7,8 @@ from capri_runtime import (
     HostAuthorityError,
     HostAuthorityResolver,
     InMemoryAuditSink,
+    InMemoryWorkerRegistry,
+    WorkerDescriptor,
     SessionClosedError,
     SessionNotFoundError,
     SQLiteSessionStore,
@@ -90,6 +92,128 @@ class CapriHostRuntimeTests(unittest.TestCase):
             self.orchestrator,
             **kwargs,
         )
+
+    def test_worker_registry_requires_host_identity_and_policy_callbacks(self):
+        with self.assertRaises(HostRuntimeError):
+            self.make_host(worker_registry=InMemoryWorkerRegistry())
+
+    def test_worker_registration_and_heartbeat_are_bound_to_transport_identity(self):
+        identities = {"worker-token": "worker-1"}
+        registry = InMemoryWorkerRegistry()
+        host = self.make_host(
+            task_store=self.task_store,
+            worker_registry=registry,
+            worker_identity_resolver=identities.get,
+            worker_policy_resolver=lambda principal, task_id, capability: set(),
+        )
+        descriptor = WorkerDescriptor(
+            "worker-1", (1,), ("math.factorial",), max_concurrency=2,
+        )
+        initial = host.register_worker("worker-token", descriptor)
+        self.assertEqual(initial.health.state, "starting")
+        with self.assertRaises(HostRuntimeError):
+            host.heartbeat_worker("invalid-token", "worker-1", in_flight=0)
+        with self.assertRaises(HostRuntimeError):
+            host.heartbeat_worker("worker-token", "worker-2", in_flight=0)
+        healthy = host.heartbeat_worker(
+            "worker-token", "worker-1", in_flight=0,
+        )
+        self.assertEqual(healthy.health.state, "healthy")
+
+    def test_worker_candidates_are_scoped_to_task_owner_and_host_policy(self):
+        identities = {
+            "worker-one-token": "worker-1",
+            "worker-two-token": "worker-2",
+        }
+        policy_calls = []
+
+        def policy(principal_id, task_id, capability):
+            policy_calls.append((principal_id, task_id, capability))
+            return {"worker-1"}
+
+        registry = InMemoryWorkerRegistry()
+        host = self.make_host(
+            task_store=self.task_store,
+            worker_registry=registry,
+            worker_identity_resolver=identities.get,
+            worker_policy_resolver=policy,
+        )
+        for worker_id, token in (
+            ("worker-1", "worker-one-token"),
+            ("worker-2", "worker-two-token"),
+        ):
+            host.register_worker(
+                token,
+                WorkerDescriptor(worker_id, (1,), ("math.factorial",)),
+            )
+            host.heartbeat_worker(token, worker_id, in_flight=0)
+        task = self.task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {"scope": "owned"}}],
+        )
+
+        candidates = host.get_worker_candidates(
+            "alice-token", task.task_id, "math.factorial", 1,
+        )
+        self.assertEqual(
+            [item.descriptor.worker_id for item in candidates],
+            ["worker-1"],
+        )
+        self.assertEqual(policy_calls, [("alice", task.task_id, "math.factorial")])
+        with self.assertRaises(HostRuntimeError):
+            host.get_worker_candidates(
+                "bob-token", task.task_id, "math.factorial", 1,
+            )
+        self.assertEqual(len(policy_calls), 1)
+
+    def test_worker_policy_failure_and_invalid_allowlist_fail_closed(self):
+        registry = InMemoryWorkerRegistry()
+        identity = lambda credential: "worker-1" if credential == "worker-token" else None
+        task = self.task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {}}],
+        )
+        failing = self.make_host(
+            task_store=self.task_store,
+            worker_registry=registry,
+            worker_identity_resolver=identity,
+            worker_policy_resolver=lambda *args: (_ for _ in ()).throw(RuntimeError("private policy error")),
+        )
+        failing.register_worker(
+            "worker-token", WorkerDescriptor("worker-1", (1,), ("math.factorial",)),
+        )
+        failing.heartbeat_worker("worker-token", "worker-1", in_flight=0)
+        with self.assertRaisesRegex(HostRuntimeError, "policy resolution failed"):
+            failing.get_worker_candidates(
+                "alice-token", task.task_id, "math.factorial", 1,
+            )
+
+        invalid = self.make_host(
+            task_store=self.task_store,
+            worker_registry=registry,
+            worker_identity_resolver=identity,
+            worker_policy_resolver=lambda *args: ["worker-1"],
+        )
+        with self.assertRaisesRegex(HostRuntimeError, "invalid allow-list"):
+            invalid.get_worker_candidates(
+                "alice-token", task.task_id, "math.factorial", 1,
+            )
+
+    def test_worker_failure_observation_requires_matching_host_identity(self):
+        registry = InMemoryWorkerRegistry()
+        host = self.make_host(
+            task_store=self.task_store,
+            worker_registry=registry,
+            worker_identity_resolver=lambda credential: (
+                "worker-1" if credential == "worker-token" else None
+            ),
+            worker_policy_resolver=lambda *args: set(),
+        )
+        host.register_worker(
+            "worker-token", WorkerDescriptor("worker-1", (1,), ("math.factorial",)),
+        )
+        with self.assertRaises(HostRuntimeError):
+            host.record_worker_failure("invalid-token", "worker-1")
+        failed = host.record_worker_failure("worker-token", "worker-1")
+        self.assertEqual(failed.health.state, "degraded")
 
     def test_execution_budget_usage_is_wired_and_principal_scoped(self):
         budgets = SQLiteBudgetStore(
