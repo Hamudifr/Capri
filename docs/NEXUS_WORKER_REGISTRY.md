@@ -71,3 +71,36 @@ candidates = registry.eligible(
 ## Next integration boundary
 
 Before connecting this catalogue to a dispatcher, implement host-authenticated transport/supervisor identity, durable audit integration, and an atomic host-owned capacity reservation. Keep dispatch policy and worker execution separate from this registry.
+
+
+## Trusted host runtime gateway
+
+`CapriHostRuntime` can optionally expose the registry through five injected host callbacks:
+
+- `worker_identity_resolver(credential)`: authenticates a worker transport and returns the worker ID bound to that authenticated channel. Used for registration; it must not read an ID from an unauthenticated payload.
+- `worker_descriptor_resolver(worker_id, proposed_descriptor)`: returns the exact host-approved `WorkerDescriptor` for that identity. It must derive protocol versions, capabilities, priority and concurrency from host configuration/policy rather than blindly trusting worker self-advertisements.
+- `worker_observer_authorizer(credential, worker_id)`: authenticates a separate host supervisor/monitor credential and authorizes it to report health for that worker. Worker transport credentials must be rejected.
+- `worker_in_flight_resolver(worker_id)`: returns the in-flight count measured by the trusted host supervisor. The heartbeat API accepts no caller-supplied load count; worker payloads cannot claim zero load or otherwise alter capacity.
+- `worker_policy_resolver(principal_id, task_id, capability)`: returns a set/frozenset of worker IDs authorized by the host for this exact principal, task and capability. The embedding host must include all applicable resource, approval, budget and task-state checks; the registry does not infer them.
+- `worker_registry`: the process-local catalogue instance.
+
+The runtime gateway exposes registration, supervisor-observed heartbeat/failure recording and principal/task-scoped candidate lookup. Registration binds the worker ID to the authenticated worker transport and passes the proposed descriptor through the host descriptor-approval resolver. Heartbeat and failure observations require the separate supervisor/monitor credential. Heartbeat load is derived from the host monitor, never from a worker-provided field. Candidate lookup first verifies that the task belongs to the authenticated principal, then calls the separate host policy resolver, then applies registry compatibility/health filters.
+
+The gateway returns candidate snapshots only. It does not dispatch, reserve capacity, run a process, or accept a worker response. A dispatcher must re-evaluate policy and identity immediately before use. Callback exceptions, worker credentials presented as supervisor credentials, and invalid policy/load results fail closed and are surfaced as redacted host errors.
+
+Example composition:
+
+```python
+host = CapriHostRuntime(
+    authority,
+    session_store,
+    orchestrator,
+    task_store=task_store,
+    worker_registry=registry,
+    worker_identity_resolver=authenticate_worker_transport,
+    worker_descriptor_resolver=approve_worker_descriptor_from_host_config,
+    worker_observer_authorizer=authenticate_supervisor_for_worker,
+    worker_in_flight_resolver=host_observed_in_flight_count,
+    worker_policy_resolver=authorized_workers_for_task,
+)
+```
