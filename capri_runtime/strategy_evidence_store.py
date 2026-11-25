@@ -35,6 +35,7 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _MANIFEST_REF = re.compile(r"^sqlite-strategy-manifest:([0-9a-f]{64})$")
 _DIGEST_REF = re.compile(r"^sha256:([0-9a-f]{64})$")
 _MANIFEST_SCHEMA = "capri.strategy-evidence-manifest.v1"
+_MAX_MANIFEST_BYTES = 16_000_000
 _OBSERVATION_FIELDS = frozenset({
     "task_id", "scenario", "strategy_id", "strategy_version", "outcome",
     "evidence_ref", "safety_violation", "tool_calls", "context_tokens",
@@ -244,7 +245,10 @@ class SQLiteStrategyEvidenceManifestStore:
             "observations": observation_data,
         }
         manifest_json = _canonical(manifest)
-        manifest_sha256 = hashlib.sha256(manifest_json.encode("utf-8")).hexdigest()
+        manifest_bytes = manifest_json.encode("utf-8")
+        if len(manifest_bytes) > _MAX_MANIFEST_BYTES:
+            raise StrategyAuthorizationError("evidence manifest exceeds the configured size limit")
+        manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
         try:
             now = self._clock()
             if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
