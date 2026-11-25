@@ -393,7 +393,7 @@ class DoctorTests(unittest.TestCase):
             workflow = root / ".github/workflows/quality.yml"
             content = workflow.read_text(encoding="utf-8")
             content = content.replace(
-                '  pull_request:\\n    branches: ["main"]\\n',
+                '  pull_request:\n    branches: ["main"]\n',
                 '  pull_request:\\n',
             )
             workflow.write_text(content, encoding="utf-8")
@@ -473,7 +473,7 @@ class DoctorTests(unittest.TestCase):
             self._make_repository(root)
             workflow = root / ".github/workflows/quality.yml"
             content = workflow.read_text(encoding="utf-8").replace(
-                '  pull_request:\\n    branches: ["main"]\\n',
+                '  pull_request:\n    branches: ["main"]\n',
                 '  pull_request:\\n',
             )
             content += (
