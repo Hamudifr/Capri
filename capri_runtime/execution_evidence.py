@@ -254,8 +254,15 @@ class SQLiteExecutionEvidenceJournal:
         if len(encoded_result) > _MAX_RESULT_BYTES:
             raise StrategyAuthorizationError("execution result exceeds the evidence hashing limit")
         result_digest = hashlib.sha256(encoded_result).hexdigest()
+        # The host verifier receives its own decoded snapshot. A callback must
+        # not be able to mutate TaskEngine's result object after its digest has
+        # been computed but before that same object is persisted by finish_step.
         try:
-            verified = self._verify_result(principal, claim, result, result_digest)
+            verifier_result = json.loads(encoded_result.decode("utf-8", errors="strict"))
+        except Exception:
+            raise StrategyAuthorizationError("execution result snapshot is invalid") from None
+        try:
+            verified = self._verify_result(principal, claim, verifier_result, result_digest)
         except Exception:
             raise StrategyAuthorizationError("host execution result verification failed") from None
         verified = self._validate_result(verified, result_digest)
