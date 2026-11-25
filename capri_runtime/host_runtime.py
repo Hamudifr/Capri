@@ -596,8 +596,11 @@ class CapriHostRuntime:
     ) -> WorkerSnapshot:
         """Record liveness only from a trusted supervisor and host-derived load."""
         self._authorize_worker_observer(observer_credential, worker_id)
-        in_flight = self._worker_in_flight(worker_id)
         with self._worker_reservation_lock:
+            # Sample host-observed load under the same lock as the registry
+            # update. Otherwise concurrent heartbeats can persist stale counts
+            # out of order and under-account active work.
+            in_flight = self._worker_in_flight(worker_id)
             self._purge_worker_reservation_contexts()
             self._begin_worker_audit_operation()
             try:
