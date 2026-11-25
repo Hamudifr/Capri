@@ -388,5 +388,65 @@ class DurableWorkerRestartTests(unittest.TestCase):
         self.assertFalse(audit_store.worker_lifecycle_reconciliation_required())
 
 
+    def test_expiry_audit_failure_after_registry_commit_keeps_restart_gate_pending(self):
+        now = {"value": 1_000_000_000}
+        task_store = SQLiteTaskStore(self.tasks_path)
+        audit_store = SQLiteSecurityStore(self.audit_path)
+        registry = SQLiteWorkerRegistry(
+            task_store,
+            heartbeat_ttl_ms=5_000,
+            reservation_ttl_ms=1_000,
+            clock_ns=lambda: now["value"],
+            clock_wall_ns=lambda: now["value"],
+        )
+        host = self._host(task_store, audit_store, registry=registry)
+        host.register_worker(
+            "worker-token",
+            WorkerDescriptor("worker-1", (1,), ("math.factorial",), max_concurrency=1),
+        )
+        host.heartbeat_worker("monitor-token", "worker-1")
+        task = task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {"scope": "expiry-audit-failure"}}],
+        )
+        pending = host.reserve_worker_candidate(
+            "alice-token", task.task_id, "math.factorial", 1,
+        )
+        self.assertIsNotNone(pending)
+
+        original_sweep = registry.active_reservations_with_expired
+        crossed_ttl = {"value": False}
+
+        def sweep_then_cross_ttl():
+            result = original_sweep()
+            if not crossed_ttl["value"]:
+                crossed_ttl["value"] = True
+                now["value"] += 2_000_000_000
+            return result
+
+        registry.active_reservations_with_expired = sweep_then_cross_ttl
+        original_write = audit_store.write
+
+        def fail_expiry_write(event):
+            if event.tool_name == "worker.reservation.expired":
+                raise OSError("simulated lifecycle audit outage")
+            return original_write(event)
+
+        audit_store.write = fail_expiry_write
+        with self.assertRaisesRegex(HostRuntimeError, "reconciliation is required"):
+            host.get_worker_candidates(
+                "alice-token", task.task_id, "math.factorial", 1,
+            )
+
+        # Registry commit already removed the expired hold, but the durable
+        # lifecycle marker remains open because the second audit store failed.
+        self.assertIsNone(registry.get_reservation(pending.reservation.token))
+        self.assertTrue(audit_store.worker_lifecycle_reconciliation_required())
+        reopened_audit = SQLiteSecurityStore(self.audit_path)
+        with self.assertRaisesRegex(
+            HostRuntimeError, "pending operations or reservations"
+        ):
+            self._host(task_store, reopened_audit, registry=registry)
+
+
 if __name__ == "__main__":
     unittest.main()
