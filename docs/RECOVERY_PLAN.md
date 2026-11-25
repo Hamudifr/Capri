@@ -1,5 +1,13 @@
 # Capri recovery plan
 
+## Current owner policy correction — 2026-11-25
+
+The former blanket GitHub Actions hold through 2026-12-01 is revoked. The associated blanket prohibitions on branch creation, commits/pushes, PR creation or updates, PR merges/closures, standard CI triggers/reruns, and repository-level protection/permission configuration are also revoked. These operations are within Capri's delegated authority when the exact change is reviewed, required checks are run on the actual candidate, least privilege is preserved, and recovery is practical.
+
+The live repository is public. Standard GitHub-hosted `ubuntu-latest` runners are permitted. Recheck current visibility and runner type before workflow execution, but do not require a December 1 date gate or treat the former quota hold as active. Paid/larger runners, billable compute, purchases, subscriptions, visibility changes, collaborator-access expansion, secret exposure, protection bypass, and destructive high-impact changes remain subject to their appropriate approval and safety boundaries.
+
+The 2026-11-08 repository snapshot and older reconciliation blocks below are historical evidence. Their private-repository assumptions and temporary no-Actions instructions do not govern current work.
+
 ## Repository snapshot — 2026-11-08 18:24 CET
 
 This is a timestamped snapshot of the repository state observed before this documentation PR is integrated. Use live GitHub metadata for any later exact branch or PR pointers. Older reconciliation blocks below are retained as historical records and must not be treated as current state.
