@@ -24,7 +24,7 @@ _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in __import__("sys").path:
     __import__("sys").path.insert(0, str(_ROOT))
 
-from capri_runtime import SQLiteGoalStore, SQLiteTaskStore
+from capri_runtime import SQLiteBudgetStore, SQLiteGoalStore, SQLiteTaskStore
 
 _PLAN = [{"tool": "noop", "input": {"value": "persistence-profile"}, "max_attempts": 1}]
 _PRINCIPAL = "persistence-benchmark-principal"
@@ -206,6 +206,16 @@ def run(*, warmup: int = 10, samples: int = 50, workers: int = 4, queue_size: in
         results.append(_measure(
             "goal_domain_events_for_principal",
             lambda: goals.domain_events_for_principal(goal_ids[-1], _PRINCIPAL),
+            warmup, samples,
+        ))
+
+        budgets = SQLiteBudgetStore(str(root / "budgets.sqlite3"))
+        budgets.reserve_for_principal(
+            _PRINCIPAL, {"provider_calls": 1}, now=now,
+        )
+        results.append(_measure(
+            "budget_usage_for_principal",
+            lambda: budgets.usage_for_principal(_PRINCIPAL, now=now),
             warmup, samples,
         ))
 
