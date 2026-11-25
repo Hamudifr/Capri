@@ -78,4 +78,4 @@ See [APC1 KPT uniformization conditional theorem](R43_APC1_KPT_COLLAPSE.md).
 
 The new conditional implication is: if APC1 proves the existential SAT-antichecker statement S_K for every sufficiently large fixed exponent, then P != NP. The key is the witnessed dWPHP form of the APC1 KPT theorem. Under P = NP, each missing-range witness function h_e can be computed in P by searching for a value outside the range of a polynomial-time function; the KPT terms then become uniform P-time, and the R40 path selector yields the witness functions needed by Pich–Santhanam Corollary 1.
 
-This does not prove S_K in APC1 or P != NP unconditionally. The R42 certificate-lifted PV MinMax formulation remains the candidate upstream route.
+This does not prove S_K in APC1 or P != NP unconditionally. R42 is a separate KPS canonical-pair route: it covers only unsatisfiable formulas with short P-refutations, not every negative SAT instance. The direct S_K MinMax problem remains open.
