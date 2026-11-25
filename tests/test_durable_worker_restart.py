@@ -326,5 +326,62 @@ class DurableWorkerRestartTests(unittest.TestCase):
         self.assertFalse(reopened_audit.worker_lifecycle_reconciliation_required())
 
 
+    def test_operation_local_expiry_is_audited_when_ttl_crosses_after_host_sweep(self):
+        now = {"value": 1_000_000_000}
+        task_store = SQLiteTaskStore(self.tasks_path)
+        audit_store = SQLiteSecurityStore(self.audit_path)
+        registry = SQLiteWorkerRegistry(
+            task_store,
+            heartbeat_ttl_ms=5_000,
+            reservation_ttl_ms=1_000,
+            clock_ns=lambda: now["value"],
+            clock_wall_ns=lambda: now["value"],
+        )
+        host = self._host(task_store, audit_store, registry=registry)
+        host.register_worker(
+            "worker-token",
+            WorkerDescriptor("worker-1", (1,), ("math.factorial",), max_concurrency=1),
+        )
+        host.heartbeat_worker("monitor-token", "worker-1")
+        task = task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {"scope": "expiry-toctou"}}],
+        )
+        pending = host.reserve_worker_candidate(
+            "alice-token", task.task_id, "math.factorial", 1,
+        )
+        self.assertIsNotNone(pending)
+        self.assertIn(pending.reservation.token, host._worker_reservation_contexts)
+
+        # The host's preliminary sweep sees the hold as active. Advance time
+        # immediately after that transaction, before eligible() opens its own
+        # BEGIN IMMEDIATE transaction and performs its second expiry sweep.
+        original_sweep = registry.active_reservations_with_expired
+        crossed_ttl = {"value": False}
+
+        def sweep_then_cross_ttl():
+            result = original_sweep()
+            if not crossed_ttl["value"]:
+                crossed_ttl["value"] = True
+                now["value"] += 2_000_000_000
+            return result
+
+        registry.active_reservations_with_expired = sweep_then_cross_ttl
+        candidates = host.get_worker_candidates(
+            "alice-token", task.task_id, "math.factorial", 1,
+        )
+
+        self.assertTrue(crossed_ttl["value"])
+        self.assertEqual(len(candidates), 1)
+        self.assertIsNone(registry.get_reservation(pending.reservation.token))
+        self.assertNotIn(pending.reservation.token, host._worker_reservation_contexts)
+        expiry_events = [
+            event for event in audit_store.events()
+            if event.tool_name == "worker.reservation.expired"
+            and event.reservation_token == pending.reservation.token
+        ]
+        self.assertEqual(len(expiry_events), 1)
+        self.assertFalse(audit_store.worker_lifecycle_reconciliation_required())
+
+
 if __name__ == "__main__":
     unittest.main()
