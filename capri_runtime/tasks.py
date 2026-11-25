@@ -21,6 +21,7 @@ from capri_core.validation import contains_surrogate
 
 from .sqlite_backup import backup_sqlite_database
 from .tools import ToolCancelledError
+from .budgets import BudgetExceededError, SQLiteBudgetStore
 
 
 class TaskError(Exception):
@@ -163,7 +164,7 @@ def _validate_persisted_attempts(
         raise TaskValidationError("persisted task attempts are corrupt")
     if completed:
         valid = attempts == 0
-    elif state == "queued":
+    elif state in {"queued", "budget_wait"}:
         valid = attempts == 0
     elif state == "retry_wait":
         valid = max_attempts is not None and 1 <= attempts < max_attempts
@@ -536,7 +537,7 @@ class SQLiteTaskStore:
                 if state in {"succeeded", "failed", "cancelled"}:
                     connection.execute("COMMIT")
                     return self.get(task_id)
-                if state in {"queued", "blocked", "retry_wait"}:
+                if state in {"queued", "blocked", "budget_wait", "retry_wait"}:
                     connection.execute(
                         "UPDATE tasks SET state='cancelled',cancel_requested=1,updated_at=?,lease_owner=NULL,lease_until=NULL WHERE task_id=?",
                         (stamp, task_id),
@@ -571,7 +572,8 @@ class SQLiteTaskStore:
 
     def claim_next(self, executor_id: str, lease_seconds: int = 60,
                    now: datetime | None = None, *,
-                   principal_tools: frozenset[str] = frozenset()) -> TaskClaim | None:
+                   principal_tools: frozenset[str] = frozenset(),
+                   allow_budget_wait: bool = False) -> TaskClaim | None:
         """Claim the next task, failing closed for unsupported principal-owned work.
 
         Principal tasks are excluded by default. Callers must provide the exact
@@ -583,6 +585,8 @@ class SQLiteTaskStore:
             raise TaskValidationError("principal_tools must be a frozenset of at most 128 names")
         for tool_name in principal_tools:
             _text(tool_name, "principal handler name", 64)
+        if type(allow_budget_wait) is not bool:
+            raise TaskValidationError("allow_budget_wait must be a boolean")
         if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int) or not 5 <= lease_seconds <= 3600:
             raise TaskValidationError("lease_seconds must be between 5 and 3600")
         current = now or _now()
@@ -625,11 +629,12 @@ class SQLiteTaskStore:
                     deterministic=True,
                 )
                 connection.execute("BEGIN IMMEDIATE")
-                query = """SELECT tasks.task_id,tasks.state,tasks.plan_json,tasks.current_step,
+                ready_states = "'queued','retry_wait','budget_wait'" if allow_budget_wait else "'queued','retry_wait'"
+                query = f"""SELECT tasks.task_id,tasks.state,tasks.plan_json,tasks.current_step,
                     tasks.attempts,tasks.cancel_requested,task_owners.principal_id
                     FROM tasks LEFT JOIN task_owners ON task_owners.task_id=tasks.task_id
                     WHERE (
-                    (tasks.state IN ('queued','retry_wait') AND tasks.available_at<=?) OR
+                    (tasks.state IN ({ready_states}) AND tasks.available_at<=?) OR
                     (tasks.state='running' AND tasks.lease_until<=?)
                     )"""
                 params = [stamp, stamp]
@@ -956,6 +961,64 @@ class SQLiteTaskStore:
             finally:
                 connection.close()
 
+    def defer_claim_for_budget(
+        self, claim: TaskClaim, reset_at: datetime, *,
+        now: datetime | None = None,
+    ) -> TaskRecord:
+        """Release a claim without consuming an attempt when a budget is exhausted."""
+        if type(claim) is not TaskClaim:
+            raise TaskValidationError("claim must be a TaskClaim")
+        current = now or _now()
+        stamp = _iso(current)
+        available = _iso(reset_at)
+        if _parse_time(available) <= _parse_time(stamp):
+            available = _iso(current + timedelta(seconds=1))
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    """SELECT tasks.state,tasks.lease_owner,tasks.lease_until,
+                    tasks.current_step,tasks.attempts,tasks.plan_json,
+                    task_owners.principal_id,tasks.cancel_requested
+                    FROM tasks LEFT JOIN task_owners
+                    ON task_owners.task_id=tasks.task_id WHERE tasks.task_id=?""",
+                    (claim.task_id,),
+                ).fetchone()
+                if not row:
+                    raise TaskNotFoundError("task does not exist")
+                self._assert_claim_matches(claim, row[:7], stamp)
+                if row[7]:
+                    state = "cancelled"
+                    attempts = claim.attempt
+                    error_code = "cancelled_before_handler"
+                    available = stamp
+                else:
+                    state = "budget_wait"
+                    attempts = 0
+                    error_code = "budget_exhausted"
+                connection.execute(
+                    """UPDATE tasks SET state=?,attempts=?,error_code=?,updated_at=?,
+                    available_at=?,lease_owner=NULL,lease_until=NULL WHERE task_id=?""",
+                    (state, attempts, error_code, stamp, available, claim.task_id),
+                )
+                connection.execute(
+                    """INSERT INTO task_events(
+                    task_id,timestamp,state,step_index,attempt,error_code
+                    ) VALUES(?,?,?,?,?,?)""",
+                    (claim.task_id, stamp, state, claim.step_index, claim.attempt, error_code),
+                )
+                connection.execute("COMMIT")
+                return self.get(claim.task_id)
+            except Exception:
+                try:
+                    connection.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+                raise
+            finally:
+                connection.close()
+
     def fail_step(self, claim: TaskClaim, error_code: str = "handler_failed",
                   retry_delay_seconds: int = 5, now: datetime | None = None,
                   retryable: bool = False) -> TaskRecord:
@@ -1024,7 +1087,7 @@ class SQLiteTaskStore:
                 connection.close()
 
     def _validate_backup_snapshot(self, connection: sqlite3.Connection) -> None:
-        allowed_states = {"queued", "blocked", "running", "retry_wait", "reconciliation_required", "succeeded", "failed", "cancelled"}
+        allowed_states = {"queued", "blocked", "budget_wait", "running", "retry_wait", "reconciliation_required", "succeeded", "failed", "cancelled"}
         rows = connection.execute(
             """SELECT task_id,idempotency_key,state,created_at,updated_at,current_step,
             attempts,available_at,cancel_requested,results_json,error_code,plan_json,
@@ -1074,11 +1137,11 @@ class SQLiteTaskStore:
                 or len(record.result) != index
             ):
                 raise TaskValidationError("backup contains invalid task lifecycle progress")
-            if state in {"queued", "blocked", "retry_wait", "running", "reconciliation_required", "failed"}:
+            if state in {"queued", "blocked", "budget_wait", "retry_wait", "running", "reconciliation_required", "failed"}:
                 if not 0 <= index < len(plan):
                     raise TaskValidationError("backup contains invalid task lifecycle progress")
                 maximum = plan[index]["max_attempts"]
-                if state in {"queued", "blocked"}:
+                if state in {"queued", "blocked", "budget_wait"}:
                     valid_attempts = attempts == 0
                 elif state == "retry_wait":
                     valid_attempts = 1 <= attempts < maximum
@@ -1173,6 +1236,7 @@ class TaskEngine:
         executor_id: str, lease_seconds: int = 60,
         *,
         principal_handlers: Mapping[str, Callable[[dict[str, Any], str, str], Any]] | None = None,
+        budget_store: SQLiteBudgetStore | None = None,
     ) -> None:
         if not isinstance(store, SQLiteTaskStore):
             raise TaskValidationError("store must be a SQLiteTaskStore")
@@ -1197,11 +1261,21 @@ class TaskEngine:
             principal_copied[name] = handler
         if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int) or not 5 <= lease_seconds <= 3600:
             raise TaskValidationError("lease_seconds must be between 5 and 3600")
+        if budget_store is not None and not isinstance(budget_store, SQLiteBudgetStore):
+            raise TaskValidationError("budget_store must be a SQLiteBudgetStore")
         self.store = store
         self.handlers = copied
         self.principal_handlers = principal_copied
         self.executor_id = executor_id
         self.lease_seconds = lease_seconds
+        self.budget_store = budget_store
+
+    def set_budget_store(self, budget_store: SQLiteBudgetStore) -> None:
+        if not isinstance(budget_store, SQLiteBudgetStore):
+            raise TaskValidationError("budget_store must be a SQLiteBudgetStore")
+        if self.budget_store is not None and self.budget_store is not budget_store:
+            raise TaskValidationError("a different budget store is already configured")
+        self.budget_store = budget_store
 
     def execute_claim(self, claim: TaskClaim, now: datetime | None = None) -> TaskRecord:
         if type(claim) is not TaskClaim:
@@ -1243,6 +1317,29 @@ class TaskEngine:
             invoke = lambda: handler(
                 handler_input, claim.idempotency_key, claim.principal_id
             )
+        if self.budget_store is not None and claim.principal_id is not None:
+            try:
+                input_bytes = len(json.dumps(
+                    handler_input, ensure_ascii=False, allow_nan=False,
+                    sort_keys=True, separators=(",", ":"),
+                ).encode("utf-8", errors="strict"))
+                self.budget_store.reserve_for_principal(
+                    claim.principal_id,
+                    {"task_steps": 1, "task_input_bytes": input_bytes},
+                    now=now,
+                )
+            except BudgetExceededError as error:
+                if error.permanent:
+                    return self.store.fail_step(
+                        claim, "task_input_budget_exceeded", now=now, retryable=False,
+                    )
+                return self.store.defer_claim_for_budget(
+                    claim, error.reset_at, now=now,
+                )
+            except Exception:
+                return self.store.fail_step(
+                    claim, "budget_store_unavailable", now=now, retryable=False,
+                )
         try:
             result = invoke()
         except ToolCancelledError as error:
@@ -1273,6 +1370,7 @@ class TaskEngine:
             self.lease_seconds,
             now,
             principal_tools=frozenset(self.principal_handlers),
+            allow_budget_wait=self.budget_store is not None,
         )
         if claim is None:
             return None
@@ -1308,6 +1406,7 @@ class TaskWorker:
             engine.executor_id,
             engine.lease_seconds,
             principal_tools=frozenset(engine.principal_handlers),
+            allow_budget_wait=engine.budget_store is not None,
         )
         if claim is None:
             return None

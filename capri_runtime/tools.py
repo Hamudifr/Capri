@@ -19,6 +19,8 @@ from uuid import uuid4
 
 from capri_core.validation import contains_surrogate as _contains_surrogate
 
+from .budgets import BudgetExceededError, SQLiteBudgetStore
+
 
 class ToolBoundaryError(Exception):
     """Base class for expected tool-boundary failures."""
@@ -50,6 +52,10 @@ class AuditError(ToolBoundaryError):
 
 class ToolExecutionError(ToolBoundaryError):
     """An injected handler failed; handler details are intentionally suppressed."""
+
+
+class ToolBudgetExceededError(ToolBoundaryError):
+    """A principal execution budget denied a tool call before handler dispatch."""
 
 
 class ToolCancelledError(ToolExecutionError):
@@ -691,6 +697,7 @@ class ToolExecutor:
         approval_store: ApprovalStore | None = None,
         approval_verifier: Callable[[ApprovalGrant], bool] | None = None,
         require_signed_approvals: bool = False,
+        budget_store: SQLiteBudgetStore | None = None,
     ) -> None:
         if not isinstance(registry, ToolRegistry) or not callable(getattr(audit_sink, "write", None)):
             raise ToolValidationError("registry and audit sink are required")
@@ -702,6 +709,8 @@ class ToolExecutor:
             raise ToolValidationError("require_signed_approvals must be boolean")
         if require_signed_approvals and approval_verifier is None:
             raise ToolValidationError("signed approvals require a trusted approval verifier")
+        if budget_store is not None and not isinstance(budget_store, SQLiteBudgetStore):
+            raise ToolValidationError("budget_store must be a SQLiteBudgetStore")
         for name, value in (("max_argument_bytes", max_argument_bytes), ("max_result_bytes", max_result_bytes)):
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ToolValidationError(f"{name} must be a positive integer")
@@ -713,6 +722,14 @@ class ToolExecutor:
         self.approval_store = approval_store if approval_store is not None else InMemoryApprovalStore()
         self.approval_verifier = approval_verifier
         self.require_signed_approvals = require_signed_approvals
+        self.budget_store = budget_store
+
+    def set_budget_store(self, budget_store: SQLiteBudgetStore) -> None:
+        if not isinstance(budget_store, SQLiteBudgetStore):
+            raise ToolValidationError("budget_store must be a SQLiteBudgetStore")
+        if self.budget_store is not None and self.budget_store is not budget_store:
+            raise ToolValidationError("a different budget store is already configured")
+        self.budget_store = budget_store
 
     def _now(self) -> datetime:
         value = self._clock()
@@ -823,6 +840,17 @@ class ToolExecutor:
                 raise PermissionDeniedError("host context is not authorized for this resource") from None
         if spec.requires_approval:
             self._consume_approval(context, spec, digest)
+        if self.budget_store is not None:
+            try:
+                self.budget_store.reserve_for_principal(
+                    context.principal_id, {"tool_calls": 1}, now=self._now(),
+                )
+            except BudgetExceededError:
+                self._audit(context.principal_id, spec.name, digest, "budget_denied", "execution_budget_exhausted")
+                raise ToolBudgetExceededError("principal tool-call budget exhausted") from None
+            except Exception:
+                self._audit(context.principal_id, spec.name, digest, "budget_denied", "budget_store_unavailable")
+                raise ToolExecutionError("budget reservation failed; tool execution was blocked") from None
         self._audit(context.principal_id, spec.name, digest, "started")
         if cancellation_event is not None and cancellation_event.is_set():
             self._audit(context.principal_id, spec.name, digest, "cancelled", "cancelled_before_handler")

@@ -15,8 +15,8 @@ from uuid import uuid4
 from capri_core.validation import contains_surrogate
 
 from .runtime import Message, Session, SessionStore
-from .memory import UntrustedMemoryContext
-from .knowledge_graph import UntrustedKnowledgeContext
+from .memory import UntrustedMemoryContext, serialize_untrusted_memory_context
+from .knowledge_graph import UntrustedKnowledgeContext, serialize_untrusted_knowledge_context
 from .tool_bridge import (
     ToolBridgeValidationError,
     ToolCallOutcome,
@@ -25,6 +25,7 @@ from .tool_bridge import (
     ToolExecutionBridge,
 )
 from .tools import ExecutionContext
+from .budgets import BudgetExceededError, SQLiteBudgetStore
 
 
 class ToolOrchestrationError(Exception):
@@ -146,6 +147,7 @@ class ToolOrchestrator:
         max_output_chars: int = 64_000,
         max_tool_message_bytes: int = 131_072,
         max_history_bytes: int = 2_097_152,
+        budget_store: SQLiteBudgetStore | None = None,
     ) -> None:
         if not any(callable(getattr(adapter, name, None)) for name in (
             "complete_with_tools",
@@ -184,6 +186,33 @@ class ToolOrchestrator:
         self.max_output_chars = max_output_chars
         self.max_tool_message_bytes = max_tool_message_bytes
         self.max_history_bytes = max_history_bytes
+        self.budget_store: SQLiteBudgetStore | None = self.bridge.executor.budget_store
+        if budget_store is not None:
+            self.set_budget_store(budget_store)
+
+    def set_budget_store(self, budget_store: SQLiteBudgetStore) -> None:
+        if not isinstance(budget_store, SQLiteBudgetStore):
+            raise ToolOrchestrationError("budget_store must be a SQLiteBudgetStore")
+        if self.budget_store is not None and self.budget_store is not budget_store:
+            raise ToolOrchestrationError("a different budget store is already configured")
+        self.bridge.executor.set_budget_store(budget_store)
+        self.budget_store = budget_store
+
+    def _provider_input_bytes(
+        self, working: list[Message], definitions: tuple[ToolDefinition, ...],
+        memory_context: UntrustedMemoryContext | None,
+        knowledge_context: UntrustedKnowledgeContext | None,
+    ) -> int:
+        total = _history_size(working)
+        total += sum(
+            len(tool.name.encode("utf-8")) + len(tool.parameters_json.encode("utf-8")) + 64
+            for tool in definitions
+        )
+        if memory_context is not None:
+            total += len(serialize_untrusted_memory_context(memory_context).encode("utf-8"))
+        if knowledge_context is not None:
+            total += len(serialize_untrusted_knowledge_context(knowledge_context).encode("utf-8"))
+        return total
 
     def run(
         self,
@@ -262,6 +291,21 @@ class ToolOrchestrator:
         for turn_index in range(self.max_tool_rounds + 1):
             if cancellation_event is not None and cancellation_event.is_set():
                 raise ToolOrchestrationError("orchestration cancelled")
+            if self.budget_store is not None:
+                try:
+                    provider_input_bytes = self._provider_input_bytes(
+                        working, definitions, memory_context, knowledge_context,
+                    )
+                    self.budget_store.reserve_for_principal(
+                        context.principal_id,
+                        {"provider_calls": 1, "provider_input_bytes": provider_input_bytes},
+                    )
+                except BudgetExceededError:
+                    raise
+                except Exception:
+                    raise ToolOrchestrationError(
+                        "provider budget reservation failed; model invocation was blocked"
+                    ) from None
             try:
                 if memory_context is not None and knowledge_context is not None:
                     response = self.adapter.complete_with_tools_and_memory_and_knowledge(
