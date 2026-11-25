@@ -105,33 +105,52 @@ class CapriHostRuntimeTests(unittest.TestCase):
             revision=proposed.revision,
         )
 
-    def test_worker_registry_requires_host_identity_and_policy_callbacks(self):
-        with self.assertRaises(HostRuntimeError):
-            self.make_host(worker_registry=InMemoryWorkerRegistry())
-
-    def test_worker_registration_and_heartbeat_are_bound_to_transport_identity(self):
-        identities = {"worker-token": "worker-1"}
-        registry = InMemoryWorkerRegistry()
-        host = self.make_host(
+    def make_worker_host(self, registry, identities, policy):
+        known_ids = frozenset(identities.values())
+        return self.make_host(
             task_store=self.task_store,
             worker_registry=registry,
             worker_identity_resolver=identities.get,
             worker_descriptor_resolver=self.approve_worker_descriptor,
-            worker_policy_resolver=lambda principal, task_id, capability: set(),
+            worker_observer_authorizer=lambda credential, worker_id: (
+                credential == "monitor-token" and worker_id in known_ids
+            ),
+            worker_in_flight_resolver=lambda worker_id: 0,
+            worker_policy_resolver=policy,
+        )
+
+    def test_worker_registry_requires_all_host_callbacks(self):
+        with self.assertRaises(HostRuntimeError):
+            self.make_host(worker_registry=InMemoryWorkerRegistry())
+        with self.assertRaises(HostRuntimeError):
+            self.make_host(
+                worker_registry=InMemoryWorkerRegistry(),
+                worker_identity_resolver=lambda credential: "worker-1",
+                worker_descriptor_resolver=self.approve_worker_descriptor,
+                worker_policy_resolver=lambda *args: set(),
+            )
+
+    def test_worker_registration_and_heartbeat_require_distinct_trusted_identities(self):
+        identities = {"worker-token": "worker-1"}
+        registry = InMemoryWorkerRegistry()
+        host = self.make_worker_host(
+            registry, identities, lambda principal, task_id, capability: set(),
         )
         descriptor = WorkerDescriptor(
             "worker-1", (1,), ("math.factorial",), max_concurrency=2,
         )
         initial = host.register_worker("worker-token", descriptor)
         self.assertEqual(initial.health.state, "starting")
+        # A worker transport credential cannot assert host-observed liveness.
         with self.assertRaises(HostRuntimeError):
-            host.heartbeat_worker("invalid-token", "worker-1", in_flight=0)
+            host.heartbeat_worker("worker-token", "worker-1")
         with self.assertRaises(HostRuntimeError):
-            host.heartbeat_worker("worker-token", "worker-2", in_flight=0)
-        healthy = host.heartbeat_worker(
-            "worker-token", "worker-1", in_flight=0,
-        )
+            host.heartbeat_worker("monitor-token", "worker-2")
+        healthy = host.heartbeat_worker("monitor-token", "worker-1")
         self.assertEqual(healthy.health.state, "healthy")
+        # Callers cannot supply or spoof the host-observed load count.
+        with self.assertRaises(TypeError):
+            host.heartbeat_worker("monitor-token", "worker-1", in_flight=0)
 
     def test_worker_candidates_are_scoped_to_task_owner_and_host_policy(self):
         identities = {
@@ -145,13 +164,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
             return {"worker-1"}
 
         registry = InMemoryWorkerRegistry()
-        host = self.make_host(
-            task_store=self.task_store,
-            worker_registry=registry,
-            worker_identity_resolver=identities.get,
-            worker_descriptor_resolver=self.approve_worker_descriptor,
-            worker_policy_resolver=policy,
-        )
+        host = self.make_worker_host(registry, identities, policy)
         for worker_id, token in (
             ("worker-1", "worker-one-token"),
             ("worker-2", "worker-two-token"),
@@ -160,7 +173,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
                 token,
                 WorkerDescriptor(worker_id, (1,), ("math.factorial",)),
             )
-            host.heartbeat_worker(token, worker_id, in_flight=0)
+            host.heartbeat_worker("monitor-token", worker_id)
         task = self.task_store.create_for_principal(
             "alice", [{"tool": "collect", "input": {"scope": "owned"}}],
         )
@@ -180,33 +193,26 @@ class CapriHostRuntimeTests(unittest.TestCase):
         self.assertEqual(len(policy_calls), 1)
 
     def test_worker_policy_failure_and_invalid_allowlist_fail_closed(self):
+        identities = {"worker-token": "worker-1"}
         registry = InMemoryWorkerRegistry()
-        identity = lambda credential: "worker-1" if credential == "worker-token" else None
         task = self.task_store.create_for_principal(
             "alice", [{"tool": "collect", "input": {}}],
         )
-        failing = self.make_host(
-            task_store=self.task_store,
-            worker_registry=registry,
-            worker_identity_resolver=identity,
-            worker_descriptor_resolver=self.approve_worker_descriptor,
-            worker_policy_resolver=lambda *args: (_ for _ in ()).throw(RuntimeError("private policy error")),
+        failing = self.make_worker_host(
+            registry, identities,
+            lambda *args: (_ for _ in ()).throw(RuntimeError("private policy error")),
         )
         failing.register_worker(
             "worker-token", WorkerDescriptor("worker-1", (1,), ("math.factorial",)),
         )
-        failing.heartbeat_worker("worker-token", "worker-1", in_flight=0)
+        failing.heartbeat_worker("monitor-token", "worker-1")
         with self.assertRaisesRegex(HostRuntimeError, "policy resolution failed"):
             failing.get_worker_candidates(
                 "alice-token", task.task_id, "math.factorial", 1,
             )
 
-        invalid = self.make_host(
-            task_store=self.task_store,
-            worker_registry=registry,
-            worker_identity_resolver=identity,
-            worker_descriptor_resolver=self.approve_worker_descriptor,
-            worker_policy_resolver=lambda *args: ["worker-1"],
+        invalid = self.make_worker_host(
+            registry, identities, lambda *args: ["worker-1"],
         )
         with self.assertRaisesRegex(HostRuntimeError, "invalid allow-list"):
             invalid.get_worker_candidates(
@@ -215,14 +221,8 @@ class CapriHostRuntimeTests(unittest.TestCase):
 
     def test_worker_descriptor_capabilities_are_host_approved_not_self_advertised(self):
         registry = InMemoryWorkerRegistry()
-        host = self.make_host(
-            task_store=self.task_store,
-            worker_registry=registry,
-            worker_identity_resolver=lambda credential: (
-                "worker-1" if credential == "worker-token" else None
-            ),
-            worker_descriptor_resolver=self.approve_worker_descriptor,
-            worker_policy_resolver=lambda *args: {"worker-1"},
+        host = self.make_worker_host(
+            registry, {"worker-token": "worker-1"}, lambda *args: {"worker-1"},
         )
         proposed = WorkerDescriptor(
             "worker-1", (1,), ("math.factorial", "admin.execute"),
@@ -231,7 +231,22 @@ class CapriHostRuntimeTests(unittest.TestCase):
         stored = registry.get("worker-1")
         self.assertEqual(stored.descriptor.capabilities, ("math.factorial",))
 
-    def test_worker_failure_observation_requires_matching_host_identity(self):
+    def test_worker_failure_observation_requires_host_supervisor_identity(self):
+        registry = InMemoryWorkerRegistry()
+        host = self.make_worker_host(
+            registry, {"worker-token": "worker-1"}, lambda *args: set(),
+        )
+        host.register_worker(
+            "worker-token", WorkerDescriptor("worker-1", (1,), ("math.factorial",)),
+        )
+        with self.assertRaises(HostRuntimeError):
+            host.record_worker_failure("worker-token", "worker-1")
+        with self.assertRaises(HostRuntimeError):
+            host.record_worker_failure("invalid-monitor-token", "worker-1")
+        failed = host.record_worker_failure("monitor-token", "worker-1")
+        self.assertEqual(failed.health.state, "degraded")
+
+    def test_worker_load_observation_is_host_derived_and_fails_closed(self):
         registry = InMemoryWorkerRegistry()
         host = self.make_host(
             task_store=self.task_store,
@@ -240,15 +255,17 @@ class CapriHostRuntimeTests(unittest.TestCase):
                 "worker-1" if credential == "worker-token" else None
             ),
             worker_descriptor_resolver=self.approve_worker_descriptor,
+            worker_observer_authorizer=lambda credential, worker_id: (
+                credential == "monitor-token" and worker_id == "worker-1"
+            ),
+            worker_in_flight_resolver=lambda worker_id: True,
             worker_policy_resolver=lambda *args: set(),
         )
         host.register_worker(
             "worker-token", WorkerDescriptor("worker-1", (1,), ("math.factorial",)),
         )
-        with self.assertRaises(HostRuntimeError):
-            host.record_worker_failure("invalid-token", "worker-1")
-        failed = host.record_worker_failure("worker-token", "worker-1")
-        self.assertEqual(failed.health.state, "degraded")
+        with self.assertRaisesRegex(HostRuntimeError, "load observation is invalid"):
+            host.heartbeat_worker("monitor-token", "worker-1")
 
     def test_execution_budget_usage_is_wired_and_principal_scoped(self):
         budgets = SQLiteBudgetStore(
