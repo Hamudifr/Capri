@@ -203,7 +203,7 @@ static CapriSessionError read_row(CapriSessionStore *store,sqlite3_stmt *st,Capr
     memset(out,0,sizeof *out);
     const unsigned char *sid=sqlite3_column_text(st,0),*created=sqlite3_column_text(st,1),*updated=sqlite3_column_text(st,2),*json=sqlite3_column_text(st,5);
     if(!sid||!created||!updated||!json) return CAPRI_SESSION_CORRUPT;
-    if(strlen((const char*)sid)>=sizeof out->session_id || !text_ok((const char*)created,64u,true) || !text_ok((const char*)updated,64u,true)) return CAPRI_SESSION_CORRUPT;
+    if(strlen((const char*)sid)>=sizeof out->session_id || !text_ok((const char*)sid,36u,true) || !text_ok((const char*)created,64u,true) || !text_ok((const char*)updated,64u,true)) return CAPRI_SESSION_CORRUPT;
     if(strlen((const char*)created)>=sizeof out->created_at || strlen((const char*)updated)>=sizeof out->updated_at) return CAPRI_SESSION_CORRUPT;
     strcpy(out->session_id,(const char*)sid);strcpy(out->created_at,(const char*)created);strcpy(out->updated_at,(const char*)updated);
     out->version=sqlite3_column_int64(st,3);out->closed=sqlite3_column_int(st,4);
@@ -279,7 +279,7 @@ CapriSessionError capri_session_commit_turn_for_principal(CapriSessionStore *s,c
     st=NULL;const char *append_sql="SELECT json_group_array(json(value)) FROM (SELECT value,0 AS grp,CAST(key AS INTEGER) AS seq FROM json_each(?1) UNION ALL SELECT value,1 AS grp,CAST(key AS INTEGER) AS seq FROM json_each(?2) ORDER BY grp,seq)";
     rc=sqlite3_prepare_v2(s->db,append_sql,-1,&st,NULL);if(rc==SQLITE_OK){sqlite3_bind_text(st,1,current.messages_json,-1,SQLITE_TRANSIENT);sqlite3_bind_text(st,2,turn_json,-1,SQLITE_TRANSIENT);rc=sqlite3_step(st);}char *combined=rc==SQLITE_ROW?strdup((const char*)sqlite3_column_text(st,0)):NULL;sqlite3_finalize(st);if(!combined){e=rc==SQLITE_ROW?CAPRI_SESSION_NO_MEMORY:CAPRI_SESSION_DATABASE;goto fail;}
     char now[32];if(!utc_now(now)){free(combined);e=CAPRI_SESSION_IO;goto fail;}
-    st=NULL;rc=sqlite3_prepare_v2(s->db,"UPDATE sessions SET updated_at=?1,version=version+1,messages_json=?2 WHERE session_id=?3 AND version=?4 AND closed=0",-1,&st,NULL);if(rc==SQLITE_OK){sqlite3_bind_text(st,1,now,-1,SQLITE_TRANSIENT);sqlite3_bind_text(st,2,combined,-1,SQLITE_TRANSIENT);sqlite3_bind_text(st,3,id,-1,SQLITE_TRANSIENT);sqlite3_bind_int64(st,4,expected);rc=sqlite3_step(st);}sqlite3_finalize(st);if(rc!=SQLITE_DONE){e=map_sqlite(rc);goto fail;}if(sqlite3_changes(s->db)!=1){e=CAPRI_SESSION_CONFLICT;goto fail;}
+    st=NULL;rc=sqlite3_prepare_v2(s->db,"UPDATE sessions SET updated_at=?1,version=version+1,messages_json=?2 WHERE session_id=?3 AND version=?4 AND closed=0",-1,&st,NULL);if(rc==SQLITE_OK){sqlite3_bind_text(st,1,now,-1,SQLITE_TRANSIENT);sqlite3_bind_text(st,2,combined,-1,SQLITE_TRANSIENT);sqlite3_bind_text(st,3,id,-1,SQLITE_TRANSIENT);sqlite3_bind_int64(st,4,expected);rc=sqlite3_step(st);}sqlite3_finalize(st);if(rc!=SQLITE_DONE){free(combined);e=map_sqlite(rc);goto fail;}if(sqlite3_changes(s->db)!=1){free(combined);e=CAPRI_SESSION_CONFLICT;goto fail;}
     if(!exec_sql(s->db,"COMMIT")){free(combined);e=CAPRI_SESSION_DATABASE;goto fail;}
     *out=current; memset(&current,0,sizeof current); out->version=expected+1; strcpy(out->updated_at,now); free(out->messages_json); out->messages_json=combined;
     RETURN_UNLOCK(s,CAPRI_SESSION_OK);
@@ -334,6 +334,6 @@ CapriSessionError capri_session_close_for_principal(CapriSessionStore *s,const c
     if(!exec_sql(s->db,"BEGIN IMMEDIATE")) RETURN_UNLOCK(s,CAPRI_SESSION_DATABASE);
     CapriSession current={0};CapriSessionError e=select_owned(s,id,principal,&current);if(e!=CAPRI_SESSION_OK){exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,e);}
     if(!current.closed){char now[32];if(!utc_now(now)){capri_session_free(&current);exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,CAPRI_SESSION_IO);}sqlite3_stmt *st=NULL;int rc=sqlite3_prepare_v2(s->db,"UPDATE sessions SET closed=1,updated_at=?1 WHERE session_id=?2",-1,&st,NULL);if(rc==SQLITE_OK){sqlite3_bind_text(st,1,now,-1,SQLITE_TRANSIENT);sqlite3_bind_text(st,2,id,-1,SQLITE_TRANSIENT);rc=sqlite3_step(st);}sqlite3_finalize(st);if(rc!=SQLITE_DONE){capri_session_free(&current);exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,map_sqlite(rc));}current.closed=1;strcpy(current.updated_at,now);}
-    if(!exec_sql(s->db,"COMMIT")){capri_session_free(&current);RETURN_UNLOCK(s,CAPRI_SESSION_DATABASE);}*out=current;RETURN_UNLOCK(s,CAPRI_SESSION_OK);
+    if(!exec_sql(s->db,"COMMIT")){capri_session_free(&current);exec_sql(s->db,"ROLLBACK");RETURN_UNLOCK(s,CAPRI_SESSION_DATABASE);}*out=current;RETURN_UNLOCK(s,CAPRI_SESSION_OK);
 }
 const char *capri_session_error_string(CapriSessionError e){static const char *const m[]={"ok","invalid input","filesystem operation failed","SQLite operation failed","session not found","session closed","session conflict","resource limit reached","persisted session is corrupt","out of memory"};return e>=CAPRI_SESSION_OK&&e<=CAPRI_SESSION_NO_MEMORY?m[e]:"unknown session error";}
