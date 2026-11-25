@@ -123,8 +123,8 @@ This is a strong component foundation. It is not yet a complete autonomous agent
 | Order | Work package | Milestone | Exit evidence |
 |---|---|---|---|
 | 1 | Principal-scoped durable task ownership and safe task recovery | X7 | **Implemented:** immutable owner rows, scoped idempotency/read/cancel/events, handler allowlists, explicit retries, uncertain-outcome quarantine, backup validation, and adversarial tests |
-| 2 | Durable goal record and goal planner protocol | X7 | **Implemented in PR candidate:** principal-owned SQLite goal contracts, constraints/deadline/acceptance criteria, versioned lifecycle, data-only planner protocol and allowlist validator; host API tests pending CI |
-| 3 | Deterministic goal-plan validator and coordinator linking planner, task engine, session, and evidence | X7 | Adversarial planner-output tests; end-to-end fake-adapter tests across restart; no permission escalation |
+| 2 | Durable goal record and goal planner protocol | X7 | **Implemented in PR #162:** principal-owned SQLite goal contracts, constraints/deadline/acceptance criteria, versioned lifecycle, data-only planner protocol and allowlist validator; five-version CI passed |
+| 3 | Deterministic goal-plan validator and coordinator linking planner, task engine, session, and evidence | X7 | **Implemented in PR candidate:** blocked/deferred tasks, immutable goal-task links, idempotent crash recovery, cancellation coordination, hashed step evidence and terminal outcome reconciliation; CI pending |
 | 4 | Execution budget and provider spend guard | X7 | Over-budget rejection before model/tool invocation |
 | 5 | Supervised host service and health lifecycle | X7 | Startup/shutdown, health, worker recovery tests |
 | 6 | Goal acceptance and evidence report | X7 | Read-back verification and partial/uncertain outcome tests |
@@ -145,4 +145,4 @@ This is a strong component foundation. It is not yet a complete autonomous agent
 
 ## Immediate next engineering action
 
-X7.2 goal-contract implementation is in progress on `feat/x7-goal-contract-2026-11-25`: durable principal-owned goal records, immutable owner rows, idempotent creation, versioned lifecycle transitions, and a data-only planner proposal contract with trusted-handler allowlist validation. The planner does not execute tools. Next is X7.3: deterministic coordinator linking validated plans to durable tasks, checkpoints and evidence, followed by X7.4 hard execution/provider budgets.
+X7.2 is merged in PR #162 (main `f573e6b707bf1c57e6dfe62c25bc4be94c7c7a23`) with five-version exact-head and post-merge CI passing. X7.3 is under implementation on `feat/x7-goal-coordinator-2026-11-25`: deferred task activation prevents workers from claiming a task before the durable goal-task link exists; stable idempotency keys recover across crashes; cancellation and task outcomes reconcile into goal state; hashed step-result evidence is persisted without copying raw outputs. Next after X7.3 is X7.4 hard execution/provider budgets.
