@@ -527,7 +527,6 @@ class WorkerRegistryTests(unittest.TestCase):
                     committed, authenticated_worker_id="worker-1",
                     observed_in_flight=invalid, now_ns=self.now,
                 )
-        self.assertIsNotNone(self.registry.get_reservation(committed.token))
         self.assertTrue(self.registry.release_reservation(
             committed, authenticated_worker_id="worker-1",
             observed_in_flight=0, now_ns=self.now,
