@@ -56,7 +56,7 @@ static bool utf8_valid(const unsigned char *s, size_t n, size_t *characters) {
     return true;
 }
 static bool unicode_space(uint32_t cp) {
-    return (cp>=0x09u&&cp<=0x0Du)||cp==0x20u||cp==0x85u||cp==0xA0u||cp==0x1680u||
+    return (cp>=0x09u&&cp<=0x0Du)||(cp>=0x1Cu&&cp<=0x20u)||cp==0x85u||cp==0xA0u||cp==0x1680u||
       (cp>=0x2000u&&cp<=0x200Au)||cp==0x2028u||cp==0x2029u||cp==0x202Fu||cp==0x205Fu||cp==0x3000u;
 }
 static bool has_non_whitespace(const unsigned char *s,size_t n) {
