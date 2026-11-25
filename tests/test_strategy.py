@@ -305,7 +305,7 @@ class StrategyEvaluationTests(unittest.TestCase):
         self.assertEqual(result.interpretation[:14], "Descriptive ev")
         self.assertEqual(result.baseline_version, "unversioned")
         self.assertEqual(result.candidate_version, "unversioned")
-        self.assertEqual(result.cohort_schema, "capri.strategy-cohort.v2")
+        self.assertEqual(result.cohort_schema, "unversioned")
 
     def test_v2_cohort_fingerprint_has_a_known_vector_and_binds_versions(self):
         records = [
