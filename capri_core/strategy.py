@@ -118,9 +118,9 @@ def evaluate_strategies(
 ) -> StrategyEvaluation:
     """Compare two strategies on exactly matched task/scenario cohorts.
 
-    All hard gates are non-inferiority checks: the candidate may not reduce the
-    verified-success rate, increase safety violations, or worsen any measured
-    resource metric. A candidate is eligible for manual review only when the
+    All hard gates are paired non-inferiority checks: on no matched task may
+    the candidate lose a verified success, introduce a safety violation, or
+    worsen a measured resource metric. A candidate is eligible for manual review only when the
     cohort is complete, the sample floor is met, all hard gates pass, and at
     least one quality/resource dimension strictly improves.
 
