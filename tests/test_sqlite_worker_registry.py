@@ -352,5 +352,35 @@ class SQLiteWorkerRegistryTests(unittest.TestCase):
         with self.assertRaises(WorkerRegistryError):
             self.make_registry(SQLiteTaskStore(self.path))
 
+    def test_reservation_task_projection_tampering_fails_closed(self):
+        self.register_healthy()
+        pending = self.reserve(self.registry, "task-original")
+        connection = self.store._connect()
+        try:
+            connection.execute(
+                "UPDATE worker_registry_reservations SET task_id='task-forged' WHERE token=?",
+                (pending.token,),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        self.assertEqual(self.registry.integrity_check(), "worker registry validation failed")
+        with self.assertRaises(WorkerRegistryError):
+            self.make_registry(SQLiteTaskStore(self.path))
+
+    def test_heartbeat_refresh_is_audited_even_when_load_is_unchanged(self):
+        self.register_healthy()
+        before = self.registry.events_for_worker("worker-1")
+        self.registry.heartbeat(
+            "worker-1",
+            authenticated_worker_id="worker-1",
+            in_flight=0,
+        )
+        after = self.registry.events_for_worker("worker-1")
+        self.assertEqual(len(after), len(before) + 1)
+        self.assertEqual(after[-1]["event_type"], "worker_heartbeat_state_changed")
+        self.assertEqual(self.registry.integrity_check(), "ok")
+
 if __name__ == "__main__":
     unittest.main()
