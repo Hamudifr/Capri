@@ -300,7 +300,12 @@ CapriSessionError capri_session_backup_to(CapriSessionStore *s,const char *desti
     bool ok=fchmod(fd,0600)==0&&fsync(fd)==0;close(fd);if(!ok){unlink(temporary);free(temporary);free(parent);free(absolute);return CAPRI_SESSION_IO;}
     pthread_mutex_lock(&s->mutex);
     if(!store_path_safe(s)){pthread_mutex_unlock(&s->mutex);unlink(temporary);free(temporary);free(parent);free(absolute);return CAPRI_SESSION_IO;}
-    sqlite3 *destination=NULL;int rc=sqlite3_open_v2(temporary,&destination,SQLITE_OPEN_READWRITE|SQLITE_OPEN_FULLMUTEX,NULL);
+    sqlite3 *destination=NULL;
+    int destination_flags=SQLITE_OPEN_READWRITE|SQLITE_OPEN_FULLMUTEX;
+#ifdef SQLITE_OPEN_NOFOLLOW
+    destination_flags|=SQLITE_OPEN_NOFOLLOW;
+#endif
+    int rc=sqlite3_open_v2(temporary,&destination,destination_flags,NULL);
     if(rc!=SQLITE_OK){if(destination)sqlite3_close(destination);pthread_mutex_unlock(&s->mutex);unlink(temporary);free(temporary);free(parent);free(absolute);return map_sqlite(rc);}
     bool configured=sqlite3_busy_timeout(destination,5000)==SQLITE_OK;
 #ifdef SQLITE_DBCONFIG_DEFENSIVE
@@ -623,7 +628,11 @@ CapriSessionError capri_session_restore_to(CapriSessionStore *s,const char *back
     bool source_safe=source_fd>=0&&fstat(source_fd,&opened_source)==0&&S_ISREG(opened_source.st_mode)&&opened_source.st_uid==geteuid()&&opened_source.st_nlink==1&&(opened_source.st_mode&0777u)==0600u&&lstat(source_path,&path_source)==0&&opened_source.st_dev==path_source.st_dev&&opened_source.st_ino==path_source.st_ino;
     if(!source_safe){if(source_fd>=0)close(source_fd);pthread_mutex_unlock(&s->mutex);unlink(temporary);free(temporary);free(parent);free(source_path);free(target_path);return CAPRI_SESSION_IO;}
     sqlite3 *source=NULL,*destination=NULL;
-    int rc=sqlite3_open_v2(source_path,&source,SQLITE_OPEN_READONLY|SQLITE_OPEN_FULLMUTEX,NULL);
+    int source_flags=SQLITE_OPEN_READONLY|SQLITE_OPEN_FULLMUTEX;
+#ifdef SQLITE_OPEN_NOFOLLOW
+    source_flags|=SQLITE_OPEN_NOFOLLOW;
+#endif
+    int rc=sqlite3_open_v2(source_path,&source,source_flags,NULL);
     struct stat after_open;
     if(rc==SQLITE_OK&&lstat(source_path,&after_open)==0&&opened_source.st_dev==after_open.st_dev&&opened_source.st_ino==after_open.st_ino){
         if(sqlite3_busy_timeout(source,5000)!=SQLITE_OK ||
@@ -632,7 +641,11 @@ CapriSessionError capri_session_restore_to(CapriSessionStore *s,const char *back
     } else if(rc==SQLITE_OK)rc=SQLITE_CANTOPEN;
     CapriSessionError result=rc==SQLITE_OK?validate_backup_snapshot(s,source):map_sqlite(rc);
     if(result==CAPRI_SESSION_OK){
-        rc=sqlite3_open_v2(temporary,&destination,SQLITE_OPEN_READWRITE|SQLITE_OPEN_FULLMUTEX,NULL);
+        int destination_flags=SQLITE_OPEN_READWRITE|SQLITE_OPEN_FULLMUTEX;
+#ifdef SQLITE_OPEN_NOFOLLOW
+        destination_flags|=SQLITE_OPEN_NOFOLLOW;
+#endif
+        rc=sqlite3_open_v2(temporary,&destination,destination_flags,NULL);
         if(rc==SQLITE_OK){
             if(sqlite3_busy_timeout(destination,5000)!=SQLITE_OK)result=CAPRI_SESSION_DATABASE;
 #ifdef SQLITE_DBCONFIG_DEFENSIVE
