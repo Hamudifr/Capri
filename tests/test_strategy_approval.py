@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 from capri_runtime.strategy_approval import (
@@ -44,7 +45,6 @@ class HostStrategyApprovalAuthorityTests(unittest.TestCase):
         self.assertEqual(grant.signature.split(".", 1)[0], "k1")
 
     def test_every_bound_field_is_authenticated(self):
-        from dataclasses import replace
         grant = self.authority.issue_grant("valid", self.request)
         changes = {
             "principal_id": "mallory",
@@ -68,9 +68,7 @@ class HostStrategyApprovalAuthorityTests(unittest.TestCase):
             self.authority.issue_grant("invalid", self.request)
 
     def test_cross_principal_grant_is_denied(self):
-        request = StrategyApprovalRequest(
-            **{**self.request.__dict__, "principal_id": "bob"}
-        )
+        request = replace(self.request, principal_id="bob")
         with self.assertRaises(StrategyAuthorizationError):
             self.authority.issue_grant("valid", request)
 
@@ -85,14 +83,21 @@ class HostStrategyApprovalAuthorityTests(unittest.TestCase):
 
     def test_key_rotation_keeps_old_grant_verifiable(self):
         grant = self.authority.issue_grant("valid", self.request)
-        self.keyring.rotate("k2")
-        self.assertTrue(self.authority.verify(grant))
-        newer = self.authority.issue_grant("valid", self.request)
+        rotated = HmacApprovalKeyRing(
+            {"k1": b"x" * 32, "k2": b"y" * 32}, active_key_id="k2",
+        )
+        authority = HostStrategyApprovalAuthority(
+            rotated,
+            authenticate_approver=lambda credential: self.identity if credential == "valid" else None,
+            authorize_approver=lambda identity, request: True,
+            clock=lambda: self.now,
+        )
+        self.assertTrue(authority.verify(grant))
+        newer = authority.issue_grant("valid", self.request)
         self.assertEqual(newer.signature.split(".", 1)[0], "k2")
-        self.assertTrue(self.authority.verify(newer))
+        self.assertTrue(authority.verify(newer))
 
     def test_tampered_signature_is_rejected(self):
-        from dataclasses import replace
         grant = self.authority.issue_grant("valid", self.request)
         self.assertFalse(self.authority.verify(replace(grant, signature="k1." + "0" * 64)))
 
