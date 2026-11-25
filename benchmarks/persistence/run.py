@@ -55,7 +55,7 @@ def _summary(
         "name": name,
         "unit": unit,
         "sample_count": len(values_ns),
-        "elapsed_seconds": round(wall_elapsed_s, 9) if wall_elapsed_s is not None else None,
+        "elapsed_seconds": wall_elapsed_s,
         "aggregate_operation_seconds": round(aggregate_operation_s, 6),
         "throughput_per_second": (
             round(len(values_ns) / wall_elapsed_s, 2)
