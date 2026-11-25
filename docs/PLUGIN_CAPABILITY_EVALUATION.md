@@ -2,7 +2,7 @@
 
 **Purpose:** test whether each packaged skill or remote tool improves task outcomes, and distinguish static packaging from actual runtime capability.
 
-**Current target:** Capri Engineering Lab v0.7.2 — 15 packaged skill files, 4 configured remote MCP servers. The fixed suite remains 13 cases; two packaged skills are not individually covered.
+**Current target:** Capri Engineering Lab v0.7.3 — 15 packaged skill files, 4 configured remote MCP servers. The fixed suite remains 13 cases; two packaged skills are not individually covered.
 
 ## Evaluation layers
 
@@ -76,7 +76,7 @@ A skill is **provisionally useful** if it improves the aggregate score by at lea
 ## Release gate
 
 - [ ] Manifest and ZIP parse successfully.
-- [ ] All thirteen skill frontmatters are unique and all referenced files exist.
+- [ ] All fifteen packaged skill frontmatters are unique and all referenced files exist.
 - [ ] All four endpoint URLs and transports are present in plugin source.
 - [ ] License, maintainer, authentication, privacy, and data-flow review exists for each remote service.
 - [ ] ChatGPT-side initialize/tools/list succeeds for each endpoint.
