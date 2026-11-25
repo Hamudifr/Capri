@@ -24,7 +24,10 @@ _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in __import__("sys").path:
     __import__("sys").path.insert(0, str(_ROOT))
 
-from capri_runtime import BudgetPolicy, SQLiteBudgetStore, SQLiteGoalStore, SQLiteTaskStore
+from capri_runtime import (
+    BudgetPolicy, Message, SQLiteBudgetStore, SQLiteGoalStore,
+    SQLiteSessionStore, SQLiteTaskStore,
+)
 
 _PLAN = [{"tool": "noop", "input": {"value": "persistence-profile"}, "max_attempts": 1}]
 _PRINCIPAL = "persistence-benchmark-principal"
@@ -234,6 +237,24 @@ def run(*, warmup: int = 10, samples: int = 50, workers: int = 4, queue_size: in
                 {"provider_calls": 1, "provider_input_bytes": 64,
                  "tool_calls": 1, "task_steps": 1, "task_input_bytes": 64},
                 now=now,
+            ),
+            warmup, samples,
+        ))
+
+        sessions = SQLiteSessionStore(str(root / "sessions.sqlite3"))
+        session_records = [
+            sessions.create_for_principal(_PRINCIPAL)
+            for _ in range(warmup + samples)
+        ]
+        session_iterator = iter(session_records)
+        session_turn = (
+            Message(role="user", content="persistence-profile"),
+            Message(role="assistant", content="completed"),
+        )
+        results.append(_measure(
+            "session_commit_for_principal",
+            lambda: sessions.commit_turn_messages_for_principal(
+                next(session_iterator).session_id, _PRINCIPAL, 0, session_turn,
             ),
             warmup, samples,
         ))
