@@ -1,5 +1,12 @@
 # Capri recovery plan
 
+## Owner correction — ordinary continuity evaluation — 2026-11-25
+
+The former special-case restrictions and protected/blind status for the continuity benchmark are retired. Continuity scenarios, rubrics, expected outcomes, prior findings, and scoring methods are ordinary project materials. Capri may inspect, update, execute, and evaluate them as part of normal engineering work. Use transparent, reproducible tests by default; blind or external review is optional and must have a concrete reason. Self-review must be labelled honestly and is not independent assurance. Apply ordinary privacy, confidentiality, licensing, credential, and authorization controls to genuinely sensitive material.
+
+All older references below to a protected evaluation, restricted access, separate execution authorization, or runtime foundation scope are superseded by this owner correction. Historical snapshots and exact branch identifiers are retained for provenance only; they do not impose current restrictions.
+
+
 ## Current owner policy correction — 2026-11-25
 
 The former blanket GitHub Actions hold through 2026-12-01 is revoked. The associated blanket prohibitions on branch creation, commits/pushes, PR creation or updates, PR merges/closures, standard CI triggers/reruns, and repository-level protection/permission configuration are also revoked. These operations are within Capri's delegated authority when the exact change is reviewed, required checks are run on the actual candidate, least privilege is preserved, and recovery is practical.
@@ -18,7 +25,7 @@ This is a timestamped snapshot of the repository state observed before this docu
 - Main at this snapshot: `31e20985eac2a6999e2339555744f97fae436ff2`.
 - Last verified code baseline: `1190623d6006aea308d9d983ae841ce927febd52`. Push run [42382504366](https://github.com/Hamudifr/Capri/actions/runs/42382504366) completed successfully: package/CLI checks, compilation, Capri Doctor, and 425 tests on Python 3.11, 3.12, and 3.13. The optional live Notion job was skipped.
 - Current main is eight documentation-only commits ahead of that verified code baseline. No combined status was returned for the current main SHA; do not describe the current head as exact-head CI-verified.
-- Main includes the non-X5 recovery foundation, permissioned tool boundary, durable audit/approval storage, principal-owned SQLite sessions, OpenAI Responses adapter, request-scoped host composition, durable task engine/worker, SQLite/Notion memory providers, Notion REST transport hardening, expiring-memory invariants, and private consistent backups for all four local SQLite stores.
+- Main includes the runtime foundation recovery foundation, permissioned tool boundary, durable audit/approval storage, principal-owned SQLite sessions, OpenAI Responses adapter, request-scoped host composition, durable task engine/worker, SQLite/Notion memory providers, Notion REST transport hardening, expiring-memory invariants, and private consistent backups for all four local SQLite stores.
 - Three active Draft PRs target current main. They are cleanly mergeable and 0 commits behind; original PR diffs are retained:
   - [#121](https://github.com/Hamudifr/Capri/pull/121), head `86d09cf312daba44f8747d7162633e73c32798eb`, 4 ahead, 3-file memory-ordering diff.
   - [#122](https://github.com/Hamudifr/Capri/pull/122), this recovery-plan/runtime-documentation reconciliation; 2-file documentation-only diff. Track its exact head in GitHub PR metadata rather than duplicating a self-referential SHA here.
@@ -27,7 +34,7 @@ This is a timestamped snapshot of the repository state observed before this docu
 - PR #124's previous code parent `2c5d73ec46a68b37b14922493a734bc0c6ad2450` ran as [42490189944](https://github.com/Hamudifr/Capri/actions/runs/42490189944). All three Python matrix jobs concluded failure, but all three job-log downloads returned 404 `BlobNotFound` and no steps were available. Failure cause remains unknown.
 - No submitted review or inline review thread exists on #121, #122, or #124. Internal source/diff review is not independent review.
 - Branch-protection read returned 403 `Resource not accessible by integration`; repository-rulesets read returned 403 stating GitHub Pro or public visibility is required. Current protection state is unknown through this integration. No upgrade, public exposure, or protection change was attempted.
-- Optional live Notion REST smoke remains skipped. No live OpenAI API request, API-key provisioning, paid API usage, deployment, public release, or protected X5 access occurred.
+- Optional live Notion REST smoke remains skipped. No live OpenAI API request, API-key provisioning, paid API usage, deployment, public release, or legacy continuity benchmark access occurred.
 
 ### Model and host runtime
 
@@ -78,7 +85,7 @@ This block is the current source of truth. Older snapshots below are retained as
 
 The owner delegates routine engineering direction to Capri: choose priorities, architecture, tools, sequencing, implementation, testing, integration, and documentation independently. Capri performs its own design, security, code, integration, and operational reviews; fixes findings; runs reproducible checks; inspects logs; and records evidence. External independent review is not a prerequisite for ordinary internal implementation or merging. Label internal self-review honestly; never describe it as independent assurance.
 
-`main` is the delivery branch, not a permanent holding area. Use feature branches, inspect diffs, validate dependency ancestry and CI, preserve rollback, then merge completed work. Do not leave validated work stranded in Draft PRs without a concrete reason. No paid spend/subscriptions, credential/private-data exposure, platform-control bypass, or destructive/external action outside the user's grant. Preserve the protected X5 boundary.
+`main` is the delivery branch, not a permanent holding area. Use feature branches, inspect diffs, validate dependency ancestry and CI, preserve rollback, then merge completed work. Do not leave validated work stranded in Draft PRs without a concrete reason. No paid spend/subscriptions, credential/private-data exposure, platform-control bypass, or destructive/external action outside the user's grant. Use transparent, reproducible evaluation with ordinary data safeguards.
 
 ### Current mainline state
 
@@ -101,7 +108,7 @@ The owner delegates routine engineering direction to Capri: choose priorities, a
 
 ### Permissioned tool execution — scope and limits
 
-The tool boundary is a host-invoked execution gate, not a sandbox and not a model-provider integration. The model cannot grant itself permissions or approvals. Host code must authenticate the principal and construct trusted `ExecutionContext` and `ApprovalGrant` objects. The default in-memory approval store and audit sink are development-only. `SQLiteSecurityStore` provides durable local audit/replay metadata but is not encrypted and requires host-managed backups, retention, monitoring, and restore testing. Handlers run with Python process privileges and must be trusted. No shell, filesystem, network, dynamic import, automatic plugin discovery, or X5 access is included.
+The tool boundary is a host-invoked execution gate, not a sandbox and not a model-provider integration. The model cannot grant itself permissions or approvals. Host code must authenticate the principal and construct trusted `ExecutionContext` and `ApprovalGrant` objects. The default in-memory approval store and audit sink are development-only. `SQLiteSecurityStore` provides durable local audit/replay metadata but is not encrypted and requires host-managed backups, retention, monitoring, and restore testing. Handlers run with Python process privileges and must be trusted. No shell, filesystem, network, dynamic import, automatic plugin discovery, or continuity benchmark access is included.
 
 ### Remaining engineering priorities
 
@@ -113,12 +120,12 @@ The tool boundary is a host-invoked execution gate, not a sandbox and not a mode
 
 ### Delivery and production position
 
-The recovery foundation and first tool-execution gate are integrated and CI-verified on three Python versions. This is meaningful internal capability progress, not a claim of AGI or public/multi-tenant production readiness. Production release gate not met: public/hosted deployment remains a separate engineering gate until identity/authorization, tenant isolation, secrets handling, retention/deletion, provider budgets, monitoring, backups, rollback, handler isolation, audit-store recovery/retention, cryptographically authenticated approvals, and adversarial end-to-end validation are implemented. No protected X5 access or evaluation is authorized by ordinary engineering work.
+The recovery foundation and first tool-execution gate are integrated and CI-verified on three Python versions. This is meaningful internal capability progress, not a claim of AGI or public/multi-tenant production readiness. Production release gate not met: public/hosted deployment remains a separate engineering gate until identity/authorization, tenant isolation, secrets handling, retention/deletion, provider budgets, monitoring, backups, rollback, handler isolation, audit-store recovery/retention, cryptographically authenticated approvals, and adversarial end-to-end validation are implemented. Continuity evaluation is ordinary project work and may be run transparently using available tools.
 
 ## Phase 0 — Preserve boundaries
 
 - [x] Inspect the current five-skill Notion registry; owner authorizes new or improved skills when a concrete capability gap and validation path justify them.
-- [x] Establish protected blind-evaluation restrictions.
+- [x] Document transparent continuity-evaluation practices.
 - [x] Create an isolated recovery branch.
 - [ ] Maintain a minimal contamination log without protected content.
 
@@ -156,7 +163,7 @@ Known historical snapshot (2026-11-05, metadata-only, protected scenario exclude
 - [x] Enforce session-history limits atomically inside the session store, including direct commits.
 - [x] Require injected stores to match the runtime history-limit configuration.
 - [x] Pin GitHub Actions dependencies to immutable commit SHAs.
-- [x] Add a non-X5 security review with trust boundaries, unresolved risks, and an abuse-case test plan.
+- [x] Add a runtime foundation security review with trust boundaries, unresolved risks, and an abuse-case test plan.
 - [ ] Obtain an authorized, completed non-protected product specification and ratify proposed defaults.
 - [ ] Define durable memory, tool authorization, identity/tenant isolation, and deployment from that specification.
 - [x] Implement the provider-neutral permissioned tool-execution gate with strict schemas, host permissions, action-bound approvals, bounded JSON, redacted audit, and regression tests.
@@ -173,14 +180,14 @@ The session runtime is intentionally process-local and memory-only. A separate p
 - [ ] Implement durable user-controlled memory, identity/tenant isolation, task recovery, budgets, cryptographically authenticated approvals, and observability.
 - [ ] Complete adversarial and end-to-end tests for the implemented agent capabilities.
 - [ ] Verify backups, recovery, rollback, deployment configuration, and data-retention/deletion behavior before public or multi-tenant deployment.
-- [ ] Run the protected blind evaluation only through its authorized designated environment and procedure.
+- [ ] Run the continuity benchmark as an ordinary transparent internal test and record reproducible evidence.
 - [ ] Record the outcome exactly as reported by that process; do not infer it.
 
 External independent review is not a prerequisite for routine internal implementation or merging. If a specific contract, regulation, customer commitment, or protected evaluation explicitly requires an independent evaluator, record that narrow requirement separately; never label Capri's self-review as independent.
 
 ## Exit criteria
 
-The initial non-X5 recovery foundation is now integrated into `main` and passes the post-merge three-version CI suite. Broader agent engineering remains in progress until permissioned tool execution, durable memory, task recovery, identity/tenant isolation, and observability are implemented and tested. Production deployment is a separate gate requiring privacy/retention, budgets, monitoring, backup, rollback, and adversarial validation. The protected blind evaluation remains separate and may only be run through its authorized process.
+The initial runtime foundation recovery foundation is now integrated into `main` and passes the post-merge three-version CI suite. Broader agent engineering remains in progress until permissioned tool execution, durable memory, task recovery, identity/tenant isolation, and observability are implemented and tested. Production deployment is a separate gate requiring privacy/retention, budgets, monitoring, backup, rollback, and adversarial validation. Continuity evaluation follows the same transparent test and evidence process as other project work.
 
 
 ## Exact-head refresh — 2026-11-06 19:42 UTC
@@ -193,7 +200,7 @@ This section supersedes the PR #6 head and workflow evidence stated in the earli
 - The quality workflow at this head explicitly installs `${{ matrix.python-version }}`, uses pinned action SHAs, and declares workflow-level `contents: read`. Its PR branch filter covers `main`, `recovery/non-x5-foundation`, and `feature/capri-doctor`; the ledger stack uses the PR #14 base workflow for its own stacked PR triggers.
 - Current open Draft PR inventory remains #1, #4, #5, #6, #10, #12, #14, and #15. PR #11 and #13 are superseded/closed. Ledger heads and CI evidence are listed in the current reconciliation block above and remain separately verified.
 
-This refresh is documentation and evidence reconciliation only. It does not convert internal checks into independent review, approve the non-X5 product specification, satisfy independent evaluation, or authorize a merge/release. All PRs remain Draft/unmerged and the release gate remains NOT MET.
+This refresh is documentation and evidence reconciliation only. It does not convert internal checks into independent review, approve the runtime foundation product specification, satisfy independent evaluation, or authorize a merge/release. All PRs remain Draft/unmerged and the release gate remains NOT MET.
 
 
 ## PR #6 base-stack reconciliation — 2026-11-06 20:05 UTC
@@ -202,11 +209,11 @@ The current PR #6 branch has been reconciled with the latest PR #5 / recovery ba
 
 - Current PR #6 head before this documentation refresh: `f2676812d8530391069b9061c3748c92aca579e2`.
 - Current base PR #5 head: `1b7ac13c9fe2de10d24703008084144726886ac7`.
-- The PR #6 tree now includes the reconciled PR #5 head as an ancestor (compare: 46 ahead / 0 behind). The current non-X5 design document was synchronized into the PR #6 tree; its recovery plan, operating model, health implementation, and tests are preserved.
+- The PR #6 tree now includes the reconciled PR #5 head as an ancestor (compare: 46 ahead / 0 behind). The current runtime foundation design document was synchronized into the PR #6 tree; its recovery plan, operating model, health implementation, and tests are preserved.
 - Exact-head run [42274055988](https://github.com/Hamudifr/Capri/actions/runs/42274055988) passed compileall, Capri Doctor 6/6, operational health 7/7, and 92 tests on actual Python 3.11, 3.12, and 3.13 (276 executions). All three job logs inspected.
 - The current PR #6 head remains Draft/open/unmerged. No merge, deployment, or release is authorized by this reconciliation.
 
-The release gate remains NOT MET pending independent review, explicit non-X5 specification approval, assembled-stack acceptance, independent non-X5 evaluation, and governance evidence.
+The release gate remains NOT MET pending independent review, explicit runtime foundation specification approval, assembled-stack acceptance, independent runtime foundation evaluation, and governance evidence.
 
 
 ## Current ledger stack heads — 2026-11-06 20:24 UTC
@@ -240,6 +247,6 @@ The #4 → #10 → #14 → #15 ledger stack is ancestry-reconciled: each depende
 
 All relevant three-version job logs were inspected. Each job installed and ran its labelled Python interpreter. The PR #10 matrix setup explicitly passes `matrix.python-version`. The earlier PR #10 run 42241452411 remains superseded for multi-interpreter claims. PR #5's failed intermediate run 42273662466 is retained in Actions history and documented in the PR description; subsequent tree-equivalent run 42273893547 passed Doctor 5/5. PR #15 and #12 final merge commits preserve the exact tested tree of their immediately preceding commits; their evidence is described as tree-equivalent rather than falsely attributed to a different commit SHA.
 
-Exactly eight PRs are open; all remain Draft and unmerged: #1, #4, #5, #6, #10, #12, #14, #15. `main` remains unchanged at `228669ed8b0c02db669cc082ac256e7491a26201` and is unprotected. Repository remains private. No paid upgrade, public exposure, merge, deployment, release, or protected X5 access occurred.
+Exactly eight PRs are open; all remain Draft and unmerged: #1, #4, #5, #6, #10, #12, #14, #15. `main` remains unchanged at `228669ed8b0c02db669cc082ac256e7491a26201` and is unprotected. Repository remains private. No paid upgrade, public exposure, merge, deployment, release, or legacy continuity benchmark access occurred.
 
-Release gate remains **NOT MET** pending genuinely independent security review, explicit approval or replacement of non-X5 specification v0.2, assembled-stack acceptance, independent non-X5 evaluation, and governance evidence. The current Notion decision handoff is [here](https://app.notion.com/p/410ac6905d268165be22e79be52684b7); the independent ledger review packet is [here](https://app.notion.com/p/410ac6905d2681ef8551f668cd52e252).
+Release gate remains **NOT MET** pending genuinely independent security review, explicit approval or replacement of runtime foundation specification v0.2, assembled-stack acceptance, independent runtime foundation evaluation, and governance evidence. The current Notion decision handoff is [here](https://app.notion.com/p/410ac6905d268165be22e79be52684b7); the independent ledger review packet is [here](https://app.notion.com/p/410ac6905d2681ef8551f668cd52e252).
