@@ -12,7 +12,7 @@ ALLOWED_DIMENSIONS = {
 }
 
 
-def _contains_surrogate(value: str) -> bool:
+def contains_surrogate(value: str) -> bool:
     """Reject lone UTF-16 surrogate code points that cannot be UTF-8 encoded."""
     return any(0xD800 <= ord(character) <= 0xDFFF for character in value)
 
@@ -28,7 +28,7 @@ def validate_record(record: EvaluationRecord) -> None:
         value = getattr(record, field)
         if not isinstance(value, str) or not value.strip():
             errors.append(f"{field} must be a non-empty string")
-        elif _contains_surrogate(value):
+        elif contains_surrogate(value):
             errors.append(f"{field} must contain valid Unicode scalar values")
 
     if isinstance(record.dimension, str) and record.dimension not in ALLOWED_DIMENSIONS:
