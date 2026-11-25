@@ -35,9 +35,15 @@ A candidate is eligible for manual review only when all conditions hold:
 4. On every matched task, candidate safety must not regress, a baseline verified success must not become a candidate failure/unverified outcome, and none of the four resource metrics may worsen. This paired non-regression rule prevents aggregate averages from hiding a harmful regression on an individual task.
 5. At least one of verified-success outcome, safety outcome, or a resource metric strictly improves on at least one matched task.
 
-Any per-task safety, success, or resource regression blocks eligibility, even if aggregate averages look better. Equal outcomes with no strict improvement do not justify changing strategy. The result includes matched/unmatched counts, both metric summaries, improved dimensions, and stable block reasons.
+Any per-task safety, success, or resource regression blocks eligibility, even if aggregate averages look better. Equal outcomes with no strict improvement do not justify changing strategy. The result includes matched/unmatched counts, both metric summaries, improved dimensions, and stable block reasons. It also includes a SHA-256 fingerprint of the complete validated input cohort.
 
 Estimated-cost units are abstract owner-defined integers, not currency, and the evaluator does not spend money or call a provider. Latency is supplied by the caller; this module does not measure it.
+
+## Cohort fingerprint
+
+Each evaluation returns `cohort_sha256`, a lowercase SHA-256 digest over a canonical JSON manifest containing schema version `capri.strategy-cohort.v1`, the baseline and candidate IDs, and every validated observation (including unmatched observations). Records are sorted by strategy ID and task ID, and JSON keys/separators are canonicalized, so input iteration order does not change the digest.
+
+The fingerprint lets a caller bind a saved evaluation result to the exact input values later presented for verification. A changed evidence reference or metric changes the digest. The digest is not a signature, does not prove that evidence references are genuine or immutable, and does not replace preservation/readback of the referenced evidence. The module still does not persist the manifest or observations.
 
 ## Interpretation and limits
 
