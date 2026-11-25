@@ -286,6 +286,61 @@ def _grant_payload(grant: StrategyActivationGrant) -> None:
         raise StrategyAuthorizationError("promotion assessment fingerprint is invalid")
 
 
+def _promotion_json(value: object, *, field: str, maximum: int) -> str:
+    try:
+        encoded = json.dumps(
+            value, ensure_ascii=False, sort_keys=True,
+            separators=(",", ":"), allow_nan=False,
+        )
+    except (TypeError, ValueError):
+        raise StrategyStoreError(f"{field} is not canonical JSON data") from None
+    if len(encoded.encode("utf-8")) > maximum:
+        raise StrategyStoreError(f"{field} exceeds its size limit")
+    return encoded
+
+
+def _promotion_record_digest(summary_json: str, refs_json: str) -> str:
+    try:
+        summary = json.loads(summary_json)
+        refs = json.loads(refs_json)
+        if type(summary) is not dict or type(refs) is not dict:
+            raise ValueError("promotion record payloads must be JSON objects")
+        payload = {
+            "schema": "capri.strategy-promotion-record.v1",
+            "summary": summary,
+            "evidence_manifest_refs": refs,
+        }
+        encoded = json.dumps(
+            payload, ensure_ascii=False, sort_keys=True,
+            separators=(",", ":"), allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        raise StrategyIntegrityError("stored promotion assessment is corrupt") from None
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _promotion_record_from_row(row: tuple[Any, ...]) -> StrategyPromotionRecord:
+    summary_json, refs_json = row[10], row[11]
+    digest = _promotion_record_digest(summary_json, refs_json)
+    if digest != row[9]:
+        raise StrategyIntegrityError("promotion assessment fingerprint does not match its stored evidence")
+    try:
+        summary = json.loads(summary_json)
+        refs = json.loads(refs_json)
+        if type(summary) is not dict or type(refs) is not dict:
+            raise ValueError("invalid promotion record")
+        normalized_refs = tuple(sorted(
+            (_text(key, "cohort_id", 128), _text(value, "evidence_manifest_ref", 512))
+            for key, value in refs.items()
+        ))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        raise StrategyIntegrityError("stored promotion assessment payload is invalid") from None
+    return StrategyPromotionRecord(
+        row[0], row[1], row[2], row[3], row[4], row[5], row[6],
+        row[7], row[8], row[12], row[9], summary, normalized_refs, row[13],
+    )
+
+
 class SQLiteStrategyStore:
     """Append-only strategy registry sharing the task store's private SQLite DB.
 
