@@ -636,7 +636,7 @@ class SQLiteGoalStore:
         _text(evidence_type, "evidence_type", 64)
         _text(reference, "evidence reference", 512)
         if type(step_index) is not int or not -1 <= step_index < 32:
-            raise GoalValidationError("evidence step_index must be between 0 and 31")
+            raise GoalValidationError("evidence step_index must be between -1 and 31")
         stamp = _stamp(now)
         with self._lock:
             connection = self._connect()
@@ -650,7 +650,7 @@ class SQLiteGoalStore:
                 ).fetchone()
                 if row is None:
                     raise GoalNotFoundError("goal does not exist")
-                if row[0] not in {"running", "succeeded", "cancelling", "reconciliation_required"}:
+                if row[0] not in {"running", "awaiting_verification", "succeeded", "cancelling", "reconciliation_required"}:
                     raise GoalConflictError("goal is not accepting task evidence")
                 inserted = connection.execute(
                     """INSERT OR IGNORE INTO goal_evidence(
