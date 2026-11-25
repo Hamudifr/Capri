@@ -499,7 +499,8 @@ def transition_action_capsule(
             raise ActionCapsuleError("evidence_refs must be a collection")
         try:
             iterator = iter(evidence_refs)
-            has_extra_evidence = next(iterator, None) is not None
+            sentinel = object()
+            has_extra_evidence = next(iterator, sentinel) is not sentinel
         except TypeError:
             raise ActionCapsuleError("evidence_refs must be iterable") from None
         if any(value is not None for value in (verifier_id, verifier_version)) or has_extra_evidence:
