@@ -240,6 +240,15 @@ class HostStrategyApprovalAuthority:
             key_id, separator, encoded_tag = grant.signature.partition(":")
             if not separator or not _KEY_ID.fullmatch(key_id) or not re.fullmatch(r"[0-9a-f]{64}", encoded_tag):
                 return False
+            issued = datetime.fromisoformat(grant.issued_at.replace("Z", "+00:00"))
+            expires = datetime.fromisoformat(grant.expires_at.replace("Z", "+00:00"))
+            if (
+                issued.tzinfo is None or issued.utcoffset() is None
+                or expires.tzinfo is None or expires.utcoffset() is None
+            ):
+                return False
+            if expires <= issued or (expires - issued).total_seconds() > self._max_ttl:
+                return False
             tag = bytes.fromhex(encoded_tag)
             result = self._mac.verify(key_id, _payload(grant, key_id), tag)
             return result is True
