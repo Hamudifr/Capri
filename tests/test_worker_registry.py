@@ -251,7 +251,7 @@ class WorkerRegistryTests(unittest.TestCase):
     def test_descriptor_updates_use_revision_compare_and_swap(self):
         self.register_healthy()
         updated = self.registry.update_descriptor(
-            self.descriptor(priority=10, revision=2),
+            self.descriptor(priority=10, max_concurrency=1, revision=2),
             authenticated_worker_id="worker-1",
             expected_revision=1,
         )
@@ -478,7 +478,7 @@ class WorkerRegistryTests(unittest.TestCase):
         ))
 
     def test_committed_hold_survives_worker_failure_and_descriptor_change(self):
-        self.register_healthy()
+        self.register_healthy(max_concurrency=1)
         pending = self.registry.reserve_eligible(
             "math.factorial", protocol_version=1,
             authorized_worker_ids={"worker-1"}, now_ns=self.now,
