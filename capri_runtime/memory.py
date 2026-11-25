@@ -573,12 +573,25 @@ class SQLiteMemoryStore:
                 current = db.execute("SELECT status FROM memories WHERE memory_id=?", (memory_id,)).fetchone()
                 if current is None:
                     raise MemoryNotFoundError("memory record not found")
+                child_row = db.execute(
+                    "SELECT * FROM memories WHERE supersedes_id=? LIMIT 1", (memory_id,)
+                ).fetchone()
+                if child_row is not None:
+                    existing = self._record(child_row)
+                    same_payload = all(
+                        getattr(existing, field) == getattr(corrected, field)
+                        for field in (
+                            "title", "content", "record_type", "scope", "sensitivity",
+                            "source", "confidence", "retention", "tags", "expires_at",
+                            "supersedes_id",
+                        )
+                    )
+                    if current["status"] == "archived" and same_payload:
+                        db.execute("COMMIT")
+                        return existing
+                    raise MemoryConflictError("memory predecessor already has a correction successor")
                 if current["status"] != "active":
                     raise MemoryConflictError("only the active memory head can be corrected")
-                if db.execute(
-                    "SELECT 1 FROM memories WHERE supersedes_id=? LIMIT 1", (memory_id,)
-                ).fetchone() is not None:
-                    raise MemoryConflictError("memory predecessor already has a correction successor")
                 count = db.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
                 if count >= _MAX_RECORDS:
                     raise MemoryValidationError("memory record capacity reached")
