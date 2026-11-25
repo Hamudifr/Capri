@@ -304,9 +304,14 @@ class CapriHostRuntime:
             raise HostRuntimeError("worker_registry requires a trusted lifecycle audit sink")
         if worker_registry is not None:
             try:
-                if worker_lifecycle_audit_sink.worker_lifecycle_reconciliation_required():
+                reconciliation_required = (
+                    worker_lifecycle_audit_sink.worker_lifecycle_reconciliation_required()
+                )
+                if type(reconciliation_required) is not bool:
+                    raise HostRuntimeError("worker lifecycle audit state returned an invalid result")
+                if reconciliation_required:
                     raise HostRuntimeError(
-                        "worker lifecycle audit has pending operations; reconcile and acknowledge before startup"
+                        "worker lifecycle audit has pending operations or reservations; reconcile and acknowledge before startup"
                     )
             except HostRuntimeError:
                 raise
