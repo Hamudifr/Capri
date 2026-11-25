@@ -94,6 +94,7 @@ class SQLiteExecutionEvidenceJournalTests(unittest.TestCase):
         )
         completed = engine.execute_claim(self.claim)
         self.assertEqual(completed.state, "succeeded")
+        self.assertEqual(completed.result[-1], self.result)
         with self.tasks._lock:
             connection = self.tasks._connect()
             try:
