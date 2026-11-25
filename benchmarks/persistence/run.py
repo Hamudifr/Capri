@@ -42,15 +42,19 @@ def _percentile(values: list[float], fraction: float) -> float:
     return ordered[max(0, math.ceil(fraction * len(ordered)) - 1)]
 
 
-def _summary(name: str, values_ns: list[int], *, unit: str = "operation") -> dict[str, Any]:
+def _summary(
+    name: str, values_ns: list[int], *, wall_elapsed_ns: int, unit: str = "operation"
+) -> dict[str, Any]:
     values_us = [value / 1_000 for value in values_ns]
-    elapsed_s = sum(values_ns) / 1_000_000_000
+    aggregate_operation_s = sum(values_ns) / 1_000_000_000
+    wall_elapsed_s = wall_elapsed_ns / 1_000_000_000
     return {
         "name": name,
         "unit": unit,
         "sample_count": len(values_ns),
-        "elapsed_seconds": round(elapsed_s, 6),
-        "throughput_per_second": round(len(values_ns) / elapsed_s, 2) if elapsed_s else None,
+        "elapsed_seconds": round(wall_elapsed_s, 6),
+        "aggregate_operation_seconds": round(aggregate_operation_s, 6),
+        "throughput_per_second": round(len(values_ns) / wall_elapsed_s, 2) if wall_elapsed_s else None,
         "latency_us": {
             "min": round(min(values_us), 3),
             "median": round(statistics.median(values_us), 3),
@@ -66,11 +70,13 @@ def _measure(name: str, operation: Callable[[], Any], warmup: int, samples: int)
     for _ in range(warmup):
         operation()
     values: list[int] = []
+    batch_started = time.perf_counter_ns()
     for _ in range(samples):
         started = time.perf_counter_ns()
         operation()
         values.append(time.perf_counter_ns() - started)
-    return _summary(name, values)
+    wall_elapsed_ns = time.perf_counter_ns() - batch_started
+    return _summary(name, values, wall_elapsed_ns=wall_elapsed_ns)
 
 
 def _transaction_phases(path: Path, warmup: int, samples: int) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -82,7 +88,10 @@ def _transaction_phases(path: Path, warmup: int, samples: int) -> tuple[dict[str
         connection.execute("CREATE TABLE phase_probe (id INTEGER PRIMARY KEY, payload TEXT NOT NULL)")
         execute_ns: list[int] = []
         commit_ns: list[int] = []
+        sample_batch_started: int | None = None
         for index in range(warmup + samples):
+            if index == warmup:
+                sample_batch_started = time.perf_counter_ns()
             connection.execute("BEGIN IMMEDIATE")
             started = time.perf_counter_ns()
             connection.execute("INSERT INTO phase_probe(payload) VALUES(?)", (f"row-{index}",))
@@ -92,7 +101,20 @@ def _transaction_phases(path: Path, warmup: int, samples: int) -> tuple[dict[str
             if index >= warmup:
                 execute_ns.append(executed - started)
                 commit_ns.append(committed - executed)
-        return _summary("sqlite_insert_statement_only", execute_ns), _summary("sqlite_commit_only_after_insert", commit_ns)
+        sample_batch_elapsed_ns = (
+            time.perf_counter_ns() - sample_batch_started
+            if sample_batch_started is not None else 0
+        )
+        return (
+            _summary(
+                "sqlite_insert_statement_only", execute_ns,
+                wall_elapsed_ns=sample_batch_elapsed_ns,
+            ),
+            _summary(
+                "sqlite_commit_only_after_insert", commit_ns,
+                wall_elapsed_ns=sample_batch_elapsed_ns,
+            ),
+        )
     finally:
         connection.close()
 
