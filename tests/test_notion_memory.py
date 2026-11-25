@@ -206,6 +206,33 @@ class NotionMemoryAdapterTests(unittest.TestCase):
         results = self.store.search("Shared Project", limit=2)
         self.assertEqual([item.memory_id for item in results], [newer.memory_id, older.memory_id])
 
+    def test_search_applies_scope_and_updated_after_filters(self):
+        current = self.create(title="Shared Project", scope="Capri System")
+        outside = self.create(title="Shared Project", scope="GitHub Repository")
+        older = self.create(title="Shared Project", scope="Capri System")
+        self.transport.pages[current.memory_id]["last_edited_time"] = "2026-11-06T00:00:00+00:00"
+        self.transport.pages[outside.memory_id]["last_edited_time"] = "2026-11-06T00:00:00+00:00"
+        self.transport.pages[older.memory_id]["last_edited_time"] = "2026-01-01T00:00:00+00:00"
+        results = self.store.search(
+            "Shared Project",
+            limit=5,
+            scope="Capri System",
+            updated_after=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        )
+        self.assertEqual([record.memory_id for record in results], [current.memory_id])
+
+    def test_search_rejects_invalid_scope_and_temporal_filters(self):
+        class TextSubclass(str):
+            pass
+        class DateTimeSubclass(datetime):
+            pass
+        with self.assertRaises(MemoryValidationError):
+            self.store.search("memory", scope=TextSubclass("Capri System"))
+        with self.assertRaises(MemoryValidationError):
+            self.store.search("memory", updated_after=datetime(2026, 6, 1))
+        with self.assertRaises(MemoryValidationError):
+            self.store.search("memory", updated_after=DateTimeSubclass.now(timezone.utc))
+
     def test_export_json_is_deterministic(self):
         self.create(title="Alpha")
         self.create(title="Beta")
