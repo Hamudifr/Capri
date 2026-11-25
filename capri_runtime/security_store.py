@@ -6,6 +6,7 @@ are not stored. The database is private but not encrypted at rest.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -48,11 +49,15 @@ def _validate_backup_semantics(connection: sqlite3.Connection) -> None:
     """Reject logically malformed security rows even when SQLite is structurally sound."""
     audit_rows = connection.execute(
         """SELECT event_id, timestamp, principal_id, tool_name,
-        argument_digest, status, error_code FROM audit_events"""
+        argument_digest, status, error_code, resource_type, resource_id,
+        task_id, metadata_json FROM audit_events"""
     ).fetchall()
-    for event_id, timestamp, principal_id, tool_name, digest, status, error_code in audit_rows:
+    for (
+        event_id, timestamp, principal_id, tool_name, digest, status, error_code,
+        resource_type, resource_id, task_id, metadata_json,
+    ) in audit_rows:
         if not all((
-            _valid_text(event_id, 64), _valid_text(timestamp, 64),
+            _valid_text(event_id, 64), _valid_text(timestamp),
             _valid_text(principal_id, 256), _valid_text(tool_name, 64),
             _valid_text(status, 64),
             isinstance(digest, str) and _DIGEST_RE.fullmatch(digest),
@@ -62,6 +67,30 @@ def _validate_backup_semantics(connection: sqlite3.Connection) -> None:
             ),
         )):
             raise ToolValidationError("security backup contains an invalid audit event")
+        resource_fields = (resource_type, resource_id, task_id)
+        if metadata_json is None:
+            if any(value is not None for value in resource_fields):
+                raise ToolValidationError("security backup contains incomplete audit resource metadata")
+        else:
+            if not all((
+                _valid_text(resource_type, 64), _valid_text(resource_id, 256),
+                task_id is None or _valid_text(task_id, 128),
+                _valid_text(metadata_json, 16_384),
+            )):
+                raise ToolValidationError("security backup contains invalid audit resource metadata")
+            try:
+                metadata = json.loads(metadata_json)
+                canonical_metadata = json.dumps(
+                    metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+                )
+            except (TypeError, ValueError, json.JSONDecodeError):
+                raise ToolValidationError("security backup contains invalid audit metadata JSON") from None
+            if (
+                not isinstance(metadata, dict)
+                or canonical_metadata != metadata_json
+                or hashlib.sha256(metadata_json.encode("utf-8")).hexdigest() != digest
+            ):
+                raise ToolValidationError("security backup contains an invalid audit metadata digest")
 
     approval_rows = connection.execute(
         """SELECT grant_id, principal_id, tool_name, argument_digest,
@@ -278,8 +307,28 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
                         tool_name TEXT NOT NULL,
                         argument_digest TEXT NOT NULL,
                         status TEXT NOT NULL,
-                        error_code TEXT
+                        error_code TEXT,
+                        resource_type TEXT,
+                        resource_id TEXT,
+                        task_id TEXT,
+                        metadata_json TEXT
                     )"""
+                )
+                existing_audit_columns = {
+                    row[1] for row in connection.execute("PRAGMA table_info(audit_events)")
+                }
+                for column in ("resource_type", "resource_id", "task_id", "metadata_json"):
+                    if column not in existing_audit_columns:
+                        connection.execute(f"ALTER TABLE audit_events ADD COLUMN {column} TEXT")
+                connection.execute(
+                    """CREATE TRIGGER IF NOT EXISTS audit_events_immutable_update
+                    BEFORE UPDATE ON audit_events
+                    BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END"""
+                )
+                connection.execute(
+                    """CREATE TRIGGER IF NOT EXISTS audit_events_immutable_delete
+                    BEFORE DELETE ON audit_events
+                    BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END"""
                 )
                 connection.execute(
                     """CREATE TABLE IF NOT EXISTS consumed_approvals (
@@ -312,13 +361,50 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
             or contains_surrogate(event.error_code)
         ):
             raise ToolValidationError("audit event error code is invalid")
+        optional_fields = (
+            (event.resource_type, 64), (event.resource_id, 256), (event.task_id, 128),
+        )
+        if any(
+            value is not None and (
+                not isinstance(value, str) or not value or len(value) > limit
+                or contains_surrogate(value)
+            )
+            for value, limit in optional_fields
+        ):
+            raise ToolValidationError("audit event resource metadata is invalid")
+        if event.metadata_json is None:
+            if any(value is not None for value, _ in optional_fields):
+                raise ToolValidationError("audit resource fields require canonical metadata JSON")
+        else:
+            if (
+                not isinstance(event.metadata_json, str)
+                or len(event.metadata_json.encode("utf-8")) > 16_384
+                or contains_surrogate(event.metadata_json)
+                or event.resource_type is None or event.resource_id is None
+            ):
+                raise ToolValidationError("audit event metadata JSON is invalid")
+            try:
+                metadata = json.loads(event.metadata_json)
+                canonical_metadata = json.dumps(
+                    metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+                )
+            except (TypeError, ValueError, json.JSONDecodeError):
+                raise ToolValidationError("audit event metadata JSON is invalid") from None
+            if (
+                not isinstance(metadata, dict)
+                or canonical_metadata != event.metadata_json
+                or hashlib.sha256(event.metadata_json.encode("utf-8")).hexdigest()
+                    != event.argument_digest
+            ):
+                raise ToolValidationError("audit event metadata digest or canonical form is invalid")
         with self._lock:
             connection = self._connect()
             try:
                 connection.execute(
                     """INSERT INTO audit_events
-                    (event_id, timestamp, principal_id, tool_name, argument_digest, status, error_code)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (event_id, timestamp, principal_id, tool_name, argument_digest, status,
+                     error_code, resource_type, resource_id, task_id, metadata_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         event.event_id,
                         event.timestamp,
@@ -327,6 +413,10 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
                         event.argument_digest,
                         event.status,
                         event.error_code,
+                        event.resource_type,
+                        event.resource_id,
+                        event.task_id,
+                        event.metadata_json,
                     ),
                 )
             finally:
@@ -386,7 +476,8 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
             try:
                 rows = connection.execute(
                     """SELECT event_id, timestamp, principal_id, tool_name,
-                    argument_digest, status, error_code FROM audit_events ORDER BY rowid"""
+                    argument_digest, status, error_code, resource_type, resource_id,
+                    task_id, metadata_json FROM audit_events ORDER BY rowid"""
                 ).fetchall()
                 return tuple(AuditEvent(*row) for row in rows)
             finally:
