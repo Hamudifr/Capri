@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "capri_session_store.h"
 #include <assert.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,6 +11,18 @@
 #include <pthread.h>
 #include <sys/wait.h>
 #include <time.h>
+
+static int write_all(int fd,const void *buffer,size_t size) {
+    const unsigned char *cursor=(const unsigned char*)buffer;
+    while(size>0u){
+        ssize_t written=write(fd,cursor,size);
+        if(written<0&&errno==EINTR)continue;
+        if(written<=0)return 0;
+        cursor+=(size_t)written;
+        size-=(size_t)written;
+    }
+    return 1;
+}
 
 typedef struct {
     CapriSessionStore *store;
@@ -107,7 +120,7 @@ int main(void) {
         CapriSessionError child_error=CAPRI_SESSION_INVALID;
         CapriSessionStore *child_store=capri_session_store_open(path,200,16000,64000,131072,&child_error);
         int ready=child_store!=NULL&&child_error==CAPRI_SESSION_OK;
-        (void)write(ready_pipe[1],&ready,sizeof ready);close(ready_pipe[1]);
+        if(!write_all(ready_pipe[1],&ready,sizeof ready)){close(ready_pipe[1]);_exit(4);}close(ready_pipe[1]);
         if(!ready){close(start_pipe[0]);close(process_result_pipe[1]);_exit(2);}
         unsigned char go=0;if(read(start_pipe[0],&go,sizeof go)!=(ssize_t)sizeof go){capri_session_store_close(child_store);_exit(3);}
         close(start_pipe[0]);
@@ -115,7 +128,7 @@ int main(void) {
         CapriSession child_output={0};
         CapriSessionError child_result=capri_session_commit_turn_for_principal(child_store,process_session.session_id,"principal-race",0,process_turn,NULL,&child_output);
         int child_code=(int)child_result;
-        (void)write(process_result_pipe[1],&child_code,sizeof child_code);
+        if(!write_all(process_result_pipe[1],&child_code,sizeof child_code)){capri_session_free(&child_output);capri_session_store_close(child_store);close(process_result_pipe[1]);_exit(5);}
         capri_session_free(&child_output);capri_session_store_close(child_store);close(process_result_pipe[1]);_exit(0);
     }
     close(ready_pipe[1]);close(start_pipe[0]);close(process_result_pipe[1]);
