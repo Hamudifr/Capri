@@ -712,6 +712,7 @@ class CapriHostRuntime:
         allowed = self._worker_policy_allowlist(context.principal_id, task_id, capability)
         with self._worker_reservation_lock:
             self._purge_worker_reservation_contexts()
+            self._begin_worker_audit_operation()
             try:
                 reservation = self._worker_registry.reserve_eligible(
                     capability,
@@ -719,8 +720,10 @@ class CapriHostRuntime:
                     authorized_worker_ids=allowed,
                 )
             except WorkerRegistryError:
+                self._finish_worker_audit_operation()
                 raise HostRuntimeError("host worker reservation was rejected") from None
             if reservation is None:
+                self._finish_worker_audit_operation()
                 return None
             wrapped = HostWorkerReservation(
                 context.principal_id, task_id, capability, protocol_version, reservation,
@@ -731,7 +734,21 @@ class CapriHostRuntime:
                         reservation, authenticated_worker_id=reservation.worker_id,
                     )
                 except WorkerRegistryError:
-                    pass
+                    self._worker_audit_healthy = False
+                    raise HostRuntimeError("worker reservation collision cleanup failed") from None
+                self._record_worker_lifecycle_event(
+                    "worker.reservation.collision_released",
+                    reservation.worker_id,
+                    principal_id=context.principal_id,
+                    task_id=task_id,
+                    capability=capability,
+                    protocol_version=protocol_version,
+                    descriptor_revision=reservation.descriptor_revision,
+                    reservation_token=reservation.token,
+                    status="rejected",
+                    error_code="reservation_context_collision",
+                )
+                self._finish_worker_audit_operation()
                 raise HostRuntimeError("worker reservation context collision")
             self._worker_reservation_contexts[reservation.token] = wrapped
             self._record_worker_lifecycle_event(
@@ -745,6 +762,7 @@ class CapriHostRuntime:
                 reservation_token=reservation.token,
                 expires_at_ns=reservation.expires_at_ns,
             )
+            self._finish_worker_audit_operation()
             return wrapped
 
     def commit_worker_reservation(
