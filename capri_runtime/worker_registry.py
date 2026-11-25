@@ -107,6 +107,15 @@ class WorkerReservation:
     expires_at_ns: int
     descriptor_revision: int
 
+    def __post_init__(self) -> None:
+        if type(self.token) is not str or re.fullmatch(r"[A-Za-z0-9_-]{32,128}", self.token) is None:
+            raise WorkerRegistryError("reservation token is invalid")
+        _identifier(self.worker_id, "worker_id")
+        if type(self.expires_at_ns) is not int or self.expires_at_ns < 0:
+            raise WorkerRegistryError("reservation expiry must be a non-negative integer")
+        if type(self.descriptor_revision) is not int or self.descriptor_revision < 1:
+            raise WorkerRegistryError("reservation descriptor revision must be positive")
+
 
 @dataclass(frozen=True, slots=True)
 class WorkerSnapshot:
