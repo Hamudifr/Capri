@@ -546,6 +546,42 @@ class WorkerRegistryTests(unittest.TestCase):
             pending, authenticated_worker_id="worker-1", now_ns=self.now,
         ))
 
+    def test_reservation_lookup_prunes_expired_pending_but_keeps_committed(self):
+        registry = InMemoryWorkerRegistry(
+            clock_ns=lambda: self.now, reservation_ttl_ms=1_000,
+        )
+        registry.register(
+            self.descriptor(max_concurrency=1),
+            authenticated_worker_id="worker-1", now_ns=self.now,
+        )
+        registry.heartbeat(
+            "worker-1", authenticated_worker_id="worker-1",
+            in_flight=0, now_ns=self.now,
+        )
+        pending = registry.reserve_eligible(
+            "math.factorial", protocol_version=1,
+            authorized_worker_ids={"worker-1"}, now_ns=self.now,
+        )
+        self.assertEqual(registry.get_reservation(pending.token, now_ns=self.now), pending)
+        self.now += 2_000_000_000
+        self.assertIsNone(registry.get_reservation(pending.token, now_ns=self.now))
+
+        registry.heartbeat(
+            "worker-1", authenticated_worker_id="worker-1",
+            in_flight=0, now_ns=self.now,
+        )
+        pending = registry.reserve_eligible(
+            "math.factorial", protocol_version=1,
+            authorized_worker_ids={"worker-1"}, now_ns=self.now,
+        )
+        committed = registry.commit_reservation(
+            pending, authenticated_worker_id="worker-1", now_ns=self.now,
+        )
+        self.now += 2_000_000_000
+        self.assertEqual(
+            registry.get_reservation(committed.token, now_ns=self.now), committed,
+        )
+
     def test_expired_pending_reservation_cannot_be_committed(self):
         registry = InMemoryWorkerRegistry(
             clock_ns=lambda: self.now, reservation_ttl_ms=1_000,

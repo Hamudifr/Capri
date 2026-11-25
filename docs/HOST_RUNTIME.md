@@ -118,3 +118,15 @@ The host-runtime tests cover:
 - Closed-session behavior, invalid inputs, and redacted memory resolver errors.
 
 These tests establish application-level session and task ownership boundaries, not complete tenant isolation. Before external multi-user deployment, add authentication integration tests, principal-handler resource ACL tests, memory-provider ACL tests, rate limiting, per-principal provider budgets, approval UX, structured observability, encrypted backup storage, retention and restore drills, and deployment hardening.
+
+## Nexus worker reservation gateway
+
+When a process-local `InMemoryWorkerRegistry` is configured with the required worker identity, descriptor, supervisor-observer, host-load and task-policy resolvers, `CapriHostRuntime` exposes a host-only reservation lifecycle:
+
+- `reserve_worker_candidate(credential, task_id, capability, protocol_version)` verifies the authenticated principal owns the task, applies the host allow-list, and returns a `HostWorkerReservation` or `None`.
+- `commit_worker_reservation(credential, observer_credential, reservation)` rechecks task ownership and policy, authenticates the supervisor, refreshes host-observed load, and commits the pending hold.
+- `release_worker_reservation(observer_credential, reservation)` requires supervisor authorization. Pending holds can be released before dispatch; committed holds require the host-observed in-flight count and atomically hand the slot back to that count.
+
+The wrapper binds the registry token to principal/task/capability/protocol in process-local host context. Cross-principal or cross-task rebinding is rejected. Do not expose these methods or the wrapper to the model as tools. The gateway still does not dispatch, launch worker processes, implement IPC, accept worker responses, or provide OS isolation.
+
+The registry and wrapper context are process-local. The embedding host remains responsible for durable audit of registration, health, failure, reservation, commit, release, quarantine, recovery and retirement events, and for reconciliation after restart. The current gateway does not itself persist those lifecycle audit events.

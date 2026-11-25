@@ -203,6 +203,17 @@ class InMemoryWorkerRegistry:
                 raise WorkerNotFoundError("worker is not registered")
             return snapshot
 
+    def get_reservation(
+        self, token: str, *, now_ns: int | None = None,
+    ) -> WorkerReservation | None:
+        """Return a live reservation by opaque token, lazily pruning expired pending holds."""
+        if type(token) is not str or re.fullmatch(r"[A-Za-z0-9_-]{32,128}", token) is None:
+            raise WorkerRegistryError("reservation token is invalid")
+        timestamp = _now_ns(now_ns, self._clock_ns)
+        with self._lock:
+            self._purge_expired_reservations(timestamp)
+            return self._reservations.get(token)
+
     def update_descriptor(
         self,
         descriptor: WorkerDescriptor,
