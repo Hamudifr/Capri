@@ -32,6 +32,8 @@ _RESERVED_CONFIG_KEYS = frozenset({
 })
 _MAX_CONFIG_BYTES = 8192
 _MAX_APPROVAL_TTL = 900
+_KEY_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+_OPERATION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 
 
 class StrategyStoreError(ValueError):
@@ -71,6 +73,8 @@ class StrategyActivationGrant:
     expires_at: str
     approver_id: str
     signature: str
+    key_id: str | None = None
+    operation_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -236,6 +240,13 @@ def _grant_payload(grant: StrategyActivationGrant) -> None:
         raise StrategyAuthorizationError("approval grant lifetime is invalid")
     _text(grant.approver_id, "approver_id", 128)
     _text(grant.signature, "signature", 2048)
+    if (grant.key_id is None) != (grant.operation_id is None):
+        raise StrategyAuthorizationError("approval key ID and operation ID must be supplied together")
+    if grant.key_id is not None:
+        if type(grant.key_id) is not str or not _KEY_ID.fullmatch(grant.key_id):
+            raise StrategyAuthorizationError("approval key ID is invalid")
+        if type(grant.operation_id) is not str or not _OPERATION_ID.fullmatch(grant.operation_id):
+            raise StrategyAuthorizationError("approval operation ID is invalid")
 
 
 class SQLiteStrategyStore:
