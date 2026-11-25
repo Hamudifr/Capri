@@ -217,6 +217,9 @@ class ExecutionBudgetIntegrationTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertIsNone(engine.run_once(now=NOW))
         reset = self.budgets.usage_for_principal("alice", now=NOW).reset_at
+        self.assertIsNone(store.claim_next(
+            "unbudgeted-worker", now=reset, principal_tools=frozenset({"collect"}),
+        ))
         resumed = engine.run_once(now=reset)
         self.assertEqual(resumed.task_id, second.task_id)
         self.assertEqual(resumed.state, "succeeded")
