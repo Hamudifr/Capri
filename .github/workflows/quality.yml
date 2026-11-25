@@ -38,6 +38,7 @@ jobs:
         run: |
           capri --help
           capri doctor --json
+          capri skills validate --root . --json
       - name: Compile source and tests
         run: python -m compileall -q capri_core capri_runtime tests
       - name: Run Capri Doctor
