@@ -397,10 +397,10 @@ class InMemoryWorkerRegistry:
             del self._reservations[token]
 
     def _revoke_worker_reservations(self, worker_id: str) -> None:
-        """Invalidate all pending holds for a worker. Caller must hold _lock."""
+        """Invalidate pending holds, preserving committed in-flight work. Caller holds _lock."""
         revoked = [
             token for token, reservation in self._reservations.items()
-            if reservation.worker_id == worker_id
+            if reservation.worker_id == worker_id and not reservation.committed
         ]
         for token in revoked:
             del self._reservations[token]
