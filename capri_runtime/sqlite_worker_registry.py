@@ -494,7 +494,8 @@ class SQLiteWorkerRegistry:
         clock_ns: Callable[[], int] = time.monotonic_ns,
         clock_wall_ns: Callable[[], int] = time.time_ns,
     ) -> None:
-        if not callable(getattr(task_store, "_connect", None)) or not hasattr(task_store, "_lock"):
+        from .tasks import SQLiteTaskStore
+        if not isinstance(task_store, SQLiteTaskStore):
             raise WorkerRegistryError("SQLiteWorkerRegistry requires a SQLiteTaskStore")
         if not callable(clock_wall_ns):
             raise WorkerRegistryError("clock_wall_ns must be callable")
