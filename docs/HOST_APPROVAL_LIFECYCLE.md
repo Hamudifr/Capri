@@ -140,3 +140,18 @@ After a challenge is approved, the host's authority resolver must supply the per
 ## Non-exportable MAC provider boundary — 2026-11-06
 
 The core now defines an ApprovalMacProvider protocol for host integrations with KMS/HSM-backed HMAC operations. It exposes only the active immutable key ID, sign(key_id, payload), and verify(key_id, payload, signature); raw key bytes are not part of the interface. The provider must operate on the exact requested key version, return a 32-byte HMAC-SHA256 tag from signing, return an actual boolean from verification, and fail closed on errors. No vendor adapter or cloud connection is included.
+
+
+## Durable domain-action approval bridge — 2026-11-25
+
+The host approval service now supports a generic host-owned action challenge in addition to the tool-outcome adapter:
+
+- `create_action_challenge(principal_id, action_name, argument_digest, operation_id)` is a trusted host API. It is not model-facing.
+- `get_challenge_by_operation_id()` recovers the durable record for a stable operation ID.
+- `verify_grant()` verifies the HMAC and that the exact grant is stored on the matching approved challenge.
+- SQLite triggers make challenge identity immutable, permit only one transition from PENDING to a terminal state, prevent terminal-row updates, and prohibit challenge deletion.
+- New approval grants include the authenticated approver ID inside the HMAC payload. Legacy grants without this optional field remain verifiable by the generic service for compatibility; the strategy bridge requires a signed approver ID.
+
+The strategy-specific adapter is `StrategyApprovalBridge` in `capri_runtime.strategy_approvals`. It binds principal, strategy class/ID/version, evaluation fingerprint, config fingerprint, expected generation, action, stable operation ID, challenge creation time, approver identity and HMAC grant. The challenge and grant lifetimes together must not exceed 15 minutes. Use the same trusted UTC clock for HostApprovalService and its HMAC signer. Pass `bridge.verify` as the `SQLiteStrategyStore` approval verifier. The bridge is host-only and must not be exposed to model input.
+
+This is an authenticated approval bridge, not a deployed approval UI or identity provider. It does not authenticate evidence manifests, bind the multi-cohort StrategyPromotionAssessment record, route canaries, or activate strategies automatically. The host still owns user-facing disclosure, identity, authorization policy, evidence provenance, task-family classification and the explicit call to activate/rollback. The current strategy store's evaluation fingerprint is a single StrategyEvaluation cohort hash; binding the full promotion assessment is a separate required gate before automatic staged promotion.
