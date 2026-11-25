@@ -22,7 +22,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Iterable, Literal
 
-from capri_runtime.sqlite_backup import backup_sqlite_database
 
 Outcome = Literal["verified_success", "verified_failure", "unverified"]
 Split = Literal["train", "validation", "test"]
@@ -944,6 +943,10 @@ class LearningStore:
         restore, verify every artifact against the restored authoritative registry
         before allowing it to be consumed.
         """
+        # Import lazily: capri_runtime.__init__ imports the consent adapter,
+        # which itself imports LearningConsent from this module.
+        from capri_runtime.sqlite_backup import backup_sqlite_database
+
         return backup_sqlite_database(
             self.database,
             str(destination_path),
