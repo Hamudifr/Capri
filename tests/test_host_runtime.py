@@ -39,6 +39,7 @@ from capri_runtime import (
 )
 from capri_runtime.host_runtime import CapriHostRuntime, HostRuntimeError, HostWorkerReservation
 from capri_runtime.security_store import SQLiteSecurityStore
+from capri_runtime.tools import AuditSink
 from capri_runtime.tasks import TaskNotFoundError, TaskValidationError
 from capri_runtime.goals import GoalNotFoundError, GoalPlanProposal, GoalValidationError, SQLiteGoalStore
 from capri_runtime.budgets import BudgetExceededError, BudgetPolicy, SQLiteBudgetStore
@@ -140,6 +141,19 @@ class CapriHostRuntimeTests(unittest.TestCase):
         if audit_sink is not None:
             options["worker_lifecycle_audit_sink"] = audit_sink
         return self.make_host(**options)
+
+    def test_worker_registry_rejects_placeholder_audit_sink(self):
+        with self.assertRaisesRegex(HostRuntimeError, "trusted AuditSink"):
+            self.make_host(
+                task_store=self.task_store,
+                worker_registry=InMemoryWorkerRegistry(),
+                worker_identity_resolver=lambda credential: "worker-1",
+                worker_descriptor_resolver=self.approve_worker_descriptor,
+                worker_observer_authorizer=lambda credential, worker_id: True,
+                worker_in_flight_resolver=lambda worker_id: 0,
+                worker_policy_resolver=lambda *args: {"worker-1"},
+                worker_lifecycle_audit_sink=AuditSink(),
+            )
 
     def test_worker_registry_requires_audit_sink(self):
         with self.assertRaisesRegex(HostRuntimeError, "lifecycle audit sink"):
