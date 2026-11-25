@@ -7,7 +7,7 @@ not imply a total order or cross-store transaction.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import re
 from typing import Iterable
@@ -178,5 +178,10 @@ def project_domain_events(*streams: Iterable[DomainEvent]) -> tuple[DomainEvent,
                 raise DomainEventValidationError("duplicate CloudEvents source/id identity")
             projected[identity] = event
     return tuple(sorted(
-        projected.values(), key=lambda item: (item.time, item.source, item.id),
+        projected.values(),
+        key=lambda item: (
+            datetime.fromisoformat(item.time.replace("Z", "+00:00")).astimezone(timezone.utc),
+            item.source,
+            item.id,
+        ),
     ))
