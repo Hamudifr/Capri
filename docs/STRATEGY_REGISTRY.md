@@ -20,7 +20,7 @@ A candidate must:
 1. Be compared with a registered baseline.
 2. Have an eligible offline `StrategyEvaluation` with at least 20 matched pairs.
 3. Supply the original observations; the store recomputes the evaluation and requires an exact result/fingerprint match.
-4. Supply a bounded evidence-manifest locator. The locator is not proof; the host remains responsible for preserving and verifying the referenced evidence.
+4. Supply a bounded evidence-manifest locator. The locator is not proof. Candidate admission also requires a trusted host-injected `evidence_verifier`; if absent, false, or failing, registration is denied before any evaluation row is written. The verifier receives an immutable context binding principal, strategy class, baseline/candidate IDs and versions, cohort fingerprint/schema, manifest locator, and matched-pair count. It must load the source journal, authenticate provenance and task-family classification, reconstruct the cohort, and confirm the exact fingerprint. It must be read-only and must not trust caller-supplied observations or model assertions.
 5. Register a data-only configuration. Registration does not activate the candidate.
 
 The store persists only the evaluation summary and fingerprint, not raw observations or conversation content.
@@ -39,7 +39,7 @@ A host-issued `StrategyActivationGrant` binds the exact strategy version measure
 - issue/expiry timestamps (maximum 15-minute lifetime);
 - one-use grant ID and approver identity.
 
-The host verifier must authenticate the grant's signature/authorization. The store independently checks the fields, expiry, principal, config/evaluation fingerprints, grant replay, and generation compare-and-swap inside an atomic SQLite write transaction.
+The host verifier must authenticate the grant's signature/authorization. The store independently checks the fields, expiry, principal, config/evaluation fingerprints, grant replay, and generation compare-and-swap inside an atomic SQLite write transaction. The host grant issuer must independently re-verify the candidate's authenticated evidence manifest and task-family classification before signing, including for legacy candidate rows created before an `evidence_verifier` was configured; admission-time verification does not retroactively authenticate old rows.
 
 Rollback is not deletion or time travel. It appends a new `rollback` event pointing to a version that was previously active. The former state remains in history.
 

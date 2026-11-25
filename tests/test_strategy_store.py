@@ -52,6 +52,7 @@ class SQLiteStrategyStoreTests(unittest.TestCase):
         self.store = SQLiteStrategyStore(
             self.task_store,
             approval_verifier=lambda grant: grant.signature == "valid",
+            evidence_verifier=lambda context: True,
         )
         self.observations = make_observations()
         self.evaluation = evaluate_strategies("baseline", "candidate", self.observations)
@@ -273,7 +274,11 @@ class SQLiteStrategyStoreTests(unittest.TestCase):
             )
 
     def test_baseline_must_be_registered_before_candidate(self):
-        store = SQLiteStrategyStore(self.task_store, approval_verifier=lambda grant: True)
+        store = SQLiteStrategyStore(
+            self.task_store,
+            approval_verifier=lambda grant: True,
+            evidence_verifier=lambda context: True,
+        )
         with self.assertRaises(StrategyNotFoundError):
             store.register_candidate_for_principal(
                 "bob", "reasoning", "candidate", "1.0", {},
@@ -373,6 +378,85 @@ class SQLiteStrategyStoreTests(unittest.TestCase):
     def test_store_requires_the_exact_task_store_type(self):
         with self.assertRaises(StrategyStoreError):
             SQLiteStrategyStore(object())
+
+
+    def test_candidate_admission_requires_a_trusted_evidence_verifier(self):
+        store = SQLiteStrategyStore(self.task_store)
+        store.register_baseline_for_principal(
+            "carol", "reasoning", "baseline", "1.0", {"mode": "standard"},
+        )
+        with self.assertRaisesRegex(StrategyAuthorizationError, "evidence verifier"):
+            store.register_candidate_for_principal(
+                "carol", "reasoning", "candidate", "1.0", {"mode": "candidate"},
+                self.evaluation, observations=self.observations,
+                evidence_manifest_ref="test://manifests/cohort-002",
+            )
+        connection = self.task_store._connect()
+        try:
+            count = connection.execute(
+                "SELECT COUNT(*) FROM strategy_evaluations WHERE principal_id='carol'"
+            ).fetchone()[0]
+        finally:
+            connection.close()
+        self.assertEqual(count, 0)
+
+    def test_candidate_evidence_verifier_fails_closed(self):
+        verifiers = (
+            lambda context: False,
+            lambda context: 1,
+            lambda context: None,
+            lambda context: (_ for _ in ()).throw(RuntimeError("unavailable")),
+        )
+        for index, verifier in enumerate(verifiers):
+            principal = f"carol{index}"
+            store = SQLiteStrategyStore(self.task_store, evidence_verifier=verifier)
+            store.register_baseline_for_principal(
+                principal, "reasoning", "baseline", "1.0", {"mode": "standard"},
+            )
+            with self.subTest(verifier=index), self.assertRaises(StrategyAuthorizationError):
+                store.register_candidate_for_principal(
+                    principal, "reasoning", "candidate", "1.0", {"mode": "candidate"},
+                    self.evaluation, observations=self.observations,
+                    evidence_manifest_ref=f"test://manifests/{principal}",
+                )
+            connection = self.task_store._connect()
+            try:
+                count = connection.execute(
+                    "SELECT COUNT(*) FROM strategy_evaluations WHERE principal_id=?",
+                    (principal,),
+                ).fetchone()[0]
+            finally:
+                connection.close()
+            self.assertEqual(count, 0)
+
+    def test_candidate_evidence_verifier_receives_exact_immutable_binding(self):
+        captured = []
+        store = SQLiteStrategyStore(
+            self.task_store,
+            evidence_verifier=lambda context: captured.append(context) is None,
+        )
+        store.register_baseline_for_principal(
+            "dana", "reasoning", "baseline", "1.0", {"mode": "standard"},
+        )
+        store.register_candidate_for_principal(
+            "dana", "reasoning", "candidate", "1.0", {"mode": "candidate"},
+            self.evaluation, observations=self.observations,
+            evidence_manifest_ref="test://manifests/dana-cohort",
+        )
+        self.assertEqual(len(captured), 1)
+        context = captured[0]
+        self.assertEqual(context.principal_id, "dana")
+        self.assertEqual(context.strategy_class, "reasoning")
+        self.assertEqual(context.baseline_id, "baseline")
+        self.assertEqual(context.baseline_version, "1.0")
+        self.assertEqual(context.candidate_id, "candidate")
+        self.assertEqual(context.candidate_version, "1.0")
+        self.assertEqual(context.cohort_sha256, self.evaluation.cohort_sha256)
+        self.assertEqual(context.cohort_schema, self.evaluation.cohort_schema)
+        self.assertEqual(context.evidence_manifest_ref, "test://manifests/dana-cohort")
+        self.assertEqual(context.matched_pairs, self.evaluation.matched_pairs)
+        with self.assertRaises((AttributeError, TypeError)):
+            context.cohort_sha256 = "0" * 64
 
 
 if __name__ == "__main__":
