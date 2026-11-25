@@ -4,7 +4,8 @@ import unittest
 from dataclasses import replace
 
 from capri_core.strategy import StrategyObservation
-from capri_runtime.strategy_approval import HostStrategyApprovalAuthority, StrategyApprovalIdentity
+from capri_core.strategy import evaluate_strategies
+from capri_runtime.strategy_evidence import HostStrategyEvidenceAuthority
 from capri_runtime.strategy_evidence_store import SQLiteStrategyEvidenceManifestStore
 from capri_runtime.strategy_store import SQLiteStrategyStore, StrategyAuthorizationError
 from capri_runtime.tasks import SQLiteTaskStore
@@ -17,19 +18,15 @@ class SQLiteStrategyEvidenceManifestStoreTests(unittest.TestCase):
         self.task_store = SQLiteTaskStore(f"{self.directory.name}/tasks.sqlite3")
         self.source_valid = True
         self.family_override = None
+        self.mixed_family = False
         self.store = SQLiteStrategyEvidenceManifestStore(
             self.task_store,
             authenticate_collector=lambda credential: "alice" if credential == "host-credential" else None,
             classify_task_family=lambda principal, task_id: (
-                self.family_override if self.family_override is not None else "research"
+                self.family_override if self.family_override is not None
+                else ("coding" if self.mixed_family and task_id == "task-000" else "research")
             ),
-            validate_source_events=lambda principal, category, observations, families: (
-                self.source_valid
-                and principal == "alice"
-                and category == "reasoning"
-                and len(observations) == 40
-                and all(families[item.task_id] == "research" for item in observations)
-            ),
+            validate_source_events=self.validate_sources,
         )
         self.observations = []
         for index in range(20):
@@ -57,6 +54,15 @@ class SQLiteStrategyEvidenceManifestStoreTests(unittest.TestCase):
 
     def tearDown(self):
         self.directory.cleanup()
+
+    def validate_sources(self, principal, category, observations, families):
+        if not (
+            principal == "alice" and category == "reasoning"
+            and len(observations) == 40
+            and all(families[item.task_id] in {"research", "coding"} for item in observations)
+        ):
+            return False
+        return self.source_valid
 
     def register(self):
         return self.store.register_manifest(
@@ -106,7 +112,7 @@ class SQLiteStrategyEvidenceManifestStoreTests(unittest.TestCase):
             self.register()
 
     def test_all_observations_must_share_one_task_family(self):
-        self.family_override = "coding"
+        self.mixed_family = True
         with self.assertRaises(StrategyAuthorizationError):
             self.register()
 
@@ -128,9 +134,7 @@ class SQLiteStrategyEvidenceManifestStoreTests(unittest.TestCase):
             registry.register_baseline_for_principal(
                 "alice", "reasoning", "baseline", "1.0", {"mode": "standard"},
             )
-            evaluation = __import__(
-                "capri_core.strategy", fromlist=["evaluate_strategies"]
-            ).evaluate_strategies("baseline", "candidate", self.observations)
+            evaluation = evaluate_strategies("baseline", "candidate", self.observations)
             candidate = registry.register_candidate_for_principal(
                 "alice", "reasoning", "candidate", "2.0",
                 {"mode": "efficient"}, evaluation,
