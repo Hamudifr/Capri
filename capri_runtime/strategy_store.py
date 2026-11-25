@@ -74,6 +74,22 @@ class StrategyActivationGrant:
 
 
 @dataclass(frozen=True, slots=True)
+class StrategyEvidenceContext:
+    """Exact immutable binding a trusted host evidence verifier must authenticate."""
+
+    principal_id: str
+    strategy_class: str
+    baseline_id: str
+    baseline_version: str
+    candidate_id: str
+    candidate_version: str
+    cohort_sha256: str
+    cohort_schema: str
+    evidence_manifest_ref: str
+    matched_pairs: int
+
+
+@dataclass(frozen=True, slots=True)
 class StrategyVersionRecord:
     principal_id: str
     strategy_class: str
@@ -250,16 +266,20 @@ class SQLiteStrategyStore:
         task_store: SQLiteTaskStore,
         *,
         approval_verifier: Callable[[StrategyActivationGrant], bool] | None = None,
+        evidence_verifier: Callable[[StrategyEvidenceContext], bool] | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         if type(task_store) is not SQLiteTaskStore:
             raise StrategyStoreError("SQLiteStrategyStore requires the exact trusted SQLiteTaskStore")
         if approval_verifier is not None and not callable(approval_verifier):
             raise StrategyStoreError("approval_verifier must be callable")
+        if evidence_verifier is not None and not callable(evidence_verifier):
+            raise StrategyStoreError("evidence_verifier must be callable")
         if clock is not None and not callable(clock):
             raise StrategyStoreError("clock must be callable")
         self._task_store = task_store
         self._approval_verifier = approval_verifier
+        self._evidence_verifier = evidence_verifier
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = task_store._lock
         self._initialize()
@@ -458,6 +478,28 @@ class SQLiteStrategyStore:
         ):
             raise StrategyStoreError("candidate evaluation does not meet the independently recomputed registry admission gate")
         evidence_ref = _text(evidence_manifest_ref, "evidence_manifest_ref", 512)
+        if self._evidence_verifier is None:
+            raise StrategyAuthorizationError(
+                "candidate admission requires a trusted host evidence verifier"
+            )
+        evidence_context = StrategyEvidenceContext(
+            principal_id=principal,
+            strategy_class=category,
+            baseline_id=baseline_id,
+            baseline_version=baseline_version,
+            candidate_id=candidate_id,
+            candidate_version=candidate_version,
+            cohort_sha256=evaluation.cohort_sha256,
+            cohort_schema=evaluation.cohort_schema,
+            evidence_manifest_ref=evidence_ref,
+            matched_pairs=evaluation.matched_pairs,
+        )
+        try:
+            evidence_verified = self._evidence_verifier(evidence_context)
+        except Exception:
+            raise StrategyAuthorizationError("candidate evidence verification failed") from None
+        if evidence_verified is not True:
+            raise StrategyAuthorizationError("candidate evidence provenance could not be verified")
         config_json, config_hash = _encode_config(config)
         timestamp = created_at or datetime.now(timezone.utc)
         if not isinstance(timestamp, datetime) or timestamp.tzinfo is None or timestamp.utcoffset() is None:

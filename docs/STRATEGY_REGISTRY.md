@@ -20,7 +20,7 @@ A candidate must:
 1. Be compared with a registered baseline.
 2. Have an eligible offline `StrategyEvaluation` with at least 20 matched pairs.
 3. Supply the original observations; the store recomputes the evaluation and requires an exact result/fingerprint match.
-4. Supply a bounded evidence-manifest locator. The locator is not proof; the host remains responsible for preserving and verifying the referenced evidence.
+4. Supply a bounded evidence-manifest locator. The locator is not proof. Candidate admission also requires a trusted host-injected `evidence_verifier`; if absent, false, or failing, registration is denied before any evaluation row is written. The verifier receives an immutable context binding principal, strategy class, baseline/candidate IDs and versions, cohort fingerprint/schema, manifest locator, and matched-pair count. It must load the source journal, authenticate provenance and task-family classification, reconstruct the cohort, and confirm the exact fingerprint. It must be read-only and must not trust caller-supplied observations or model assertions.
 5. Register a data-only configuration. Registration does not activate the candidate.
 
 The store persists only the evaluation summary and fingerprint, not raw observations or conversation content.

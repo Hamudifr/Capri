@@ -8,7 +8,7 @@ Implemented as a pure offline eligibility evaluator. It does not collect or auth
 
 Import `PromotionCohort` and `assess_strategy_canary` from `capri_core`.
 
-Each cohort contains an immutable tuple of `StrategyObservation` records for exactly one baseline and one candidate. The host must first load and verify the source journal, authenticate its provenance, and classify the task family. Do not construct these records directly from model assertions or aggregate Observatory summaries.
+Each cohort contains an immutable tuple of `StrategyObservation` records for exactly one baseline and one candidate. The host must first load and verify the source journal, authenticate its provenance, and classify the task family. Do not construct these records directly from model assertions or aggregate Observatory summaries. The registry's candidate-admission path now fails closed unless a trusted host `evidence_verifier` independently authenticates the manifest and exact cohort fingerprint.
 
 ## Fixed policy gates
 
