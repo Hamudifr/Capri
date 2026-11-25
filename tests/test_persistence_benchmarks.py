@@ -17,6 +17,7 @@ class PersistenceBenchmarkTests(unittest.TestCase):
                 "goal_evidence_for_principal",
                 "goal_events_for_principal",
                 "goal_domain_events_for_principal",
+                "budget_usage_for_principal",
                 "task_create_api",
                 "task_get_api",
                 "task_get_for_principal",
