@@ -180,6 +180,7 @@ static bool store_path_safe(const CapriSessionStore *store) {
 static CapriSessionError validate_backup_snapshot(CapriSessionStore *store,sqlite3 *db);
 static bool owner_triggers_valid(sqlite3 *db);
 static bool session_schema_valid(sqlite3 *db);
+static bool schema_is_empty(sqlite3 *db,bool *empty);
 
 static bool configure_database(sqlite3 *db) {
     return exec_sql_retry_busy(
