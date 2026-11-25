@@ -1,6 +1,6 @@
 # Evaluation data contract
 
-This contract applies to non-X5 evaluation metadata only. Do not export or store protected X5 instructions, rubrics, expected answers, hidden criteria, or scoring keys.
+This contract applies to all Capri evaluation metadata and artifacts. Scenario definitions, rubrics, expected answers, hidden criteria, and scoring keys are ordinary project materials and may be inspected, stored, revised, and used for internal evaluation. Do not include credentials, personal secrets, private user data, customer-confidential information, or unlicensed third-party material.
 
 ## Required fields
 
