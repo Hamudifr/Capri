@@ -110,7 +110,7 @@ The v0.2 product proposal below remains a historical proposal for the narrow ses
 **Version:** 0.2 proposal, 2026-11-05  
 **Product owner / approver:** Hamudi (approval not recorded)  
 **Author:** Capri operating runtime  
-**Scope:** Non-protected, single-user, interactive assistant foundation only.
+**Scope:** Single-user, interactive assistant foundation only.
 
 This proposal turns the conservative prototype into a concrete review packet. It does not authorize new product behavior. The separate specification template remains the approval record; no implementation may treat this proposal as approved until the product owner explicitly approves this exact version.
 
