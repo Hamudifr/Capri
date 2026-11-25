@@ -205,6 +205,24 @@ class SQLiteGoalStoreTests(unittest.TestCase):
         with self.assertRaises(GoalValidationError):
             self.store.backup_to(backup)
 
+    def test_goal_events_project_with_cloudevents_identity_and_owner_provenance(self):
+        from capri_runtime.domain_events import project_domain_events
+
+        goal = self.create()
+        self.store.transition_for_principal(
+            goal.goal_id, "alice", "planning", expected_version=1, now=NOW,
+        )
+        events = self.store.domain_events_for_principal(goal.goal_id, "alice")
+        self.assertEqual(events[0].specversion, "1.0")
+        self.assertTrue(all(event.source == f"urn:capri:goal:{goal.goal_id}" for event in events))
+        self.assertEqual(dict(events[0].data)["actor_id"], "alice")
+        self.assertEqual(
+            project_domain_events(events),
+            tuple(sorted(events, key=lambda event: (event.time, event.source, event.id))),
+        )
+        with self.assertRaises(GoalNotFoundError):
+            self.store.domain_events_for_principal(goal.goal_id, "bob")
+
     def test_goal_database_rejects_permissions_widened_after_open(self):
         goal = self.create()
         if os.name != "posix":
