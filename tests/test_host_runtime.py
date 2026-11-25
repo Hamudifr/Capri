@@ -22,7 +22,7 @@ from capri_runtime import (
 )
 from capri_runtime.host_runtime import CapriHostRuntime, HostRuntimeError
 from capri_runtime.tasks import TaskNotFoundError, TaskValidationError
-from capri_runtime.goals import GoalNotFoundError, GoalPlanProposal, SQLiteGoalStore
+from capri_runtime.goals import GoalNotFoundError, GoalPlanProposal, GoalValidationError, SQLiteGoalStore
 
 
 class RecordingAdapter:
@@ -304,7 +304,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(planned.state, "planned")
         self.assertEqual(planned.plan[0]["tool"], "collect")
-        with self.assertRaises(Exception):
+        with self.assertRaises(GoalValidationError):
             host.save_goal_plan(
                 "alice-token", goal.goal_id,
                 GoalPlanProposal(({"tool": "admin", "input": {}},)),
