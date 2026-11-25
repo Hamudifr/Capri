@@ -1055,26 +1055,13 @@ class SQLiteStrategyStore:
                 if row is None:
                     raise StrategyNotFoundError("promotion assessment is not registered for this candidate")
                 record = _promotion_record_from_row(row)
-                cohort_results = record.summary.get("cohort_results")
-                cohort_ids = {
-                    item.get("cohort_id") for item in cohort_results
-                    if type(item) is dict and type(item.get("cohort_id")) is str
-                } if type(cohort_results) is list else set()
-                if (
-                    type(cohort_results) is not list
-                    or not 2 <= len(cohort_results) <= 4
-                    or len(cohort_ids) != len(cohort_results)
-                    or record.summary.get("eligible_for_canary") is not True
-                    or record.summary.get("policy_version") != record.policy_version
-                    or record.summary.get("strategy_class") != record.strategy_class
-                    or record.summary.get("baseline_id") != record.baseline_id
-                    or record.summary.get("candidate_id") != record.candidate_id
-                    or record.summary.get("baseline_version") != record.baseline_version
-                    or record.summary.get("candidate_version") != record.candidate_version
-                    or record.summary.get("task_family") != record.task_family
-                    or record.summary.get("primary_metric") != record.primary_metric
-                    or cohort_ids != {key for key, _ in record.evidence_manifest_refs}
-                    or cohort_ids != {key for key, _ in record.cohort_sha256s}
+                if not _promotion_record_matches(
+                    record,
+                    strategy_class=category,
+                    baseline_id=record.baseline_id,
+                    candidate_id=candidate,
+                    baseline_version=record.baseline_version,
+                    candidate_version=version,
                 ):
                     raise StrategyIntegrityError("promotion assessment summary does not match its registry binding")
                 return record
