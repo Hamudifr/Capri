@@ -67,7 +67,7 @@ int main(void) {
     CapriSession unicode_session={0},unicode_committed={0};
     assert(capri_session_create_for_principal(store,unicode_principal,&unicode_session)==CAPRI_SESSION_OK);
     assert(capri_session_claim_turn_lease_for_principal(store,unicode_session.session_id,unicode_principal,unicode_token,30.0)==CAPRI_SESSION_OK);
-    const char *unicode_turn="[{\\"role\\":\\"user\\",\\"content\\":\\"unicode principal\\"},{\\"role\\":\\"assistant\\",\\"content\\":\\"unicode lease token\\"}]";
+    const char *unicode_turn="[{\"role\":\"user\",\"content\":\"unicode principal\"},{\"role\":\"assistant\",\"content\":\"unicode lease token\"}]";
     assert(capri_session_commit_turn_for_principal(store,unicode_session.session_id,unicode_principal,0,unicode_turn,unicode_token,&unicode_committed)==CAPRI_SESSION_OK);
     assert(unicode_committed.version==1);
     int unicode_released=0;
