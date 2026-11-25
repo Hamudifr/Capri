@@ -477,7 +477,12 @@ int main(void) {
         "messages_json TEXT NOT NULL CHECK(json_valid(messages_json) AND json_type(messages_json)='array'));"
         "INSERT INTO sessions_new SELECT * FROM sessions;"
         "DROP TABLE sessions;"
-        "ALTER TABLE sessions_new RENAME TO sessions;"
+        "CREATE TABLE sessions("
+        "session_id TEXT PRIMARY KEY,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,"
+        "version INTEGER NOT NULL,closed INTEGER NOT NULL CHECK(closed IN(0,1)),"
+        "messages_json TEXT NOT NULL CHECK(json_valid(messages_json) AND json_type(messages_json)='array'));"
+        "INSERT INTO sessions SELECT * FROM sessions_new;"
+        "DROP TABLE sessions_new;"
         "CREATE INDEX sessions_updated_at ON sessions(updated_at);",
         NULL,NULL,NULL
     )==SQLITE_OK);
