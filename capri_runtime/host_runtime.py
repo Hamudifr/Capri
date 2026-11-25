@@ -722,7 +722,8 @@ class CapriHostRuntime:
                             error_code="reservation_missing_or_revoked",
                         )
                         self._worker_audit_healthy = False
-                        self._finish_worker_audit_operation()
+                        # Keep the durable operation marker pending until an
+                        # operator reconciles the unexpected disappearance.
                         raise HostRuntimeError(
                             "worker reservation expired or disappeared outside the trusted host gateway; reconciliation is required"
                         )
