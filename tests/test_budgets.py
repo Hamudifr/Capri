@@ -119,6 +119,20 @@ class SQLiteBudgetStoreTests(unittest.TestCase):
         with self.assertRaises(BudgetValidationError):
             reopened.backup_to(backup)
 
+    def test_default_budget_metadata_is_immutable(self):
+        connection = sqlite3.connect(self.path)
+        try:
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    "UPDATE budget_meta SET value='{}' WHERE key='default_policy'"
+                )
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    "DELETE FROM budget_meta WHERE key='default_policy'"
+                )
+        finally:
+            connection.close()
+
     def test_budget_reservation_rows_are_append_only(self):
         self.store.reserve_for_principal("alice", {"tool_calls": 1}, now=NOW)
         connection = sqlite3.connect(self.path)
