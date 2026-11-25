@@ -414,6 +414,104 @@ class WorkerRegistryTests(unittest.TestCase):
                 reservation, authenticated_worker_id="worker-2", now_ns=self.now,
             )
 
+    def test_committed_reservation_survives_ttl_until_explicit_release(self):
+        registry = InMemoryWorkerRegistry(
+            clock_ns=lambda: self.now, reservation_ttl_ms=1_000,
+        )
+        registry.register(
+            self.descriptor(max_concurrency=1),
+            authenticated_worker_id="worker-1", now_ns=self.now,
+        )
+        registry.heartbeat(
+            "worker-1", authenticated_worker_id="worker-1",
+            in_flight=0, now_ns=self.now,
+        )
+        pending = registry.reserve_eligible(
+            "math.factorial", protocol_version=1,
+            authorized_worker_ids={"worker-1"}, now_ns=self.now,
+        )
+        self.assertIsNotNone(pending)
+        committed = registry.commit_reservation(
+            pending, authenticated_worker_id="worker-1", now_ns=self.now,
+        )
+        self.assertIsNotNone(committed)
+        self.assertTrue(committed.committed)
+        self.assertEqual(
+            registry.commit_reservation(
+                committed, authenticated_worker_id="worker-1", now_ns=self.now,
+            ),
+            committed,
+        )
+        self.now += 2_000_000_000
+        self.assertIsNone(registry.reserve_eligible(
+            "math.factorial", protocol_version=1,
+            authorized_worker_ids={"worker-1"}, now_ns=self.now,
+        ))
+        self.assertTrue(registry.release_reservation(
+            committed, authenticated_worker_id="worker-1", now_ns=self.now,
+        ))
+        self.assertIsNotNone(registry.reserve_eligible(
+            "math.factorial", protocol_version=1,
+            authorized_worker_ids={"worker-1"}, now_ns=self.now,
+        ))
+
+    def test_expired_pending_reservation_cannot_be_committed(self):
+        registry = InMemoryWorkerRegistry(
+            clock_ns=lambda: self.now, reservation_ttl_ms=1_000,
+        )
+        registry.register(
+            self.descriptor(max_concurrency=1),
+            authenticated_worker_id="worker-1", now_ns=self.now,
+        )
+        registry.heartbeat(
+            "worker-1", authenticated_worker_id="worker-1",
+            in_flight=0, now_ns=self.now,
+        )
+        pending = registry.reserve_eligible(
+            "math.factorial", protocol_version=1,
+            authorized_worker_ids={"worker-1"}, now_ns=self.now,
+        )
+        self.assertIsNotNone(pending)
+        self.now += 1_000_000_000
+        self.assertIsNone(registry.commit_reservation(
+            pending, authenticated_worker_id="worker-1", now_ns=self.now,
+        ))
+
+    def test_committed_hold_survives_worker_failure_and_descriptor_change(self):
+        self.register_healthy()
+        pending = self.registry.reserve_eligible(
+            "math.factorial", protocol_version=1,
+            authorized_worker_ids={"worker-1"}, now_ns=self.now,
+        )
+        committed = self.registry.commit_reservation(
+            pending, authenticated_worker_id="worker-1", now_ns=self.now,
+        )
+        self.assertIsNotNone(committed)
+        self.registry.update_descriptor(
+            self.descriptor(priority=10, revision=2),
+            authenticated_worker_id="worker-1",
+            expected_revision=1,
+        )
+        self.registry.record_failure(
+            "worker-1", authenticated_worker_id="worker-1",
+        )
+        self.assertFalse(self.registry.release_reservation(
+            pending, authenticated_worker_id="worker-1", now_ns=self.now,
+        ))
+        # A fresh heartbeat restores health, but the committed in-flight hold
+        # continues to consume capacity until the host reconciles completion.
+        self.registry.heartbeat(
+            "worker-1", authenticated_worker_id="worker-1",
+            in_flight=0, now_ns=self.now,
+        )
+        self.assertIsNone(self.registry.reserve_eligible(
+            "math.factorial", protocol_version=1,
+            authorized_worker_ids={"worker-1"}, now_ns=self.now,
+        ))
+        self.assertTrue(self.registry.release_reservation(
+            committed, authenticated_worker_id="worker-1", now_ns=self.now,
+        ))
+
     def test_reservation_configuration_and_token_are_bounded(self):
         for value in (True, 0, 60_001):
             with self.subTest(value=value), self.assertRaises(WorkerRegistryError):
