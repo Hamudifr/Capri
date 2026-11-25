@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const CcelOperation all_operations[5] = {
+static int grid_is_valid(const CcelGrid *g) {\n    return g && g->height > 0 && g->width > 0 &&\n           g->height <= CCEL_MAX_SIDE && g->width <= CCEL_MAX_SIDE &&\n           g->height <= CCEL_MAX_CELLS / g->width;\n}\n\nstatic const CcelOperation all_operations[5] = {
     CCEL_ROTATE_CLOCKWISE, CCEL_ROTATE_COUNTERCLOCKWISE,
     CCEL_FLIP_HORIZONTAL, CCEL_FLIP_VERTICAL, CCEL_TRANSPOSE
 };
@@ -18,7 +18,7 @@ const char *ccel_error_string(CcelError e) {
         "provide at least one example", "example count exceeds 100",
         "provide at least one program", "provide at least one candidate probe",
         "no program in the bounded DSL explains all examples",
-        "consistent models exceed the candidate budget", "memory allocation failed"
+        "consistent models exceed the candidate budget", "invalid operation", "memory allocation failed"
     };
     const size_t n = sizeof messages / sizeof messages[0];
     return (unsigned)e < n ? messages[e] : "unknown CCEL error";
@@ -46,7 +46,7 @@ int ccel_grid_equal(const CcelGrid *a, const CcelGrid *b) {
 }
 
 int ccel_grid_compare(const CcelGrid *a, const CcelGrid *b) {
-    if (a->height != b->height) return a->height < b->height ? -1 : 1;
+    if (!grid_is_valid(a) || !grid_is_valid(b)) return 0;\n    if (a->height != b->height) return a->height < b->height ? -1 : 1;
     if (a->width != b->width) return a->width < b->width ? -1 : 1;
     int c = memcmp(a->cells, b->cells, a->height * a->width);
     return (c > 0) - (c < 0);
@@ -59,7 +59,7 @@ CcelError ccel_operation_apply(CcelOperation op, const CcelGrid *in, CcelGrid *o
     const size_t h = in->height, w = in->width;
     const int swaps = op == CCEL_ROTATE_CLOCKWISE ||
         op == CCEL_ROTATE_COUNTERCLOCKWISE || op == CCEL_TRANSPOSE;
-    if ((unsigned)op >= 5u) return CCEL_ERR_CELL_OUT_OF_RANGE;
+    if ((unsigned)op >= 5u) return CCEL_ERR_INVALID_OPERATION;
     out->height = swaps ? w : h;
     out->width = swaps ? h : w;
     memset(out->cells, 0, sizeof out->cells);
@@ -84,7 +84,7 @@ CcelError ccel_program_init(CcelProgram *out, const CcelOperation *ops, size_t n
     if (n > CCEL_MAX_PROGRAM_DEPTH) return CCEL_ERR_PROGRAM_TOO_DEEP;
     out->length = n;
     for (size_t i = 0; i < n; ++i) {
-        if ((unsigned)ops[i] >= 5u) return CCEL_ERR_CELL_OUT_OF_RANGE;
+        if ((unsigned)ops[i] >= 5u) return CCEL_ERR_INVALID_OPERATION;
         out->operations[i] = ops[i];
     }
     return CCEL_OK;
