@@ -193,6 +193,21 @@ def run(*, warmup: int = 10, samples: int = 50, workers: int = 4, queue_size: in
             lambda: goals.get_for_principal(goal_ids[-1], _PRINCIPAL),
             warmup, samples,
         ))
+        results.append(_measure(
+            "goal_evidence_for_principal",
+            lambda: goals.evidence_for_principal(goal_ids[-1], _PRINCIPAL),
+            warmup, samples,
+        ))
+        results.append(_measure(
+            "goal_events_for_principal",
+            lambda: goals.events_for_principal(goal_ids[-1], _PRINCIPAL),
+            warmup, samples,
+        ))
+        results.append(_measure(
+            "goal_domain_events_for_principal",
+            lambda: goals.domain_events_for_principal(goal_ids[-1], _PRINCIPAL),
+            warmup, samples,
+        ))
 
         tasks = SQLiteTaskStore(str(root / "tasks.sqlite3"))
         task_ids: list[str] = []
