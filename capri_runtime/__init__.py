@@ -65,6 +65,10 @@ from .orchestration import (
 )
 from .host import HostToolGateway
 from .host_runtime import CapriHostRuntime, HostRuntimeError
+from .service import (
+    CapriHostService, HostServiceError, HostServiceHealth,
+    HostServiceState, RuntimeHealthState,
+)
 from .openai_responses import OpenAIResponsesAdapter, OpenAIResponsesAdapterError
 from .knowledge_graph import (
     GraphNeuron,
@@ -168,6 +172,11 @@ __all__ = [
     "HostToolGateway",
     "CapriHostRuntime",
     "HostRuntimeError",
+    "CapriHostService",
+    "HostServiceError",
+    "HostServiceHealth",
+    "HostServiceState",
+    "RuntimeHealthState",
     "InMemoryAuditSink",
     "InMemoryApprovalStore",
     "MemoryErrorBase",
