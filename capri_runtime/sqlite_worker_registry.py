@@ -993,6 +993,7 @@ class SQLiteWorkerRegistry:
         now_ns: int | None = None,
         actor_id: str = "host",
         event_context: dict[str, Any] | None = None,
+        include_expired: bool = False,
     ) -> Any:
         mono_now = now_ns if now_ns is not None else self._clock_ns()
         if type(mono_now) is not int or mono_now < 0:
@@ -1003,6 +1004,12 @@ class SQLiteWorkerRegistry:
             before_workers = dict(memory._workers)
             before_reservations = dict(memory._reservations)
             memory._purge_expired_reservations(mono_now)
+            expired_reservations = tuple(
+                reservation for token, reservation in before_reservations.items()
+                if token not in memory._reservations
+                and not reservation.committed
+                and reservation.expires_at_ns <= mono_now
+            )
             result = callback(memory, mono_now)
             self._persist_memory(connection, memory, wall_now, mono_now)
             self._append_diff_events(
@@ -1011,7 +1018,7 @@ class SQLiteWorkerRegistry:
                 operation=operation, actor_id=actor_id, wall_now=wall_now,
                 mono_now=mono_now, event_context=event_context,
             )
-            return result
+            return (result, expired_reservations) if include_expired else result
 
     @staticmethod
     def _current_reservation(
@@ -1063,11 +1070,14 @@ class SQLiteWorkerRegistry:
             now_ns=now_ns,
         )
 
-    def active_reservations(self) -> tuple[WorkerReservation, ...]:
-        """Return active reservations and durably purge expired holds in one transaction."""
+    def active_reservations_with_expired(
+        self,
+    ) -> tuple[tuple[WorkerReservation, ...], tuple[WorkerReservation, ...]]:
+        """Return active and just-expired reservations from one durable sweep."""
         return self._run(
             "active_reservations",
             lambda memory, timestamp: tuple(memory._reservations.values()),
+            include_expired=True,
         )
 
     def update_descriptor(
