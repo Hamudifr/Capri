@@ -1,3 +1,5 @@
+import hashlib
+import json
 import os
 import tempfile
 import unittest
@@ -36,6 +38,8 @@ from capri_runtime import (
     UntrustedKnowledgeContext,
 )
 from capri_runtime.host_runtime import CapriHostRuntime, HostRuntimeError, HostWorkerReservation
+from capri_runtime.security_store import SQLiteSecurityStore
+from capri_runtime.tools import AuditSink
 from capri_runtime.tasks import TaskNotFoundError, TaskValidationError
 from capri_runtime.goals import GoalNotFoundError, GoalPlanProposal, GoalValidationError, SQLiteGoalStore
 from capri_runtime.budgets import BudgetExceededError, BudgetPolicy, SQLiteBudgetStore
@@ -99,6 +103,8 @@ class CapriHostRuntimeTests(unittest.TestCase):
         self.temp.cleanup()
 
     def make_host(self, **kwargs):
+        if kwargs.get("worker_registry") is not None:
+            kwargs.setdefault("worker_lifecycle_audit_sink", InMemoryAuditSink())
         return CapriHostRuntime(
             self.authority,
             self.store,
@@ -119,19 +125,194 @@ class CapriHostRuntimeTests(unittest.TestCase):
             revision=1,
         )
 
-    def make_worker_host(self, registry, identities, policy):
+    def make_worker_host(self, registry, identities, policy, audit_sink=None):
         known_ids = frozenset(identities.values())
-        return self.make_host(
-            task_store=self.task_store,
-            worker_registry=registry,
-            worker_identity_resolver=identities.get,
-            worker_descriptor_resolver=self.approve_worker_descriptor,
-            worker_observer_authorizer=lambda credential, worker_id: (
+        options = {
+            "task_store": self.task_store,
+            "worker_registry": registry,
+            "worker_identity_resolver": identities.get,
+            "worker_descriptor_resolver": self.approve_worker_descriptor,
+            "worker_observer_authorizer": lambda credential, worker_id: (
                 credential == "monitor-token" and worker_id in known_ids
             ),
-            worker_in_flight_resolver=lambda worker_id: 0,
-            worker_policy_resolver=policy,
+            "worker_in_flight_resolver": lambda worker_id: 0,
+            "worker_policy_resolver": policy,
+        }
+        if audit_sink is not None:
+            options["worker_lifecycle_audit_sink"] = audit_sink
+        return self.make_host(**options)
+
+    def test_worker_registry_rejects_placeholder_audit_sink(self):
+        with self.assertRaisesRegex(HostRuntimeError, "trusted AuditSink"):
+            self.make_host(
+                task_store=self.task_store,
+                worker_registry=InMemoryWorkerRegistry(),
+                worker_identity_resolver=lambda credential: "worker-1",
+                worker_descriptor_resolver=self.approve_worker_descriptor,
+                worker_observer_authorizer=lambda credential, worker_id: True,
+                worker_in_flight_resolver=lambda worker_id: 0,
+                worker_policy_resolver=lambda *args: {"worker-1"},
+                worker_lifecycle_audit_sink=AuditSink(),
+            )
+
+    def test_worker_registry_requires_audit_sink(self):
+        with self.assertRaisesRegex(HostRuntimeError, "lifecycle audit sink"):
+            self.make_host(
+                task_store=self.task_store,
+                worker_registry=InMemoryWorkerRegistry(),
+                worker_identity_resolver=lambda credential: "worker-1",
+                worker_descriptor_resolver=self.approve_worker_descriptor,
+                worker_observer_authorizer=lambda credential, worker_id: True,
+                worker_in_flight_resolver=lambda worker_id: 0,
+                worker_policy_resolver=lambda *args: {"worker-1"},
+                worker_lifecycle_audit_sink=None,
+            )
+
+    def test_worker_lifecycle_audit_persists_structured_metadata(self):
+        audit = SQLiteSecurityStore(os.path.join(self.temp.name, "worker-audit.sqlite3"))
+        registry = InMemoryWorkerRegistry()
+        host = self.make_worker_host(
+            registry, {"worker-token": "worker-1"}, lambda *args: {"worker-1"},
+            audit_sink=audit,
         )
+        host.register_worker(
+            "worker-token", WorkerDescriptor("worker-1", (1,), ("math.factorial",)),
+        )
+        host.heartbeat_worker("monitor-token", "worker-1")
+        task = self.task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {}}],
+        )
+        pending = host.reserve_worker_candidate(
+            "alice-token", task.task_id, "math.factorial", 1,
+        )
+        self.assertTrue(audit.worker_lifecycle_reconciliation_required())
+        committed = host.commit_worker_reservation(
+            "alice-token", "monitor-token", pending,
+        )
+        self.assertTrue(audit.worker_lifecycle_reconciliation_required())
+        self.assertTrue(host.release_worker_reservation("monitor-token", committed))
+        self.assertFalse(audit.worker_lifecycle_reconciliation_required())
+
+        events = audit.events()
+        event_types = [event.tool_name for event in events]
+        self.assertIn("worker.registered", event_types)
+        self.assertIn("worker.heartbeat", event_types)
+        self.assertIn("worker.reservation.created", event_types)
+        self.assertIn("worker.reservation.committed", event_types)
+        self.assertIn("worker.reservation.released", event_types)
+        reservation_events = [
+            event for event in events if event.tool_name.startswith("worker.reservation.")
+        ]
+        self.assertEqual(len(reservation_events), 3)
+        for event in reservation_events:
+            self.assertEqual(event.principal_id, "alice")
+            self.assertEqual(event.resource_type, "worker")
+            self.assertEqual(event.resource_id, "worker-1")
+            self.assertEqual(event.task_id, task.task_id)
+            metadata = json.loads(event.metadata_json)
+            self.assertEqual(metadata["worker_id"], "worker-1")
+            self.assertNotIn(pending.reservation.token, event.metadata_json)
+            self.assertEqual(
+                event.argument_digest,
+                hashlib.sha256(event.metadata_json.encode("utf-8")).hexdigest(),
+            )
+        committed_event = next(
+            event for event in reservation_events
+            if event.tool_name == "worker.reservation.committed"
+        )
+        self.assertEqual(json.loads(committed_event.metadata_json)["observed_in_flight"], 0)
+
+    def test_worker_runtime_startup_requires_reconciliation_for_unreleased_reservation(self):
+        audit = SQLiteSecurityStore(os.path.join(self.temp.name, "restart-audit.sqlite3"))
+        identities = {"worker-token": "worker-1"}
+        registry = InMemoryWorkerRegistry()
+        host = self.make_worker_host(
+            registry, identities, lambda *args: {"worker-1"}, audit_sink=audit,
+        )
+        host.register_worker(
+            "worker-token", WorkerDescriptor("worker-1", (1,), ("math.factorial",)),
+        )
+        host.heartbeat_worker("monitor-token", "worker-1")
+        task = self.task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {}}],
+        )
+        pending = host.reserve_worker_candidate(
+            "alice-token", task.task_id, "math.factorial", 1,
+        )
+        host.commit_worker_reservation("alice-token", "monitor-token", pending)
+        self.assertTrue(audit.worker_lifecycle_reconciliation_required())
+
+        with self.assertRaisesRegex(HostRuntimeError, "reconcile and acknowledge"):
+            self.make_worker_host(
+                InMemoryWorkerRegistry(), identities,
+                lambda *args: {"worker-1"}, audit_sink=audit,
+            )
+        self.assertTrue(
+            audit.acknowledge_worker_lifecycle_reconciliation(
+                "Supervisor reconciled active worker load and discarded process-local reservations",
+            )
+        )
+        self.assertFalse(audit.worker_lifecycle_reconciliation_required())
+        restarted = self.make_worker_host(
+            InMemoryWorkerRegistry(), identities,
+            lambda *args: {"worker-1"}, audit_sink=audit,
+        )
+        self.assertIsNotNone(restarted)
+
+    def test_worker_audit_failure_requires_reconciliation_before_restart(self):
+        class FailingHeartbeatAuditSink(InMemoryAuditSink):
+            def write(self, event):
+                if event.tool_name == "worker.heartbeat":
+                    raise OSError("simulated durable audit outage")
+                super().write(event)
+
+        audit = FailingHeartbeatAuditSink()
+        identities = {"worker-token": "worker-1"}
+        registry = InMemoryWorkerRegistry()
+        host = self.make_worker_host(
+            registry, identities, lambda *args: {"worker-1"}, audit_sink=audit,
+        )
+        host.register_worker(
+            "worker-token", WorkerDescriptor("worker-1", (1,), ("math.factorial",)),
+        )
+        with self.assertRaisesRegex(HostRuntimeError, "audit persistence failed"):
+            host.heartbeat_worker("monitor-token", "worker-1")
+        self.assertTrue(audit.worker_lifecycle_reconciliation_required())
+
+        with self.assertRaisesRegex(HostRuntimeError, "reconcile and acknowledge"):
+            self.make_worker_host(
+                InMemoryWorkerRegistry(), identities,
+                lambda *args: {"worker-1"}, audit_sink=audit,
+            )
+        self.assertTrue(
+            audit.acknowledge_worker_lifecycle_reconciliation(
+                "Supervisor checked worker process state and host load; stale in-memory registry discarded",
+            )
+        )
+        restarted = self.make_worker_host(
+            InMemoryWorkerRegistry(), identities,
+            lambda *args: {"worker-1"}, audit_sink=audit,
+        )
+        self.assertIsNotNone(restarted)
+
+    def test_worker_audit_failure_disables_registry_gateway(self):
+        audit = InMemoryAuditSink(max_events=1)
+        registry = InMemoryWorkerRegistry()
+        host = self.make_worker_host(
+            registry, {"worker-token": "worker-1"}, lambda *args: {"worker-1"},
+            audit_sink=audit,
+        )
+        host.register_worker(
+            "worker-token", WorkerDescriptor("worker-1", (1,), ("math.factorial",)),
+        )
+        with self.assertRaisesRegex(HostRuntimeError, "audit persistence failed"):
+            host.heartbeat_worker("monitor-token", "worker-1")
+        with self.assertRaisesRegex(HostRuntimeError, "disabled"):
+            host.get_worker_candidates(
+                "alice-token", "task-does-not-exist", "math.factorial", 1,
+            )
+        self.assertEqual(len(audit.events()), 1)
+        self.assertTrue(audit.worker_lifecycle_reconciliation_required())
 
     def test_worker_registry_requires_all_host_callbacks(self):
         with self.assertRaises(HostRuntimeError):
@@ -347,13 +528,15 @@ class CapriHostRuntimeTests(unittest.TestCase):
             1,
         )
 
-    def test_host_worker_reservation_expiry_purges_host_context(self):
+    def test_host_worker_reservation_expiry_requires_reconciliation(self):
         now = {"value": 10_000_000_000}
         registry = InMemoryWorkerRegistry(
             clock_ns=lambda: now["value"], reservation_ttl_ms=1_000,
         )
+        audit = InMemoryAuditSink()
+        identities = {"worker-token": "worker-1"}
         host = self.make_worker_host(
-            registry, {"worker-token": "worker-1"}, lambda *args: {"worker-1"},
+            registry, identities, lambda *args: {"worker-1"}, audit_sink=audit,
         )
         host.register_worker(
             "worker-token", WorkerDescriptor("worker-1", (1,), ("math.factorial",)),
@@ -367,14 +550,23 @@ class CapriHostRuntimeTests(unittest.TestCase):
         )
         self.assertIsNotNone(expired)
         now["value"] += 2_000_000_000
-        self.assertFalse(host.release_worker_reservation("monitor-token", expired))
-        replacement = host.reserve_worker_candidate(
-            "alice-token", task.task_id, "math.factorial", 1,
+        with self.assertRaisesRegex(HostRuntimeError, "expired or disappeared"):
+            host.release_worker_reservation("monitor-token", expired)
+        with self.assertRaisesRegex(HostRuntimeError, "disabled"):
+            host.reserve_worker_candidate(
+                "alice-token", task.task_id, "math.factorial", 1,
+            )
+        self.assertTrue(audit.worker_lifecycle_reconciliation_required())
+        self.assertTrue(
+            audit.acknowledge_worker_lifecycle_reconciliation(
+                "Supervisor confirmed the pending hold expired and no worker execution remained",
+            )
         )
-        self.assertIsNotNone(replacement)
-        self.assertNotEqual(
-            replacement.reservation.token, expired.reservation.token,
+        restarted = self.make_worker_host(
+            InMemoryWorkerRegistry(), identities,
+            lambda *args: {"worker-1"}, audit_sink=audit,
         )
+        self.assertIsNotNone(restarted)
 
     def test_host_worker_reservation_returns_none_when_no_policy_candidate(self):
         registry = InMemoryWorkerRegistry()
