@@ -173,6 +173,27 @@ class SQLiteExecutionEvidenceJournalTests(unittest.TestCase):
         with self.assertRaises(Exception):
             journal.record_execution("host-credential", self.claim, self.result)
 
+    def test_claim_is_revalidated_inside_evidence_write_transaction(self):
+        def complete_during_classification(principal, task_id):
+            # Simulate another worker/process completing the lease after the
+            # journal's initial authentication/claim check but before append.
+            self.tasks.finish_step(self.claim, {"status": "concurrent completion"})
+            return self.classification
+
+        journal = self.make_journal(classifier=complete_during_classification)
+        with self.assertRaisesRegex(Exception, "task claim does not match"):
+            journal.record_execution("host-credential", self.claim, self.result)
+        with self.tasks._lock:
+            connection = self.tasks._connect()
+            try:
+                count = connection.execute(
+                    "SELECT COUNT(*) FROM execution_evidence_events WHERE task_id=?",
+                    (self.claim.task_id,),
+                ).fetchone()[0]
+            finally:
+                connection.close()
+        self.assertEqual(count, 0)
+
     def test_stale_claim_is_rejected(self):
         self.tasks.finish_step(self.claim, {"status": "done"})
         with self.assertRaises(Exception):
