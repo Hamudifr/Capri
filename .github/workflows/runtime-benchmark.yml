@@ -1,0 +1,45 @@
+name: Runtime performance baseline
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "benchmarks/runtime/**"
+      - "tests/test_runtime_benchmarks.py"
+      - "capri_runtime/goals.py"
+      - "capri_runtime/tasks.py"
+      - "capri_runtime/tools.py"
+      - "capri_runtime/orchestration.py"
+      - ".github/workflows/runtime-benchmark.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runtime-benchmark-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runtime-benchmark:
+    name: Offline runtime baseline (Python 3.13)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.13"
+      - name: Record benchmark environment
+        run: |
+          uname -a
+          lscpu
+          python --version
+          python -c "import sqlite3; print('SQLite', sqlite3.sqlite_version)"
+      - name: Run offline runtime benchmarks
+        run: |
+          python benchmarks/runtime/run.py --warmup 50 --samples 250 --output runtime-benchmark-results.json
+          cat runtime-benchmark-results.json
+          cat runtime-benchmark-results.json >> "$GITHUB_STEP_SUMMARY"
