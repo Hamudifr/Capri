@@ -188,7 +188,7 @@ class HostStrategyApprovalAuthority:
             raise StrategyAuthorizationError("host signing provider is unavailable") from None
         if type(tag) is not bytes or len(tag) != 32:
             raise StrategyAuthorizationError("host signing provider returned an invalid MAC")
-        signature = f"{key_id}.{tag.hex()}"
+        signature = f"{key_id}:{tag.hex()}"
         return StrategyActivationGrant(
             grant_id=unsigned.grant_id,
             principal_id=unsigned.principal_id,
@@ -210,7 +210,7 @@ class HostStrategyApprovalAuthority:
         if type(grant) is not StrategyActivationGrant:
             return False
         try:
-            key_id, separator, encoded_tag = grant.signature.partition(".")
+            key_id, separator, encoded_tag = grant.signature.partition(":")
             if not separator or not _KEY_ID.fullmatch(key_id) or not re.fullmatch(r"[0-9a-f]{64}", encoded_tag):
                 return False
             tag = bytes.fromhex(encoded_tag)
