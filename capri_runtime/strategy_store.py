@@ -814,6 +814,12 @@ class SQLiteStrategyStore:
         if (
             type(assessment) is not StrategyPromotionAssessment
             or assessment.policy_version != STRATEGY_PROMOTION_POLICY_VERSION
+            or assessment.strategy_class != category
+            or assessment.task_family != family
+            or assessment.baseline_id != baseline
+            or assessment.candidate_id != candidate
+            or assessment.primary_metric != metric
+            or {item.cohort_id for item in assessment.cohort_results} != set(cohort_ids)
             or assessment.eligible_for_canary is not True
             or assessment.blocked_reasons
             or assessment.baseline_version is None
@@ -870,9 +876,12 @@ class SQLiteStrategyStore:
         }
         hashes_json = _promotion_json(cohort_hashes, field="promotion cohort fingerprints", maximum=2_048)
         assessment_hash = _promotion_record_digest(summary_json, refs_json, hashes_json)
-        timestamp = created_at or self._now()
+        now = self._now()
+        timestamp = created_at or now
         if not isinstance(timestamp, datetime) or timestamp.tzinfo is None or timestamp.utcoffset() is None:
             raise StrategyStoreError("created_at must be timezone-aware")
+        if timestamp.astimezone(timezone.utc) > now.astimezone(timezone.utc):
+            raise StrategyStoreError("created_at cannot be in the future")
         created = timestamp.astimezone(timezone.utc).isoformat()
         assessment_id = uuid4().hex
 
@@ -1004,8 +1013,12 @@ class SQLiteStrategyStore:
                     if type(item) is dict and type(item.get("cohort_id")) is str
                 } if type(cohort_results) is list else set()
                 if (
-                    record.summary.get("eligible_for_canary") is not True
+                    type(cohort_results) is not list
+                    or not 2 <= len(cohort_results) <= 4
+                    or len(cohort_ids) != len(cohort_results)
+                    or record.summary.get("eligible_for_canary") is not True
                     or record.summary.get("policy_version") != record.policy_version
+                    or record.summary.get("strategy_class") != record.strategy_class
                     or record.summary.get("baseline_id") != record.baseline_id
                     or record.summary.get("candidate_id") != record.candidate_id
                     or record.summary.get("baseline_version") != record.baseline_version
