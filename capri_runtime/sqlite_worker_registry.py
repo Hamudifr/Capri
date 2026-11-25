@@ -23,7 +23,7 @@ from .worker_registry import (
 )
 
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 _ZERO_HASH = "0" * 64
 _TABLES = {
     "worker_registry_meta",
@@ -76,6 +76,23 @@ def _descriptor_payload(descriptor: WorkerDescriptor) -> dict[str, Any]:
         "priority": descriptor.priority,
         "enabled": descriptor.enabled,
         "revision": descriptor.revision,
+    }
+
+
+def _health_payload(
+    health: WorkerHealth, *, wall_now_ns: int, mono_now_ns: int,
+) -> dict[str, Any]:
+    last_heartbeat_wall_ns = None
+    if health.last_heartbeat_ns is not None:
+        age = mono_now_ns - health.last_heartbeat_ns
+        if age >= 0 and wall_now_ns >= age:
+            last_heartbeat_wall_ns = wall_now_ns - age
+    return {
+        "state": health.state,
+        "last_heartbeat_wall_ns": last_heartbeat_wall_ns,
+        "consecutive_failures": health.consecutive_failures,
+        "in_flight": health.in_flight,
+        "revision": health.revision,
     }
 
 
@@ -245,6 +262,12 @@ def validate_worker_registry_snapshot(connection: sqlite3.Connection) -> None:
     expected_sequence = 0
     events_by_token: dict[str, list[str]] = {}
     registered_workers: set[str] = set()
+    worker_projections: dict[str, dict[str, Any]] = {}
+    health_event_types = {
+        "worker_heartbeat_state_changed", "worker_failure_recorded",
+        "worker_quarantined", "worker_retired", "worker_quarantine_cleared",
+        "worker_health_updated",
+    }
     for row in connection.execute("SELECT * FROM worker_registry_events ORDER BY sequence"):
         expected_sequence += 1
         if row["sequence"] != expected_sequence:
@@ -276,11 +299,37 @@ def validate_worker_registry_snapshot(connection: sqlite3.Connection) -> None:
             raise WorkerRegistryError("worker registry audit payload does not match its columns")
         if _canonical_json(payload) != row["payload_json"]:
             raise WorkerRegistryError("worker registry audit payload is not canonical")
+        event_data = payload["payload"]
+        worker_id = row["worker_id"]
+        if row["event_type"] == "worker_registered":
+            if worker_id in worker_projections:
+                raise WorkerRegistryError("worker has duplicate registration audit events")
+            descriptor_data = event_data.get("descriptor")
+            health_data = event_data.get("health")
+            if type(descriptor_data) is not dict or type(health_data) is not dict:
+                raise WorkerRegistryError("worker registration audit projection is incomplete")
+            _parse_descriptor(_canonical_json(descriptor_data))
+            worker_projections[worker_id] = {
+                "descriptor": descriptor_data,
+                "health": health_data,
+            }
+            registered_workers.add(worker_id)
+        elif row["event_type"] == "worker_descriptor_updated":
+            projection = worker_projections.get(worker_id)
+            descriptor_data = event_data.get("descriptor")
+            if projection is None or type(descriptor_data) is not dict:
+                raise WorkerRegistryError("worker descriptor audit projection is incomplete")
+            _parse_descriptor(_canonical_json(descriptor_data))
+            projection["descriptor"] = descriptor_data
+        elif row["event_type"] in health_event_types:
+            projection = worker_projections.get(worker_id)
+            health_data = event_data.get("health")
+            if projection is None or type(health_data) is not dict:
+                raise WorkerRegistryError("worker health audit projection is incomplete")
+            projection["health"] = health_data
         digest = hashlib.sha256(row["payload_json"].encode("utf-8")).hexdigest()
         if row["event_sha256"] != digest:
             raise WorkerRegistryError("worker registry audit hash is invalid")
-        if row["event_type"] == "worker_registered":
-            registered_workers.add(row["worker_id"])
         token_hash = row["token_sha256"]
         if token_hash is not None:
             if type(token_hash) is not str or len(token_hash) != 64:
@@ -310,7 +359,22 @@ def validate_worker_registry_snapshot(connection: sqlite3.Connection) -> None:
             raise WorkerRegistryError("worker registry heartbeat timestamp is invalid")
         if row["worker_id"] not in registered_workers:
             raise WorkerRegistryError("worker registry state has no registration audit event")
+        projection = worker_projections.get(row["worker_id"])
+        if projection is None or projection["descriptor"] != _descriptor_payload(descriptor):
+            raise WorkerRegistryError("worker descriptor state does not match the audit projection")
+        expected_health = {
+            "state": row["health_state"],
+            "last_heartbeat_wall_ns": row["last_heartbeat_wall_ns"],
+            "consecutive_failures": row["consecutive_failures"],
+            "in_flight": row["in_flight"],
+            "revision": row["health_revision"],
+        }
+        if projection["health"] != expected_health:
+            raise WorkerRegistryError("worker health state does not match the audit projection")
         state_by_worker[row["worker_id"]] = descriptor
+
+    if set(state_by_worker) != set(worker_projections):
+        raise WorkerRegistryError("worker audit projection contains missing or orphaned worker state")
 
     active_tasks: set[tuple[str, str]] = set()
     for row in connection.execute("SELECT * FROM worker_registry_reservations"):
@@ -724,8 +788,12 @@ class SQLiteWorkerRegistry:
                 self._append_event(
                     connection, event_type="worker_registered", worker_id=worker_id,
                     actor_id=actor_id or worker_id, timestamp_wall_ns=wall_now,
-                    payload={"descriptor": _descriptor_payload(current.descriptor),
-                             "health_state": current.health.state},
+                    payload={
+                        "descriptor": _descriptor_payload(current.descriptor),
+                        "health": _health_payload(
+                            current.health, wall_now_ns=wall_now, mono_now_ns=mono_now,
+                        ),
+                    },
                 )
                 continue
             if previous.descriptor != current.descriptor:
@@ -735,6 +803,7 @@ class SQLiteWorkerRegistry:
                     payload={
                         "previous_revision": previous.descriptor.revision,
                         "new_revision": current.descriptor.revision,
+                        "descriptor": _descriptor_payload(current.descriptor),
                     },
                 )
             old_health = previous.health
@@ -743,6 +812,7 @@ class SQLiteWorkerRegistry:
                 old_health.state != new_health.state
                 or old_health.consecutive_failures != new_health.consecutive_failures
                 or old_health.in_flight != new_health.in_flight
+                or old_health.revision != new_health.revision
             ):
                 event_type = {
                     "record_failure": "worker_failure_recorded",
@@ -761,6 +831,9 @@ class SQLiteWorkerRegistry:
                         "new_in_flight": new_health.in_flight,
                         "consecutive_failures": new_health.consecutive_failures,
                         "health_revision": new_health.revision,
+                        "health": _health_payload(
+                            new_health, wall_now_ns=wall_now, mono_now_ns=mono_now,
+                        ),
                     },
                 )
 
