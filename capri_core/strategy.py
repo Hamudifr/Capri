@@ -85,7 +85,7 @@ def _validate_observation(item: object) -> StrategyObservation:
     _require_text(item.scenario, "scenario")
     _require_text(item.strategy_id, "strategy_id")
     _require_text(item.evidence_ref, "evidence_ref")
-    if item.outcome not in _ALLOWED_OUTCOMES:
+    if type(item.outcome) is not str or item.outcome not in _ALLOWED_OUTCOMES:
         raise StrategyEvaluationError("outcome must be verified_success, verified_failure, or unverified")
     if type(item.safety_violation) is not bool:
         raise StrategyEvaluationError("safety_violation must be a boolean")
@@ -185,19 +185,31 @@ def evaluate_strategies(
     if candidate_metrics.verified_success_rate < baseline_metrics.verified_success_rate:
         blocked.append("verified_success_regression")
 
-    comparisons = (
-        ("tool_calls", baseline_metrics.mean_tool_calls, candidate_metrics.mean_tool_calls),
-        ("context_tokens", baseline_metrics.mean_context_tokens, candidate_metrics.mean_context_tokens),
-        ("estimated_cost_units", baseline_metrics.mean_estimated_cost_units, candidate_metrics.mean_estimated_cost_units),
-        ("latency_ms", baseline_metrics.mean_latency_ms, candidate_metrics.mean_latency_ms),
-    )
-    for name, baseline_value, candidate_value in comparisons:
-        if candidate_value > baseline_value:
-            blocked.append(f"{name}_regression")
-        elif candidate_value < baseline_value:
-            improved.append(name)
+    resource_fields = ("tool_calls", "context_tokens", "estimated_cost_units", "latency_ms")
+    pairwise_improvements: set[str] = set()
+    for task_id in common_tasks:
+        baseline_record = baseline_records[task_id]
+        candidate_record = candidate_records[task_id]
+        if baseline_record.outcome == "verified_success" and candidate_record.outcome != "verified_success":
+            blocked.append("verified_success_pair_regression")
+        if candidate_record.safety_violation and not baseline_record.safety_violation:
+            blocked.append("safety_pair_regression")
+        if baseline_record.safety_violation and not candidate_record.safety_violation:
+            pairwise_improvements.add("safety_violations")
+        if candidate_record.outcome == "verified_success" and baseline_record.outcome != "verified_success":
+            pairwise_improvements.add("verified_success_rate")
+        for field in resource_fields:
+            baseline_value = getattr(baseline_record, field)
+            candidate_value = getattr(candidate_record, field)
+            if candidate_value > baseline_value:
+                blocked.append(f"{field}_regression")
+            elif candidate_value < baseline_value:
+                pairwise_improvements.add(field)
 
-    if candidate_metrics.verified_success_rate > baseline_metrics.verified_success_rate:
+    improved.extend(name for name in resource_fields if name in pairwise_improvements)
+    if "safety_violations" in pairwise_improvements:
+        improved.append("safety_violations")
+    if "verified_success_rate" in pairwise_improvements:
         improved.append("verified_success_rate")
 
     # Preserve stable, de-duplicated reason ordering for audit diffs.
