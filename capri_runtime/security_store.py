@@ -267,6 +267,7 @@ def _outstanding_worker_reservations(connection: sqlite3.Connection) -> int:
         "worker.reservation.commit_rejected",
         "worker.reservation.release_missing",
         "worker.reservation.collision_released",
+        "worker.reservation.expired",
     }
     for event_type, digest, metadata_json in rows[last_ack + 1:]:
         if not isinstance(event_type, str) or not event_type.startswith("worker.reservation."):
