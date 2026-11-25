@@ -22,6 +22,8 @@ from .strategy_store import (
 from .tools import ApprovalMacProvider
 
 _KEY_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+_IDENTIFIER = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
+_VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.+-]{0,63}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _MAX_TTL_SECONDS = 900
 
@@ -119,9 +121,12 @@ class HostStrategyApprovalAuthority:
         if type(request) is not StrategyApprovalRequest:
             raise StrategyAuthorizationError("a typed strategy approval request is required")
         _text(request.principal_id, "principal_id")
-        _text(request.strategy_class, "strategy_class", 64)
-        _text(request.strategy_id, "strategy_id", 64)
-        _text(request.version, "version", 64)
+        if not _IDENTIFIER.fullmatch(_text(request.strategy_class, "strategy_class", 64)):
+            raise StrategyAuthorizationError("strategy_class is invalid")
+        if not _IDENTIFIER.fullmatch(_text(request.strategy_id, "strategy_id", 64)):
+            raise StrategyAuthorizationError("strategy_id is invalid")
+        if not _VERSION.fullmatch(_text(request.version, "version", 64)) or request.version == "unversioned":
+            raise StrategyAuthorizationError("version is invalid")
         if request.evaluation_sha256 is not None and (
             type(request.evaluation_sha256) is not str
             or not _SHA256.fullmatch(request.evaluation_sha256)
