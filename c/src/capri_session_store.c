@@ -476,6 +476,10 @@ static bool table_matches(sqlite3 *db,const char *name,const char *expected_sql)
     bool matches=rc==SQLITE_ROW
         &&sqlite3_column_type(st,0)==SQLITE_TEXT
         &&normalized_sql_equal((const char*)sqlite3_column_text(st,0),expected_sql);
+    if(!matches&&rc==SQLITE_ROW){
+        fprintf(stderr,"schema table mismatch (%s): actual=[%s] expected=[%s]\\n",
+            name,sqlite3_column_text(st,0),expected_sql);
+    }
     sqlite3_finalize(st);
     return matches;
 }
