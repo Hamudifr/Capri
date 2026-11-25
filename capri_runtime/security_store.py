@@ -302,14 +302,14 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
             (event.tool_name, 64), (event.status, 64),
         )
         if any(not isinstance(value, str) or not value or len(value) > limit
-               or any(0xD800 <= ord(ch) <= 0xDFFF for ch in value)
+               or contains_surrogate(value)
                for value, limit in text_fields):
             raise ToolValidationError("audit event contains invalid or oversized metadata")
         if not isinstance(event.argument_digest, str) or not _DIGEST_RE.fullmatch(event.argument_digest):
             raise ToolValidationError("audit event argument digest must be SHA-256 hex")
         if event.error_code is not None and (
             not isinstance(event.error_code, str) or len(event.error_code) > 128
-            or any(0xD800 <= ord(ch) <= 0xDFFF for ch in event.error_code)
+            or contains_surrogate(event.error_code)
         ):
             raise ToolValidationError("audit event error code is invalid")
         with self._lock:
@@ -340,7 +340,7 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
                 or not isinstance(grant.tool_name, str) or not _NAME_RE.fullmatch(grant.tool_name)
                 or not isinstance(grant.argument_digest, str) or not _DIGEST_RE.fullmatch(grant.argument_digest)
                 or not isinstance(grant.expires_at, str) or len(grant.expires_at) > 64
-                or any(0xD800 <= ord(ch) <= 0xDFFF for value in (grant.grant_id, grant.principal_id, grant.tool_name, grant.argument_digest, grant.expires_at) for ch in value)):
+                or any(contains_surrogate(value) for value in (grant.grant_id, grant.principal_id, grant.tool_name, grant.argument_digest, grant.expires_at))):
             return False
         if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
             raise ToolValidationError("approval consumption requires a timezone-aware time")
