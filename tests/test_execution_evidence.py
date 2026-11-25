@@ -412,5 +412,61 @@ class SQLiteExecutionEvidenceJournalTests(unittest.TestCase):
         self.assertEqual(journal.integrity_check(), "ok")
         self.assertEqual(store.integrity_check(), "ok")
 
+    def test_completed_event_lookup_supports_256_character_principal(self):
+        principal_id = "p" * 256
+        store = SQLiteTaskStore(f"{self.directory.name}/long-principal-lookup.sqlite3")
+        task = store.create_for_principal(
+            principal_id, [{"tool": "research", "input": {"query": "bounded"}}],
+        )
+        claim = store.claim_next(
+            "worker-256", principal_tools=frozenset({"research"}),
+        )
+        self.assertIsNotNone(claim)
+        journal = SQLiteExecutionEvidenceJournal(
+            store,
+            self.keyring,
+            authenticate_collector=lambda credential: (
+                principal_id if credential == "host-credential" else None
+            ),
+            classify_task=lambda principal, task_id: TaskClassification(
+                "research", "long-principal-scenario",
+            ),
+            resolve_strategy=lambda principal, live_claim: StrategyBinding(
+                "reasoning", "baseline", "1.0",
+            ),
+            verify_result=lambda principal, live_claim, result, digest: VerifiedExecutionResult(
+                digest, "verified_success", False, 1, 128, 1, 25,
+            ),
+        )
+        reference = journal.record_execution_and_finish(
+            "host-credential", claim, {"status": "verified"},
+        )
+        self.assertEqual(
+            journal.get_completed_event_ref(
+                principal_id, task.task_id, claim.step_index, claim.attempt,
+            ),
+            reference,
+        )
+        observation = StrategyObservation(
+            task_id=task.task_id,
+            scenario="long-principal-scenario",
+            strategy_id="baseline",
+            strategy_version="1.0",
+            outcome="verified_success",
+            evidence_ref=reference,
+            safety_violation=False,
+            tool_calls=1,
+            context_tokens=128,
+            estimated_cost_units=1,
+            latency_ms=25,
+        )
+        self.assertTrue(journal.validate_source_events(
+            principal_id, "reasoning", (observation,),
+            {task.task_id: "research"},
+        ))
+        self.assertEqual(journal.integrity_check(), "ok")
+        self.assertEqual(store.integrity_check(), "ok")
+
+
 if __name__ == "__main__":
     unittest.main()
