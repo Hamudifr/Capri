@@ -572,7 +572,8 @@ class SQLiteTaskStore:
 
     def claim_next(self, executor_id: str, lease_seconds: int = 60,
                    now: datetime | None = None, *,
-                   principal_tools: frozenset[str] = frozenset()) -> TaskClaim | None:
+                   principal_tools: frozenset[str] = frozenset(),
+                   allow_budget_wait: bool = False) -> TaskClaim | None:
         """Claim the next task, failing closed for unsupported principal-owned work.
 
         Principal tasks are excluded by default. Callers must provide the exact
@@ -584,6 +585,8 @@ class SQLiteTaskStore:
             raise TaskValidationError("principal_tools must be a frozenset of at most 128 names")
         for tool_name in principal_tools:
             _text(tool_name, "principal handler name", 64)
+        if type(allow_budget_wait) is not bool:
+            raise TaskValidationError("allow_budget_wait must be a boolean")
         if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int) or not 5 <= lease_seconds <= 3600:
             raise TaskValidationError("lease_seconds must be between 5 and 3600")
         current = now or _now()
@@ -626,11 +629,12 @@ class SQLiteTaskStore:
                     deterministic=True,
                 )
                 connection.execute("BEGIN IMMEDIATE")
-                query = """SELECT tasks.task_id,tasks.state,tasks.plan_json,tasks.current_step,
+                ready_states = "'queued','retry_wait','budget_wait'" if allow_budget_wait else "'queued','retry_wait'"
+                query = f"""SELECT tasks.task_id,tasks.state,tasks.plan_json,tasks.current_step,
                     tasks.attempts,tasks.cancel_requested,task_owners.principal_id
                     FROM tasks LEFT JOIN task_owners ON task_owners.task_id=tasks.task_id
                     WHERE (
-                    (tasks.state IN ('queued','budget_wait','retry_wait') AND tasks.available_at<=?) OR
+                    (tasks.state IN ({ready_states}) AND tasks.available_at<=?) OR
                     (tasks.state='running' AND tasks.lease_until<=?)
                     )"""
                 params = [stamp, stamp]
@@ -1366,6 +1370,7 @@ class TaskEngine:
             self.lease_seconds,
             now,
             principal_tools=frozenset(self.principal_handlers),
+            allow_budget_wait=self.budget_store is not None,
         )
         if claim is None:
             return None
