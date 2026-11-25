@@ -665,8 +665,8 @@ class SQLiteStrategyStoreTests(unittest.TestCase):
         store.activate_for_principal("legacy-active", restore)
         active = store.get_active_for_principal("legacy-active", "reasoning")
         self.assertIsNotNone(active)
-        self.assertTrue(active.is_baseline)
         self.assertEqual(active.strategy_id, "baseline")
+        self.assertEqual(active.version, "1.0")
 
 
 if __name__ == "__main__":
