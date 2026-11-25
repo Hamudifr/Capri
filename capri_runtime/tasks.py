@@ -1006,7 +1006,7 @@ class SQLiteTaskStore:
                     """INSERT INTO task_events(
                     task_id,timestamp,state,step_index,attempt,error_code
                     ) VALUES(?,?,?,?,?,?)""",
-                    (claim.task_id, stamp, state, claim.step_index, attempts, error_code),
+                    (claim.task_id, stamp, state, claim.step_index, claim.attempt, error_code),
                 )
                 connection.execute("COMMIT")
                 return self.get(claim.task_id)
