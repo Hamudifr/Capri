@@ -263,6 +263,47 @@ class SQLiteWorkerRegistryTests(unittest.TestCase):
             connection.close()
         self.assertEqual(self.registry.integrity_check(), "ok")
 
+    def test_legacy_registry_schema_version_is_rejected_without_rewriting_snapshot(self):
+        self.register_healthy()
+        connection = self.store._connect()
+        try:
+            connection.execute(
+                "UPDATE worker_registry_meta SET schema_version=1 WHERE singleton=1"
+            )
+            connection.commit()
+            state_before = connection.execute(
+                "SELECT worker_id, descriptor_json, health_state, health_revision "
+                "FROM worker_registry_state ORDER BY worker_id"
+            ).fetchall()
+            events_before = connection.execute(
+                "SELECT sequence, event_sha256 FROM worker_registry_events ORDER BY sequence"
+            ).fetchall()
+        finally:
+            connection.close()
+
+        reopened_store = SQLiteTaskStore(self.path)
+        with self.assertRaisesRegex(WorkerRegistryError, "schema version is unsupported"):
+            self.make_registry(reopened_store)
+
+        # The unsupported version is rejected, not silently migrated or reset.
+        connection = reopened_store._connect()
+        try:
+            version = connection.execute(
+                "SELECT schema_version FROM worker_registry_meta WHERE singleton=1"
+            ).fetchone()[0]
+            state_after = connection.execute(
+                "SELECT worker_id, descriptor_json, health_state, health_revision "
+                "FROM worker_registry_state ORDER BY worker_id"
+            ).fetchall()
+            events_after = connection.execute(
+                "SELECT sequence, event_sha256 FROM worker_registry_events ORDER BY sequence"
+            ).fetchall()
+        finally:
+            connection.close()
+        self.assertEqual(version, 1)
+        self.assertEqual(state_after, state_before)
+        self.assertEqual(events_after, events_before)
+
     def test_backup_restore_preserves_registry_and_detects_audit_tampering(self):
         self.register_healthy()
         pending = self.reserve(self.registry, "task-1")
