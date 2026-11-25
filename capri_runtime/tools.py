@@ -678,9 +678,47 @@ class InMemoryAuditSink(AuditSink):
                 raise ToolValidationError("no worker lifecycle operation is pending")
             self._pending_worker_operations -= 1
 
+    def _outstanding_worker_reservations_locked(self) -> int:
+        last_ack = max(
+            (
+                index for index, event in enumerate(self._events)
+                if event.tool_name == "worker.reconciliation.acknowledged"
+            ),
+            default=-1,
+        )
+        states: dict[str, str] = {}
+        closed_events = {
+            "worker.reservation.released",
+            "worker.reservation.denied",
+            "worker.reservation.commit_missing",
+            "worker.reservation.commit_rejected",
+            "worker.reservation.release_missing",
+            "worker.reservation.collision_released",
+        }
+        for event in self._events[last_ack + 1:]:
+            if not event.tool_name.startswith("worker.reservation."):
+                continue
+            try:
+                metadata = json.loads(event.metadata_json or "")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return 1
+            token_hash = metadata.get("reservation_token_sha256")
+            if not isinstance(token_hash, str) or len(token_hash) != 64:
+                return 1
+            if event.tool_name == "worker.reservation.created":
+                states[token_hash] = "pending"
+            elif event.tool_name == "worker.reservation.committed":
+                states[token_hash] = "committed"
+            elif event.tool_name in closed_events:
+                states[token_hash] = "closed"
+        return sum(state in {"pending", "committed"} for state in states.values())
+
     def worker_lifecycle_reconciliation_required(self) -> bool:
         with self._lock:
-            return self._pending_worker_operations > 0
+            return (
+                self._pending_worker_operations > 0
+                or self._outstanding_worker_reservations_locked() > 0
+            )
 
     def acknowledge_worker_lifecycle_reconciliation(self, note: str) -> bool:
         if (
@@ -690,10 +728,15 @@ class InMemoryAuditSink(AuditSink):
             raise ToolValidationError("worker lifecycle reconciliation note is invalid")
         with self._lock:
             pending = self._pending_worker_operations
-            if pending == 0:
+            outstanding = self._outstanding_worker_reservations_locked()
+            if pending == 0 and outstanding == 0:
                 return False
             metadata_json = json.dumps(
-                {"pending_operations": pending, "reconciliation_note": note},
+                {
+                    "pending_operations": pending,
+                    "outstanding_reservations": outstanding,
+                    "reconciliation_note": note,
+                },
                 sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
             )
             event = AuditEvent(
