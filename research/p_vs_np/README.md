@@ -20,7 +20,9 @@ Requires Python 3, NumPy, and SciPy.
 
 ## Mathematical status
 
-The KPT terminal-package lemma recorded in R36 is a derived adversarial-path argument from the exact KPT predicate in Pich–Santhanam, *Towards P != NP from Extended Frege lower bounds*, preprint §3. At each round, the KPT function outputs its package before the current circuit challenge. If no output search circuit is globally correct, choose a witness that falsifies the search branch. If the bounded validity predicate has a falsifying input, choose it; otherwise choose a circuit that evades the package unless the package already refutes every circuit. Continuing for all constant-many rounds would falsify every KPT disjunct, contradiction.
+The KPT terminal-package lemma recorded in R36 is a derived adversarial-path unpacking of the exact KPT predicate in Pich–Santhanam, *Towards P != NP from Extended Frege lower bounds*, preprint §3. At each round, the KPT function outputs its package before the current circuit challenge. If no output search circuit is globally correct, choose a witness that falsifies the search branch. If the bounded validity predicate has a falsifying input, choose it; otherwise choose a circuit that evades the package unless the package already refutes every circuit. Continuing for all constant-many rounds would falsify every KPT disjunct, contradiction.
+
+This is the Student–Teacher interpretation: the KPT functions are the Student; the previous circuits, formula/witness pairs, and auxiliary inputs are the Teacher's counterexamples. Ježil–Tsintsilidas (2026), Theorems 1.6–1.8, classify PV1-provable forall-exists-forall statements as constant-round, one-query-per-round Student–Teacher games. Their adaptivity/parallelism separations are general results and do not prove this SAT-specific selector impossible.
 
 This is a nonuniform existence argument. It does not construct the history in deterministic polynomial time, prove P != NP, prove SAT not in P/poly, or provide a PV1/S1_2-provably correct selector.
 
@@ -30,4 +32,5 @@ The Python tests are finite sanity checks only. They do not prove the asymptotic
 
 - Pich–Santhanam preprint: https://users.ox.ac.uk/~coml0742/papers/eopt.pdf
 - Published version: https://doi.org/10.1145/3801091
+- Ježil–Tsintsilidas, *Parallelism and Adaptivity in Student-Teacher Witnessing* (2026): https://arxiv.org/abs/2602.19934
 - Chen–Li–Oliveira–Williams, APX1: https://arxiv.org/abs/2602.09302
