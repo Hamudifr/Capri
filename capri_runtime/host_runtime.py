@@ -107,9 +107,9 @@ class CapriHostRuntime:
 
     All provider/model execution remains injected through ToolOrchestrator.
     Memory and knowledge-graph resolvers are trusted host code and must enforce
-    principal-scoped access. TaskWorker remains explicitly host-managed;
-    run_task_worker() blocks until its stop event is set and should be run under
-    an external process supervisor.
+    principal-scoped access. TaskWorker remains opt-in; CapriHostService provides
+    cooperative in-process lifecycle management, while an external process
+    supervisor remains responsible for process restart and OS-level limits.
     """
 
     def __init__(
@@ -424,6 +424,32 @@ class CapriHostRuntime:
             memory_context=memory_context,
             knowledge_context=knowledge_context,
         )
+
+    @property
+    def task_worker_configured(self) -> bool:
+        """Whether this host has an explicitly configured task worker."""
+        return self._task_worker is not None
+
+    def storage_health(self) -> dict[str, str]:
+        """Return redacted integrity states for configured durable stores."""
+        stores = {
+            "sessions": self._session_store,
+            "tasks": self._task_store,
+            "goals": self._goal_store,
+            "budgets": self._budget_store,
+        }
+        health: dict[str, str] = {}
+        for name, store in stores.items():
+            if store is None:
+                health[name] = "not_configured"
+                continue
+            try:
+                result = store.integrity_check()
+            except Exception:
+                health[name] = "unavailable"
+            else:
+                health[name] = "healthy" if result == "ok" else "degraded"
+        return health
 
     def run_task_worker(self, stop_event: Any) -> None:
         """Run the configured task worker until the host sets stop_event."""
