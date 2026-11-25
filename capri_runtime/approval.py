@@ -331,12 +331,18 @@ class SQLiteApprovalChallengeStore:
                 grant = None
                 status = "rejected"
                 if decision == "approve":
-                    grant = grant_factory(record)
+                    approval_context = ApprovalChallenge(
+                        record.challenge_id, record.operation_id, record.principal_id,
+                        record.tool_name, record.argument_digest, record.created_at,
+                        record.expires_at, record.status, approver_id, record.grant,
+                    )
+                    grant = grant_factory(approval_context)
                     if (not isinstance(grant, ApprovalGrant)
                             or grant.principal_id != record.principal_id
                             or grant.tool_name != record.tool_name
                             or grant.argument_digest != record.argument_digest
                             or grant.operation_id != record.operation_id
+                            or grant.approver_id != approver_id
                             or not isinstance(grant.signature, str)
                             or not re.fullmatch(r"[0-9a-f]{64}", grant.signature)):
                         raise ToolValidationError("grant factory returned a mismatched or unsigned grant")
@@ -348,6 +354,7 @@ class SQLiteApprovalChallengeStore:
                     "tool_name": grant.tool_name, "argument_digest": grant.argument_digest,
                     "expires_at": grant.expires_at, "signature": grant.signature,
                     "key_id": grant.key_id, "operation_id": grant.operation_id,
+                    "approver_id": grant.approver_id,
                 }, sort_keys=True, separators=(",", ":")) if grant else None
                 connection.execute(
                     """UPDATE approval_challenges SET status=?,approver_id=?,grant_json=?
@@ -463,7 +470,11 @@ class HostApprovalService:
             challenge = self._store.get_by_operation_id(grant.operation_id, now)
             if challenge is None or challenge.status != "approved":
                 return False
-            if challenge.grant != grant or challenge.approver_id is None:
+            if (
+                challenge.grant != grant
+                or challenge.approver_id is None
+                or grant.approver_id != challenge.approver_id
+            ):
                 return False
             if (
                 challenge.principal_id != grant.principal_id
@@ -505,6 +516,7 @@ class HostApprovalService:
             factory = lambda item: self._signer.issue(
                 item.principal_id, item.tool_name, item.argument_digest,
                 ttl_seconds=self._grant_ttl, operation_id=item.operation_id,
+                approver_id=item.approver_id,
             )
         # Re-read time after authentication/policy callbacks; the store checks it
         # inside its serialized decision transaction, not at challenge display time.
