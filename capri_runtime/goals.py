@@ -724,7 +724,7 @@ class SQLiteGoalStore:
                         event_id=row[0], goal_id=goal_id, timestamp=row[1],
                         state=row[2], version=row[3], event_type=row[4],
                         principal_id=principal_id,
-                    ) for row in rows
+                    ) for row in rows if row[4] != "evidence_recorded"
                 ]
                 events.extend(DomainEvent(
                     id=f"evidence-{row[0]}",
