@@ -2,7 +2,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from capri_runtime.memory import MemoryNotFoundError, MemoryValidationError
+from capri_runtime.memory import MemoryConflictError, MemoryNotFoundError, MemoryValidationError
 from capri_runtime.notion_memory import MemorySyncError, NotionMemoryAdapter
 
 
@@ -10,6 +10,8 @@ class FakeNotionTransport:
     def __init__(self):
         self.pages = {}
         self.fail_archive = False
+        self.fail_activate = False
+        self.fail_after_activate = False
         self.max_page_size = 2
         self.repeat_cursor = False
         self.empty_repeated_cursor = False
@@ -49,8 +51,12 @@ class FakeNotionTransport:
         page = self.get_page(page_id)
         if properties.get("Status") == "Archived" and self.fail_archive:
             raise RuntimeError("simulated Notion archive failure")
+        if properties.get("Status") == "Active" and self.fail_activate:
+            raise RuntimeError("simulated Notion activation failure")
         page["properties"].update(properties)
         page["last_edited_time"] = datetime.now(timezone.utc).isoformat()
+        if properties.get("Status") == "Active" and self.fail_after_activate:
+            raise RuntimeError("simulated lost activation response")
         return page
 
     def delete_page(self, page_id):
@@ -335,14 +341,96 @@ class NotionMemoryAdapterTests(unittest.TestCase):
             store.archive(record.memory_id)
         self.assertEqual(store.get(record.memory_id).status, "active")
 
-    def test_correction_failure_leaves_replacement_in_review(self):
+    def test_correction_failure_leaves_replacement_in_review_and_reconciles(self):
         old = self.create()
         self.transport.fail_archive = True
         with self.assertRaises(MemorySyncError) as caught:
             self.store.correct(old.memory_id, content="Replacement.")
-        replacement = self.store.get(caught.exception.new_memory_id)
+        replacement_id = caught.exception.new_memory_id
+        replacement = self.store.get(replacement_id)
         self.assertEqual(replacement.status, "review")
         self.assertEqual(self.store.get(old.memory_id).status, "active")
+        self.transport.fail_archive = False
+        reconciled = self.store.reconcile_correction(replacement_id)
+        self.assertEqual(reconciled.status, "active")
+        self.assertEqual(self.store.get(old.memory_id).status, "archived")
+        self.assertEqual(
+            self.store.correct(old.memory_id, content="Replacement.").memory_id,
+            replacement_id,
+        )
+
+    def test_reconcile_finishes_interruption_after_predecessor_archival(self):
+        old = self.create()
+        self.transport.fail_activate = True
+        with self.assertRaises(MemorySyncError) as caught:
+            self.store.correct(old.memory_id, content="Replacement after archive.")
+        replacement_id = caught.exception.new_memory_id
+        self.assertEqual(self.store.get(old.memory_id).status, "archived")
+        self.assertEqual(self.store.get(replacement_id).status, "review")
+        self.transport.fail_activate = False
+        self.assertEqual(self.store.reconcile_correction(replacement_id).status, "active")
+        self.assertEqual(self.store.reconcile_correction(replacement_id).status, "active")
+
+    def test_reconcile_accepts_activation_that_succeeded_before_response_was_lost(self):
+        old = self.create()
+        self.transport.fail_after_activate = True
+        with self.assertRaises(MemorySyncError) as caught:
+            self.store.correct(old.memory_id, content="Replacement activated.")
+        replacement_id = caught.exception.new_memory_id
+        self.assertEqual(self.store.get(old.memory_id).status, "archived")
+        self.assertEqual(self.store.get(replacement_id).status, "active")
+        self.transport.fail_after_activate = False
+        self.assertEqual(self.store.reconcile_correction(replacement_id).status, "active")
+
+    def test_archived_predecessor_rejects_different_successor_and_same_payload_is_idempotent(self):
+        old = self.create()
+        first = self.store.correct(old.memory_id, content="Single successor.")
+        replay = self.store.correct(old.memory_id, content="Single successor.")
+        self.assertEqual(replay.memory_id, first.memory_id)
+        with self.assertRaises(MemoryConflictError):
+            self.store.correct(old.memory_id, content="Competing successor.")
+
+    def test_archived_review_replacement_is_not_mistaken_for_completed_activation(self):
+        old = self.create()
+        replacement = self.store.correct(old.memory_id, content="Replacement.")
+        self.store.archive(replacement.memory_id)
+        with self.assertRaises(MemoryConflictError):
+            self.store.correct(old.memory_id, content="Replacement.")
+
+    def test_concurrent_corrections_from_separate_adapters_have_one_successor(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        old = self.create()
+        second = NotionMemoryAdapter(self.transport)
+
+        def correct(store, content):
+            try:
+                return store.correct(old.memory_id, content=content)
+            except MemoryConflictError:
+                return None
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = tuple(pool.map(
+                lambda pair: correct(*pair),
+                ((self.store, "First concurrent correction."),
+                 (second, "Second concurrent correction.")),
+            ))
+        self.assertEqual(sum(item is not None for item in results), 1)
+        children = [
+            record for record in self.store._list_all()
+            if record.supersedes_id == old.memory_id
+        ]
+        self.assertEqual(len(children), 1)
+        self.assertEqual(children[0].status, "active")
+
+    def test_notion_domain_events_project_creation_and_supersession_without_content(self):
+        old = self.create()
+        new = self.store.correct(old.memory_id, content="Replacement with secret-like-looking content.")
+        events = self.store.domain_events()
+        correction = next(event for event in events if event.subject == new.memory_id)
+        self.assertEqual(correction.type, "com.capri.memory.record_created")
+        self.assertEqual(dict(correction.data)["supersedes_id"], old.memory_id)
+        self.assertNotIn("content", correction.as_dict()["data"])
 
     def test_explicit_archive_and_delete(self):
         record = self.create()

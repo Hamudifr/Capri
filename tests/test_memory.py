@@ -8,6 +8,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 from capri_runtime.memory import (
+    MemoryConflictError,
     MemoryNotFoundError,
     MemoryRecord,
     MemoryValidationError,
@@ -429,6 +430,99 @@ class SQLiteMemoryStoreTests(unittest.TestCase):
         self.assertEqual(self.store.search("Updated safe")[0].memory_id, corrected.memory_id)
         self.assertIn(("superseded", self.store.events(original.memory_id)[-1][1]),
                       self.store.events(original.memory_id))
+
+    def test_identical_memory_correction_retry_reuses_existing_successor(self):
+        original = self.create()
+        first = self.store.correct(original.memory_id, content="Idempotent correction.")
+        replay = self.store.correct(original.memory_id, content="Idempotent correction.")
+        self.assertEqual(replay.memory_id, first.memory_id)
+        with self.assertRaises(MemoryConflictError):
+            self.store.correct(original.memory_id, content="Different correction.")
+        self.assertEqual(
+            len([row for row in json.loads(self.store.export_json())
+                 if row["supersedes_id"] == original.memory_id]),
+            1,
+        )
+
+    def test_archived_predecessor_cannot_be_corrected_again(self):
+        original = self.create()
+        corrected = self.store.correct(original.memory_id, content="First correction.")
+        with self.assertRaises(MemoryConflictError):
+            self.store.correct(original.memory_id, content="Competing correction.")
+        self.assertEqual(self.store.search("First correction")[0].memory_id, corrected.memory_id)
+        self.assertEqual(self.store.integrity_check(), "ok")
+
+    def test_concurrent_corrections_from_separate_store_instances_have_one_winner(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        original = self.create()
+        second_store = SQLiteMemoryStore(self.path)
+
+        def correct(store, suffix):
+            try:
+                return store.correct(original.memory_id, content="Correction " + suffix)
+            except MemoryConflictError:
+                return None
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = tuple(pool.map(
+                lambda pair: correct(*pair),
+                ((self.store, "one"), (second_store, "two")),
+            ))
+        self.assertEqual(sum(item is not None for item in results), 1)
+        self.assertEqual(
+            len([row for row in json.loads(self.store.export_json()) if row["supersedes_id"] == original.memory_id]),
+            1,
+        )
+        self.assertEqual(self.store.integrity_check(), "ok")
+
+    def test_integrity_check_detects_missing_event_triggers_or_successor_index(self):
+        self.create()
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute("DROP TRIGGER memory_event_immutable_delete")
+            connection.commit()
+        finally:
+            connection.close()
+        self.assertEqual(self.store.integrity_check(), "memory store validation failed")
+        reopened = SQLiteMemoryStore(os.path.join(self.temp.name, "second.sqlite3"))
+        reopened.create(
+            title="Independent memory", content="A harmless test record.",
+            record_type="project_fact", scope="Capri System",
+            source="https://example.com/memory", confidence="unverified",
+        )
+        connection = sqlite3.connect(reopened.path)
+        try:
+            connection.execute("DROP INDEX memories_single_successor")
+            connection.commit()
+        finally:
+            connection.close()
+        self.assertEqual(reopened.integrity_check(), "memory store validation failed")
+
+    def test_memory_events_are_immutable_and_project_without_content(self):
+        original = self.create()
+        corrected = self.store.correct(original.memory_id, content="Corrected content.")
+        events = self.store.domain_events(original.memory_id)
+        correction_events = self.store.domain_events(corrected.memory_id)
+        self.assertEqual(
+            {event.type for event in events},
+            {"com.capri.memory.created", "com.capri.memory.superseded"},
+        )
+        self.assertEqual(
+            {event.type for event in correction_events},
+            {"com.capri.memory.correction_created"},
+        )
+        projected = correction_events[0].as_dict()
+        self.assertEqual(projected["data"]["supersedes_id"], original.memory_id)
+        self.assertNotIn("content", projected["data"])
+        connection = sqlite3.connect(self.path)
+        try:
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute("UPDATE memory_events SET event_type='rewritten'")
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute("DELETE FROM memory_events")
+        finally:
+            connection.close()
 
     def test_archive_is_reversible_only_by_explicit_new_record(self):
         record = self.create()

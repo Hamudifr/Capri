@@ -20,6 +20,7 @@ from uuid import uuid4
 from capri_core.validation import contains_surrogate
 
 from .sqlite_backup import backup_sqlite_database
+from .domain_events import DomainEvent, project_domain_events, task_event
 from .tools import ToolCancelledError
 from .budgets import BudgetExceededError, SQLiteBudgetStore
 
@@ -311,6 +312,12 @@ class SQLiteTaskStore:
                     task_id TEXT PRIMARY KEY REFERENCES tasks(task_id) ON DELETE RESTRICT,
                     principal_id TEXT NOT NULL
                 )""")
+                connection.execute("""CREATE TRIGGER IF NOT EXISTS task_event_immutable_update
+                    BEFORE UPDATE ON task_events
+                    BEGIN SELECT RAISE(ABORT, 'task events are append-only'); END""")
+                connection.execute("""CREATE TRIGGER IF NOT EXISTS task_event_immutable_delete
+                    BEFORE DELETE ON task_events
+                    BEGIN SELECT RAISE(ABORT, 'task events are append-only'); END""")
                 connection.execute("""CREATE TRIGGER IF NOT EXISTS task_owner_immutable_update
                     BEFORE UPDATE ON task_owners
                     BEGIN SELECT RAISE(ABORT, 'task ownership is immutable'); END""")
@@ -506,6 +513,27 @@ class SQLiteTaskStore:
     ) -> tuple[dict[str, Any], ...]:
         self._assert_principal_owner(task_id, principal_id)
         return self.events(task_id)
+
+    def domain_events_for_principal(
+        self, task_id: str, principal_id: str
+    ) -> tuple[DomainEvent, ...]:
+        """Return an owner-checked CloudEvents projection of this task's local events."""
+        self._assert_principal_owner(task_id, principal_id)
+        with self._lock:
+            connection = self._connect()
+            try:
+                rows = connection.execute(
+                    """SELECT event_id,timestamp,state,step_index,attempt,error_code
+                    FROM task_events WHERE task_id=? ORDER BY event_id""",
+                    (task_id,),
+                ).fetchall()
+                return project_domain_events(tuple(task_event(
+                    event_id=row[0], task_id=task_id, timestamp=row[1],
+                    state=row[2], step_index=row[3], attempt=row[4],
+                    error_code=row[5], principal_id=principal_id,
+                ) for row in rows))
+            finally:
+                connection.close()
 
     def get(self, task_id: str) -> TaskRecord:
         _text(task_id, "task_id", 64)
@@ -1087,6 +1115,19 @@ class SQLiteTaskStore:
                 connection.close()
 
     def _validate_backup_snapshot(self, connection: sqlite3.Connection) -> None:
+        triggers = {
+            row[0]: (row[1] or "").upper()
+            for row in connection.execute(
+                "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND tbl_name='task_events'"
+            ).fetchall()
+        }
+        if (
+            "BEFORE UPDATE ON TASK_EVENTS" not in triggers.get("task_event_immutable_update", "")
+            or "RAISE(ABORT" not in triggers.get("task_event_immutable_update", "")
+            or "BEFORE DELETE ON TASK_EVENTS" not in triggers.get("task_event_immutable_delete", "")
+            or "RAISE(ABORT" not in triggers.get("task_event_immutable_delete", "")
+        ):
+            raise TaskValidationError("task event append-only protections are missing")
         allowed_states = {"queued", "blocked", "budget_wait", "running", "retry_wait", "reconciliation_required", "succeeded", "failed", "cancelled"}
         rows = connection.execute(
             """SELECT task_id,idempotency_key,state,created_at,updated_at,current_step,
@@ -1214,6 +1255,10 @@ class SQLiteTaskStore:
                     return str(row[0])
                 if foreign_key_errors:
                     return "foreign key check failed"
+                try:
+                    self._validate_backup_snapshot(connection)
+                except TaskValidationError:
+                    return "task store validation failed"
                 return "ok"
             finally:
                 connection.close()

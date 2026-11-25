@@ -10,12 +10,20 @@ The local SQLite store supports:
 - create and retrieve records with source, confidence, scope, type, explicit non-sensitive classification, tags, retention, timestamps, and expiry metadata;
 - deterministic token-AND search with bounded offset pagination, exact provenance,
   optional exact-scope filtering, and a timezone-aware `updated_after` cutoff;
-- corrections as new records linked to the prior record, which is archived rather than silently overwritten;
+- corrections as new records linked to the prior record; only the active head may be corrected, identical retries reuse the existing successor, and a partial unique index permits at most one successor per predecessor;
+- append-only `memory_events` rows protected by SQLite UPDATE/DELETE triggers, with trigger/index checks included in integrity and backup validation;
+- a read-only CloudEvents-style projection that carries event identity, source, revision link, and bounded source provenance without exposing memory content;
 - controlled tags from the project's six-tag vocabulary;
 - explicit archive and physical content deletion (with a minimal ID-only deletion event);
 - expiry sweeps and exclusion of expired records from active retrieval;
 - deterministic JSON export;
 - private local database permissions and path checks on supported POSIX systems.
+
+## Correction and event integrity
+
+SQLite corrections run under `BEGIN IMMEDIATE`, require the predecessor to be Active, reject any existing successor, and atomically archive the predecessor while creating the replacement. A partial unique index on non-null `supersedes_id` enforces one successor even across store instances. Archived predecessors cannot be corrected again; explicit branching is not supported by this store. Memory event rows reject UPDATE and DELETE, and `integrity_check()` verifies the immutability triggers, successor index, event schema, and record semantics.
+
+`domain_events(memory_id=None)` projects local memory events into the shared CloudEvents 1.0 envelope. The projection contains identifiers, event types, status, source references, and supersession IDs only. It is read-only and does not create a global event database.
 
 ## Trust and privacy rules
 

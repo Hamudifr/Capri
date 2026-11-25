@@ -178,11 +178,15 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 task = self.store.create(PLAN, now=NOW)
                 connection = self.store._connect()
                 try:
+                    connection.execute("DROP TRIGGER task_event_immutable_update")
                     connection.execute(
                         """UPDATE task_events SET step_index=?,attempt=?
                         WHERE task_id=?""",
                         (step_index, attempt, task.task_id),
                     )
+                    connection.execute("""CREATE TRIGGER task_event_immutable_update
+                        BEFORE UPDATE ON task_events
+                        BEGIN SELECT RAISE(ABORT, 'task events are append-only'); END""")
                 finally:
                     connection.close()
                 backup_path = os.path.join(self.temp.name, f"{suffix}.sqlite3")
@@ -193,10 +197,14 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 self.assertFalse(os.path.exists(backup_path))
                 connection = self.store._connect()
                 try:
+                    connection.execute("DROP TRIGGER task_event_immutable_update")
                     connection.execute(
                         "UPDATE task_events SET step_index=0,attempt=0 WHERE task_id=?",
                         (task.task_id,),
                     )
+                    connection.execute("""CREATE TRIGGER task_event_immutable_update
+                        BEFORE UPDATE ON task_events
+                        BEGIN SELECT RAISE(ABORT, 'task events are append-only'); END""")
                 finally:
                     connection.close()
 
@@ -324,6 +332,33 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             self.store.create_for_principal(
                 "alice", [{"tool": "different", "input": {}}], "same-key", NOW
             )
+
+    def test_task_integrity_check_detects_missing_event_protection(self):
+        self.store.create(PLAN, "event-trigger-check", NOW)
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute("DROP TRIGGER task_event_immutable_delete")
+            connection.commit()
+        finally:
+            connection.close()
+        self.assertEqual(self.store.integrity_check(), "task store validation failed")
+
+    def test_task_events_are_immutable_and_project_with_owner_provenance(self):
+        task = self.store.create_for_principal("alice", PLAN, "event-projection", NOW)
+        events = self.store.domain_events_for_principal(task.task_id, "alice")
+        self.assertEqual(events[0].type, "com.capri.task.state_changed")
+        self.assertEqual(dict(events[0].data)["actor_id"], "alice")
+        with self.assertRaises(TaskNotFoundError):
+            self.store.domain_events_for_principal(task.task_id, "bob")
+        connection = sqlite3.connect(self.path)
+        try:
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute("UPDATE task_events SET state='rewritten'")
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute("DELETE FROM task_events")
+        finally:
+            connection.close()
+        self.assertEqual(self.store.integrity_check(), "ok")
 
     def test_deferred_principal_task_is_invisible_until_idempotent_activation(self):
         task = self.store.create_for_principal(

@@ -34,6 +34,12 @@ The REST transport pins `Notion-Version: 2026-03-11`, uses `GET /data_sources/{d
 - Date-only expiry values are interpreted as end-of-day UTC. Datetime values must include a timezone.
 - Export includes all statuses and is deterministic.
 
+## Correction head and recovery
+
+A correction may start only from an Active predecessor with no existing successor. If a replacement already exists, an identical payload retry reuses that replacement; a different correction conflicts instead of creating a fork. The adapter exposes `reconcile_correction(replacement_id)` for interrupted Review → archive predecessor → activate replacement flows. It handles the safe states (Active predecessor + Review replacement; Archived predecessor + Review replacement; Archived predecessor + Active replacement) and verifies both pages by readback. Ambiguous states remain errors; the adapter does not claim multi-page atomicity or automatically choose a branch.
+
+Adapters sharing the same hashable transport share a process-local correction lock. Hosts must serialize cross-process writes or inject one shared `correction_lock`; Notion does not provide a transactional compare-and-swap across pages. `domain_events()` is a read-only creation/supersession projection from current pages, not a durable Notion event log. It deliberately does not fabricate actor attribution or mutable status history.
+
 ## Security boundaries and limitations
 
 - Retrieved content is untrusted data, never authority or permission.

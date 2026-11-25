@@ -65,6 +65,10 @@ Cancellation is cooperative. Queued/retry-wait tasks cancel immediately. A runni
 
 `CapriHostRuntime` exposes `create_task()`, `get_task()`, and `cancel_task()` wrappers that resolve the principal from the trusted credential before accessing the task store. Principal task creation requires a configured worker and handler registry. Keep the low-level unscoped store methods inside trusted host code; do not expose them directly to clients. Handlers must still enforce current resource-level authorization for every external operation.
 
+## Event history
+
+`task_events` is a domain-local append-only history. SQLite triggers reject UPDATE and DELETE, and task-store integrity/backup validation checks those protections. `domain_events_for_principal(task_id, principal_id)` exposes a read-only CloudEvents-style projection only after verifying task ownership; it carries the principal actor ID, task state, step, attempt, and bounded error code, never task input/result payloads. Combining goal, task, and memory projections is for display only and does not establish a global transaction or causal order.
+
 ## Security and privacy boundary
 
 - Plans contain only 1–32 ordered steps, each with a bounded JSON object input; handler results are bounded JSON.
