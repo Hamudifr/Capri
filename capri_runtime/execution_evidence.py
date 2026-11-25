@@ -183,8 +183,8 @@ class SQLiteExecutionEvidenceJournal:
             finally:
                 connection.close()
 
-    def _now(self) -> str:
-        value = self._clock()
+    def _now(self, value: datetime | None = None) -> str:
+        value = value or self._clock()
         if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
             raise StrategyAuthorizationError("trusted evidence clock must return an aware datetime")
         return value.astimezone(timezone.utc).isoformat()
@@ -243,7 +243,26 @@ class SQLiteExecutionEvidenceJournal:
         return value
 
     def record_execution(self, credential: Any, claim: TaskClaim, result: object) -> str:
-        """Persist a signed event only after host authentication and result verification."""
+        """Append a verified source event without changing task lifecycle state."""
+        return self._record_execution(
+            credential, claim, result, finish_task=False, now=None,
+        )
+
+    def record_execution_and_finish(
+        self, credential: Any, claim: TaskClaim, result: object,
+        *, now: datetime | None = None,
+    ) -> str:
+        """Atomically append evidence and commit the exact task result/lease transition."""
+        if type(claim) is not TaskClaim or claim.principal_id is None:
+            raise StrategyAuthorizationError("principal-owned task claim is required")
+        return self._record_execution(
+            credential, claim, result, finish_task=True, now=now,
+        )
+
+    def _record_execution(
+        self, credential: Any, claim: TaskClaim, result: object,
+        *, finish_task: bool, now: datetime | None,
+    ) -> str:
         principal = self._authenticate_claim(credential, claim)
         classification = self._validate_classification(self._classify(principal, claim.task_id))
         binding = self._validate_binding(self._resolve_strategy(principal, claim))
@@ -254,11 +273,12 @@ class SQLiteExecutionEvidenceJournal:
         if len(encoded_result) > _MAX_RESULT_BYTES:
             raise StrategyAuthorizationError("execution result exceeds the evidence hashing limit")
         result_digest = hashlib.sha256(encoded_result).hexdigest()
-        # The host verifier receives its own decoded snapshot. A callback must
-        # not be able to mutate TaskEngine's result object after its digest has
-        # been computed but before that same object is persisted by finish_step.
+        # Keep independent decoded copies for the verifier and task persistence.
+        # A callback cannot mutate the result snapshot that TaskEngine will commit.
         try:
-            verifier_result = json.loads(encoded_result.decode("utf-8", errors="strict"))
+            encoded_text = encoded_result.decode("utf-8", errors="strict")
+            verifier_result = json.loads(encoded_text)
+            persisted_result = json.loads(encoded_text)
         except Exception:
             raise StrategyAuthorizationError("execution result snapshot is invalid") from None
         try:
@@ -268,7 +288,7 @@ class SQLiteExecutionEvidenceJournal:
         verified = self._validate_result(verified, result_digest)
         claim_digest = _claim_digest(claim)
         event_id = uuid4().hex
-        created_at = self._now()
+        created_at = self._now(now)
         key_id = self._mac.active_key_id
         if type(key_id) is not str or not _KEY_ID.fullmatch(key_id):
             raise StrategyAuthorizationError("execution evidence MAC key identifier is invalid")
@@ -308,10 +328,9 @@ class SQLiteExecutionEvidenceJournal:
             connection = self._tasks._connect()
             try:
                 connection.execute("BEGIN IMMEDIATE")
-                # Revalidate the lease inside the same SQLite write transaction
-                # as the append. The earlier callback-time validation is not
-                # sufficient: another process may reclaim or finish the task
-                # while classification/result verification is running.
+                # Revalidate the authoritative lease inside the same SQLite
+                # transaction that will append evidence and, for TaskEngine,
+                # complete the task result.
                 live_claim = connection.execute(
                     """SELECT tasks.state,tasks.lease_owner,tasks.lease_until,
                     tasks.current_step,tasks.attempts,tasks.plan_json,
@@ -343,25 +362,30 @@ class SQLiteExecutionEvidenceJournal:
                     )
                     if existing[1:] != expected_existing:
                         raise StrategyAuthorizationError("conflicting execution evidence already exists")
-                    connection.execute("COMMIT")
-                    return f"host-execution-event:{existing[0]}"
-                connection.execute(
-                    """INSERT INTO execution_evidence_events(
-                    event_id,principal_id,task_id,step_index,attempt,claim_sha256,
-                    strategy_class,strategy_id,strategy_version,task_family,scenario,
-                    outcome,safety_violation,tool_calls,context_tokens,estimated_cost_units,
-                    latency_ms,result_sha256,created_at,key_id,event_sha256,signature,payload_json
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    (
-                        event_id, principal, claim.task_id, claim.step_index, claim.attempt,
-                        claim_digest, binding.strategy_class, binding.strategy_id,
-                        binding.strategy_version, classification.task_family,
-                        classification.scenario, verified.outcome, int(verified.safety_violation),
-                        verified.tool_calls, verified.context_tokens,
-                        verified.estimated_cost_units, verified.latency_ms, result_digest,
-                        created_at, key_id, event_sha, signature.hex(), payload_json,
-                    ),
-                )
+                    event_ref = f"host-execution-event:{existing[0]}"
+                else:
+                    connection.execute(
+                        """INSERT INTO execution_evidence_events(
+                        event_id,principal_id,task_id,step_index,attempt,claim_sha256,
+                        strategy_class,strategy_id,strategy_version,task_family,scenario,
+                        outcome,safety_violation,tool_calls,context_tokens,estimated_cost_units,
+                        latency_ms,result_sha256,created_at,key_id,event_sha256,signature,payload_json
+                        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (
+                            event_id, principal, claim.task_id, claim.step_index, claim.attempt,
+                            claim_digest, binding.strategy_class, binding.strategy_id,
+                            binding.strategy_version, classification.task_family,
+                            classification.scenario, verified.outcome, int(verified.safety_violation),
+                            verified.tool_calls, verified.context_tokens,
+                            verified.estimated_cost_units, verified.latency_ms, result_digest,
+                            created_at, key_id, event_sha, signature.hex(), payload_json,
+                        ),
+                    )
+                    event_ref = f"host-execution-event:{event_id}"
+                if finish_task:
+                    self._tasks._finish_step_in_transaction(
+                        connection, claim, persisted_result, created_at,
+                    )
                 connection.execute("COMMIT")
             except Exception:
                 try:
@@ -371,7 +395,7 @@ class SQLiteExecutionEvidenceJournal:
                 raise
             finally:
                 connection.close()
-        return f"host-execution-event:{event_id}"
+        return event_ref
 
     def classify_task_family(self, principal_id: str, task_id: str) -> str | None:
         """Adapter for SQLiteStrategyEvidenceManifestStore's trusted classifier hook."""
