@@ -589,16 +589,9 @@ class SQLiteGoalStore:
     ) -> tuple[dict[str, Any], ...]:
         connection = self._connect()
         try:
-            rows = connection.execute(
-                """SELECT evidence_type,reference,step_index,created_at
-                FROM goal_evidence WHERE goal_id=? AND principal_id=?
-                ORDER BY evidence_id""",
-                (goal_id, principal_id),
-            ).fetchall()
-            return tuple({
-                "evidence_type": row[0], "reference": row[1],
-                "step_index": row[2], "created_at": row[3],
-            } for row in rows)
+            return self._evidence_rows_on_connection(
+                connection, goal_id, principal_id
+            )
         finally:
             connection.close()
 
