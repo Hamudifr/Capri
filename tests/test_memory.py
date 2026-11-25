@@ -473,7 +473,11 @@ class SQLiteMemoryStoreTests(unittest.TestCase):
             connection.close()
         self.assertEqual(self.store.integrity_check(), "memory store validation failed")
         reopened = SQLiteMemoryStore(os.path.join(self.temp.name, "second.sqlite3"))
-        reopened.create(title="Independent memory")
+        reopened.create(
+            title="Independent memory", content="A harmless test record.",
+            record_type="project_fact", scope="Capri System",
+            source="https://example.com/memory", confidence="unverified",
+        )
         connection = sqlite3.connect(reopened.path)
         try:
             connection.execute("DROP INDEX memories_single_successor")
