@@ -119,6 +119,9 @@ class CapriHostRuntime:
     principal-scoped access. TaskWorker remains opt-in; CapriHostService provides
     cooperative in-process lifecycle management, while an external process
     supervisor remains responsible for process restart and OS-level limits.
+    The optional Nexus registry gateway requires separate host worker-identity
+    and task-policy resolvers. It returns advisory candidates only and never
+    dispatches work or grants permissions.
     """
 
     def __init__(
