@@ -48,7 +48,9 @@ class DurableWorkerRestartTests(unittest.TestCase):
         )
 
     @staticmethod
-    def _host(task_store, audit_store):
+    def _host(task_store, audit_store, registry=None):
+        if registry is None:
+            registry = SQLiteWorkerRegistry(task_store)
         sessions = SQLiteSessionStore(
             os.path.join(os.path.dirname(task_store.path), "sessions.sqlite3"),
             max_output_chars=131_072,
@@ -62,7 +64,7 @@ class DurableWorkerRestartTests(unittest.TestCase):
             sessions,
             orchestrator,
             task_store=task_store,
-            worker_registry=SQLiteWorkerRegistry(task_store),
+            worker_registry=registry,
             worker_identity_resolver=lambda credential: (
                 {"worker-token": "worker-1"}.get(credential)
             ),
@@ -138,6 +140,100 @@ class DurableWorkerRestartTests(unittest.TestCase):
         self.assertIn("worker.reconciliation.acknowledged", event_types)
         self.assertIn("worker.reservation.committed", event_types)
         self.assertIn("worker.reservation.released", event_types)
+
+
+    def test_candidate_lookup_audits_expired_reservation_with_local_context(self):
+        now = {"value": 1_000_000_000}
+        task_store = SQLiteTaskStore(self.tasks_path)
+        audit_store = SQLiteSecurityStore(self.audit_path)
+        registry = SQLiteWorkerRegistry(
+            task_store,
+            heartbeat_ttl_ms=5_000,
+            reservation_ttl_ms=1_000,
+            clock_ns=lambda: now["value"],
+            clock_wall_ns=lambda: now["value"],
+        )
+        host = self._host(task_store, audit_store, registry=registry)
+        host.register_worker(
+            "worker-token",
+            WorkerDescriptor("worker-1", (1,), ("math.factorial",), max_concurrency=1),
+        )
+        host.heartbeat_worker("monitor-token", "worker-1")
+        first_task = task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {"scope": "first"}}],
+        )
+        pending = host.reserve_worker_candidate(
+            "alice-token", first_task.task_id, "math.factorial", 1,
+        )
+        self.assertIsNotNone(pending)
+
+        now["value"] += 2_000_000_000
+        next_task = task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {"scope": "next"}}],
+        )
+        candidates = host.get_worker_candidates(
+            "alice-token", next_task.task_id, "math.factorial", 1,
+        )
+        self.assertEqual(len(candidates), 1)
+        self.assertIsNone(registry.get_reservation(pending.reservation.token))
+        self.assertTrue(any(
+            event.tool_name == "worker.reservation.expired"
+            for event in audit_store.events()
+        ))
+        self.assertFalse(audit_store.worker_lifecycle_reconciliation_required())
+
+    def test_post_restart_heartbeat_audits_expiry_without_local_context(self):
+        now = {"value": 1_000_000_000}
+        task_store = SQLiteTaskStore(self.tasks_path)
+        audit_store = SQLiteSecurityStore(self.audit_path)
+        registry = SQLiteWorkerRegistry(
+            task_store,
+            heartbeat_ttl_ms=5_000,
+            reservation_ttl_ms=1_000,
+            clock_ns=lambda: now["value"],
+            clock_wall_ns=lambda: now["value"],
+        )
+        host = self._host(task_store, audit_store, registry=registry)
+        host.register_worker(
+            "worker-token",
+            WorkerDescriptor("worker-1", (1,), ("math.factorial",), max_concurrency=1),
+        )
+        host.heartbeat_worker("monitor-token", "worker-1")
+        task = task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {"scope": "restart-expiry"}}],
+        )
+        pending = host.reserve_worker_candidate(
+            "alice-token", task.task_id, "math.factorial", 1,
+        )
+        self.assertIsNotNone(pending)
+
+        reopened_tasks = SQLiteTaskStore(self.tasks_path)
+        reopened_audit = SQLiteSecurityStore(self.audit_path)
+        self.assertTrue(
+            reopened_audit.acknowledge_worker_lifecycle_reconciliation(
+                "Supervisor reconciled worker identity and load after process restart",
+            )
+        )
+        now["value"] += 2_000_000_000
+        reopened_registry = SQLiteWorkerRegistry(
+            reopened_tasks,
+            heartbeat_ttl_ms=5_000,
+            reservation_ttl_ms=1_000,
+            clock_ns=lambda: now["value"],
+            clock_wall_ns=lambda: now["value"],
+        )
+        restarted_host = self._host(
+            reopened_tasks, reopened_audit, registry=reopened_registry,
+        )
+        self.assertEqual(restarted_host._worker_reservation_contexts, {})
+
+        restarted_host.heartbeat_worker("monitor-token", "worker-1")
+        self.assertIsNone(reopened_registry.get_reservation(pending.reservation.token))
+        self.assertTrue(any(
+            event.tool_name == "worker.reservation.expired"
+            for event in reopened_audit.events()
+        ))
+        self.assertFalse(reopened_audit.worker_lifecycle_reconciliation_required())
 
 
 if __name__ == "__main__":
