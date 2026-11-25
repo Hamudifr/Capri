@@ -457,7 +457,7 @@ class WorkerRegistryTests(unittest.TestCase):
         ))
         self.assertTrue(registry.release_reservation(
             committed, authenticated_worker_id="worker-1",
-            observed_in_flight=0, now_ns=self.now,
+            observed_unreserved_in_flight=0, now_ns=self.now,
         ))
         self.assertIsNotNone(registry.reserve_eligible(
             "math.factorial", protocol_version=1,
@@ -495,7 +495,7 @@ class WorkerRegistryTests(unittest.TestCase):
         # happens under the same lock as removing the hold.
         self.assertTrue(registry.release_reservation(
             committed, authenticated_worker_id="worker-1",
-            observed_in_flight=1, now_ns=self.now,
+            observed_unreserved_in_flight=1, now_ns=self.now,
         ))
         self.assertEqual(registry.get("worker-1").health.in_flight, 1)
         self.assertIsNone(registry.reserve_eligible(
@@ -524,11 +524,11 @@ class WorkerRegistryTests(unittest.TestCase):
             with self.assertRaises(WorkerRegistryError):
                 self.registry.release_reservation(
                     committed, authenticated_worker_id="worker-1",
-                    observed_in_flight=invalid, now_ns=self.now,
+                    observed_unreserved_in_flight=invalid, now_ns=self.now,
                 )
         self.assertTrue(self.registry.release_reservation(
             committed, authenticated_worker_id="worker-1",
-            observed_in_flight=0, now_ns=self.now,
+            observed_unreserved_in_flight=0, now_ns=self.now,
         ))
 
     def test_pending_release_rejects_in_flight_observation(self):
@@ -540,7 +540,7 @@ class WorkerRegistryTests(unittest.TestCase):
         with self.assertRaises(WorkerRegistryError):
             self.registry.release_reservation(
                 pending, authenticated_worker_id="worker-1",
-                observed_in_flight=0, now_ns=self.now,
+                observed_unreserved_in_flight=0, now_ns=self.now,
             )
         self.assertTrue(self.registry.release_reservation(
             pending, authenticated_worker_id="worker-1", now_ns=self.now,
@@ -660,7 +660,7 @@ class WorkerRegistryTests(unittest.TestCase):
         ))
         self.assertTrue(self.registry.release_reservation(
             committed, authenticated_worker_id="worker-1",
-            observed_in_flight=0, now_ns=self.now,
+            observed_unreserved_in_flight=0, now_ns=self.now,
         ))
 
     def test_reservation_configuration_and_token_are_bounded(self):
