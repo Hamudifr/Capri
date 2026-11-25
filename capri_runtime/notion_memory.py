@@ -591,9 +591,9 @@ class NotionMemoryAdapter:
         """
         events = []
         for record in self._list_all():
-            data = ()
+            data: tuple[tuple[str, str | int | None], ...] = (("derived_from", record.source),)
             if record.supersedes_id is not None:
-                data = (("supersedes_id", record.supersedes_id),)
+                data += (("supersedes_id", record.supersedes_id),)
             events.append(DomainEvent(
                 id=record.memory_id,
                 source=f"urn:capri:notion-memory:{record.memory_id}",
