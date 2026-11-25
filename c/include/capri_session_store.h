@@ -77,6 +77,11 @@ CapriSessionError capri_session_close_for_principal(
  * existing destination. The destination parent must already be private.
  */
 CapriSessionError capri_session_backup_to(CapriSessionStore *store, const char *destination_path);
+/* Restores a validated snapshot to a new private database path. The destination
+ * must not exist; the live store and source backup are never overwritten.
+ */
+CapriSessionError capri_session_restore_to(
+    CapriSessionStore *store, const char *backup_path, const char *destination_path);
 CapriSessionError capri_session_integrity_check(CapriSessionStore *store);
 void capri_session_free(CapriSession *session);
 const char *capri_session_error_string(CapriSessionError error);
