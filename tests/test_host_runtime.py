@@ -345,6 +345,35 @@ class CapriHostRuntimeTests(unittest.TestCase):
             1,
         )
 
+    def test_host_worker_reservation_expiry_purges_host_context(self):
+        now = {"value": 10_000_000_000}
+        registry = InMemoryWorkerRegistry(
+            clock_ns=lambda: now["value"], reservation_ttl_ms=1_000,
+        )
+        host = self.make_worker_host(
+            registry, {"worker-token": "worker-1"}, lambda *args: {"worker-1"},
+        )
+        host.register_worker(
+            "worker-token", WorkerDescriptor("worker-1", (1,), ("math.factorial",)),
+        )
+        host.heartbeat_worker("monitor-token", "worker-1")
+        task = self.task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {}}],
+        )
+        expired = host.reserve_worker_candidate(
+            "alice-token", task.task_id, "math.factorial", 1,
+        )
+        self.assertIsNotNone(expired)
+        now["value"] += 2_000_000_000
+        self.assertFalse(host.release_worker_reservation("monitor-token", expired))
+        replacement = host.reserve_worker_candidate(
+            "alice-token", task.task_id, "math.factorial", 1,
+        )
+        self.assertIsNotNone(replacement)
+        self.assertNotEqual(
+            replacement.reservation.token, expired.reservation.token,
+        )
+
     def test_host_worker_reservation_returns_none_when_no_policy_candidate(self):
         registry = InMemoryWorkerRegistry()
         host = self.make_worker_host(registry, {"worker-token": "worker-1"}, lambda *args: set())
