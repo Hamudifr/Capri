@@ -25,6 +25,13 @@ class PersistenceBenchmarkTests(unittest.TestCase):
         for result in report["results"]:
             self.assertEqual(result["sample_count"], 5)
             self.assertEqual(len(result["latency_samples_us"]), 5)
+            self.assertGreater(result["elapsed_seconds"], 0)
+            self.assertGreaterEqual(result["aggregate_operation_seconds"], 0)
+            self.assertAlmostEqual(
+                result["throughput_per_second"],
+                5 / result["elapsed_seconds"],
+                delta=0.02,
+            )
             latency = result["latency_us"]
             self.assertLessEqual(latency["min"], latency["median"])
             self.assertLessEqual(latency["median"], latency["p95"])
