@@ -80,7 +80,7 @@ Cancellation is cooperative. Queued/retry-wait tasks cancel immediately. A runni
 
 ## Validation
 
-`tests/test_tasks.py` covers persistent state, idempotent creation, plan validation, concurrent claims, lease-expiry quarantine, stale-worker rejection, renewed-lease handling, bounded explicit retries, step checkpointing, handler failure suppression, principal ownership, cancellation, event persistence, symlink rejection, and directory privacy. The repository quality workflow runs the full suite on Python 3.11, 3.12, 3.13, and 3.15.
+`tests/test_tasks.py` covers persistent state, idempotent creation, plan validation, concurrent claims, lease-expiry quarantine, stale-worker rejection, renewed-lease handling, bounded explicit retries, step checkpointing, handler failure suppression, principal ownership, cancellation, event persistence, symlink rejection, and directory privacy. The repository quality workflow runs the full suite on Python 3.11 through 3.15.
 
 
 ## Operator handling of reconciliation quarantine
