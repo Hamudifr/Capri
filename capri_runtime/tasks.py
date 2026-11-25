@@ -1349,6 +1349,16 @@ class SQLiteTaskStore:
                 raise TaskValidationError(
                     "task store contains invalid provider usage events"
                 ) from None
+        if connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='execution_evidence_events'"
+        ).fetchone() is not None:
+            try:
+                from .execution_evidence import validate_execution_evidence_snapshot
+                validate_execution_evidence_snapshot(connection)
+            except Exception:
+                raise TaskValidationError(
+                    "task store contains invalid execution evidence events"
+                ) from None
 
     def backup_to(self, destination_path: str) -> str:
         """Create a private, consistent task-state snapshot without overwriting."""
@@ -1401,6 +1411,8 @@ class TaskEngine:
         *,
         principal_handlers: Mapping[str, Callable[[dict[str, Any], str, str], Any]] | None = None,
         budget_store: SQLiteBudgetStore | None = None,
+        execution_evidence_journal: Any | None = None,
+        execution_evidence_credential: Callable[[TaskClaim], Any] | None = None,
     ) -> None:
         if not isinstance(store, SQLiteTaskStore):
             raise TaskValidationError("store must be a SQLiteTaskStore")
@@ -1433,6 +1445,21 @@ class TaskEngine:
         self.executor_id = executor_id
         self.lease_seconds = lease_seconds
         self.budget_store = budget_store
+        if (execution_evidence_journal is None) != (execution_evidence_credential is None):
+            raise TaskValidationError(
+                "execution evidence journal and credential resolver must be configured together"
+            )
+        if execution_evidence_journal is not None:
+            if (
+                getattr(execution_evidence_journal, "_tasks", None) is not store
+                or not callable(getattr(execution_evidence_journal, "record_execution", None))
+                or not callable(execution_evidence_credential)
+            ):
+                raise TaskValidationError(
+                    "execution evidence must use this task store and a trusted credential resolver"
+                )
+        self.execution_evidence_journal = execution_evidence_journal
+        self.execution_evidence_credential = execution_evidence_credential
 
     def set_budget_store(self, budget_store: SQLiteBudgetStore) -> None:
         if not isinstance(budget_store, SQLiteBudgetStore):
@@ -1521,12 +1548,24 @@ class TaskEngine:
                 claim, "handler_outcome_uncertain", now=now
             )
         try:
-            _json(result, label="handler result")
+            _, result_snapshot = _json(result, label="handler result")
         except Exception:
             return self.store.require_reconciliation(
                 claim, "handler_result_invalid", now=now
             )
-        return self.store.finish_step(claim, result, now=now)
+        if self.execution_evidence_journal is not None and claim.principal_id is not None:
+            try:
+                credential = self.execution_evidence_credential(claim)
+                self.execution_evidence_journal.record_execution(
+                    credential, claim, result_snapshot,
+                )
+            except Exception:
+                # The handler may already have caused an external side effect.
+                # Do not mark the task successful without its required evidence.
+                return self.store.require_reconciliation(
+                    claim, "execution_evidence_unavailable", now=now,
+                )
+        return self.store.finish_step(claim, result_snapshot, now=now)
 
     def run_once(self, now: datetime | None = None) -> TaskRecord | None:
         claim = self.store.claim_next(
