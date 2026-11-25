@@ -430,17 +430,6 @@ class CapriHostRuntime:
             raise HostRuntimeError(
                 "worker registry is disabled because lifecycle audit persistence is unavailable"
             )
-        try:
-            if self._worker_lifecycle_audit_sink.worker_lifecycle_reconciliation_required():
-                self._worker_audit_healthy = False
-                raise HostRuntimeError(
-                    "worker registry is disabled pending lifecycle audit reconciliation"
-                )
-        except HostRuntimeError:
-            raise
-        except Exception:
-            self._worker_audit_healthy = False
-            raise HostRuntimeError("worker lifecycle audit state could not be verified") from None
 
     def _begin_worker_audit_operation(self) -> None:
         self._require_worker_audit_healthy()
