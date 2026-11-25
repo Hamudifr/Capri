@@ -8,6 +8,7 @@ import sqlite3
 import time
 import uuid
 from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, Callable, Iterator
 
 from .worker_registry import (
@@ -522,6 +523,9 @@ class SQLiteWorkerRegistry:
         self._max_reservations = max_reservations
         self._clock_ns = clock_ns
         self._clock_wall_ns = clock_wall_ns
+        self._expired_reservation_captures: ContextVar[tuple[list[WorkerReservation], ...]] = ContextVar(
+            "sqlite_worker_registry_expired_reservation_captures", default=(),
+        )
         self._config = {
             "heartbeat_ttl_ms": heartbeat_ttl_ms,
             "failure_threshold": failure_threshold,
@@ -539,6 +543,17 @@ class SQLiteWorkerRegistry:
             clock_ns=clock_ns,
         )
         self._initialize()
+
+    @contextmanager
+    def capture_expired_reservations(self) -> Iterator[list[WorkerReservation]]:
+        """Capture expiries committed by registry operations in this execution context."""
+        captures = self._expired_reservation_captures.get()
+        captured: list[WorkerReservation] = []
+        token = self._expired_reservation_captures.set((*captures, captured))
+        try:
+            yield captured
+        finally:
+            self._expired_reservation_captures.reset(token)
 
     @contextmanager
     def _transaction(self) -> Iterator[sqlite3.Connection]:
@@ -1022,7 +1037,13 @@ class SQLiteWorkerRegistry:
                 operation=operation, actor_id=actor_id, wall_now=wall_now,
                 mono_now=mono_now, event_context=event_context,
             )
-            return (result, expired_reservations) if include_expired else result
+            outcome = (result, expired_reservations) if include_expired else result
+
+        # The transaction has committed before expiry rows become visible to
+        # the host audit capture. A rollback must never publish phantom expiries.
+        for capture in self._expired_reservation_captures.get():
+            capture.extend(expired_reservations)
+        return outcome
 
     @staticmethod
     def _current_reservation(
@@ -1239,6 +1260,40 @@ class SQLiteWorkerRegistry:
             "release_reservation", release, now_ns=now_ns,
             actor_id=authenticated_worker_id,
             event_context={"observed_unreserved_in_flight": observed_unreserved_in_flight},
+        )
+
+    def release_reservation_with_load_resolver(
+        self,
+        reservation: WorkerReservation,
+        *,
+        authenticated_worker_id: str,
+        in_flight_resolver: Callable[[str], int],
+        now_ns: int | None = None,
+    ) -> bool:
+        """Sample unreserved host load only after the durable writer lock is held."""
+        if not callable(in_flight_resolver):
+            raise WorkerRegistryError("in_flight_resolver must be callable")
+        event_context: dict[str, Any] = {}
+
+        def release(memory: InMemoryWorkerRegistry, timestamp: int):
+            current = self._current_reservation(memory, reservation)
+            if current is None:
+                return False
+            observed = in_flight_resolver(current.worker_id)
+            event_context["observed_unreserved_in_flight"] = observed
+            return memory.release_reservation(
+                current,
+                authenticated_worker_id=authenticated_worker_id,
+                observed_unreserved_in_flight=observed,
+                now_ns=timestamp,
+            )
+
+        return self._run(
+            "release_reservation",
+            release,
+            now_ns=now_ns,
+            actor_id=authenticated_worker_id,
+            event_context=event_context,
         )
 
     def expire_reservations(self, *, now_ns: int | None = None) -> tuple[WorkerReservation, ...]:
