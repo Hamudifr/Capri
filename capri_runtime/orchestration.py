@@ -205,7 +205,7 @@ class ToolOrchestrator:
     ) -> int:
         total = _history_size(working)
         total += sum(
-            len(tool.name.encode("utf-8")) + len(tool.parameters.encode("utf-8")) + 64
+            len(tool.name.encode("utf-8")) + len(tool.parameters_json.encode("utf-8")) + 64
             for tool in definitions
         )
         if memory_context is not None:
