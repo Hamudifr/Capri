@@ -169,7 +169,27 @@ def build_goal_report(
         ))
 
     evidence_truncated = len(evidence_rows) > _MAX_EVIDENCE_ITEMS
-    bounded_evidence = tuple(evidence_rows[-_MAX_EVIDENCE_ITEMS:])
+    first_recent_index = max(0, len(evidence_rows) - _MAX_EVIDENCE_ITEMS)
+    selected_indices = list(range(first_recent_index, len(evidence_rows)))
+    latest_decision_index = next(
+        (
+            index for index in range(len(evidence_rows) - 1, -1, -1)
+            if evidence_rows[index].evidence_type in {
+                "acceptance_accepted", "acceptance_rejected",
+            }
+        ),
+        None,
+    )
+    if (
+        evidence_truncated
+        and latest_decision_index is not None
+        and latest_decision_index < first_recent_index
+    ):
+        selected_indices = [latest_decision_index] + selected_indices[
+            -(_MAX_EVIDENCE_ITEMS - 1):
+        ]
+        selected_indices.sort()
+    bounded_evidence = tuple(evidence_rows[index] for index in selected_indices)
     raw_goal_state = goal.state
     goal_state = raw_goal_state if raw_goal_state in _GOAL_STATES else "unknown"
     task_state = None

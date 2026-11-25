@@ -172,18 +172,26 @@ class GoalReportTests(unittest.TestCase):
         self.assertTrue(mismatch.uncertain)
         self.assertEqual(mismatch.uncertainty_code, "task_progress_mismatch")
 
-    def test_evidence_is_bounded_and_latest_acceptance_is_retained(self):
-        rows = tuple(
-            evidence("task_step_result_sha256", f"{index:064x}", index % 32)
+    def test_evidence_is_bounded_and_latest_acceptance_decision_is_retained(self):
+        later_rows = tuple(
+            evidence("followup_note", f"{index:064x}")
             for index in range(70)
-        ) + (evidence("acceptance_accepted"),)
-        report = build_goal_report(
-            make_goal(state="succeeded", evidence=rows),
         )
-        self.assertTrue(report.evidence_truncated)
-        self.assertEqual(len(report.evidence), 64)
-        self.assertEqual(report.owner_acceptance_status, "accepted")
-        self.assertEqual(report.evidence[-1].evidence_type, "acceptance_accepted")
+        cases = (
+            ("succeeded", "acceptance_accepted", "accepted"),
+            ("failed", "acceptance_rejected", "rejected"),
+        )
+        for state, decision, expected_status in cases:
+            with self.subTest(decision=decision):
+                rows = (evidence(decision, "f" * 64),) + later_rows
+                report = build_goal_report(make_goal(state=state, evidence=rows))
+                self.assertTrue(report.evidence_truncated)
+                self.assertEqual(len(report.evidence), 64)
+                self.assertEqual(report.owner_acceptance_status, expected_status)
+                self.assertEqual(report.evidence[0].evidence_type, decision)
+                self.assertEqual(report.evidence[0].reference, "f" * 64)
+                self.assertEqual(report.evidence[1].reference, f"{7:064x}")
+                self.assertEqual(report.evidence[-1].reference, f"{69:064x}")
 
 
 if __name__ == "__main__":
