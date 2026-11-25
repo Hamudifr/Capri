@@ -85,6 +85,37 @@ class SQLiteApprovalChallengeStore:
                     "CREATE INDEX IF NOT EXISTS approval_challenges_status_expiry "
                     "ON approval_challenges(status, expires_at)"
                 )
+                connection.execute(
+                    """CREATE TRIGGER IF NOT EXISTS approval_challenges_identity_immutable
+                    BEFORE UPDATE ON approval_challenges
+                    WHEN NEW.challenge_id != OLD.challenge_id
+                      OR NEW.operation_id != OLD.operation_id
+                      OR NEW.principal_id != OLD.principal_id
+                      OR NEW.tool_name != OLD.tool_name
+                      OR NEW.argument_digest != OLD.argument_digest
+                      OR NEW.created_at != OLD.created_at
+                      OR NEW.expires_at != OLD.expires_at
+                    BEGIN
+                        SELECT RAISE(ABORT, 'approval challenge identity is immutable');
+                    END"""
+                )
+                connection.execute(
+                    """CREATE TRIGGER IF NOT EXISTS approval_challenges_terminal_immutable
+                    BEFORE UPDATE ON approval_challenges
+                    WHEN OLD.status != 'pending'
+                      OR NEW.status NOT IN ('approved','rejected','expired')
+                      OR NEW.status = OLD.status
+                    BEGIN
+                        SELECT RAISE(ABORT, 'approval challenge is terminal');
+                    END"""
+                )
+                connection.execute(
+                    """CREATE TRIGGER IF NOT EXISTS approval_challenges_no_delete
+                    BEFORE DELETE ON approval_challenges
+                    BEGIN
+                        SELECT RAISE(ABORT, 'approval challenges are append-only');
+                    END"""
+                )
             finally:
                 connection.close()
 
@@ -202,6 +233,46 @@ class SQLiteApprovalChallengeStore:
                 raise
             finally:
                 connection.close()
+
+    def get_by_operation_id(self, operation_id: str, now: datetime) -> ApprovalChallenge | None:
+        current = _utc(now, "challenge clock")
+        if not isinstance(operation_id, str) or not _OPERATION.fullmatch(operation_id):
+            return None
+        with self._store._lock:
+            connection = self._store._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    """SELECT challenge_id,operation_id,principal_id,tool_name,argument_digest,
+                    created_at,expires_at,status,approver_id,grant_json
+                    FROM approval_challenges WHERE operation_id=?""", (operation_id,),
+                ).fetchone()
+                if row is None:
+                    connection.execute("COMMIT")
+                    return None
+                if row[7] == "pending" and datetime.fromisoformat(row[6]) <= current:
+                    connection.execute(
+                        "UPDATE approval_challenges SET status='expired' WHERE operation_id=? AND status='pending'",
+                        (operation_id,),
+                    )
+                    connection.execute(
+                        """INSERT INTO audit_events
+                        (event_id,timestamp,principal_id,tool_name,argument_digest,status,error_code)
+                        VALUES (?,?,?,?,?,'approval_expired',NULL)""",
+                        (str(uuid4()), current.isoformat(), row[2], row[3], row[4]),
+                    )
+                    row = (*row[:7], "expired", row[8], row[9])
+                connection.execute("COMMIT")
+                return self._from_row(row)
+            except Exception:
+                try:
+                    connection.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+                raise
+            finally:
+                connection.close()
+
 
     def decide(
         self, challenge_id: str, approver_id: str, decision: str, now: datetime,
@@ -336,6 +407,23 @@ class HostApprovalService:
         self._challenge_ttl, self._grant_ttl = challenge_ttl_seconds, grant_ttl_seconds
         self._allow_self_approval = allow_self_approval
 
+    def create_action_challenge(
+        self, principal_id: str, action_name: str, argument_digest: str, operation_id: str,
+    ) -> ApprovalChallenge:
+        """Create a host-owned approval challenge for a non-tool domain action.
+
+        This API is host-only. Never expose it or the approval service to model input.
+        The caller must compute a canonical digest of the exact state transition.
+        """
+        SQLiteApprovalChallengeStore._validate(
+            operation_id, principal_id, action_name, argument_digest
+        )
+        now = _utc(self._clock(), "host clock")
+        return self._store.create(
+            operation_id, principal_id, action_name, argument_digest,
+            now, now + timedelta(seconds=self._challenge_ttl),
+        )
+
     def create_challenge(
         self, context: ExecutionContext, outcome: ToolCallOutcome, operation_id: str,
     ) -> ApprovalChallenge:
@@ -347,11 +435,42 @@ class HostApprovalService:
         if (not isinstance(operation_id, str) or not _OPERATION.fullmatch(operation_id)
                 or context.operation_id != operation_id):
             raise ToolValidationError("approval challenge must match the trusted execution operation")
-        now = _utc(self._clock(), "host clock")
-        return self._store.create(
-            operation_id, context.principal_id, outcome.name, outcome.argument_digest,
-            now, now + timedelta(seconds=self._challenge_ttl),
+        return self.create_action_challenge(
+            context.principal_id, outcome.name, outcome.argument_digest, operation_id
         )
+
+    def get_challenge_by_operation_id(self, operation_id: str) -> ApprovalChallenge | None:
+        """Return the durable approval record for one host operation."""
+        now = _utc(self._clock(), "host clock")
+        return self._store.get_by_operation_id(operation_id, now)
+
+    def verify_grant(self, grant: ApprovalGrant) -> bool:
+        """Verify the HMAC and the exact durable approved challenge record."""
+        if type(grant) is not ApprovalGrant:
+            return False
+        try:
+            if self._signer.verify(grant) is not True:
+                return False
+            now = _utc(self._clock(), "host clock")
+            challenge = self._store.get_by_operation_id(grant.operation_id, now)
+            if challenge is None or challenge.status != "approved":
+                return False
+            if challenge.grant != grant or challenge.approver_id is None:
+                return False
+            if (
+                challenge.principal_id != grant.principal_id
+                or challenge.tool_name != grant.tool_name
+                or challenge.argument_digest != grant.argument_digest
+                or challenge.operation_id != grant.operation_id
+            ):
+                return False
+            expiry = _utc(
+                datetime.fromisoformat(grant.expires_at.replace("Z", "+00:00")),
+                "grant expiry",
+            )
+            return expiry > now
+        except Exception:
+            return False
 
     def _decide(self, credential: Any, challenge_id: str, decision: str) -> ApprovalChallenge:
         now = _utc(self._clock(), "host clock")
