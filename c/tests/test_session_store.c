@@ -177,8 +177,9 @@ int main(void) {
         CapriSessionStore *child_store=capri_session_store_open(path,200,16000,64000,131072,&child_error);
         unsigned char opened=(unsigned char)(child_store!=NULL&&child_error==CAPRI_SESSION_OK);
         if(child_store)capri_session_store_close(child_store);
-        (void)write(result_pipe[1],&opened,sizeof opened);
+        ssize_t written=write(result_pipe[1],&opened,sizeof opened);
         close(result_pipe[1]);
+        if(written!=(ssize_t)sizeof opened)_exit(2);
         _exit(opened?0:1);
     }
     close(result_pipe[1]);
