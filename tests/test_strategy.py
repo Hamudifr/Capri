@@ -22,6 +22,7 @@ def cohort(
             "task_id": task_id,
             "scenario": "research",
             "evidence_ref": f"test://evidence/{task_id}",
+            "strategy_version": "1.0",
             "tool_calls": 5,
             "context_tokens": 1_000,
             "estimated_cost_units": 100,
@@ -36,6 +37,21 @@ def cohort(
 
 
 class StrategyEvaluationTests(unittest.TestCase):
+    def test_strategy_versions_are_fingerprinted_and_mixed_versions_are_rejected(self):
+        original = cohort()
+        baseline_result = evaluate_strategies("baseline", "candidate", original)
+        changed = cohort(candidate_overrides={
+            index: {"strategy_version": "2.0"} for index in range(20)
+        })
+        changed_result = evaluate_strategies("baseline", "candidate", changed)
+        self.assertEqual(baseline_result.baseline_version, "1.0")
+        self.assertEqual(changed_result.candidate_version, "2.0")
+        self.assertNotEqual(baseline_result.cohort_sha256, changed_result.cohort_sha256)
+
+        mixed = cohort(candidate_overrides={0: {"strategy_version": "2.0"}})
+        with self.assertRaisesRegex(StrategyEvaluationError, "exactly one version"):
+            evaluate_strategies("baseline", "candidate", mixed)
+
     def test_candidate_with_equal_quality_and_lower_cost_is_eligible_for_manual_review(self):
         records = cohort(candidate_overrides={
             index: {"estimated_cost_units": 80} for index in range(20)
