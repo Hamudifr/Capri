@@ -12,13 +12,17 @@ import math
 import re
 import sqlite3
 import threading
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Iterable
 from uuid import uuid4
 
 from capri_core.validation import contains_surrogate
 from capri_core.strategy import StrategyEvaluation, StrategyObservation, evaluate_strategies
+from capri_core.strategy_promotion import (
+    PromotionCohort, StrategyPromotionAssessment, assess_strategy_canary,
+    STRATEGY_PROMOTION_POLICY_VERSION,
+)
 from .tasks import SQLiteTaskStore
 
 
@@ -71,6 +75,7 @@ class StrategyActivationGrant:
     expires_at: str
     approver_id: str
     signature: str
+    promotion_assessment_sha256: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +92,8 @@ class StrategyEvidenceContext:
     cohort_schema: str
     evidence_manifest_ref: str
     matched_pairs: int
+    cohort_id: str | None = None
+    task_family: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +120,7 @@ class ActiveStrategyRecord:
     config_sha256: str
     activated_at: str
     event_id: str
+    promotion_assessment_sha256: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,6 +141,25 @@ class StrategyActivationEvent:
     created_at: str
     previous_hash: str
     event_hash: str
+    promotion_assessment_sha256: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class StrategyPromotionRecord:
+    assessment_id: str
+    principal_id: str
+    strategy_class: str
+    baseline_id: str
+    baseline_version: str
+    candidate_id: str
+    candidate_version: str
+    policy_version: str
+    task_family: str
+    primary_metric: str
+    assessment_sha256: str
+    summary: dict[str, Any]
+    evidence_manifest_refs: tuple[tuple[str, str], ...]
+    created_at: str
 
 
 def _text(value: object, field: str, maximum: int = 256) -> str:
@@ -252,6 +279,11 @@ def _grant_payload(grant: StrategyActivationGrant) -> None:
         raise StrategyAuthorizationError("approval grant lifetime is invalid")
     _text(grant.approver_id, "approver_id", 128)
     _text(grant.signature, "signature", 2048)
+    if grant.promotion_assessment_sha256 is not None and (
+        type(grant.promotion_assessment_sha256) is not str
+        or not _SHA256.fullmatch(grant.promotion_assessment_sha256)
+    ):
+        raise StrategyAuthorizationError("promotion assessment fingerprint is invalid")
 
 
 class SQLiteStrategyStore:
