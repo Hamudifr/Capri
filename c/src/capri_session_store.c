@@ -233,13 +233,14 @@ CapriSessionStore *capri_session_store_open(const char *path,size_t max_messages
 #ifdef SQLITE_DBCONFIG_DEFENSIVE
     if(rc==SQLITE_OK && sqlite3_db_config(s->db,SQLITE_DBCONFIG_DEFENSIVE,1,NULL)!=SQLITE_OK) rc=SQLITE_ERROR;
 #endif
-    bool schema_ready=false;
-    if(rc==SQLITE_OK){
-        if(fresh_database){
+    bool schema_ready=false,empty_schema=false;
+    if(rc==SQLITE_OK && schema_is_empty(s->db,&empty_schema)){
+        if(empty_schema && fresh_database){
             schema_ready=schema(s->db);
-        }else{
-            /* Never recreate missing tables, indexes or triggers in an existing
-               database. Validate the complete security boundary first. */
+        }else if(!empty_schema){
+            /* SQLite may keep a newly initialized schema in WAL while the main
+               file is still zero length. Inspect sqlite_master before deciding
+               whether this is fresh; never recreate missing security objects. */
             schema_ready=session_schema_valid(s->db)
                 &&owner_triggers_valid(s->db)
                 &&configure_database(s->db);
@@ -432,6 +433,20 @@ static bool index_matches(sqlite3 *db,const char *name,const char *table,const c
         &&normalized_sql_equal((const char*)sqlite3_column_text(st,1),expected_sql);
     sqlite3_finalize(st);
     return matches;
+}
+
+static bool schema_is_empty(sqlite3 *db,bool *empty) {
+    sqlite3_stmt *st=NULL;
+    if(!empty || sqlite3_prepare_v2(
+        db,
+        "SELECT count(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'",
+        -1,&st,NULL
+    )!=SQLITE_OK)return false;
+    int rc=sqlite3_step(st);
+    bool valid=rc==SQLITE_ROW;
+    if(valid)*empty=sqlite3_column_int64(st,0)==0;
+    sqlite3_finalize(st);
+    return valid;
 }
 
 static bool schema_objects_valid(sqlite3 *db) {
