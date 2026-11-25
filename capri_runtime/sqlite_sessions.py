@@ -456,6 +456,24 @@ class SQLiteSessionStore(SessionStore):
         with self._lock:
             connection = self._connect()
             try:
+                row = connection.execute(
+                    """SELECT session_id, created_at, updated_at, version, closed, messages_json
+                    FROM sessions WHERE session_id = ?""",
+                    (session_id,),
+                ).fetchone()
+            finally:
+                connection.close()
+        if row is None:
+            raise SessionNotFoundError("session does not exist")
+        return self._decode(row)
+
+    def close(self, session_id: str) -> Session:
+        if not isinstance(session_id, str) or not session_id.strip():
+            raise ValidationError("session_id must be a non-empty string")
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
                 if principal_id is None:
                     row = connection.execute(
                         """SELECT session_id, created_at, updated_at, version, closed, messages_json
@@ -471,24 +489,6 @@ class SQLiteSessionStore(SessionStore):
                         WHERE s.session_id = ? AND o.principal_id = ?""",
                         (session_id, principal_id),
                     ).fetchone()
-            finally:
-                connection.close()
-        if row is None:
-            raise SessionNotFoundError("session does not exist")
-        return self._decode(row)
-
-    def close(self, session_id: str) -> Session:
-        if not isinstance(session_id, str) or not session_id.strip():
-            raise ValidationError("session_id must be a non-empty string")
-        with self._lock:
-            connection = self._connect()
-            try:
-                connection.execute("BEGIN IMMEDIATE")
-                row = connection.execute(
-                    """SELECT session_id, created_at, updated_at, version, closed, messages_json
-                    FROM sessions WHERE session_id = ?""",
-                    (session_id,),
-                ).fetchone()
                 if row is None:
                     raise SessionNotFoundError("session does not exist")
                 current = self._decode(row)
