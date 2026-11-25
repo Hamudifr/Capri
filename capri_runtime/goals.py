@@ -17,6 +17,7 @@ from typing import Any, Protocol, runtime_checkable
 from uuid import uuid4
 
 from capri_core.validation import contains_surrogate
+from .sqlite_backup import backup_sqlite_database
 
 
 class GoalError(Exception):
@@ -43,7 +44,6 @@ _GOAL_STATES = {
     "accepted", "planning", "planned", "running", "paused",
     "succeeded", "failed", "cancelled", "reconciliation_required",
 }
-_TERMINAL_STATES = {"succeeded", "failed", "cancelled"}
 _TRANSITIONS = {
     "accepted": {"planning", "cancelled"},
     "planning": {"planned", "paused", "failed", "cancelled"},
@@ -272,6 +272,14 @@ class SQLiteGoalStore:
                     goal_id TEXT PRIMARY KEY REFERENCES goals(goal_id) ON DELETE RESTRICT,
                     principal_id TEXT NOT NULL
                 )""")
+                connection.execute("""CREATE TABLE IF NOT EXISTS goal_events (
+                    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    goal_id TEXT NOT NULL REFERENCES goals(goal_id),
+                    timestamp TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    version INTEGER NOT NULL,
+                    event_type TEXT NOT NULL
+                )""")
                 connection.execute("""CREATE TRIGGER IF NOT EXISTS goal_owner_immutable_update
                     BEFORE UPDATE ON goal_owners
                     BEGIN SELECT RAISE(ABORT, 'goal ownership is immutable'); END""")
@@ -361,6 +369,10 @@ class SQLiteGoalStore:
                     "INSERT INTO goal_owners(goal_id,principal_id) VALUES(?,?)",
                     (goal_id, principal_id),
                 )
+                connection.execute(
+                    "INSERT INTO goal_events(goal_id,timestamp,state,version,event_type) VALUES(?,?,'accepted',1,'created')",
+                    (goal_id, stamp),
+                )
                 connection.execute("COMMIT")
             except Exception:
                 try:
@@ -425,6 +437,10 @@ class SQLiteGoalStore:
                     WHERE goal_id=? AND version=?""",
                     (plan_json, stamp, goal_id, expected_version),
                 )
+                connection.execute(
+                    "INSERT INTO goal_events(goal_id,timestamp,state,version,event_type) VALUES(?,?,'planned',?,'plan_saved')",
+                    (goal_id, stamp, expected_version + 1),
+                )
                 connection.execute("COMMIT")
             except Exception:
                 try:
@@ -466,6 +482,10 @@ class SQLiteGoalStore:
                     "UPDATE goals SET state=?,version=version+1,updated_at=? WHERE goal_id=? AND version=?",
                     (new_state, stamp, goal_id, expected_version),
                 )
+                connection.execute(
+                    "INSERT INTO goal_events(goal_id,timestamp,state,version,event_type) VALUES(?,?,?,?, 'transition')",
+                    (goal_id, stamp, new_state, expected_version + 1),
+                )
                 connection.execute("COMMIT")
             except Exception:
                 try:
@@ -476,3 +496,72 @@ class SQLiteGoalStore:
             finally:
                 connection.close()
         return self.get_for_principal(goal_id, principal_id)
+
+    def events_for_principal(
+        self, goal_id: str, principal_id: str
+    ) -> tuple[dict[str, Any], ...]:
+        with self._lock:
+            self._owned_row(goal_id, principal_id)
+            connection = self._connect()
+            try:
+                rows = connection.execute(
+                    """SELECT timestamp,state,version,event_type FROM goal_events
+                    WHERE goal_id=? ORDER BY event_id""",
+                    (goal_id,),
+                ).fetchall()
+                return tuple({
+                    "timestamp": row[0], "state": row[1],
+                    "version": row[2], "event_type": row[3],
+                } for row in rows)
+            finally:
+                connection.close()
+
+    @staticmethod
+    def _validate_backup_snapshot(connection: sqlite3.Connection) -> None:
+        goal_count = connection.execute("SELECT COUNT(*) FROM goals").fetchone()[0]
+        owner_count = connection.execute("SELECT COUNT(*) FROM goal_owners").fetchone()[0]
+        if goal_count != owner_count:
+            raise GoalValidationError("goal backup contains missing or orphaned owners")
+        rows = connection.execute(
+            """SELECT g.goal_id,g.outcome,g.constraints_json,g.deadline,g.criteria_json,
+            g.state,g.version,g.created_at,g.updated_at,g.plan_json,o.principal_id
+            FROM goals g JOIN goal_owners o ON o.goal_id=g.goal_id"""
+        ).fetchall()
+        for row in rows:
+            SQLiteGoalStore._record(row[:10], row[10])
+        event_rows = connection.execute(
+            "SELECT state,version,event_type FROM goal_events"
+        ).fetchall()
+        for state, version, event_type in event_rows:
+            if state not in _GOAL_STATES or type(version) is not int or version < 1:
+                raise GoalValidationError("goal backup contains an invalid event")
+            if event_type not in {"created", "plan_saved", "transition"}:
+                raise GoalValidationError("goal backup contains an invalid event type")
+
+    def backup_to(self, destination_path: str) -> str:
+        """Create a private, consistent goal-state snapshot without overwriting."""
+        return backup_sqlite_database(
+            self.path,
+            destination_path,
+            lock=self._lock,
+            connect=self._connect,
+            validate_snapshot=self._validate_backup_snapshot,
+            error_type=GoalValidationError,
+            prefix=".capri-goal-backup-",
+        )
+
+    def integrity_check(self) -> str:
+        with self._lock:
+            connection = self._connect()
+            try:
+                row = connection.execute("PRAGMA integrity_check").fetchone()
+                foreign_key_errors = connection.execute("PRAGMA foreign_key_check").fetchall()
+                if not row:
+                    return "no result"
+                if row[0] != "ok":
+                    return str(row[0])
+                if foreign_key_errors:
+                    return "foreign key check failed"
+                return "ok"
+            finally:
+                connection.close()
