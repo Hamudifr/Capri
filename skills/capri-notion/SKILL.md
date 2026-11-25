@@ -1,6 +1,6 @@
 ---
-name: capri-notion-knowledge-stewardship
-description: Retrieve, create, update, organize and validate Capri's Notion knowledge, memory, project records and reusable skills.
+name: capri-notion
+description: Use when Capri retrieves, creates, updates, organizes, or validates Notion knowledge, memory, project records, and reusable skills.
 ---
 
 # Capri Notion Knowledge & Skill Stewardship

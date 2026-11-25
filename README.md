@@ -41,6 +41,14 @@ capri doctor
 capri doctor --json
 ```
 
+Validate repository-local Agent Skills packages:
+
+```bash
+capri skills validate --root .
+```
+
+See [Skill authoring and validation](docs/SKILL_AUTHORING.md) for the format, limits, and workflow. The validator is static and never executes skill instructions or scripts.
+
 Run the Python test suite:
 
 ```bash

@@ -8,6 +8,7 @@ from typing import Sequence
 
 from .ledger import HashChainLedger, LedgerIntegrityError
 from .health import build_health_report
+from .skill_validation import validate_skill_tree
 
 
 def _workflow_permissions_are_read_only(workflow: str) -> bool:
@@ -308,10 +309,33 @@ def run_doctor(root: Path, json_output: bool = False) -> int:
     return 0 if failed == 0 else 1
 
 
+def run_skill_validation(root: Path, *, json_output: bool = False) -> int:
+    """Validate repository-local skill packages without executing their contents."""
+    report = validate_skill_tree(root)
+    if json_output:
+        print(json.dumps(report, sort_keys=True))
+    else:
+        for skill in report["skills"]:
+            print(f"[{skill['status'].upper()}] {skill['directory']}: {skill['name'] or 'missing name'}")
+            for error in skill["errors"]:
+                print(f"  ERROR: {error}")
+            for warning in skill["warnings"]:
+                print(f"  WARNING: {warning}")
+        for error in report["errors"]:
+            print(f"ERROR: {error}")
+        summary = report["summary"]
+        print()
+        print(
+            f"Capri Skills: {summary['valid']}/{summary['skills']} valid; "
+            f"{summary['errors']} errors; {summary['warnings']} warnings"
+        )
+    return 0 if report["status"] == "pass" else 1
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="capri",
-        description="Read-only tools for the Capri execution ledger.",
+        description="Read-only Capri diagnostics, ledger verification, and skill validation.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
     doctor_parser = commands.add_parser("doctor", help="run read-only repository health checks")
@@ -319,6 +343,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     doctor_parser.add_argument("--json", action="store_true", help="emit a versioned machine-readable JSON report")
     verify = commands.add_parser("verify", help="verify an existing ledger without modifying it")
     verify.add_argument("path", type=Path, help="path to an existing JSONL ledger")
+    skills = commands.add_parser("skills", help="inspect and validate repository-local skill packages")
+    skill_commands = skills.add_subparsers(dest="skills_action", required=True)
+    validate = skill_commands.add_parser("validate", help="validate SKILL.md packages without executing them")
+    validate.add_argument("--root", type=Path, default=Path.cwd(), help="repository root (default: current directory)")
+    validate.add_argument("--json", action="store_true", help="emit a machine-readable JSON report")
     args = parser.parse_args(argv)
 
     if args.command == "doctor":
@@ -335,6 +364,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
         print(json.dumps(result, sort_keys=True))
         return 0
+
+    if args.command == "skills" and args.skills_action == "validate":
+        return run_skill_validation(args.root, json_output=args.json)
 
     return 2
 
