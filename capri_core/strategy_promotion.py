@@ -18,6 +18,15 @@ from .strategy import StrategyEvaluationError, StrategyObservation, evaluate_str
 
 
 _POLICY_VERSION = "capri.strategy-promotion.v1"
+_ALLOWED_TASK_FAMILIES = frozenset({
+    "coding",
+    "formatting",
+    "general_qa",
+    "research",
+    "retrieval",
+    "summarization",
+    "writing",
+})
 _ALLOWED_STRATEGY_CLASSES = frozenset({
     "formatting",
     "planning",
@@ -69,6 +78,7 @@ class CohortPromotionResult:
 class StrategyPromotionAssessment:
     policy_version: str
     strategy_class: str
+    task_family: str
     baseline_id: str
     candidate_id: str
     baseline_version: str | None
@@ -157,6 +167,7 @@ def _paired_bootstrap_interval(
 def assess_strategy_canary(
     *,
     strategy_class: str,
+    task_family: str,
     baseline_id: str,
     candidate_id: str,
     primary_metric: str,
@@ -174,12 +185,16 @@ def assess_strategy_canary(
     activates a strategy. Cohort provenance must be authenticated by the host.
     """
     strategy_class = _require_identifier(strategy_class, "strategy_class")
+    task_family = _require_identifier(task_family, "task_family")
+    primary_metric = _require_identifier(primary_metric, "primary_metric")
     baseline_id = _require_identifier(baseline_id, "baseline_id")
     candidate_id = _require_identifier(candidate_id, "candidate_id")
     if baseline_id == candidate_id:
         raise StrategyPromotionError("baseline and candidate must differ")
     if strategy_class not in _ALLOWED_STRATEGY_CLASSES:
         raise StrategyPromotionError("strategy_class is not allow-listed for autonomous canaries")
+    if task_family not in _ALLOWED_TASK_FAMILIES:
+        raise StrategyPromotionError("task_family is not allow-listed for autonomous canaries")
     if primary_metric not in _PRIMARY_METRICS:
         raise StrategyPromotionError("primary_metric is not supported")
     if isinstance(cohorts, (str, bytes)):
@@ -190,6 +205,8 @@ def assess_strategy_canary(
         raise StrategyPromotionError("cohorts must be iterable") from None
     if any(type(item) is not PromotionCohort for item in cohort_list):
         raise StrategyPromotionError("cohorts must contain PromotionCohort records")
+    for item in cohort_list:
+        _require_identifier(item.cohort_id, "cohort_id")
     cohort_list = tuple(sorted(cohort_list, key=lambda item: item.cohort_id))
 
     blocked: list[str] = []
@@ -220,6 +237,8 @@ def assess_strategy_canary(
         }
         if seen_tasks & local_tasks:
             blocked.append("overlapping_task_ids_between_cohorts")
+        if len(local_evidence) != len(cohort.observations):
+            blocked.append("duplicate_evidence_refs_within_cohort")
         if seen_evidence & local_evidence:
             blocked.append("overlapping_evidence_refs_between_cohorts")
         seen_tasks.update(local_tasks)
@@ -297,6 +316,7 @@ def assess_strategy_canary(
     return StrategyPromotionAssessment(
         policy_version=_POLICY_VERSION,
         strategy_class=strategy_class,
+        task_family=task_family,
         baseline_id=baseline_id,
         candidate_id=candidate_id,
         baseline_version=baseline_version,
