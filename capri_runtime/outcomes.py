@@ -43,7 +43,7 @@ _ALLOWED_TYPES = frozenset({"execution", "verification", "user_feedback", "opera
 _ALLOWED_STATUSES = frozenset({"succeeded", "partial", "failed", "uncertain", "observation"})
 _ALLOWED_SOURCES = frozenset({
     "user_report", "host_observation", "tool_result", "verification",
-    "system_reconciliation", "user_correction",
+    "system_reconciliation", "model_inference", "user_correction",
 })
 _ALLOWED_CONFIDENCE = frozenset({"high", "medium", "low", "unverified"})
 _MAX_RECORDS = 100_000
@@ -479,13 +479,40 @@ class SQLiteOutcomeStore:
     @staticmethod
     def _validate_backup_snapshot(connection: sqlite3.Connection) -> None:
         connection.row_factory = sqlite3.Row
+        schema_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(outcomes)").fetchall()
+        }
+        required_columns = {
+            "outcome_id", "principal_id", "subject_type", "subject_id", "outcome_type",
+            "status", "summary", "source_type", "source_reference", "confidence",
+            "recorded_at", "idempotency_key", "supersedes_id", "correction_reason",
+        }
+        if schema_columns != required_columns:
+            raise OutcomeValidationError("outcome journal schema is invalid")
         triggers = {
-            row[0] for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name='outcomes'"
+            row["name"]: row["sql"] or "" for row in connection.execute(
+                "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND tbl_name='outcomes'"
             ).fetchall()
         }
-        if not {"outcomes_immutable_update", "outcomes_immutable_delete"} <= triggers:
-            raise OutcomeValidationError("outcome journal append-only triggers are missing")
+        for name, operation in (
+            ("outcomes_immutable_update", "BEFORE UPDATE ON outcomes"),
+            ("outcomes_immutable_delete", "BEFORE DELETE ON outcomes"),
+        ):
+            sql = triggers.get(name, "").upper()
+            if operation not in sql or "RAISE(ABORT" not in sql:
+                raise OutcomeValidationError("outcome journal append-only protection is missing")
+        successor_index = {
+            row["name"]: row for row in connection.execute("PRAGMA index_list(outcomes)").fetchall()
+        }.get("outcomes_single_successor")
+        if successor_index is None or successor_index["unique"] != 1 or successor_index["partial"] != 1:
+            raise OutcomeValidationError("outcome journal correction uniqueness is missing")
+        indexed_columns = [
+            row["name"] for row in connection.execute(
+                "PRAGMA index_info(outcomes_single_successor)"
+            ).fetchall()
+        ]
+        if indexed_columns != ["supersedes_id"]:
+            raise OutcomeValidationError("outcome journal correction index is invalid")
         rows = connection.execute("SELECT * FROM outcomes ORDER BY recorded_at,outcome_id").fetchall()
         if len(rows) > _MAX_RECORDS:
             raise OutcomeValidationError("outcome backup exceeds journal capacity")
