@@ -416,7 +416,7 @@ class HmacApprovalAuthority:
             raise ToolValidationError("approval argument digest is invalid")
         if approver_id is not None and (
             not isinstance(approver_id, str) or not approver_id.strip()
-            or len(approver_id) > 256 or _contains_surrogate(approver_id)
+            or approver_id != approver_id.strip() or len(approver_id) > 256 or _contains_surrogate(approver_id)
         ):
             raise ToolValidationError("approval approver identity is invalid")
         if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int) or not 1 <= ttl_seconds <= self.max_ttl_seconds:
@@ -457,6 +457,7 @@ class HmacApprovalAuthority:
                 or (grant.approver_id is not None and (
                     not isinstance(grant.approver_id, str)
                     or not grant.approver_id.strip()
+                    or grant.approver_id != grant.approver_id.strip()
                     or len(grant.approver_id) > 256
                     or _contains_surrogate(grant.approver_id)
                 ))):
