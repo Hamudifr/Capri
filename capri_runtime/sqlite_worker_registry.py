@@ -161,6 +161,58 @@ def validate_worker_registry_snapshot(connection: sqlite3.Connection) -> None:
         if actual != columns:
             raise WorkerRegistryError(f"worker registry table {table} has an unexpected schema")
 
+    expected_indexes = {
+        "worker_registry_reservations": {
+            "worker_registry_one_active_task_reservation": (True, ("principal_id", "task_id")),
+            "worker_registry_reservations_worker_idx": (False, ("worker_id",)),
+        },
+        "worker_registry_events": {
+            "worker_registry_events_worker_idx": (False, ("worker_id", "sequence")),
+        },
+    }
+    for table, expected in expected_indexes.items():
+        actual = {}
+        for index in connection.execute(f"PRAGMA index_list({table})"):
+            columns = tuple(
+                row["name"]
+                for row in connection.execute(f"PRAGMA index_info({index['name']})")
+            )
+            actual[index["name"]] = (bool(index["unique"]), columns)
+        for name, signature in expected.items():
+            if actual.get(name) != signature:
+                raise WorkerRegistryError(f"worker registry required index {name} is missing or invalid")
+
+    # event_id is a table-level UNIQUE constraint, represented by an auto-index.
+    event_unique_indexes = []
+    for index in connection.execute("PRAGMA index_list(worker_registry_events)"):
+        columns = tuple(
+            row["name"]
+            for row in connection.execute(f"PRAGMA index_info({index['name']})")
+        )
+        if bool(index["unique"]):
+            event_unique_indexes.append(columns)
+    if ("event_id",) not in event_unique_indexes:
+        raise WorkerRegistryError("worker registry event identifier uniqueness constraint is missing")
+
+    expected_foreign_keys = {
+        "worker_registry_reservations": {
+            ("worker_registry_state", "worker_id", "worker_id", "NO ACTION", "RESTRICT", "NONE"),
+        },
+        "worker_registry_events": {
+            ("worker_registry_state", "worker_id", "worker_id", "NO ACTION", "RESTRICT", "NONE"),
+        },
+    }
+    for table, expected in expected_foreign_keys.items():
+        actual = {
+            (
+                row["table"], row["from"], row["to"],
+                row["on_update"], row["on_delete"], row["match"],
+            )
+            for row in connection.execute(f"PRAGMA foreign_key_list({table})")
+        }
+        if actual != expected:
+            raise WorkerRegistryError(f"worker registry foreign keys for {table} are missing or invalid")
+
     triggers = {
         row["name"]: row["sql"] or ""
         for row in connection.execute(
