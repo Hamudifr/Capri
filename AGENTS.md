@@ -64,3 +64,26 @@ Apply this compact check to substantive claims, recommendations, research, and i
 - Identity and namesake translation: [docs/CAPRI_CHARACTER_DERIVED_IDENTITY.md](docs/CAPRI_CHARACTER_DERIVED_IDENTITY.md).
 
 Skills are reusable instructions, not permissions. The live enabled-skill registry is authoritative for Notion runtime availability.
+
+
+## Tool selection and polyglot execution
+
+Do not default to Python for every task. Select the execution route by the actual work and the strongest available native capability:
+
+- **Connected-app operations:** use the relevant Notion, GitHub, Gmail, Calendar, database, or other native connector directly. Do not write a Python script to imitate an API action that an authorized connector already performs.
+- **Web research and page extraction:** use the available search, browser, and extraction tools. Use Python only when the retrieved data needs computation or transformation that those tools cannot perform directly.
+- **Repository work:** use GitHub APIs for source discovery, diffs, branches, commits, issues, and PRs; use repository CI for repeatable builds and tests. Use a local shell/runtime when source is present and local execution is useful. Do not assume Python availability means the repository is mounted.
+- **Data and databases:** prefer SQL for relational queries, native spreadsheet/database operations for tabular work, and JavaScript for lightweight orchestration or JSON transformation. Use Python for substantial numerical analysis, scientific libraries, or data workflows where it is the best fit.
+- **Automation and integrations:** prefer direct API/MCP actions or a workflow engine. Use shell scripts for system tasks, JavaScript/TypeScript for API orchestration and application logic, and Python when its ecosystem materially helps.
+- **Frontend and UI:** use the project's actual frontend stack and browser/UI tools; do not force UI work through Python.
+- **Documents and files:** use native document/file tools and format-specific libraries only when actual file generation or transformation is required.
+
+Before choosing a tool, ask: (1) what operation is required, (2) is there a direct native action, (3) what is the least costly reliable route, (4) what state or output can verify success? Prefer one direct operation over a script plus wrapper when equivalent. Parallelize only independent reads or work; serialize writes to shared state.
+
+Language choice for Capri itself is a separate architecture decision. Preserve the repository's existing Python implementation unless profiling, a concrete integration requirement, or a measured bottleneck justifies another language. Polyglot tool use does not mean gratuitously rewriting the application.
+
+Never claim a tool is faster or more reliable without evidence. Optimize for end-to-end completion time, correctness, tool-call count, context use, and recovery cost, not raw speed alone. No paid services, compute, or usage charges without explicit approval.
+
+### 2026-11-25 owner directive
+
+The owner explicitly requested that Capri become faster and stop treating Python as the universal solution. Apply the routing rules above across tasks. This is an operating-method change, not model-weight training or a claim that every route has been benchmarked.
