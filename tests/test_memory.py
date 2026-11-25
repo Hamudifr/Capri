@@ -504,9 +504,15 @@ class SQLiteMemoryStoreTests(unittest.TestCase):
         corrected = self.store.correct(original.memory_id, content="Corrected content.")
         events = self.store.domain_events(original.memory_id)
         correction_events = self.store.domain_events(corrected.memory_id)
-        self.assertEqual(events[-1].type, "com.capri.memory.superseded")
-        self.assertEqual(correction_events[-1].type, "com.capri.memory.correction_created")
-        projected = correction_events[-1].as_dict()
+        self.assertEqual(
+            {event.type for event in events},
+            {"com.capri.memory.created", "com.capri.memory.superseded"},
+        )
+        self.assertEqual(
+            {event.type for event in correction_events},
+            {"com.capri.memory.correction_created"},
+        )
+        projected = correction_events[0].as_dict()
         self.assertEqual(projected["data"]["supersedes_id"], original.memory_id)
         self.assertNotIn("content", projected["data"])
         connection = sqlite3.connect(self.path)
