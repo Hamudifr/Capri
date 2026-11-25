@@ -1,11 +1,14 @@
 import math
 import unittest
+from itertools import product
 
 import numpy as np
 
 from minimax_audit import (
     deterministic_response_information,
     extract_terminal_package,
+    has_terminal_package,
+    satisfies_kpt_all_sequences,
     disagreement_game,
     solve_row_strategy,
 )
@@ -58,6 +61,29 @@ class MinimaxAuditTests(unittest.TestCase):
 
         with self.assertRaises(AssertionError):
             extract_terminal_package(universe, identity_package, 3)
+
+    def test_exhaustive_small_causal_games(self):
+        # Exhaust every causal package strategy for |universe|=2, rounds=3.
+        # Whenever all challenge sequences are hit, a terminal universal
+        # package must occur at some history.
+        universe = (0, 1)
+        subsets = ({0}, {1}, set(), {0, 1})
+
+        for strategy in product(range(len(subsets)), repeat=1 + 2 + 4):
+            q0 = strategy[0]
+            q1 = strategy[1:3]
+            q2 = strategy[3:7]
+
+            def package(stage, history):
+                if stage == 0:
+                    return set(subsets[q0])
+                if stage == 1:
+                    return set(subsets[q1[history[0]]])
+                index = history[0] * 2 + history[1]
+                return set(subsets[q2[index]])
+
+            if satisfies_kpt_all_sequences(universe, package, 3):
+                self.assertTrue(has_terminal_package(universe, package, 3))
 
 
 if __name__ == "__main__":
