@@ -14,6 +14,7 @@ from capri_runtime import (
     SQLiteBudgetStore,
     SQLiteTaskStore,
     TaskEngine,
+    TaskWorker,
     ToolBudgetExceededError,
     ToolExecutionBridge,
     ToolExecutor,
@@ -149,6 +150,34 @@ class SQLiteBudgetStoreTests(unittest.TestCase):
             connection.close()
 
 
+    def test_concurrent_connections_cannot_over_reserve_a_principal(self):
+        self.store.set_policy_for_principal(
+            "alice",
+            BudgetPolicy(
+                window_seconds=60, max_provider_calls=10,
+                max_provider_input_bytes=10_000, max_tool_calls=3,
+                max_task_steps=10, max_task_input_bytes=10_000,
+            ),
+            now=NOW,
+        )
+        stores = [SQLiteBudgetStore(self.path) for _ in range(10)]
+
+        def reserve(store):
+            try:
+                store.reserve_for_principal("alice", {"tool_calls": 1}, now=NOW)
+                return "reserved"
+            except BudgetExceededError:
+                return "denied"
+
+        with ThreadPoolExecutor(max_workers=10) as pool:
+            outcomes = list(pool.map(reserve, stores))
+        self.assertEqual(outcomes.count("reserved"), 3)
+        self.assertEqual(outcomes.count("denied"), 7)
+        self.assertEqual(
+            self.store.usage_for_principal("alice", now=NOW).used["tool_calls"], 3,
+        )
+
+
 class ExecutionBudgetIntegrationTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -261,6 +290,35 @@ class ExecutionBudgetIntegrationTests(unittest.TestCase):
         self.assertEqual(result.state, "failed")
         self.assertEqual(result.error_code, "task_input_budget_exceeded")
         self.assertEqual(calls, [])
+
+
+    def test_managed_worker_resumes_budget_wait_tasks(self):
+        store = SQLiteTaskStore(os.path.join(self.temp.name, "worker-tasks.sqlite3"))
+        calls = []
+        task = store.create_for_principal("alice", PLAN, "worker-budget-wait", datetime.now(timezone.utc))
+        now = datetime.now(timezone.utc)
+        claim = store.claim_next(
+            "budget-worker", now=now, principal_tools=frozenset({"collect"}),
+        )
+        self.assertIsNotNone(claim)
+        deferred = store.defer_claim_for_budget(
+            claim, now + timedelta(seconds=0.1), now=now,
+        )
+        self.assertEqual(deferred.state, "budget_wait")
+        time.sleep(0.15)
+        engine = TaskEngine(
+            store, {}, "budget-worker",
+            principal_handlers={
+                "collect": lambda data, key, principal: calls.append(principal) or {"ok": True},
+            },
+            budget_store=self.budgets,
+        )
+        result = TaskWorker(
+            engine, poll_interval_seconds=0.05, heartbeat_interval_seconds=0.1,
+        ).run_once()
+        self.assertEqual(result.task_id, task.task_id)
+        self.assertEqual(result.state, "succeeded")
+        self.assertEqual(calls, ["alice"])
 
 
 if __name__ == "__main__":
