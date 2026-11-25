@@ -684,14 +684,38 @@ class SQLiteWorkerRegistry:
         wall_now: int,
         mono_now: int,
     ) -> None:
+        existing_state = {
+            row["worker_id"]: row
+            for row in connection.execute("SELECT * FROM worker_registry_state")
+        }
         for worker_id, snapshot in memory._workers.items():
             health = snapshot.health
+            previous = existing_state.get(worker_id)
             last_wall = None
             if health.last_heartbeat_ns is not None:
                 age = mono_now - health.last_heartbeat_ns
                 if age >= 0 and wall_now >= age:
                     last_wall = wall_now - age
+            # A wall-clock rollback makes the in-memory heartbeat freshness
+            # unknown. Preserve the last durable timestamp on read-only paths
+            # (unchanged health revision) rather than silently rewriting state.
+            if previous is not None and health.revision == previous["health_revision"]:
+                last_wall = previous["last_heartbeat_wall_ns"]
             descriptor_json = _canonical_json(_descriptor_payload(snapshot.descriptor))
+            state_changed = previous is None or any((
+                previous["descriptor_json"] != descriptor_json,
+                previous["health_state"] != health.state,
+                previous["last_heartbeat_wall_ns"] != last_wall,
+                previous["consecutive_failures"] != health.consecutive_failures,
+                previous["in_flight"] != health.in_flight,
+                previous["health_revision"] != health.revision,
+            ))
+            created_at_wall_ns = (
+                previous["created_at_wall_ns"] if previous is not None else wall_now
+            )
+            updated_at_wall_ns = (
+                wall_now if state_changed else previous["updated_at_wall_ns"]
+            )
             connection.execute(
                 """
                 INSERT INTO worker_registry_state (
@@ -711,7 +735,7 @@ class SQLiteWorkerRegistry:
                 (
                     worker_id, descriptor_json, health.state, last_wall,
                     health.consecutive_failures, health.in_flight, health.revision,
-                    wall_now, wall_now,
+                    created_at_wall_ns, updated_at_wall_ns,
                 ),
             )
 
