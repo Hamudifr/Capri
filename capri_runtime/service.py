@@ -111,7 +111,9 @@ class CapriHostService:
         with self._lock:
             thread = self._worker_thread
             return (
-                self._state in {HostServiceState.STOPPED, HostServiceState.FAILED}
+                self._state in {
+                    HostServiceState.NEW, HostServiceState.STOPPED, HostServiceState.FAILED,
+                }
                 and (thread is None or not thread.is_alive())
             )
 
