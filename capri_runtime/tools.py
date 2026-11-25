@@ -254,6 +254,7 @@ class ApprovalGrant:
     key_id: str | None = None
     operation_id: str | None = None
     approver_id: str | None = None
+    issued_at: str | None = None
 
 
 class ApprovalMacProvider(Protocol):
@@ -389,6 +390,7 @@ class HmacApprovalAuthority:
                 **({"key_id": grant.key_id} if grant.key_id is not None else {}),
                 **({"operation_id": grant.operation_id} if grant.operation_id is not None else {}),
                 **({"approver_id": grant.approver_id} if grant.approver_id is not None else {}),
+                **({"issued_at": grant.issued_at} if grant.issued_at is not None else {}),
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -429,7 +431,7 @@ class HmacApprovalAuthority:
         unsigned = ApprovalGrant(
             str(uuid4()), principal_id, tool_name, argument_digest, expiry,
             key_id=active_key_id, operation_id=operation_id,
-            approver_id=approver_id,
+            approver_id=approver_id, issued_at=now.astimezone(timezone.utc).isoformat(),
         )
         payload = self._payload(unsigned)
         try:
@@ -445,7 +447,7 @@ class HmacApprovalAuthority:
         return ApprovalGrant(
             unsigned.grant_id, unsigned.principal_id, unsigned.tool_name,
             unsigned.argument_digest, unsigned.expires_at, signature,
-            unsigned.key_id, unsigned.operation_id, unsigned.approver_id,
+            unsigned.key_id, unsigned.operation_id, unsigned.approver_id, unsigned.issued_at,
         )
 
     def verify(self, grant: ApprovalGrant) -> bool:
@@ -460,9 +462,18 @@ class HmacApprovalAuthority:
                     or grant.approver_id != grant.approver_id.strip()
                     or len(grant.approver_id) > 256
                     or _contains_surrogate(grant.approver_id)
-                ))):
+                ))
+                or (grant.issued_at is not None and not isinstance(grant.issued_at, str))):
             return False
         try:
+            if grant.issued_at is not None:
+                issued = datetime.fromisoformat(grant.issued_at.replace("Z", "+00:00"))
+                expiry = datetime.fromisoformat(grant.expires_at.replace("Z", "+00:00"))
+                if (issued.tzinfo is None or issued.utcoffset() is None
+                        or expiry.tzinfo is None or expiry.utcoffset() is None
+                        or expiry <= issued
+                        or (expiry - issued).total_seconds() > self.max_ttl_seconds):
+                    return False
             payload = self._payload(grant)
             signature_bytes = bytes.fromhex(grant.signature)
             if len(signature_bytes) != 32:
