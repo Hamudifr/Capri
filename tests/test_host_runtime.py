@@ -99,6 +99,8 @@ class CapriHostRuntimeTests(unittest.TestCase):
         self.temp.cleanup()
 
     def make_host(self, **kwargs):
+        if kwargs.get("worker_registry") is not None:
+            kwargs.setdefault("worker_lifecycle_audit_sink", InMemoryAuditSink())
         return CapriHostRuntime(
             self.authority,
             self.store,
@@ -119,19 +121,22 @@ class CapriHostRuntimeTests(unittest.TestCase):
             revision=1,
         )
 
-    def make_worker_host(self, registry, identities, policy):
+    def make_worker_host(self, registry, identities, policy, audit_sink=None):
         known_ids = frozenset(identities.values())
-        return self.make_host(
-            task_store=self.task_store,
-            worker_registry=registry,
-            worker_identity_resolver=identities.get,
-            worker_descriptor_resolver=self.approve_worker_descriptor,
-            worker_observer_authorizer=lambda credential, worker_id: (
+        options = {
+            "task_store": self.task_store,
+            "worker_registry": registry,
+            "worker_identity_resolver": identities.get,
+            "worker_descriptor_resolver": self.approve_worker_descriptor,
+            "worker_observer_authorizer": lambda credential, worker_id: (
                 credential == "monitor-token" and worker_id in known_ids
             ),
-            worker_in_flight_resolver=lambda worker_id: 0,
-            worker_policy_resolver=policy,
-        )
+            "worker_in_flight_resolver": lambda worker_id: 0,
+            "worker_policy_resolver": policy,
+        }
+        if audit_sink is not None:
+            options["worker_lifecycle_audit_sink"] = audit_sink
+        return self.make_host(**options)
 
     def test_worker_registry_requires_all_host_callbacks(self):
         with self.assertRaises(HostRuntimeError):
