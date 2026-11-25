@@ -61,7 +61,12 @@ def _safe_text(value: object, name: str, maximum: int = 128) -> str:
         or not value
         or len(value) > maximum
         or value != value.strip()
-        or any(ord(char) < 0x20 or 0x7F <= ord(char) <= 0x9F or 0xD800 <= ord(char) <= 0xDFFF for char in value)
+        or any(
+            ord(char) < 0x20
+            or 0x7F <= ord(char) <= 0x9F
+            or 0xD800 <= ord(char) <= 0xDFFF
+            for char in value
+        )
     ):
         raise ProviderUsageJournalError(f"{name} is invalid")
     return value
@@ -182,7 +187,8 @@ class SQLiteProviderUsageJournal:
                         model TEXT NOT NULL,
                         input_tokens INTEGER NOT NULL CHECK(input_tokens >= 0),
                         output_tokens INTEGER NOT NULL CHECK(output_tokens >= 0),
-                        total_tokens INTEGER NOT NULL CHECK(total_tokens = input_tokens + output_tokens),
+                        total_tokens INTEGER NOT NULL
+                            CHECK(total_tokens = input_tokens + output_tokens),
                         cached_input_tokens INTEGER NOT NULL CHECK(cached_input_tokens >= 0),
                         cache_write_tokens INTEGER NOT NULL CHECK(cache_write_tokens >= 0),
                         reasoning_tokens INTEGER NOT NULL CHECK(reasoning_tokens >= 0),
@@ -213,7 +219,9 @@ class SQLiteProviderUsageJournal:
                 connection.commit()
             except Exception:
                 connection.rollback()
-                raise ProviderUsageJournalError("provider usage journal initialization failed") from None
+                raise ProviderUsageJournalError(
+                    "provider usage journal initialization failed"
+                ) from None
             finally:
                 connection.close()
 
@@ -265,7 +273,10 @@ class SQLiteProviderUsageJournal:
                             "provider response ID conflicts with an existing immutable usage record"
                         )
                     existing_timestamp = _validate_recorded_at(existing[10])
-                    if _event_digest(principal, session, validated, existing_timestamp) != existing[11]:
+                    if (
+                        _event_digest(principal, session, validated, existing_timestamp)
+                        != existing[11]
+                    ):
                         raise ProviderUsageJournalError(
                             "existing provider usage record integrity check failed"
                         )
@@ -275,7 +286,9 @@ class SQLiteProviderUsageJournal:
                 raise
             except Exception:
                 connection.rollback()
-                raise ProviderUsageJournalError("provider usage record could not be persisted") from None
+                raise ProviderUsageJournalError(
+                    "provider usage record could not be persisted"
+                ) from None
             finally:
                 connection.close()
 
@@ -375,7 +388,8 @@ def _validate_provider_usage_schema(connection: sqlite3.Connection) -> None:
     triggers = {
         row[0]: re.sub(r"\s+", " ", (row[1] or "")).strip().upper()
         for row in connection.execute(
-            "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND tbl_name='provider_usage_events'"
+            "SELECT name,sql FROM sqlite_master "
+            "WHERE type='trigger' AND tbl_name='provider_usage_events'"
         ).fetchall()
     }
     update_expected = (
