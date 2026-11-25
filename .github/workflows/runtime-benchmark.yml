@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   runtime-benchmark:
-    name: Offline runtime baseline (Python 3.13)
+    name: Offline runtime baseline (Python 3.15)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -35,7 +35,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
-          python-version: "3.13"
+          python-version: "3.15"
       - name: Record benchmark environment
         run: |
           uname -a
