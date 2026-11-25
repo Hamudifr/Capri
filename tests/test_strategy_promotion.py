@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 
 from capri_core.strategy import StrategyObservation
 from capri_core.strategy_promotion import (
@@ -96,6 +97,20 @@ class StrategyPromotionTests(unittest.TestCase):
             self.assertGreater(result.lower_95_ci, 0)
             self.assertEqual(result.blocked_reasons, ())
         self.assertFalse(hasattr(first, "activation_grant"))
+
+    def test_unhashable_task_and_evidence_fields_fail_closed(self):
+        cohorts = make_cohorts()
+        for field in ("task_id", "evidence_ref"):
+            malformed_observations = list(cohorts[0].observations)
+            malformed_observations[0] = replace(
+                malformed_observations[0], **{field: ["not", "hashable"]}
+            )
+            malformed = PromotionCohort(
+                f"cohort-malformed-{field}", tuple(malformed_observations)
+            )
+            result = self.assess((malformed, cohorts[1]))
+            self.assertFalse(result.eligible_for_canary)
+            self.assertIn("invalid_or_inconsistent_cohort", result.blocked_reasons)
 
     def test_single_cohort_cannot_qualify(self):
         result = self.assess(make_cohorts(cohort_count=1))
