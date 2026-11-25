@@ -118,6 +118,9 @@ class GoalCoordinatorTests(unittest.TestCase):
         )
         self.assertEqual(linked.state, "running")
         self.assertEqual(self.task_store.get(deferred.task_id).state, "blocked")
+        blocked_report = self.coordinator.completion_report(goal.goal_id, "alice")
+        self.assertEqual(blocked_report.completion_status, "activation_pending")
+        self.assertEqual(blocked_report.next_action, "host_recovery_required")
         recovered = self.coordinator.prepare(
             goal.goal_id, "alice", expected_version=goal.version, now=NOW,
         )
