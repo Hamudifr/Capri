@@ -178,11 +178,15 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 task = self.store.create(PLAN, now=NOW)
                 connection = self.store._connect()
                 try:
+                    connection.execute("DROP TRIGGER task_event_immutable_update")
                     connection.execute(
                         """UPDATE task_events SET step_index=?,attempt=?
                         WHERE task_id=?""",
                         (step_index, attempt, task.task_id),
                     )
+                    connection.execute("""CREATE TRIGGER task_event_immutable_update
+                        BEFORE UPDATE ON task_events
+                        BEGIN SELECT RAISE(ABORT, 'task events are append-only'); END""")
                 finally:
                     connection.close()
                 backup_path = os.path.join(self.temp.name, f"{suffix}.sqlite3")
@@ -193,10 +197,14 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 self.assertFalse(os.path.exists(backup_path))
                 connection = self.store._connect()
                 try:
+                    connection.execute("DROP TRIGGER task_event_immutable_update")
                     connection.execute(
                         "UPDATE task_events SET step_index=0,attempt=0 WHERE task_id=?",
                         (task.task_id,),
                     )
+                    connection.execute("""CREATE TRIGGER task_event_immutable_update
+                        BEFORE UPDATE ON task_events
+                        BEGIN SELECT RAISE(ABORT, 'task events are append-only'); END""")
                 finally:
                     connection.close()
 
