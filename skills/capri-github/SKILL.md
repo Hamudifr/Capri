@@ -1,6 +1,6 @@
 ---
-name: capri-github-repository-operations
-description: Inspect, change, test, document, review and release software in a connected GitHub repository.
+name: capri-github
+description: Use when Capri inspects, changes, tests, documents, reviews, or releases software in a connected GitHub repository.
 ---
 
 # Capri GitHub Repository Operations
