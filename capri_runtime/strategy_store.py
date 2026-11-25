@@ -714,6 +714,260 @@ class SQLiteStrategyStore:
             config_hash, False, evaluation.cohort_sha256, created,
         )
 
+    def register_promotion_assessment_for_principal(
+        self,
+        principal_id: str,
+        strategy_class: str,
+        task_family: str,
+        baseline_id: str,
+        candidate_id: str,
+        primary_metric: str,
+        cohorts: Iterable[PromotionCohort],
+        evidence_manifest_refs: dict[str, str],
+        *,
+        created_at: datetime | None = None,
+    ) -> StrategyPromotionRecord:
+        """Recompute, authenticate, and persist an eligible multi-cohort assessment.
+
+        Raw observations remain in the host evidence source. This registry stores
+        only the canonical assessment summary and the exact manifest locators.
+        Every cohort is independently re-authenticated by the host verifier.
+        """
+        principal = _text(principal_id, "principal_id", 128)
+        category = _identifier(strategy_class, "strategy_class")
+        family = _identifier(task_family, "task_family")
+        baseline = _identifier(baseline_id, "baseline_id")
+        candidate = _identifier(candidate_id, "candidate_id")
+        metric = _identifier(primary_metric, "primary_metric")
+        if self._evidence_verifier is None:
+            raise StrategyAuthorizationError(
+                "promotion assessment registration requires a trusted host evidence verifier"
+            )
+        if isinstance(cohorts, (str, bytes)):
+            raise StrategyStoreError("promotion cohorts must be an iterable of PromotionCohort records")
+        try:
+            iterator = iter(cohorts)
+        except TypeError:
+            raise StrategyStoreError("promotion cohorts must be iterable") from None
+        cohort_list: list[PromotionCohort] = []
+        for cohort in iterator:
+            if len(cohort_list) >= 4:
+                raise StrategyStoreError("promotion assessment exceeds the maximum of four cohorts")
+            cohort_list.append(cohort)
+        cohort_tuple = tuple(cohort_list)
+        if len(cohort_tuple) < 2 or any(type(item) is not PromotionCohort for item in cohort_tuple):
+            raise StrategyStoreError("promotion assessment requires at least two PromotionCohort records")
+        cohort_ids = tuple(_text(item.cohort_id, "cohort_id", 128) for item in cohort_tuple)
+        if len(set(cohort_ids)) != len(cohort_ids):
+            raise StrategyStoreError("promotion cohort IDs must be unique")
+        if type(evidence_manifest_refs) is not dict:
+            raise StrategyStoreError("evidence_manifest_refs must be a bounded dictionary")
+        if len(evidence_manifest_refs) != len(cohort_tuple):
+            raise StrategyStoreError("every promotion cohort must have exactly one evidence manifest")
+        refs: dict[str, str] = {}
+        for key, value in evidence_manifest_refs.items():
+            cohort_key = _text(key, "cohort_id", 128)
+            refs[cohort_key] = _text(value, "evidence_manifest_ref", 512)
+        if set(refs) != set(cohort_ids):
+            raise StrategyStoreError("evidence manifest keys must exactly match the promotion cohort IDs")
+
+        try:
+            assessment = assess_strategy_canary(
+                strategy_class=category,
+                task_family=family,
+                baseline_id=baseline,
+                candidate_id=candidate,
+                primary_metric=metric,
+                cohorts=cohort_tuple,
+            )
+        except Exception:
+            raise StrategyStoreError("promotion assessment could not be independently recomputed") from None
+        if (
+            type(assessment) is not StrategyPromotionAssessment
+            or assessment.policy_version != STRATEGY_PROMOTION_POLICY_VERSION
+            or assessment.eligible_for_canary is not True
+            or assessment.blocked_reasons
+            or assessment.baseline_version is None
+            or assessment.candidate_version is None
+        ):
+            reasons = ",".join(assessment.blocked_reasons) if type(assessment) is StrategyPromotionAssessment else "invalid_assessment"
+            raise StrategyAuthorizationError(
+                f"promotion assessment is not eligible under the current policy: {reasons}"
+            )
+
+        cohort_evaluations: dict[str, StrategyEvaluation] = {}
+        for cohort in cohort_tuple:
+            try:
+                evaluation = evaluate_strategies(
+                    baseline, candidate, cohort.observations, min_pairs=20
+                )
+            except Exception:
+                raise StrategyStoreError("promotion cohort could not be independently evaluated") from None
+            if (
+                evaluation.baseline_version != assessment.baseline_version
+                or evaluation.candidate_version != assessment.candidate_version
+                or evaluation.eligible_for_manual_review is not True
+                or evaluation.blocked_reasons
+                or evaluation.matched_pairs < 100
+            ):
+                raise StrategyAuthorizationError("promotion cohort failed its independent evaluation gate")
+            context = StrategyEvidenceContext(
+                principal_id=principal,
+                strategy_class=category,
+                baseline_id=baseline,
+                baseline_version=assessment.baseline_version,
+                candidate_id=candidate,
+                candidate_version=assessment.candidate_version,
+                cohort_sha256=evaluation.cohort_sha256,
+                cohort_schema=evaluation.cohort_schema,
+                evidence_manifest_ref=refs[cohort.cohort_id],
+                matched_pairs=evaluation.matched_pairs,
+                cohort_id=cohort.cohort_id,
+                task_family=family,
+            )
+            try:
+                verified = self._evidence_verifier(context)
+            except Exception:
+                raise StrategyAuthorizationError("promotion cohort evidence verification failed") from None
+            if verified is not True:
+                raise StrategyAuthorizationError("promotion cohort evidence provenance could not be verified")
+            cohort_evaluations[cohort.cohort_id] = evaluation
+
+        summary_json = _promotion_json(asdict(assessment), field="promotion assessment summary", maximum=32_768)
+        refs_json = _promotion_json(dict(sorted(refs.items())), field="promotion evidence manifest references", maximum=4_096)
+        assessment_hash = _promotion_record_digest(summary_json, refs_json)
+        timestamp = created_at or self._now()
+        if not isinstance(timestamp, datetime) or timestamp.tzinfo is None or timestamp.utcoffset() is None:
+            raise StrategyStoreError("created_at must be timezone-aware")
+        created = timestamp.astimezone(timezone.utc).isoformat()
+        assessment_id = uuid4().hex
+
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                baseline_row = connection.execute(
+                    """SELECT is_baseline FROM strategy_versions
+                    WHERE principal_id=? AND strategy_class=? AND strategy_id=? AND version=?""",
+                    (principal, category, baseline, assessment.baseline_version),
+                ).fetchone()
+                if baseline_row is None or baseline_row[0] != 1:
+                    raise StrategyNotFoundError("promotion baseline version is not registered for this principal")
+                candidate_row = connection.execute(
+                    """SELECT is_baseline,evaluation_id FROM strategy_versions
+                    WHERE principal_id=? AND strategy_class=? AND strategy_id=? AND version=?""",
+                    (principal, category, candidate, assessment.candidate_version),
+                ).fetchone()
+                if candidate_row is None or candidate_row[0] != 0 or candidate_row[1] is None:
+                    raise StrategyNotFoundError("promotion candidate version is not registered for this principal")
+                registered_evaluation = connection.execute(
+                    """SELECT baseline_id,candidate_id,cohort_sha256,evidence_manifest_ref,evidence_verified
+                    FROM strategy_evaluations WHERE evaluation_id=?""",
+                    (candidate_row[1],),
+                ).fetchone()
+                if (
+                    registered_evaluation is None
+                    or registered_evaluation[0] != baseline
+                    or registered_evaluation[1] != candidate
+                    or registered_evaluation[4] != 1
+                ):
+                    raise StrategyAuthorizationError("candidate's registered evaluation is not evidence-verified")
+                matching_cohorts = [
+                    cohort_id for cohort_id, evaluation in cohort_evaluations.items()
+                    if evaluation.cohort_sha256 == registered_evaluation[2]
+                ]
+                if len(matching_cohorts) != 1:
+                    raise StrategyAuthorizationError(
+                        "promotion assessment must include the exact cohort already bound to the candidate version"
+                    )
+                if refs[matching_cohorts[0]] != registered_evaluation[3]:
+                    raise StrategyAuthorizationError(
+                        "promotion assessment manifest does not match the candidate's registered evidence manifest"
+                    )
+
+                existing = connection.execute(
+                    """SELECT assessment_id,principal_id,strategy_class,baseline_id,baseline_version,
+                    candidate_id,candidate_version,policy_version,task_family,assessment_sha256,
+                    summary_json,evidence_manifest_refs_json,primary_metric,created_at
+                    FROM strategy_promotion_assessments
+                    WHERE principal_id=? AND strategy_class=? AND candidate_id=?
+                    AND candidate_version=? AND assessment_sha256=?""",
+                    (principal, category, candidate, assessment.candidate_version, assessment_hash),
+                ).fetchone()
+                if existing is None:
+                    connection.execute(
+                        """INSERT INTO strategy_promotion_assessments
+                        (assessment_id,principal_id,strategy_class,baseline_id,baseline_version,
+                         candidate_id,candidate_version,policy_version,task_family,primary_metric,
+                         assessment_sha256,summary_json,evidence_manifest_refs_json,eligible_for_canary,created_at)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)""",
+                        (assessment_id, principal, category, baseline, assessment.baseline_version,
+                         candidate, assessment.candidate_version, assessment.policy_version,
+                         family, metric, assessment_hash, summary_json, refs_json, created),
+                    )
+                else:
+                    if existing[1:9] != (
+                        principal, category, baseline, assessment.baseline_version,
+                        candidate, assessment.candidate_version, assessment.policy_version, family,
+                    ) or existing[10:13] != (summary_json, refs_json, metric):
+                        raise StrategyConflictError("promotion assessment fingerprint already belongs to different evidence")
+                    assessment_id = existing[0]
+                    created = existing[13]
+                connection.execute("COMMIT")
+            except Exception:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+            finally:
+                connection.close()
+        return self.get_promotion_assessment_for_principal(
+            principal, category, candidate, assessment.candidate_version, assessment_hash,
+        )
+
+    def get_promotion_assessment_for_principal(
+        self,
+        principal_id: str,
+        strategy_class: str,
+        candidate_id: str,
+        candidate_version: str,
+        assessment_sha256: str,
+    ) -> StrategyPromotionRecord:
+        principal = _text(principal_id, "principal_id", 128)
+        category = _identifier(strategy_class, "strategy_class")
+        candidate = _identifier(candidate_id, "candidate_id")
+        version = _version(candidate_version)
+        if type(assessment_sha256) is not str or not _SHA256.fullmatch(assessment_sha256):
+            raise StrategyStoreError("promotion assessment fingerprint is invalid")
+        with self._lock:
+            connection = self._connect()
+            try:
+                row = connection.execute(
+                    """SELECT assessment_id,principal_id,strategy_class,baseline_id,baseline_version,
+                    candidate_id,candidate_version,policy_version,task_family,assessment_sha256,
+                    summary_json,evidence_manifest_refs_json,primary_metric,created_at
+                    FROM strategy_promotion_assessments
+                    WHERE principal_id=? AND strategy_class=? AND candidate_id=?
+                    AND candidate_version=? AND assessment_sha256=?""",
+                    (principal, category, candidate, version, assessment_sha256),
+                ).fetchone()
+                if row is None:
+                    raise StrategyNotFoundError("promotion assessment is not registered for this candidate")
+                record = _promotion_record_from_row(row)
+                if (
+                    record.summary.get("eligible_for_canary") is not True
+                    or record.summary.get("policy_version") != record.policy_version
+                    or record.summary.get("baseline_id") != record.baseline_id
+                    or record.summary.get("candidate_id") != record.candidate_id
+                    or record.summary.get("baseline_version") != record.baseline_version
+                    or record.summary.get("candidate_version") != record.candidate_version
+                    or record.summary.get("task_family") != record.task_family
+                    or record.summary.get("primary_metric") != record.primary_metric
+                ):
+                    raise StrategyIntegrityError("promotion assessment summary does not match its registry binding")
+                return record
+            finally:
+                connection.close()
+
     def _verify_chain(
         self, connection: sqlite3.Connection, principal_id: str, strategy_class: str,
     ) -> tuple[Any, ...] | None:
