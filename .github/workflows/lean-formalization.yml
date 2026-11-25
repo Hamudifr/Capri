@@ -1,0 +1,27 @@
+name: Lean formalization
+
+on:
+  push:
+    branches: ["research/pvnp-r37-ops-selector"]
+    paths:
+      - "research/p_vs_np/formalization/**"
+      - ".github/workflows/lean-formalization.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: leanprover/lean-action@v1
+        with:
+          build: true
+          test: false
+          lint: false
+          use-mathlib-cache: false
+          use-github-cache: false
+          lake-package-directory: research/p_vs_np/formalization
