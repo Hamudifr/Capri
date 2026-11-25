@@ -80,6 +80,13 @@ int main(void) {
     assert(capri_session_get(store,legacy.session_id,&legacy_read)==CAPRI_SESSION_OK);
     assert(capri_session_get_for_principal(store,legacy.session_id,"principal-alice",&bob)==CAPRI_SESSION_NOT_FOUND);
     assert(capri_session_get(store,alice.session_id,&bob)==CAPRI_SESSION_NOT_FOUND);
+    const char *unowned_bypass_turn="[{\"role\":\"user\",\"content\":\"bypass attempt\"},{\"role\":\"assistant\",\"content\":\"must remain blocked\"}]";
+    int unowned_bypass_released=0;
+    assert(capri_session_commit_turn(store,alice.session_id,0,unowned_bypass_turn,NULL,&bob)==CAPRI_SESSION_NOT_FOUND);
+    assert(capri_session_close(store,alice.session_id,&bob)==CAPRI_SESSION_NOT_FOUND);
+    assert(capri_session_claim_turn_lease(store,alice.session_id,"legacy-worker",30.0)==CAPRI_SESSION_NOT_FOUND);
+    assert(capri_session_renew_turn_lease(store,alice.session_id,"legacy-worker",30.0)==CAPRI_SESSION_NOT_FOUND);
+    assert(capri_session_release_turn_lease(store,alice.session_id,"legacy-worker",&unowned_bypass_released)==CAPRI_SESSION_NOT_FOUND&&unowned_bypass_released==0);
     const char *legacy_turn="[{\"role\":\"user\",\"content\":\"legacy\"},{\"role\":\"assistant\",\"content\":\"compatible\"}]";
     assert(capri_session_claim_turn_lease(store,legacy.session_id,"legacy-worker",30.0)==CAPRI_SESSION_OK);
     assert(capri_session_renew_turn_lease(store,legacy.session_id,"legacy-worker",30.0)==CAPRI_SESSION_OK);
