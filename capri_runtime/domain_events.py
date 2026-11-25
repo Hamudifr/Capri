@@ -20,7 +20,7 @@ class DomainEventValidationError(ValueError):
 _ALLOWED_DATA_FIELDS = frozenset({
     "state", "status", "version", "step_index", "attempt", "error_code",
     "actor_id", "supersedes_id", "reason_code", "evidence_reference",
-    "evidence_digest", "derived_from", "record_type",
+    "evidence_digest", "evidence_type", "derived_from", "record_type",
 })
 _MAX_EVENT_DATA_BYTES = 2048
 
