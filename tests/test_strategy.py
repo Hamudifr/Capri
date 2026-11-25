@@ -186,6 +186,23 @@ class StrategyEvaluationTests(unittest.TestCase):
         self.assertEqual(result.candidate.verified_success_rate, 0.0)
         self.assertIn("verified_success_regression", result.blocked_reasons)
 
+    def test_invalid_outcome_and_safety_flag_types_are_rejected(self):
+        records = cohort()
+        records[0] = StrategyObservation(
+            task_id="task-000", scenario="research", strategy_id="baseline",
+            outcome=[], evidence_ref="test://evidence/task-000",
+        )
+        with self.assertRaises(StrategyEvaluationError):
+            evaluate_strategies("baseline", "candidate", records)
+        records = cohort()
+        records[0] = StrategyObservation(
+            task_id="task-000", scenario="research", strategy_id="baseline",
+            outcome="verified_success", evidence_ref="test://evidence/task-000",
+            safety_violation=1,
+        )
+        with self.assertRaises(StrategyEvaluationError):
+            evaluate_strategies("baseline", "candidate", records)
+
     def test_invalid_metric_types_and_ranges_are_rejected(self):
         invalid_values = (True, -1, 1.5, 10**13)
         for value in invalid_values:
