@@ -17,6 +17,7 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from capri_core.learning import LearningConsent
+from capri_core.validation import contains_surrogate
 
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 _POLICY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$")
@@ -80,7 +81,7 @@ class HostLearningConsentAuthority:
     def _valid_identity(value: Any) -> bool:
         return (
             isinstance(value, str) and bool(value.strip()) and len(value) <= 256
-            and not any(0xD800 <= ord(char) <= 0xDFFF for char in value)
+            and not contains_surrogate(value)
         )
 
     def issue(
