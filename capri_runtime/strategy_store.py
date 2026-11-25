@@ -1333,7 +1333,7 @@ class SQLiteStrategyStore:
         return ActiveStrategyRecord(
             principal, grant.strategy_class, grant.strategy_id, grant.version,
             next_generation, _decode_config(config_json, config_hash), config_hash,
-            created, event_id,
+            created, event_id, grant.promotion_assessment_sha256,
         )
 
     def activate_for_principal(
