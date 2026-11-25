@@ -1406,6 +1406,7 @@ class TaskWorker:
             engine.executor_id,
             engine.lease_seconds,
             principal_tools=frozenset(engine.principal_handlers),
+            allow_budget_wait=engine.budget_store is not None,
         )
         if claim is None:
             return None
