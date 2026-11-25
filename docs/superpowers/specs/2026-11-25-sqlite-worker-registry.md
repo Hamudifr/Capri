@@ -106,3 +106,10 @@ This is a new schema version. Existing task databases with no registry tables re
 - Task-store backup/restore preserves worker state, reservations and audit chain.
 - HostRuntime accepts the SQLite implementation, rejects a registry backed by a different task store, and reports durable health.
 - Full repository CI passes; no dispatch or process execution is enabled.
+
+
+## State and audit projection integrity
+
+Schema version 2 records complete worker descriptor and health snapshots in append-only lifecycle events. Validation replays those projections and compares the resulting descriptor/health state to the current worker rows. Heartbeat revisions are audited even when the worker state and reported load remain unchanged. Active reservation rows are checked against their unique creation event, principal/task/worker/capability/protocol binding, creation timestamp, configured expiry, revision and any commit event. This detects valid-looking row edits that SQLite structural checks and event-chain hashes alone cannot detect.
+
+Schema version 1 snapshots are rejected rather than silently trusted because their audit events do not contain enough state to reconstruct the current worker projection. No automatic migration is provided in this draft; there is no production data migration or cutover.
