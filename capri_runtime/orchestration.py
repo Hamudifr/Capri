@@ -31,6 +31,12 @@ from .budgets import BudgetExceededError, SQLiteBudgetStore
 class ToolOrchestrationError(Exception):
     """A model turn could not safely complete within configured limits."""
 
+    def __init__(
+        self, message: str, *, provider_usage: tuple[ProviderUsage, ...] = ()
+    ) -> None:
+        super().__init__(message)
+        self.provider_usage = tuple(provider_usage)
+
 
 @dataclass(frozen=True, slots=True)
 class ProviderUsage:
@@ -390,11 +396,13 @@ class ToolOrchestrator:
                         )
                     except Exception:
                         raise ToolOrchestrationError(
-                            "provider usage could not be recorded; tool execution was blocked"
+                            "provider usage could not be recorded; tool execution was blocked",
+                            provider_usage=tuple(provider_usage_records),
                         ) from None
                     if observer_result is not None:
                         raise ToolOrchestrationError(
-                            "usage_observer must synchronously return None; tool execution was blocked"
+                            "usage_observer must synchronously return None; tool execution was blocked",
+                            provider_usage=tuple(provider_usage_records),
                         )
             if not _valid_text(response.content) or len(response.content) > self.max_output_chars:
                 raise ToolOrchestrationError("adapter content is invalid or oversized")

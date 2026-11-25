@@ -513,13 +513,15 @@ class OpenAIResponsesAdapterTests(unittest.TestCase):
             bridge,
             usage_observer=lambda *args: (_ for _ in ()).throw(RuntimeError("storage unavailable")),
         )
-        with self.assertRaisesRegex(ToolOrchestrationError, "tool execution was blocked"):
+        with self.assertRaisesRegex(ToolOrchestrationError, "tool execution was blocked") as raised:
             orchestrator.run(
                 "usage-failure-session",
                 "Call the tool.",
                 (),
                 ExecutionContext("trusted-principal", frozenset({"tools:safe"})),
             )
+        self.assertEqual(len(raised.exception.provider_usage), 1)
+        self.assertEqual(raised.exception.provider_usage[0].response_id, "resp_usage_tool")
         self.assertEqual(calls, [])
 
     def test_malformed_provider_usage_is_rejected(self):
