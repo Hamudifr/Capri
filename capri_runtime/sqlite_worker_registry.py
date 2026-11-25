@@ -237,10 +237,23 @@ def validate_worker_registry_snapshot(connection: sqlite3.Connection) -> None:
             "AND name LIKE 'worker_registry_events_immutable_%'"
         )
     }
-    for suffix in ("update", "delete"):
-        name = f"worker_registry_events_immutable_{suffix}"
-        if name not in triggers or "RAISE(ABORT" not in triggers[name].upper():
-            raise WorkerRegistryError("worker registry audit append-only trigger is missing")
+    expected_triggers = {
+        "worker_registry_events_immutable_update": (
+            "CREATE TRIGGER worker_registry_events_immutable_update "
+            "BEFORE UPDATE ON worker_registry_events BEGIN "
+            "SELECT RAISE(ABORT, 'worker registry audit events are append-only'); END"
+        ),
+        "worker_registry_events_immutable_delete": (
+            "CREATE TRIGGER worker_registry_events_immutable_delete "
+            "BEFORE DELETE ON worker_registry_events BEGIN "
+            "SELECT RAISE(ABORT, 'worker registry audit events are append-only'); END"
+        ),
+    }
+    for name, expected_sql in expected_triggers.items():
+        actual_sql = " ".join((triggers.get(name) or "").upper().split()).rstrip(";")
+        normalized_expected = " ".join(expected_sql.upper().split()).rstrip(";")
+        if actual_sql != normalized_expected:
+            raise WorkerRegistryError("worker registry audit append-only trigger is missing or invalid")
 
     meta_rows = connection.execute("SELECT * FROM worker_registry_meta").fetchall()
     if len(meta_rows) != 1:
