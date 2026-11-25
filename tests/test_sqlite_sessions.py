@@ -655,6 +655,38 @@ class SQLiteSessionStoreTests(unittest.TestCase):
         with self.assertRaises(SessionLimitError):
             limited.commit_turn(session.session_id, 1, "x", "y")
 
+    def test_concurrent_first_open_initializes_one_shared_schema(self):
+        path = os.path.join(self.temp.name, "concurrent-first-open.sqlite3")
+        barrier = threading.Barrier(2)
+        stores = []
+        errors = []
+        result_lock = threading.Lock()
+
+        def open_store():
+            try:
+                barrier.wait(timeout=3)
+                store = SQLiteSessionStore(path)
+                with result_lock:
+                    stores.append(store)
+            except Exception as exc:
+                with result_lock:
+                    errors.append(exc)
+
+        workers = [threading.Thread(target=open_store) for _ in range(2)]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join(timeout=5)
+
+        self.assertTrue(all(not worker.is_alive() for worker in workers))
+        self.assertEqual(errors, [])
+        self.assertEqual(len(stores), 2)
+        session = stores[0].create_for_principal("principal-concurrent")
+        self.assertEqual(
+            stores[1].get_for_principal(session.session_id, "principal-concurrent"),
+            session,
+        )
+
     def test_reopen_rejects_missing_ownership_table_without_recreating_it(self):
         session = self.store.create_for_principal("principal-owner")
         connection = sqlite3.connect(self.path)
