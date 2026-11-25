@@ -200,7 +200,8 @@ static bool schema(sqlite3 *db) {
       "CREATE INDEX session_owners_principal_id ON session_owners(principal_id);"
       "CREATE TRIGGER session_owners_immutable_update BEFORE UPDATE ON session_owners BEGIN SELECT RAISE(ABORT,'session owner is immutable'); END;"
       "CREATE TRIGGER session_owners_immutable_delete BEFORE DELETE ON session_owners BEGIN SELECT RAISE(ABORT,'session owner is immutable'); END;"
-      "CREATE TRIGGER session_owners_immutable_insert BEFORE INSERT ON session_owners WHEN EXISTS(SELECT 1 FROM session_owners WHERE session_id=NEW.session_id) BEGIN SELECT RAISE(ABORT,'session owner is immutable'); END;";
+      "CREATE TRIGGER session_owners_immutable_insert BEFORE INSERT ON session_owners WHEN EXISTS(SELECT 1 FROM session_owners WHERE session_id=NEW.session_id) BEGIN SELECT RAISE(ABORT,'session owner is immutable'); END;"
+      "PRAGMA user_version=1;";
     if(!configure_database(db) || !exec_sql_retry_busy(db,"BEGIN IMMEDIATE",5000))return false;
     bool empty=true;
     if(!schema_is_empty(db,&empty)){
@@ -520,8 +521,34 @@ static bool schema_objects_valid(sqlite3 *db) {
     return valid;
 }
 
+static bool sessions_constraints_valid(sqlite3 *db) {
+    sqlite3_stmt *version_st=NULL,*table_st=NULL;
+    if(sqlite3_prepare_v2(db,"PRAGMA user_version",-1,&version_st,NULL)!=SQLITE_OK)return false;
+    int version_rc=sqlite3_step(version_st);
+    int version=version_rc==SQLITE_ROW?sqlite3_column_int(version_st,0):-1;
+    sqlite3_finalize(version_st);
+    if(version==0)return true; /* legacy Python schema before versioned CHECK constraints */
+    if(version!=1)return false;
+    if(sqlite3_prepare_v2(
+        db,
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='sessions'",
+        -1,&table_st,NULL
+    )!=SQLITE_OK)return false;
+    int rc=sqlite3_step(table_st);
+    const char *expected=
+        "CREATE TABLE sessions(session_id TEXT PRIMARY KEY,created_at TEXT NOT NULL,"
+        "updated_at TEXT NOT NULL,version INTEGER NOT NULL CHECK(version>=0),"
+        "closed INTEGER NOT NULL CHECK(closed IN(0,1)),messages_json TEXT NOT NULL "
+        "CHECK(json_valid(messages_json) AND json_type(messages_json)='array'))";
+    bool valid=rc==SQLITE_ROW && sqlite3_column_type(table_st,0)==SQLITE_TEXT
+        &&normalized_sql_equal((const char*)sqlite3_column_text(table_st,0),expected);
+    sqlite3_finalize(table_st);
+    return valid;
+}
+
 static bool session_schema_valid(sqlite3 *db) {
     return schema_objects_valid(db)
+        &&sessions_constraints_valid(db)
         &&table_matches(db,"sessions",
             "CREATE TABLE sessions(session_id TEXT PRIMARY KEY,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,version INTEGER NOT NULL CHECK(version>=0),closed INTEGER NOT NULL CHECK(closed IN(0,1)),messages_json TEXT NOT NULL CHECK(json_valid(messages_json) AND json_type(messages_json)='array'))")
         &&table_matches(db,"session_owners",
