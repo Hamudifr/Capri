@@ -112,7 +112,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
         self.assertEqual(
             host.get_budget_usage("bob-token").used["provider_calls"], 0,
         )
-        with self.assertRaises(HostRuntimeError):
+        with self.assertRaises(HostAuthorityError):
             host.get_budget_usage("invalid-token")
 
     def test_host_discovers_budget_store_already_configured_on_tool_executor(self):
