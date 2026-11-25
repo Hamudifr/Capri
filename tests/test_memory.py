@@ -152,6 +152,18 @@ class SQLiteMemoryStoreTests(unittest.TestCase):
         self.assertEqual(results[0].confidence, "user_directed")
         self.assertEqual(self.store.search("untrusted missing"), ())
 
+    def test_search_ranks_title_relevance_above_newer_body_only_match(self):
+        relevant = self.create(
+            title="Goal planner contract",
+            content="Versioned planning constraints are validated before execution.",
+        )
+        distractor = self.create(
+            title="Execution notes",
+            content="The goal planner contract is referenced in this general note.",
+        )
+        results = self.store.search("goal planner", limit=2)
+        self.assertEqual([item.memory_id for item in results], [relevant.memory_id, distractor.memory_id])
+
     def test_search_prefers_newer_records_when_relevance_is_equal(self):
         older = self.create(title="Project context", content="stable shared memory")
         newer = self.create(title="Project context", content="stable shared memory")
