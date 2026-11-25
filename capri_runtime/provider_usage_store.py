@@ -297,51 +297,68 @@ class SQLiteProviderUsageJournal:
     ) -> tuple[ProviderUsageRecord, ...]:
         principal = _safe_text(principal_id, "principal_id")
         session = _safe_text(session_id, "session_id")
-        with self._tasks._lock:
-            connection = self._tasks._connect()
-            try:
-                rows = connection.execute(
-                    """SELECT provider,response_id,model,input_tokens,output_tokens,total_tokens,
-                    cached_input_tokens,cache_write_tokens,reasoning_tokens,provider_latency_ms,
-                    recorded_at,event_sha256
-                    FROM provider_usage_events
-                    WHERE principal_id=? AND session_id=?
-                    ORDER BY recorded_at,provider,response_id""",
-                    (principal, session),
-                ).fetchall()
-            finally:
-                connection.close()
+        try:
+            with self._tasks._lock:
+                connection = self._tasks._connect()
+                try:
+                    rows = connection.execute(
+                        """SELECT provider,response_id,model,input_tokens,output_tokens,total_tokens,
+                        cached_input_tokens,cache_write_tokens,reasoning_tokens,provider_latency_ms,
+                        recorded_at,event_sha256
+                        FROM provider_usage_events
+                        WHERE principal_id=? AND session_id=?
+                        ORDER BY recorded_at,provider,response_id""",
+                        (principal, session),
+                    ).fetchall()
+                finally:
+                    connection.close()
+        except Exception:
+            raise ProviderUsageJournalError(
+                "provider usage session records could not be read"
+            ) from None
         records: list[ProviderUsageRecord] = []
-        for row in rows:
-            usage = ProviderUsage(
-                provider=row[0], model=row[2], response_id=row[1],
-                input_tokens=row[3], output_tokens=row[4], total_tokens=row[5],
-                cached_input_tokens=row[6], cache_write_tokens=row[7],
-                reasoning_tokens=row[8], provider_latency_ms=row[9],
-            )
-            timestamp = _validate_recorded_at(row[10])
-            if _event_digest(principal, session, usage, timestamp) != row[11]:
-                raise ProviderUsageJournalError("provider usage record integrity check failed")
-            records.append(ProviderUsageRecord(principal, session, usage, timestamp, row[11]))
+        try:
+            for row in rows:
+                usage = ProviderUsage(
+                    provider=row[0], model=row[2], response_id=row[1],
+                    input_tokens=row[3], output_tokens=row[4], total_tokens=row[5],
+                    cached_input_tokens=row[6], cache_write_tokens=row[7],
+                    reasoning_tokens=row[8], provider_latency_ms=row[9],
+                )
+                timestamp = _validate_recorded_at(row[10])
+                if _event_digest(principal, session, usage, timestamp) != row[11]:
+                    raise ProviderUsageJournalError(
+                        "provider usage record integrity check failed"
+                    )
+                records.append(ProviderUsageRecord(principal, session, usage, timestamp, row[11]))
+        except ProviderUsageJournalError:
+            raise
+        except Exception:
+            raise ProviderUsageJournalError("provider usage record is invalid") from None
         return tuple(records)
 
     def summary_for_principal(
         self, principal_id: str,
     ) -> tuple[ProviderUsageAggregate, ...]:
         principal = _safe_text(principal_id, "principal_id")
-        with self._tasks._lock:
-            connection = self._tasks._connect()
-            try:
-                rows = connection.execute(
-                    """SELECT provider,model,COUNT(*),SUM(input_tokens),SUM(output_tokens),
-                    SUM(total_tokens),SUM(cached_input_tokens),SUM(cache_write_tokens),
-                    SUM(reasoning_tokens),AVG(provider_latency_ms)
-                    FROM provider_usage_events WHERE principal_id=?
-                    GROUP BY provider,model ORDER BY provider,model""",
-                    (principal,),
-                ).fetchall()
-            finally:
-                connection.close()
+        try:
+            with self._tasks._lock:
+                connection = self._tasks._connect()
+                try:
+                    rows = connection.execute(
+                        """SELECT provider,model,COUNT(*),SUM(input_tokens),SUM(output_tokens),
+                        SUM(total_tokens),SUM(cached_input_tokens),SUM(cache_write_tokens),
+                        SUM(reasoning_tokens),AVG(provider_latency_ms)
+                        FROM provider_usage_events WHERE principal_id=?
+                        GROUP BY provider,model ORDER BY provider,model""",
+                        (principal,),
+                    ).fetchall()
+                finally:
+                    connection.close()
+        except Exception:
+            raise ProviderUsageJournalError(
+                "provider usage summary could not be read"
+            ) from None
         return tuple(
             ProviderUsageAggregate(
                 provider=row[0], model=row[1], requests=row[2],
