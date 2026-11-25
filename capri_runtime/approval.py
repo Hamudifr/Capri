@@ -501,6 +501,7 @@ class HostApprovalService:
         except Exception:
             raise HostAuthorityError("approval authentication failed") from None
         if (not isinstance(approver_id, str) or not approver_id.strip()
+                or approver_id != approver_id.strip()
                 or len(approver_id) > 256 or contains_surrogate(approver_id)):
             raise HostAuthorityError("approval authentication failed")
         if not self._allow_self_approval and approver_id == challenge.principal_id:
