@@ -261,9 +261,20 @@ class SQLiteSessionStore(SessionStore):
         legacy_schema = cls._schema_sql_matches(
             connection, "table", "sessions", "sessions", legacy_sessions_sql,
         )
+        legacy_checked_sessions_sql = """CREATE TABLE sessions (
+            session_id TEXT PRIMARY KEY,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            version INTEGER NOT NULL CHECK(version >= 0),
+            closed INTEGER NOT NULL CHECK(closed IN (0, 1)),
+            messages_json TEXT NOT NULL
+        )"""
+        legacy_checked_schema = cls._schema_sql_matches(
+            connection, "table", "sessions", "sessions", legacy_checked_sessions_sql,
+        )
         if schema_version == 1 and not strict_schema:
             raise ValidationError("SQLite session schema constraints are invalid")
-        if schema_version == 0 and not (strict_schema or legacy_schema):
+        if schema_version == 0 and not (strict_schema or legacy_schema or legacy_checked_schema):
             raise ValidationError("SQLite legacy session schema constraints are invalid")
 
     def _initialize(self, *, fresh_database: bool) -> None:
