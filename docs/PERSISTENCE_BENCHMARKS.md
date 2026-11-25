@@ -13,9 +13,9 @@ The harness is offline and standard-library-only. It creates private temporary d
 
 The first same-runner comparison was completed by [workflow run 45640130539](https://github.com/Hamudifr/Capri/actions/runs/45640130539), introduced and merged through [PR #178](https://github.com/Hamudifr/Capri/pull/178).
 
-- Baseline: \`5de569a3ed061f3eda7509420ef74a8aabb3ce89\` (parent of the SQLite optimization PR).
-- Candidate: \`0a105651dbd959a7f3daeef8bda71e3d8f4fe441\` (optimized main plus the comparison tooling).
-- Environment: standard \`ubuntu-latest\`, Linux x86_64, Python 3.13.18, SQLite 3.46.1, four logical CPUs.
+- Baseline: `5de569a3ed061f3eda7509420ef74a8aabb3ce89` (parent of the SQLite optimization PR).
+- Candidate: `0a105651dbd959a7f3daeef8bda71e3d8f4fe441` (optimized main plus the comparison tooling).
+- Environment: standard `ubuntu-latest`, Linux x86_64, Python 3.13.18, SQLite 3.46.1, four logical CPUs.
 - Configuration: three runs per revision, 20 warmups and 100 measured samples per workload, four claim workers, 100 queued tasks.
 - Order: baseline/candidate, candidate/baseline, baseline/candidate. Both revisions ran sequentially in the same job with the same candidate-owned harness.
 - The six raw reports and comparison JSON are preserved in [artifact 15033637978](https://github.com/Hamudifr/Capri/actions/runs/45640130539/artifacts/15033637978).
