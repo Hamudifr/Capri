@@ -23,7 +23,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: sqlite-persistence-comparison-\${{ github.event.pull_request.number || github.ref }}
+  group: sqlite-persistence-comparison-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -33,20 +33,20 @@ jobs:
     timeout-minutes: 25
     env:
       DEFAULT_BASELINE_SHA: "5de569a3ed061f3eda7509420ef74a8aabb3ce89"
-      PR_CANDIDATE_SHA: \${{ github.event.pull_request.head.sha || github.sha }}
-      DISPATCH_BASELINE_SHA: \${{ inputs.baseline_sha || '' }}
-      DISPATCH_CANDIDATE_SHA: \${{ inputs.candidate_sha || '' }}
+      PR_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      DISPATCH_BASELINE_SHA: ${{ inputs.baseline_sha || '' }}
+      DISPATCH_CANDIDATE_SHA: ${{ inputs.candidate_sha || '' }}
     steps:
       - name: Check out candidate revision
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: \${{ github.event_name == 'workflow_dispatch' && inputs.candidate_sha || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_sha || github.event.pull_request.head.sha || github.sha }}
           path: candidate
 
       - name: Check out baseline revision
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: \${{ github.event_name == 'workflow_dispatch' && inputs.baseline_sha || '5de569a3ed061f3eda7509420ef74a8aabb3ce89' }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.baseline_sha || '5de569a3ed061f3eda7509420ef74a8aabb3ce89' }}
           path: baseline
 
       - name: Set up Python
@@ -67,8 +67,8 @@ jobs:
           cp candidate/benchmarks/persistence/compare.py "$RUNNER_TEMP/capri-persistence-harness/benchmarks/persistence/compare.py"
           BASELINE_SHA="$(git -C baseline rev-parse HEAD)"
           CANDIDATE_SHA="$(git -C candidate rev-parse HEAD)"
-          EXPECTED_BASELINE="\${DISPATCH_BASELINE_SHA:-$DEFAULT_BASELINE_SHA}"
-          EXPECTED_CANDIDATE="\${DISPATCH_CANDIDATE_SHA:-$PR_CANDIDATE_SHA}"
+          EXPECTED_BASELINE="${DISPATCH_BASELINE_SHA:-$DEFAULT_BASELINE_SHA}"
+          EXPECTED_CANDIDATE="${DISPATCH_CANDIDATE_SHA:-$PR_CANDIDATE_SHA}"
           test "$BASELINE_SHA" = "$EXPECTED_BASELINE"
           test "$CANDIDATE_SHA" = "$EXPECTED_CANDIDATE"
           {
@@ -110,8 +110,8 @@ jobs:
               report = json.load(source)
           lines = [
               "## SQLite persistence comparison", "",
-              f"- Baseline: \`{report['baseline_sha']}\`",
-              f"- Candidate: \`{report['candidate_sha']}\`",
+              f"- Baseline: `{report['baseline_sha']}`",
+              f"- Candidate: `{report['candidate_sha']}`",
               f"- Repeated runs: {report['rounds_per_revision']} per revision",
               f"- Python: {report['environment']['python']}; SQLite: {report['environment']['sqlite']}",
               f"- Runner: {report['environment']['os']} / {report['environment']['machine']}", "",
