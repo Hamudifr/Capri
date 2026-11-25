@@ -6,7 +6,7 @@ import threading
 import unittest
 
 from capri_runtime.sqlite_worker_registry import SQLiteWorkerRegistry
-from capri_runtime.tasks import SQLiteTaskStore
+from capri_runtime.tasks import SQLiteTaskStore, TaskValidationError
 from capri_runtime.worker_registry import (
     WorkerConflictError,
     WorkerDescriptor,
@@ -558,6 +558,28 @@ class SQLiteWorkerRegistryTests(unittest.TestCase):
 
         with self.assertRaisesRegex(WorkerRegistryError, "requires a SQLiteTaskStore"):
             SQLiteWorkerRegistry(FakeTaskStore())
+
+    def test_task_store_backup_rejects_tampered_worker_projection(self):
+        self.register_healthy()
+        connection = self.store._connect()
+        try:
+            row = connection.execute(
+                "SELECT descriptor_json FROM worker_registry_state WHERE worker_id='worker-1'"
+            ).fetchone()
+            descriptor = json.loads(row[0])
+            descriptor["priority"] += 1
+            connection.execute(
+                "UPDATE worker_registry_state SET descriptor_json=? WHERE worker_id='worker-1'",
+                (json.dumps(descriptor, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False),),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        backup_path = os.path.join(self.temp.name, "tampered-worker-registry-backup.sqlite3")
+        with self.assertRaisesRegex(TaskValidationError, "invalid worker registry snapshot"):
+            self.store.backup_to(backup_path)
+        self.assertFalse(os.path.exists(backup_path))
 
 if __name__ == "__main__":
     unittest.main()
