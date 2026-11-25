@@ -892,13 +892,13 @@ class LearningStoreTests(unittest.TestCase):
             revoke.terminate()
             revoke.join()
         results = [result_queue.get(timeout=5) for _ in range(2)]
+        exitcodes = (reconcile.exitcode, revoke.exitcode)
         result_queue.close()
         result_queue.join_thread()
         reconcile.close()
         revoke.close()
 
-        self.assertEqual(reconcile.exitcode, 0)
-        self.assertEqual(revoke.exitcode, 0)
+        self.assertEqual(exitcodes, (0, 0))
         self.assertEqual({result[0] for result in results}, {"reconciled", "revoked"})
         self.assertNotIn("error", {result[0] for result in results})
         status = self.store.get_export_status(result["export_id"])
