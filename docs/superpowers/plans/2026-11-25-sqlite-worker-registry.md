@@ -81,3 +81,15 @@ Steps:
 - Any backup validation that cannot preserve existing task-store guarantees.
 
 In those cases, stop the affected change, record the exact blocker in CAP-210, and keep the branch isolated.
+
+
+## Additional integrity hardening completed
+
+- [x] Version the audit projection format (schema v2) and include full worker descriptor/health snapshots in lifecycle events.
+- [x] Reconstruct worker state from append-only events and reject descriptor/health row tampering.
+- [x] Audit heartbeat-only revisions even when state/load values are unchanged.
+- [x] Bind active reservation rows to creation/commit event metadata and validate creation/expiry/revision consistency.
+- [x] Regression-test descriptor, health, task-binding, expiry and revision tampering plus heartbeat-only audit events.
+- [x] Validate the wall-clock dependency at registry construction.
+
+Version 1 audit records are intentionally rejected; no migration is claimed. This is still a draft subsystem and must not be used as a production store before an explicit migration policy is designed.
