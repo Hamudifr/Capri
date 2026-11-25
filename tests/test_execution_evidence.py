@@ -72,16 +72,34 @@ class SQLiteExecutionEvidenceJournalTests(unittest.TestCase):
     def test_journal_is_a_public_package_export(self):
         self.assertIs(ExportedExecutionEvidenceJournal, SQLiteExecutionEvidenceJournal)
 
-    def test_signed_execution_event_validates_strategy_observation(self):
+    def test_signed_execution_event_requires_persisted_task_completion(self):
         reference = self.journal.record_execution(
             "host-credential", self.claim, self.result,
         )
+        observation = self.observation(reference)
+        self.assertFalse(self.journal.validate_source_events(
+            "alice", "reasoning", (observation,),
+            {self.claim.task_id: "research"},
+        ))
+        # A pending but correctly signed event is structurally sound. It is
+        # simply not eligible for strategy evidence until task completion.
+        self.assertEqual(self.journal.integrity_check(), "ok")
+        self.tasks.finish_step(self.claim, self.result)
         self.assertTrue(self.journal.validate_source_events(
+            "alice", "reasoning", (observation,),
+            {self.claim.task_id: "research"},
+        ))
+        self.assertEqual(self.tasks.integrity_check(), "ok")
+
+    def test_event_is_not_admitted_when_persisted_result_digest_differs(self):
+        reference = self.journal.record_execution(
+            "host-credential", self.claim, self.result,
+        )
+        self.tasks.finish_step(self.claim, {"status": "different persisted result"})
+        self.assertFalse(self.journal.validate_source_events(
             "alice", "reasoning", (self.observation(reference),),
             {self.claim.task_id: "research"},
         ))
-        self.assertEqual(self.journal.integrity_check(), "ok")
-        self.assertEqual(self.tasks.integrity_check(), "ok")
 
     def test_task_engine_records_evidence_before_finishing_claim(self):
         engine = TaskEngine(
@@ -105,6 +123,20 @@ class SQLiteExecutionEvidenceJournalTests(unittest.TestCase):
             finally:
                 connection.close()
         self.assertEqual(count, 1)
+        with self.tasks._lock:
+            connection = self.tasks._connect()
+            try:
+                event_id = connection.execute(
+                    "SELECT event_id FROM execution_evidence_events WHERE task_id=?",
+                    (self.claim.task_id,),
+                ).fetchone()[0]
+            finally:
+                connection.close()
+        self.assertTrue(self.journal.validate_source_events(
+            "alice", "reasoning",
+            (self.observation(f"host-execution-event:{event_id}"),),
+            {self.claim.task_id: "research"},
+        ))
 
     def test_result_verifier_cannot_mutate_task_engine_persisted_snapshot(self):
         def mutate_verifier(principal, claim, result, digest):
