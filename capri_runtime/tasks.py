@@ -375,7 +375,7 @@ class SQLiteTaskStore:
             # Versioned, length-prefixed tuple encoding is unambiguous even
             # when either field contains NUL or other separator characters.
             payload = (
-                b"capri.task-idempotency.v2\\0"
+                b"capri.task-idempotency.v2\0"
                 + len(principal_bytes).to_bytes(4, "big")
                 + principal_bytes
                 + len(key_bytes).to_bytes(4, "big")
@@ -385,7 +385,7 @@ class SQLiteTaskStore:
             scoped_key = "principal:v2:" + digest
             # Preserve retries for rows written by the old delimiter encoding.
             legacy_digest = hashlib.sha256(
-                (principal_id + "\\0" + key).encode("utf-8")
+                (principal_id + "\0" + key).encode("utf-8")
             ).hexdigest()
             legacy_scoped_key = "principal:" + legacy_digest
         return self._create(
