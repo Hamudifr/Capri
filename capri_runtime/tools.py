@@ -253,6 +253,7 @@ class ApprovalGrant:
     signature: str | None = None
     key_id: str | None = None
     operation_id: str | None = None
+    approver_id: str | None = None
 
 
 class ApprovalMacProvider(Protocol):
@@ -387,6 +388,7 @@ class HmacApprovalAuthority:
                 "expires_at": grant.expires_at,
                 **({"key_id": grant.key_id} if grant.key_id is not None else {}),
                 **({"operation_id": grant.operation_id} if grant.operation_id is not None else {}),
+                **({"approver_id": grant.approver_id} if grant.approver_id is not None else {}),
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -401,6 +403,7 @@ class HmacApprovalAuthority:
         *,
         operation_id: str,
         ttl_seconds: int = 300,
+        approver_id: str | None = None,
     ) -> ApprovalGrant:
         if not isinstance(operation_id, str) or not _OPERATION_RE.fullmatch(operation_id):
             raise ToolValidationError("approval operation ID is invalid")
@@ -411,6 +414,11 @@ class HmacApprovalAuthority:
             raise ToolValidationError("approval tool name is invalid")
         if not isinstance(argument_digest, str) or not _DIGEST_RE.fullmatch(argument_digest):
             raise ToolValidationError("approval argument digest is invalid")
+        if approver_id is not None and (
+            not isinstance(approver_id, str) or not approver_id.strip()
+            or len(approver_id) > 256 or _contains_surrogate(approver_id)
+        ):
+            raise ToolValidationError("approval approver identity is invalid")
         if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int) or not 1 <= ttl_seconds <= self.max_ttl_seconds:
             raise ToolValidationError("approval TTL exceeds the configured limit")
         now = self._clock()
@@ -421,6 +429,7 @@ class HmacApprovalAuthority:
         unsigned = ApprovalGrant(
             str(uuid4()), principal_id, tool_name, argument_digest, expiry,
             key_id=active_key_id, operation_id=operation_id,
+            approver_id=approver_id,
         )
         payload = self._payload(unsigned)
         try:
@@ -436,7 +445,7 @@ class HmacApprovalAuthority:
         return ApprovalGrant(
             unsigned.grant_id, unsigned.principal_id, unsigned.tool_name,
             unsigned.argument_digest, unsigned.expires_at, signature,
-            unsigned.key_id, unsigned.operation_id,
+            unsigned.key_id, unsigned.operation_id, unsigned.approver_id,
         )
 
     def verify(self, grant: ApprovalGrant) -> bool:
@@ -444,7 +453,13 @@ class HmacApprovalAuthority:
                 or not isinstance(grant.operation_id, str)
                 or not _OPERATION_RE.fullmatch(grant.operation_id)
                 or not isinstance(grant.signature, str)
-                or not _DIGEST_RE.fullmatch(grant.signature)):
+                or not _DIGEST_RE.fullmatch(grant.signature)
+                or (grant.approver_id is not None and (
+                    not isinstance(grant.approver_id, str)
+                    or not grant.approver_id.strip()
+                    or len(grant.approver_id) > 256
+                    or _contains_surrogate(grant.approver_id)
+                ))):
             return False
         try:
             payload = self._payload(grant)
