@@ -126,6 +126,21 @@ class SQLiteSessionStore(SessionStore):
         return connection
 
     @staticmethod
+    def _set_wal_mode(connection: sqlite3.Connection) -> None:
+        deadline = time.monotonic() + 5.0
+        while True:
+            try:
+                mode = self._set_wal_mode(connection).fetchone()
+                if mode is None or str(mode[0]).casefold() != "wal":
+                    raise ValidationError("SQLite session database could not enter WAL mode")
+                return
+            except sqlite3.OperationalError as exc:
+                message = str(exc).casefold()
+                if ("locked" not in message and "busy" not in message) or time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.01)
+
+    @staticmethod
     def _normalized_schema_sql(sql: str) -> str:
         return "".join(sql.split()).casefold()
 
