@@ -26,9 +26,10 @@ It is deliberately not a distributed registry or a worker runtime.
 - `retire`: permanently disables the worker record in v1.
 - `update_descriptor`: host-side compare-and-swap descriptor update.
 - `eligible`: advisory filtering by host policy allow-list, capability, protocol version, enabled state, health, heartbeat freshness and remaining capacity. Ranking is deterministic: configured priority descending, combined in-flight/reserved load ascending, worker ID ascending.
-- `reserve_eligible`: atomically selects one eligible worker and reserves a capacity slot under the registry lock. It returns an opaque `WorkerReservation` or `None` when no worker is eligible.
-- `release_reservation`: releases a pending reservation once. Repeated, expired or revoked releases return `False`; an identity mismatch is rejected.
-- Reservations expire after a bounded TTL (default 10 seconds, configurable from 1–60 seconds), are capped at 4,096 by default, and are revoked when a worker fails, is quarantined/retired, or its descriptor changes. Expired reservations are pruned during selection and release.
+- `reserve_eligible`: atomically selects one eligible worker and creates a short-lived pending capacity hold under the registry lock. It returns an opaque `WorkerReservation` or `None` when no worker is eligible.
+- `commit_reservation`: atomically converts a live pending hold into a non-expiring committed/in-flight hold before dispatch. It fails closed if the hold expired, was revoked, the descriptor revision changed, or worker health is no longer fresh/healthy. Repeating the commit with the committed token is idempotent.
+- `release_reservation`: releases a pending or committed hold once. Repeated, expired or revoked releases return `False`; an identity mismatch is rejected. For committed work, update host-observed in-flight load before releasing the committed hold.
+- Pending reservations expire after a bounded TTL (default 10 seconds, configurable from 1–60 seconds); committed reservations do not expire automatically. Both count against capacity and the global 4,096 reservation cap. Worker health/descriptor changes revoke pending holds but preserve committed work until explicit completion/reconciliation release.
 
 ## Limits and failure semantics
 
@@ -39,7 +40,7 @@ It is deliberately not a distributed registry or a worker runtime.
 - Health freshness uses host monotonic time only. Missing, stale or future timestamps fail closed.
 - The registry is process-local and non-durable. Restart loses the catalogue and all health state; a host must re-register workers and obtain fresh authenticated heartbeats.
 - This module does not persist audit events. The integrating host must send registration, policy, health, quarantine, recovery and retirement transitions to its durable audit sink.
-- Reservations prevent concurrent dispatchers using this registry from over-selecting the same advertised capacity. They are still process-local coordination tokens, not dispatch authorization or durable leases. The host must re-check policy immediately before dispatch, update host-observed in-flight counts, and release the reservation. A process crash loses reservations and requires supervisor reconciliation.
+- Reservations prevent concurrent dispatchers using this registry from over-selecting the same advertised capacity. They are process-local coordination tokens, not dispatch authorization or durable leases. The required order is: reserve; re-check policy and transport identity; commit the pending hold; dispatch; after completion, update host-observed in-flight counts; then release the committed hold. Never release a committed hold before active work is reflected in host-observed load. A process crash loses all holds and requires supervisor reconciliation before the registry is considered healthy again.
 - No process launch, IPC transport, sandboxing, cancellation, retry, side-effect reconciliation or automatic recovery is implemented here.
 
 ## Minimal usage
@@ -71,13 +72,19 @@ reservation = registry.reserve_eligible(
 )
 if reservation is not None:
     authenticated_worker_id = authenticated_transport.worker_id
-    try:
-        # Host policy and authenticated transport are re-checked before dispatch.
-        pass
-    finally:
-        registry.release_reservation(
-            reservation, authenticated_worker_id=authenticated_transport.worker_id,
-        )
+    # Re-check policy and authenticated transport immediately before dispatch.
+    committed = registry.commit_reservation(
+        reservation, authenticated_worker_id=authenticated_worker_id,
+    )
+    if committed is not None:
+        try:
+            # The trusted host dispatcher starts work here.
+            pass
+        finally:
+            # First publish the host-observed in-flight count, then release.
+            registry.release_reservation(
+                committed, authenticated_worker_id=authenticated_worker_id,
+            )
 ```
 
 ## Next integration boundary
