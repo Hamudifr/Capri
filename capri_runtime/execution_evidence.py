@@ -503,6 +503,55 @@ class SQLiteExecutionEvidenceJournal:
         except Exception:
             return None
 
+    def _completed_task_result_matches(self, payload: Mapping[str, Any]) -> bool:
+        """Require a signed event to match the accepted result of a succeeded task."""
+        try:
+            task_id = payload.get("task_id")
+            principal_id = payload.get("principal_id")
+            step_index = payload.get("step_index")
+            attempt = payload.get("attempt")
+            expected_digest = payload.get("result_sha256")
+            if (
+                type(task_id) is not str or type(principal_id) is not str
+                or type(step_index) is not int or step_index < 0
+                or type(attempt) is not int or attempt < 1
+                or type(expected_digest) is not str or not _SHA256.fullmatch(expected_digest)
+            ):
+                return False
+            with self._tasks._lock:
+                connection = self._tasks._connect()
+                try:
+                    task = connection.execute(
+                        """SELECT tasks.state,tasks.results_json,task_owners.principal_id
+                        FROM tasks LEFT JOIN task_owners
+                        ON task_owners.task_id=tasks.task_id
+                        WHERE tasks.task_id=?""",
+                        (task_id,),
+                    ).fetchone()
+                    completed_step = connection.execute(
+                        """SELECT state FROM task_events
+                        WHERE task_id=? AND step_index=? AND attempt=?
+                        ORDER BY event_id DESC LIMIT 1""",
+                        (task_id, step_index, attempt),
+                    ).fetchone()
+                finally:
+                    connection.close()
+            if (
+                task is None or task[0] != "succeeded"
+                or task[2] != principal_id or completed_step is None
+                or completed_step[0] not in {"queued", "succeeded"}
+            ):
+                return False
+            results = json.loads(task[1])
+            if type(results) is not list or step_index >= len(results):
+                return False
+            result_digest = hashlib.sha256(
+                _canonical(results[step_index]).encode("utf-8")
+            ).hexdigest()
+            return result_digest == expected_digest
+        except Exception:
+            return False
+
     def validate_source_events(
         self,
         principal_id: str,
@@ -519,7 +568,7 @@ class SQLiteExecutionEvidenceJournal:
                 if match is None:
                     return False
                 payload = self._read_verified_event(match.group(1))
-                if payload is None:
+                if payload is None or not self._completed_task_result_matches(payload):
                     return False
                 if (
                     payload.get("principal_id") != principal_id
