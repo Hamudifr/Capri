@@ -142,6 +142,16 @@ class SQLiteOutcomeStoreTests(unittest.TestCase):
         finally:
             connection.close()
 
+    def test_integrity_check_detects_missing_append_only_triggers(self):
+        self.append()
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute("DROP TRIGGER outcomes_immutable_delete")
+            connection.commit()
+        finally:
+            connection.close()
+        self.assertEqual(self.store.integrity_check(), "outcome journal validation failed")
+
     def test_integrity_check_detects_semantically_invalid_persisted_rows(self):
         self.append()
         connection = sqlite3.connect(self.path)
