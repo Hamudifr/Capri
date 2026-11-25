@@ -1169,7 +1169,7 @@ class SQLiteStrategyStore:
                     if assessment_row is None:
                         raise StrategyAuthorizationError("promotion assessment is not registered for this candidate version")
                     promotion_record = _promotion_record_from_row(assessment_row)
-                    cohort_results = promotion_record.summary.get("cohorts")
+                    cohort_results = promotion_record.summary.get("cohort_results")
                     cohort_ids = {
                         item.get("cohort_id") for item in cohort_results
                         if type(item) is dict and type(item.get("cohort_id")) is str
@@ -1178,11 +1178,22 @@ class SQLiteStrategyStore:
                         evaluation_summary = json.loads(evaluation_summary_json)
                     except (TypeError, ValueError, json.JSONDecodeError):
                         raise StrategyIntegrityError("candidate evaluation summary is corrupt") from None
+                    cohort_hash_values = {value for _, value in promotion_record.cohort_sha256s}
                     if (
                         type(evaluation_summary) is not dict
+                        or type(cohort_results) is not list
+                        or not 2 <= len(cohort_results) <= 4
+                        or len(cohort_ids) != len(cohort_results)
                         or promotion_record.policy_version != STRATEGY_PROMOTION_POLICY_VERSION
                         or promotion_record.summary.get("eligible_for_canary") is not True
                         or promotion_record.summary.get("policy_version") != promotion_record.policy_version
+                        or promotion_record.summary.get("strategy_class") != promotion_record.strategy_class
+                        or promotion_record.summary.get("baseline_id") != promotion_record.baseline_id
+                        or promotion_record.summary.get("candidate_id") != promotion_record.candidate_id
+                        or promotion_record.summary.get("baseline_version") != promotion_record.baseline_version
+                        or promotion_record.summary.get("candidate_version") != promotion_record.candidate_version
+                        or promotion_record.summary.get("task_family") != promotion_record.task_family
+                        or promotion_record.summary.get("primary_metric") != promotion_record.primary_metric
                         or promotion_record.baseline_id != evaluation_baseline_id
                         or promotion_record.candidate_id != evaluation_candidate_id
                         or promotion_record.baseline_version != evaluation_summary.get("baseline_version")
@@ -1190,7 +1201,8 @@ class SQLiteStrategyStore:
                         or promotion_record.candidate_version != grant.version
                         or cohort_ids != {key for key, _ in promotion_record.evidence_manifest_refs}
                         or cohort_ids != {key for key, _ in promotion_record.cohort_sha256s}
-                        or cohort_hash not in {value for _, value in promotion_record.cohort_sha256s}
+                        or len(cohort_hash_values) != len(promotion_record.cohort_sha256s)
+                        or cohort_hash not in cohort_hash_values
                     ):
                         raise StrategyAuthorizationError("promotion assessment does not match the candidate evidence or current policy")
                 if required_action == "rollback":
@@ -1312,23 +1324,14 @@ class SQLiteStrategyStore:
                         "active candidate evidence is unverified; restore a verified baseline before serving it"
                     )
                 if row[9] is not None:
-                    promotion = connection.execute(
-                        """SELECT assessment_id,principal_id,strategy_class,baseline_id,baseline_version,
-                        candidate_id,candidate_version,policy_version,task_family,assessment_sha256,
-                        summary_json,evidence_manifest_refs_json,cohort_sha256s_json,primary_metric,created_at
-                        FROM strategy_promotion_assessments
-                        WHERE principal_id=? AND strategy_class=? AND candidate_id=?
-                        AND candidate_version=? AND assessment_sha256=?""",
-                        (principal, category, row[0], row[1], row[9]),
-                    ).fetchone()
-                    if promotion is None:
-                        raise StrategyIntegrityError("active strategy references a missing promotion assessment")
-                    record = _promotion_record_from_row(promotion)
-                    if (
-                        record.policy_version != STRATEGY_PROMOTION_POLICY_VERSION
-                        or record.summary.get("eligible_for_canary") is not True
-                    ):
-                        raise StrategyIntegrityError("active strategy promotion assessment is no longer valid")
+                    try:
+                        record = self.get_promotion_assessment_for_principal(
+                            principal, category, row[0], row[1], row[9],
+                        )
+                    except (StrategyNotFoundError, StrategyIntegrityError):
+                        raise StrategyIntegrityError("active strategy references an invalid promotion assessment") from None
+                    if record.policy_version != STRATEGY_PROMOTION_POLICY_VERSION:
+                        raise StrategyIntegrityError("active strategy promotion assessment uses a retired policy")
                 return ActiveStrategyRecord(
                     principal, category, row[0], row[1], row[2],
                     _decode_config(row[5], row[6]), row[6], row[4], row[3], row[9],
