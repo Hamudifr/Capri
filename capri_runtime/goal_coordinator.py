@@ -116,6 +116,8 @@ class GoalCoordinator:
         task = self.task_store.get_for_principal(goal.task_id, principal_id)
         if goal.state in {"succeeded", "failed", "cancelled"}:
             return GoalExecution(goal, task)
+        if goal.state == "awaiting_verification" and task.state == "succeeded":
+            return GoalExecution(goal, task)
         if task.state in {"blocked", "queued", "retry_wait", "running"}:
             return GoalExecution(goal, task)
         for index, result in enumerate(task.result):
@@ -125,7 +127,7 @@ class GoalCoordinator:
                 reference, index, now=now,
             )
         target = {
-            "succeeded": "succeeded",
+            "succeeded": "awaiting_verification",
             "failed": "failed",
             "cancelled": "cancelled",
             "reconciliation_required": "reconciliation_required",
@@ -135,7 +137,7 @@ class GoalCoordinator:
         if goal.state == "reconciliation_required":
             # Uncertain external side effects need explicit human/host resolution.
             return GoalExecution(goal, task)
-        if goal.state == "cancelling" and target == "succeeded":
+        if goal.state == "cancelling" and target == "awaiting_verification":
             # The task may have completed just before cancellation was observed.
             pass
         elif goal.state not in {"running", "cancelling"}:
@@ -146,6 +148,32 @@ class GoalCoordinator:
                 expected_version=goal.version, now=now,
             )
         return GoalExecution(goal, task)
+
+    def verify(
+        self, goal_id: str, principal_id: str, *, accepted: bool,
+        evidence_reference: str, expected_version: int,
+        now: datetime | None = None,
+    ) -> GoalRecord:
+        """Record an explicit owner acceptance decision after task execution.
+
+        Task completion alone never marks the user's outcome successful. The
+        authenticated owner must explicitly accept the stated criteria and
+        provide a durable evidence reference.
+        """
+        if type(accepted) is not bool:
+            raise GoalValidationError("accepted must be a boolean")
+        goal = self.goal_store.get_for_principal(goal_id, principal_id)
+        if goal.state != "awaiting_verification" or goal.version != expected_version:
+            raise GoalConflictError("goal is not awaiting verification at the expected version")
+        goal = self.goal_store.record_evidence_for_principal(
+            goal_id, principal_id,
+            "acceptance_accepted" if accepted else "acceptance_rejected",
+            evidence_reference, -1, now=now,
+        )
+        return self.goal_store.transition_for_principal(
+            goal_id, principal_id, "succeeded" if accepted else "failed",
+            expected_version=goal.version, now=now,
+        )
 
     def cancel(
         self, goal_id: str, principal_id: str, *,
@@ -171,7 +199,14 @@ class GoalCoordinator:
                 task.task_id, principal_id, now=now,
             )
         if task.state in {"cancelled", "failed", "succeeded", "reconciliation_required"}:
-            return self.reconcile(goal_id, principal_id, now=now)
+            reconciled = self.reconcile(goal_id, principal_id, now=now)
+            if reconciled.goal.state == "awaiting_verification":
+                cancelled = self.goal_store.transition_for_principal(
+                    goal_id, principal_id, "cancelled",
+                    expected_version=reconciled.goal.version, now=now,
+                )
+                return GoalExecution(cancelled, task)
+            return reconciled
         if goal.state == "running":
             goal = self.goal_store.transition_for_principal(
                 goal_id, principal_id, "cancelling",
