@@ -189,7 +189,9 @@ class SQLiteExecutionEvidenceJournal:
             raise StrategyAuthorizationError("trusted evidence clock must return an aware datetime")
         return value.astimezone(timezone.utc).isoformat()
 
-    def _authenticate_claim(self, credential: Any, claim: TaskClaim) -> str:
+    def _authenticate_claim(
+        self, credential: Any, claim: TaskClaim, now: datetime | None = None,
+    ) -> str:
         try:
             principal = self._authenticate(credential)
         except Exception:
@@ -198,7 +200,7 @@ class SQLiteExecutionEvidenceJournal:
         if type(claim) is not TaskClaim or claim.principal_id != principal:
             raise StrategyAuthorizationError("authenticated principal does not own this task claim")
         try:
-            self._tasks.validate_claim(claim)
+            self._tasks.validate_claim(claim, now=now)
             self._tasks.get_for_principal(claim.task_id, principal)
         except Exception:
             raise StrategyAuthorizationError("task claim is not valid for the authenticated principal") from None
@@ -263,7 +265,7 @@ class SQLiteExecutionEvidenceJournal:
         self, credential: Any, claim: TaskClaim, result: object,
         *, finish_task: bool, now: datetime | None,
     ) -> str:
-        principal = self._authenticate_claim(credential, claim)
+        principal = self._authenticate_claim(credential, claim, now=now)
         classification = self._validate_classification(self._classify(principal, claim.task_id))
         binding = self._validate_binding(self._resolve_strategy(principal, claim))
         try:
