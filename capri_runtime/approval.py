@@ -13,6 +13,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 from uuid import uuid4
 
+from capri_core.validation import contains_surrogate
+
 from .security_store import SQLiteSecurityStore
 from .tool_bridge import ToolCallOutcome
 from .tools import (
@@ -101,7 +103,7 @@ class SQLiteApprovalChallengeStore:
         if not isinstance(operation_id, str) or not _OPERATION.fullmatch(operation_id):
             raise ToolValidationError("operation_id must be a bounded identifier")
         if (not isinstance(principal_id, str) or not principal_id.strip()
-                or len(principal_id) > 256 or any(0xD800 <= ord(c) <= 0xDFFF for c in principal_id)):
+                or len(principal_id) > 256 or contains_surrogate(principal_id)):
             raise ToolValidationError("challenge principal is invalid")
         if not isinstance(tool_name, str) or not re.fullmatch(r"[a-z][a-z0-9_.-]{0,63}", tool_name):
             raise ToolValidationError("challenge tool name is invalid")
@@ -213,7 +215,7 @@ class SQLiteApprovalChallengeStore:
         if decision == "approve" and not callable(grant_factory):
             raise ToolValidationError("approval requires a trusted grant factory")
         if (not isinstance(approver_id, str) or not approver_id.strip()
-                or len(approver_id) > 256 or any(0xD800 <= ord(c) <= 0xDFFF for c in approver_id)):
+                or len(approver_id) > 256 or contains_surrogate(approver_id)):
             raise ToolValidationError("approver identity is invalid")
         with self._store._lock:
             connection = self._store._connect()
@@ -361,7 +363,7 @@ class HostApprovalService:
         except Exception:
             raise HostAuthorityError("approval authentication failed") from None
         if (not isinstance(approver_id, str) or not approver_id.strip()
-                or len(approver_id) > 256 or any(0xD800 <= ord(c) <= 0xDFFF for c in approver_id)):
+                or len(approver_id) > 256 or contains_surrogate(approver_id)):
             raise HostAuthorityError("approval authentication failed")
         if not self._allow_self_approval and approver_id == challenge.principal_id:
             raise HostAuthorityError("self-approval is not permitted")
