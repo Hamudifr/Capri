@@ -457,8 +457,25 @@ class SQLiteTaskStore:
                 connection.close()
 
     def get_for_principal(self, task_id: str, principal_id: str) -> TaskRecord:
-        self._assert_principal_owner(task_id, principal_id)
-        return self.get(task_id)
+        _text(task_id, "task_id", 64)
+        principal_id = _text(principal_id, "principal_id", 128)
+        with self._lock:
+            connection = self._connect()
+            try:
+                row = connection.execute(
+                    """SELECT tasks.task_id,tasks.idempotency_key,tasks.state,
+                    tasks.created_at,tasks.updated_at,tasks.current_step,tasks.attempts,
+                    tasks.available_at,tasks.cancel_requested,tasks.results_json,
+                    tasks.error_code
+                    FROM tasks JOIN task_owners ON task_owners.task_id=tasks.task_id
+                    WHERE tasks.task_id=? AND task_owners.principal_id=?""",
+                    (task_id, principal_id),
+                ).fetchone()
+                if row is None:
+                    raise TaskNotFoundError("task does not exist")
+                return self._record(row)
+            finally:
+                connection.close()
 
     def activate_for_principal(
         self, task_id: str, principal_id: str, now: datetime | None = None
