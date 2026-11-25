@@ -10,10 +10,7 @@ from threading import RLock
 from typing import Protocol
 from uuid import uuid4
 
-
-def _contains_surrogate(value: str) -> bool:
-    """Return True for lone UTF-16 surrogate code points."""
-    return any(0xD800 <= ord(character) <= 0xDFFF for character in value)
+from capri_core.validation import contains_surrogate as _contains_surrogate
 
 
 class RuntimeErrorBase(Exception):
