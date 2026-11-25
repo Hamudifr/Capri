@@ -167,5 +167,72 @@ class SQLiteStrategyEvidenceManifestStoreTests(unittest.TestCase):
         self.assertFalse(self.store.verify_manifest(verification_context, digest))
 
 
+    def test_manifest_verification_rejects_cross_principal_metadata_rebinding(self):
+        permissive_store = SQLiteStrategyEvidenceManifestStore(
+            self.task_store,
+            authenticate_collector=lambda credential: "alice",
+            classify_task_family=lambda principal, task_id: "research",
+            validate_source_events=lambda *args: True,
+        )
+        context = permissive_store.register_manifest(
+            "host-credential",
+            strategy_class="reasoning",
+            baseline_id="baseline",
+            candidate_id="candidate",
+            observations=self.observations,
+        )
+        digest = context.evidence_manifest_ref.split(":", 1)[1]
+        with self.task_store._lock:
+            connection = self.task_store._connect()
+            try:
+                connection.execute("DROP TRIGGER strategy_evidence_immutable_update")
+                connection.execute(
+                    "UPDATE strategy_evidence_manifests SET principal_id='mallory' WHERE manifest_sha256=?",
+                    (digest,),
+                )
+            finally:
+                connection.close()
+        rebound = replace(
+            context, principal_id="mallory", evidence_manifest_ref=f"sha256:{digest}",
+        )
+        self.assertFalse(permissive_store.verify_manifest(rebound, digest))
+
+    def test_task_store_integrity_and_backup_validate_evidence_manifests(self):
+        self.register()
+        self.assertEqual(self.task_store.integrity_check(), "ok")
+        backup_path = f"{self.directory.name}/tasks-with-evidence.sqlite3"
+        self.task_store.backup_to(backup_path)
+        with open(backup_path, "rb") as backup:
+            self.assertTrue(backup.read(16).startswith(b"SQLite format 3"))
+
+    def test_task_store_integrity_rejects_missing_evidence_immutability_trigger(self):
+        self.register()
+        with self.task_store._lock:
+            connection = self.task_store._connect()
+            try:
+                connection.execute("DROP TRIGGER strategy_evidence_immutable_delete")
+            finally:
+                connection.close()
+        self.assertEqual(self.task_store.integrity_check(), "task store validation failed")
+
+    def test_task_store_integrity_rejects_manifest_metadata_tampering(self):
+        self.register()
+        with self.task_store._lock:
+            connection = self.task_store._connect()
+            try:
+                connection.execute("DROP TRIGGER strategy_evidence_immutable_update")
+                connection.execute(
+                    "UPDATE strategy_evidence_manifests SET task_family='coding'"
+                )
+                connection.execute(
+                    """CREATE TRIGGER strategy_evidence_immutable_update
+                    BEFORE UPDATE ON strategy_evidence_manifests
+                    BEGIN SELECT RAISE(ABORT, 'strategy evidence manifests are append-only'); END"""
+                )
+            finally:
+                connection.close()
+        self.assertEqual(self.task_store.integrity_check(), "task store validation failed")
+
+
 if __name__ == "__main__":
     unittest.main()

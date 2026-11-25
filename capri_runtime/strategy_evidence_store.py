@@ -32,6 +32,7 @@ _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.+-]{0,63}$")
 _OPAQUE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_COHORT_SCHEMA = re.compile(r"^capri[.]strategy-cohort[.]v[0-9]+$")
 _MANIFEST_REF = re.compile(r"^sqlite-strategy-manifest:([0-9a-f]{64})$")
 _DIGEST_REF = re.compile(r"^sha256:([0-9a-f]{64})$")
 _MANIFEST_SCHEMA = "capri.strategy-evidence-manifest.v1"
@@ -56,6 +57,86 @@ def _canonical(value: object) -> str:
         value, ensure_ascii=False, sort_keys=True,
         separators=(",", ":"), allow_nan=False,
     )
+
+
+def _decode_manifest_blob(
+    manifest_sha256: str,
+    manifest_json: str,
+    metadata: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate canonical manifest bytes and every duplicated row binding."""
+    if type(manifest_sha256) is not str or not _SHA256.fullmatch(manifest_sha256):
+        raise StrategyStoreError("strategy evidence manifest digest is invalid")
+    if type(manifest_json) is not str:
+        raise StrategyStoreError("strategy evidence manifest payload is invalid")
+    try:
+        encoded = manifest_json.encode("utf-8", errors="strict")
+        if len(encoded) > _MAX_MANIFEST_BYTES:
+            raise StrategyStoreError("strategy evidence manifest exceeds the configured size limit")
+        if hashlib.sha256(encoded).hexdigest() != manifest_sha256:
+            raise StrategyStoreError("strategy evidence manifest digest does not match its payload")
+        manifest = json.loads(manifest_json)
+        if type(manifest) is not dict:
+            raise StrategyStoreError("strategy evidence manifest is not an object")
+        expected_keys = {
+            "manifest_schema", "principal_id", "strategy_class", "baseline_id",
+            "baseline_version", "candidate_id", "candidate_version",
+            "cohort_sha256", "cohort_schema", "matched_pairs", "task_family",
+            "observations",
+        }
+        if set(manifest) != expected_keys or _canonical(manifest) != manifest_json:
+            raise StrategyStoreError("strategy evidence manifest is not canonical")
+    except StrategyStoreError:
+        raise
+    except Exception:
+        raise StrategyStoreError("strategy evidence manifest payload is malformed") from None
+
+    principal = _text(manifest["principal_id"], "principal_id", 128)
+    category = _text(manifest["strategy_class"], "strategy_class", 64)
+    baseline = _text(manifest["baseline_id"], "baseline_id", 64)
+    candidate = _text(manifest["candidate_id"], "candidate_id", 64)
+    baseline_version = _text(manifest["baseline_version"], "baseline_version", 64)
+    candidate_version = _text(manifest["candidate_version"], "candidate_version", 64)
+    cohort_sha256 = manifest["cohort_sha256"]
+    cohort_schema = manifest["cohort_schema"]
+    matched_pairs = manifest["matched_pairs"]
+    task_family = manifest["task_family"]
+    if (
+        manifest["manifest_schema"] != _MANIFEST_SCHEMA
+        or not _IDENTIFIER.fullmatch(category)
+        or not _IDENTIFIER.fullmatch(baseline)
+        or not _IDENTIFIER.fullmatch(candidate)
+        or baseline == candidate
+        or not _VERSION.fullmatch(baseline_version)
+        or not _VERSION.fullmatch(candidate_version)
+        or baseline_version == "unversioned"
+        or candidate_version == "unversioned"
+        or type(cohort_sha256) is not str or not _SHA256.fullmatch(cohort_sha256)
+        or type(cohort_schema) is not str or not _COHORT_SCHEMA.fullmatch(cohort_schema)
+        or type(matched_pairs) is not int or not 20 <= matched_pairs <= 20_000
+        or type(task_family) is not str or task_family not in _ALLOWED_TASK_FAMILIES
+        or type(manifest["observations"]) is not list
+        or not 40 <= len(manifest["observations"]) <= 40_000
+    ):
+        raise StrategyStoreError("strategy evidence manifest metadata is invalid")
+    expected_metadata = {
+        "principal_id": principal,
+        "strategy_class": category,
+        "baseline_id": baseline,
+        "baseline_version": baseline_version,
+        "candidate_id": candidate,
+        "candidate_version": candidate_version,
+        "cohort_sha256": cohort_sha256,
+        "cohort_schema": cohort_schema,
+        "matched_pairs": matched_pairs,
+        "task_family": task_family,
+    }
+    if any(metadata.get(key) != value for key, value in expected_metadata.items()):
+        raise StrategyStoreError("strategy evidence manifest metadata does not match its immutable row")
+    for item in manifest["observations"]:
+        if type(item) is not dict or set(item) != _OBSERVATION_FIELDS:
+            raise StrategyStoreError("strategy evidence manifest observation schema is invalid")
+    return manifest
 
 
 class SQLiteStrategyEvidenceManifestStore:
@@ -342,8 +423,22 @@ class SQLiteStrategyEvidenceManifestStore:
                 candidate_version, cohort_sha256, cohort_schema, matched_pairs,
                 task_family, manifest_json,
             ) = row
-            if hashlib.sha256(manifest_json.encode("utf-8")).hexdigest() != manifest_sha256:
-                return False
+            manifest = _decode_manifest_blob(
+                manifest_sha256,
+                manifest_json,
+                {
+                    "principal_id": principal,
+                    "strategy_class": category,
+                    "baseline_id": baseline,
+                    "baseline_version": baseline_version,
+                    "candidate_id": candidate,
+                    "candidate_version": candidate_version,
+                    "cohort_sha256": cohort_sha256,
+                    "cohort_schema": cohort_schema,
+                    "matched_pairs": matched_pairs,
+                    "task_family": task_family,
+                },
+            )
             if (
                 context.principal_id != principal
                 or context.strategy_class != category
@@ -356,26 +451,18 @@ class SQLiteStrategyEvidenceManifestStore:
                 or context.matched_pairs != matched_pairs
             ):
                 return False
-            manifest = json.loads(manifest_json)
-            expected_keys = {
-                "manifest_schema", "principal_id", "strategy_class", "baseline_id",
-                "baseline_version", "candidate_id", "candidate_version",
-                "cohort_sha256", "cohort_schema", "matched_pairs", "task_family",
-                "observations",
-            }
-            if type(manifest) is not dict or set(manifest) != expected_keys:
-                return False
-            if manifest["manifest_schema"] != _MANIFEST_SCHEMA or manifest["task_family"] != task_family:
-                return False
             raw_observations = manifest["observations"]
-            if type(raw_observations) is not list:
-                return False
             records: list[StrategyObservation] = []
             for item in raw_observations:
                 if type(item) is not dict or set(item) != _OBSERVATION_FIELDS:
                     return False
                 records.append(StrategyObservation(**item))
             validated_records = self._validate_observations(baseline, candidate, tuple(records))
+            canonical_observations = [asdict(record) for record in sorted(
+                validated_records, key=lambda item: (item.strategy_id, item.task_id),
+            )]
+            if canonical_observations != raw_observations:
+                return False
             evaluation = evaluate_strategies(baseline, candidate, validated_records, min_pairs=20)
             if (
                 not evaluation.eligible_for_manual_review
@@ -399,3 +486,112 @@ class SQLiteStrategyEvidenceManifestStore:
             return True
         except Exception:
             return False
+
+def validate_strategy_evidence_snapshot(connection: sqlite3.Connection) -> None:
+    """Validate optional strategy evidence manifests during task-store backup and integrity checks."""
+    table = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='strategy_evidence_manifests'"
+    ).fetchone()
+    if table is None:
+        return
+    column_info = connection.execute("PRAGMA table_info(strategy_evidence_manifests)").fetchall()
+    columns = {row[1] for row in column_info}
+    required_columns = {
+        "manifest_sha256", "principal_id", "strategy_class", "baseline_id",
+        "baseline_version", "candidate_id", "candidate_version", "cohort_sha256",
+        "cohort_schema", "matched_pairs", "task_family", "manifest_json", "created_at",
+    }
+    if not required_columns.issubset(columns):
+        raise StrategyStoreError("strategy evidence manifest schema is incomplete")
+    primary_key = [row[1] for row in column_info if row[5]]
+    if primary_key != ["manifest_sha256"]:
+        raise StrategyStoreError("strategy evidence manifest primary key is invalid")
+    triggers = {
+        row[0]: (row[1] or "").upper()
+        for row in connection.execute(
+            "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND tbl_name='strategy_evidence_manifests'"
+        ).fetchall()
+    }
+    update_trigger = re.sub(r"\s+", " ", triggers.get("strategy_evidence_immutable_update", "")).strip()
+    delete_trigger = re.sub(r"\s+", " ", triggers.get("strategy_evidence_immutable_delete", "")).strip()
+    update_expected = (
+        "BEFORE UPDATE ON STRATEGY_EVIDENCE_MANIFESTS BEGIN SELECT RAISE(ABORT, "
+        "'STRATEGY EVIDENCE MANIFESTS ARE APPEND-ONLY'); END"
+    )
+    delete_expected = (
+        "BEFORE DELETE ON STRATEGY_EVIDENCE_MANIFESTS BEGIN SELECT RAISE(ABORT, "
+        "'STRATEGY EVIDENCE MANIFESTS ARE APPEND-ONLY'); END"
+    )
+    if update_expected not in update_trigger or delete_expected not in delete_trigger:
+        raise StrategyStoreError("strategy evidence append-only protections are missing")
+    unique_cohort_index = False
+    for index in connection.execute("PRAGMA index_list(strategy_evidence_manifests)").fetchall():
+        if index[2] != 1 or index[4] != 0:
+            continue
+        index_name = str(index[1]).replace('"', '""')
+        indexed_columns = [
+            row[2] for row in connection.execute(f'PRAGMA index_info("{index_name}")').fetchall()
+        ]
+        if indexed_columns == ["principal_id", "strategy_class", "cohort_sha256"]:
+            unique_cohort_index = True
+            break
+    if not unique_cohort_index:
+        raise StrategyStoreError("strategy evidence cohort uniqueness constraint is missing")
+
+    rows = connection.execute(
+        """SELECT manifest_sha256,principal_id,strategy_class,baseline_id,baseline_version,
+        candidate_id,candidate_version,cohort_sha256,cohort_schema,matched_pairs,
+        task_family,manifest_json,created_at FROM strategy_evidence_manifests"""
+    )
+    for row in rows:
+        (
+            digest, principal, category, baseline, baseline_version, candidate,
+            candidate_version, cohort_sha256, cohort_schema, matched_pairs,
+            task_family, manifest_json, created_at,
+        ) = row
+        manifest = _decode_manifest_blob(
+            digest,
+            manifest_json,
+            {
+                "principal_id": principal,
+                "strategy_class": category,
+                "baseline_id": baseline,
+                "baseline_version": baseline_version,
+                "candidate_id": candidate,
+                "candidate_version": candidate_version,
+                "cohort_sha256": cohort_sha256,
+                "cohort_schema": cohort_schema,
+                "matched_pairs": matched_pairs,
+                "task_family": task_family,
+            },
+        )
+        records = tuple(StrategyObservation(**item) for item in manifest["observations"])
+        validated_records = SQLiteStrategyEvidenceManifestStore._validate_observations(
+            baseline, candidate, records,
+        )
+        canonical_observations = [asdict(record) for record in sorted(
+            validated_records, key=lambda item: (item.strategy_id, item.task_id),
+        )]
+        if canonical_observations != manifest["observations"]:
+            raise StrategyStoreError("strategy evidence observation ordering is invalid")
+        evaluation = evaluate_strategies(baseline, candidate, validated_records, min_pairs=20)
+        if (
+            not evaluation.eligible_for_manual_review
+            or evaluation.cohort_sha256 != cohort_sha256
+            or evaluation.cohort_schema != cohort_schema
+            or evaluation.matched_pairs != matched_pairs
+            or evaluation.baseline_version != baseline_version
+            or evaluation.candidate_version != candidate_version
+        ):
+            raise StrategyStoreError("strategy evidence cohort fingerprint is invalid")
+        created_text = _text(created_at, "manifest created_at", 64)
+        try:
+            created = datetime.fromisoformat(created_text)
+        except ValueError:
+            raise StrategyStoreError("strategy evidence manifest timestamp is invalid") from None
+        if (
+            created.tzinfo is None or created.utcoffset() is None
+            or created.astimezone(timezone.utc).isoformat() != created_text
+        ):
+            raise StrategyStoreError("strategy evidence manifest timestamp is invalid")
+

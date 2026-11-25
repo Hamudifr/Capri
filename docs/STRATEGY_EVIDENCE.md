@@ -30,3 +30,9 @@ The versioned HMAC payload binds key ID, manifest digest, nonce, principal, stra
 ## Tests
 
 Tests cover principal authentication, exact context binding, manifest revalidation, key rotation, malformed attestor results, and candidate admission through `SQLiteStrategyStore`.
+
+## Immutable manifest storage and backup integrity
+
+The SQLite manifest store binds every duplicated row field to the canonical manifest bytes and SHA-256 digest. Verification rejects cross-principal or cross-context metadata rebinding even if a host source callback is permissive. It also checks canonical observation ordering and enforces the manifest size limit on reads.
+
+When the manifest table exists, SQLiteTaskStore integrity and backup validation checks its required schema, primary/unique constraints, append-only update/delete triggers, canonical manifest digest, row-to-manifest metadata bindings, observation schema/order, recomputed cohort fingerprint and UTC creation timestamp. This is structural integrity validation; the host evidence verifier must still reauthenticate source events and rederive task-family classifications before accepting a manifest.
