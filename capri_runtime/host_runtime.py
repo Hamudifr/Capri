@@ -658,16 +658,11 @@ class CapriHostRuntime:
             if current is None:
                 self._worker_reservation_contexts.pop(token, None)
             elif current != context.reservation:
-                if (
-                    current.worker_id == context.reservation.worker_id
-                    and current.committed and not context.reservation.committed
-                ):
-                    self._worker_reservation_contexts[token] = HostWorkerReservation(
-                        context.principal_id, context.task_id, context.capability,
-                        context.protocol_version, current,
-                    )
-                else:
-                    self._worker_reservation_contexts.pop(token, None)
+                self._worker_reservation_contexts.pop(token, None)
+                self._worker_audit_healthy = False
+                raise HostRuntimeError(
+                    "worker reservation state changed outside the trusted host gateway; reconciliation is required"
+                )
 
     def get_worker_candidates(
         self, credential: Any, task_id: str, capability: str, protocol_version: int,
