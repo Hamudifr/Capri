@@ -165,7 +165,7 @@ class WorkerRegistry(Protocol):
     def clear_quarantine(self, worker_id: str, *, expected_health_revision: int) -> WorkerSnapshot: ...
     def reserve_eligible(self, capability: str, *, protocol_version: int, authorized_worker_ids: set[str] | frozenset[str], principal_id: str, task_id: str, now_ns: int | None = None) -> WorkerReservation | None: ...
     def commit_reservation(self, reservation: WorkerReservation, *, authenticated_worker_id: str, now_ns: int | None = None) -> WorkerReservation | None: ...
-    def release_reservation(self, reservation: WorkerReservation, *, authenticated_worker_id: str, observed_unreserved_in_flight: int | None = None, now_ns: int | None = None) -> bool: ...
+    def release_reservation(self, reservation: WorkerReservation, *, authenticated_worker_id: str, observed_unreserved_in_flight: int | None = None, observed_in_flight: int | None = None, now_ns: int | None = None) -> bool: ...
     def expire_reservations(self, *, now_ns: int | None = None) -> tuple[WorkerReservation, ...]: ...
     def eligible(self, capability: str, *, protocol_version: int, authorized_worker_ids: set[str] | frozenset[str], now_ns: int | None = None, limit: int = 20) -> tuple[WorkerSnapshot, ...]: ...
     def integrity_check(self) -> str: ...
@@ -644,6 +644,7 @@ class InMemoryWorkerRegistry:
         *,
         authenticated_worker_id: str,
         observed_unreserved_in_flight: int | None = None,
+        observed_in_flight: int | None = None,
         now_ns: int | None = None,
     ) -> bool:
         """Release a pending hold or atomically hand off a committed hold to unreserved load.
@@ -651,7 +652,13 @@ class InMemoryWorkerRegistry:
         `observed_unreserved_in_flight` excludes every other active reservation.
         The registry counts those reservations separately; the handoff count
         includes only work no longer represented by a reservation token.
+
+        `observed_in_flight` remains a compatibility alias for existing callers.
         """
+        if observed_unreserved_in_flight is not None and observed_in_flight is not None:
+            raise WorkerRegistryError("supply only one observed in-flight load value")
+        if observed_unreserved_in_flight is None:
+            observed_unreserved_in_flight = observed_in_flight
         if type(reservation) is not WorkerReservation:
             raise WorkerRegistryError("reservation must be an exact WorkerReservation")
         identity = _identifier(authenticated_worker_id, "authenticated_worker_id")
