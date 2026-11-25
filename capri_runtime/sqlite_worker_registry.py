@@ -1060,25 +1060,32 @@ class SQLiteWorkerRegistry:
             now_ns=now_ns, actor_id=authenticated_worker_id, on_expired=on_expired,
         )
 
-    def get(self, worker_id: str) -> WorkerSnapshot:
-        return self._run("get", lambda memory, timestamp: memory.get(worker_id))
+    def get(
+        self, worker_id: str,
+        on_expired: Callable[[tuple[WorkerReservation, ...]], None] | None = None,
+    ) -> WorkerSnapshot:
+        return self._run("get", lambda memory, timestamp: memory.get(worker_id), on_expired=on_expired)
 
-    def get_reservation(self, token: str, *, now_ns: int | None = None) -> WorkerReservation | None:
+    def get_reservation(
+        self, token: str, *, now_ns: int | None = None,
+        on_expired: Callable[[tuple[WorkerReservation, ...]], None] | None = None,
+    ) -> WorkerReservation | None:
         return self._run(
             "get_reservation",
             lambda memory, timestamp: memory.get_reservation(token, now_ns=timestamp),
-            now_ns=now_ns,
+            now_ns=now_ns, on_expired=on_expired,
         )
 
     def get_reservation_for_task(
         self, principal_id: str, task_id: str, *, now_ns: int | None = None,
+        on_expired: Callable[[tuple[WorkerReservation, ...]], None] | None = None,
     ) -> WorkerReservation | None:
         return self._run(
             "get_reservation_for_task",
             lambda memory, timestamp: memory.get_reservation_for_task(
                 principal_id, task_id, now_ns=timestamp,
             ),
-            now_ns=now_ns,
+            now_ns=now_ns, on_expired=on_expired,
         )
 
     def active_reservations_with_expired(
@@ -1094,6 +1101,7 @@ class SQLiteWorkerRegistry:
     def update_descriptor(
         self, descriptor: WorkerDescriptor, *, authenticated_worker_id: str,
         expected_revision: int,
+        on_expired: Callable[[tuple[WorkerReservation, ...]], None] | None = None,
     ) -> WorkerSnapshot:
         return self._run(
             "update_descriptor",
@@ -1101,7 +1109,7 @@ class SQLiteWorkerRegistry:
                 descriptor, authenticated_worker_id=authenticated_worker_id,
                 expected_revision=expected_revision,
             ),
-            actor_id=authenticated_worker_id,
+            actor_id=authenticated_worker_id, on_expired=on_expired,
         )
 
     def heartbeat(
@@ -1162,28 +1170,40 @@ class SQLiteWorkerRegistry:
             actor_id=authenticated_worker_id, on_expired=on_expired,
         )
 
-    def quarantine(self, worker_id: str, *, expected_health_revision: int) -> WorkerSnapshot:
+    def quarantine(
+        self, worker_id: str, *, expected_health_revision: int,
+        on_expired: Callable[[tuple[WorkerReservation, ...]], None] | None = None,
+    ) -> WorkerSnapshot:
         return self._run(
             "quarantine",
             lambda memory, timestamp: memory.quarantine(
                 worker_id, expected_health_revision=expected_health_revision,
             ),
+            on_expired=on_expired,
         )
 
-    def retire(self, worker_id: str, *, expected_health_revision: int) -> WorkerSnapshot:
+    def retire(
+        self, worker_id: str, *, expected_health_revision: int,
+        on_expired: Callable[[tuple[WorkerReservation, ...]], None] | None = None,
+    ) -> WorkerSnapshot:
         return self._run(
             "retire",
             lambda memory, timestamp: memory.retire(
                 worker_id, expected_health_revision=expected_health_revision,
             ),
+            on_expired=on_expired,
         )
 
-    def clear_quarantine(self, worker_id: str, *, expected_health_revision: int) -> WorkerSnapshot:
+    def clear_quarantine(
+        self, worker_id: str, *, expected_health_revision: int,
+        on_expired: Callable[[tuple[WorkerReservation, ...]], None] | None = None,
+    ) -> WorkerSnapshot:
         return self._run(
             "clear_quarantine",
             lambda memory, timestamp: memory.clear_quarantine(
                 worker_id, expected_health_revision=expected_health_revision,
             ),
+            on_expired=on_expired,
         )
 
     def reserve_eligible(
