@@ -12,7 +12,7 @@ This first vertical slice establishes the evaluation contract before any strateg
 
 ## API
 
-Import `StrategyObservation`, `evaluate_strategies`, and `verify_strategy_evaluation` from `capri_core`.
+Import `StrategyObservation`, `evaluate_strategies`, and `verify_strategy_evaluation` from `capri_core.strategy`.
 
 Each observation contains:
 - task ID and scenario label;
