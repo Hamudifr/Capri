@@ -2,7 +2,7 @@
 
 ## Rust implementation
 
-The canonical CCEL computational core is implemented in Rust in `rust/ccel-core` and integrated into `main` by PR #143 (squash commit `08dbb878941501ca9cdc02afceb1ba68db3877b1`). It uses the standard library only and follows the latest stable toolchain through `rust-toolchain.toml`. Python remains available for Capri orchestration and integrations, not as the canonical CCEL search engine. Python CI tests 3.11, 3.12, 3.13 and 3.15; the package floor remains 3.11.
+The canonical CCEL computational core is implemented in Rust in `rust/ccel-core` and integrated into `main` by PR #143 (squash commit `08dbb878941501ca9cdc02afceb1ba68db3877b1`). It uses the standard library only and follows the latest stable toolchain through `rust-toolchain.toml`. Python remains available for Capri orchestration and integrations, not as the canonical CCEL search engine. Python CI tests 3.11 through 3.15; the package floor remains 3.11.
 
 A same-runner synthetic microbenchmark has now measured Rust against a Python reference. It demonstrates a speed advantage on that specific task only, not a general system-wide speedup. Rust is not itself an intelligence breakthrough.
 
