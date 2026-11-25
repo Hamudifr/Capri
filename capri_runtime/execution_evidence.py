@@ -10,8 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import sqlite3
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Mapping
 from uuid import uuid4
@@ -233,7 +232,7 @@ class SQLiteExecutionEvidenceJournal:
             raise StrategyAuthorizationError("host result verifier did not return a verified result")
         if type(value.result_sha256) is not str or value.result_sha256 != expected_digest:
             raise StrategyAuthorizationError("host result verifier returned a mismatched result digest")
-        if value.outcome not in _ALLOWED_OUTCOMES or type(value.outcome) is not str:
+        if type(value.outcome) is not str or value.outcome not in _ALLOWED_OUTCOMES:
             raise StrategyAuthorizationError("verified outcome is invalid")
         if type(value.safety_violation) is not bool:
             raise StrategyAuthorizationError("verified safety flag is invalid")
@@ -355,14 +354,23 @@ class SQLiteExecutionEvidenceJournal:
             connection = self._tasks._connect()
             try:
                 row = connection.execute(
-                    "SELECT payload_json,event_sha256,key_id,signature FROM execution_evidence_events WHERE event_id=?",
+                    """SELECT payload_json,event_sha256,key_id,signature,principal_id,task_id,
+                    step_index,attempt,claim_sha256,strategy_class,strategy_id,strategy_version,
+                    task_family,scenario,outcome,safety_violation,tool_calls,context_tokens,
+                    estimated_cost_units,latency_ms,result_sha256,created_at
+                    FROM execution_evidence_events WHERE event_id=?""",
                     (event_id,),
                 ).fetchone()
             finally:
                 connection.close()
         if row is None:
             return None
-        payload_json, event_sha, key_id, signature_hex = row
+        (
+            payload_json, event_sha, key_id, signature_hex, principal_id, task_id,
+            step_index, attempt, claim_sha, strategy_class, strategy_id, strategy_version,
+            task_family, scenario, outcome, safety_violation, tool_calls, context_tokens,
+            estimated_cost_units, latency_ms, result_sha, created_at,
+        ) = row
         try:
             encoded = payload_json.encode("utf-8", errors="strict")
             if len(encoded) > 16_384 or hashlib.sha256(encoded).hexdigest() != event_sha:
@@ -371,6 +379,25 @@ class SQLiteExecutionEvidenceJournal:
             if type(payload) is not dict or _canonical(payload) != payload_json:
                 return None
             if payload.get("event_id") != event_id or payload.get("key_id") != key_id:
+                return None
+            expected_row = (
+                payload.get("principal_id"), payload.get("task_id"),
+                payload.get("step_index"), payload.get("attempt"),
+                payload.get("claim_sha256"), payload.get("strategy_class"),
+                payload.get("strategy_id"), payload.get("strategy_version"),
+                payload.get("task_family"), payload.get("scenario"),
+                payload.get("outcome"), int(payload.get("safety_violation") is True),
+                payload.get("tool_calls"), payload.get("context_tokens"),
+                payload.get("estimated_cost_units"), payload.get("latency_ms"),
+                payload.get("result_sha256"), payload.get("created_at"),
+            )
+            actual_row = (
+                principal_id, task_id, step_index, attempt, claim_sha,
+                strategy_class, strategy_id, strategy_version, task_family,
+                scenario, outcome, safety_violation, tool_calls, context_tokens,
+                estimated_cost_units, latency_ms, result_sha, created_at,
+            )
+            if expected_row != actual_row:
                 return None
             if type(signature_hex) is not str or not re.fullmatch(r"[0-9a-f]{64}", signature_hex):
                 return None
