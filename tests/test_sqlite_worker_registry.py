@@ -4,6 +4,7 @@ import multiprocessing
 import sqlite3
 import tempfile
 import threading
+import time
 import unittest
 
 from capri_runtime.sqlite_worker_registry import SQLiteWorkerRegistry
@@ -605,6 +606,42 @@ class SQLiteWorkerRegistryTests(unittest.TestCase):
         with self.assertRaisesRegex(TaskValidationError, "invalid worker registry snapshot"):
             self.store.backup_to(backup_path)
         self.assertFalse(os.path.exists(backup_path))
+
+    def test_expiry_clock_is_sampled_after_waiting_for_sqlite_write_lock(self):
+        self.register_healthy(max_concurrency=1)
+        pending = self.reserve(self.registry, "task-lock-expiry")
+        self.assertIsNotNone(pending)
+
+        blocker = self.store._connect()
+        blocker.execute("BEGIN IMMEDIATE")
+        started = threading.Event()
+        outcome = {}
+
+        def sweep_after_lock():
+            started.set()
+            try:
+                outcome["value"] = self.registry.active_reservations_with_expired()
+            except Exception as exc:
+                outcome["error"] = exc
+
+        worker = threading.Thread(target=sweep_after_lock)
+        worker.start()
+        try:
+            self.assertTrue(started.wait(timeout=2))
+            # The registry operation is blocked behind the writer transaction.
+            time.sleep(0.1)
+            self.clock.advance_ms(2_000)
+            blocker.execute("COMMIT")
+        finally:
+            blocker.close()
+        worker.join(timeout=5)
+        self.assertFalse(worker.is_alive(), "registry sweep did not finish after lock release")
+        self.assertNotIn("error", outcome, repr(outcome.get("error")))
+        active, expired = outcome["value"]
+        self.assertEqual(active, ())
+        self.assertEqual(tuple(item.token for item in expired), (pending.token,))
+        self.assertIsNone(self.registry.get_reservation(pending.token))
+        self.assertEqual(self.registry.integrity_check(), "ok")
 
     def test_capacity_reservation_is_serialized_across_processes(self):
         if "fork" not in multiprocessing.get_all_start_methods():
