@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sqlite3
 import stat
 import threading
@@ -16,6 +15,8 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Protocol
 from uuid import uuid4
+
+from capri_core.validation import contains_surrogate
 
 from .sqlite_backup import backup_sqlite_database
 
@@ -143,7 +144,7 @@ _MAX_SOURCE = 2_048
 _MAX_SCOPE = 100
 _MAX_QUERY = 500
 _MAX_RECORDS = 10_000
-_SURROGATE = re.compile("[\\ud800-\\udfff]")
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -154,7 +155,7 @@ def _iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat()
 
 def _validate_text(value: str, field: str, maximum: int, *, empty: bool = False) -> str:
-    if not isinstance(value, str) or (not empty and not value.strip()) or len(value) > maximum or _SURROGATE.search(value):
+    if not isinstance(value, str) or (not empty and not value.strip()) or len(value) > maximum or contains_surrogate(value):
         raise MemoryValidationError(f"{field} must be valid bounded Unicode text")
     return value
 

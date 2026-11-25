@@ -14,6 +14,8 @@ import urllib.error
 import urllib.request
 from typing import Any, Sequence
 
+from capri_core.validation import contains_surrogate
+
 from .memory import UntrustedMemoryContext, serialize_untrusted_memory_context
 from .knowledge_graph import UntrustedKnowledgeContext, serialize_untrusted_knowledge_context
 from .orchestration import AssistantTurn
@@ -71,7 +73,7 @@ def _valid_text(value: object, *, maximum: int, allow_empty: bool = False) -> bo
         type(value) is str
         and (allow_empty or bool(value.strip()))
         and len(value) <= maximum
-        and not any(0xD800 <= ord(character) <= 0xDFFF for character in value)
+        and not contains_surrogate(value)
     )
 
 

@@ -14,6 +14,8 @@ from typing import Protocol
 from urllib.parse import urlsplit
 from uuid import UUID
 
+from capri_core.validation import contains_surrogate
+
 
 class KnowledgeGraphError(ValueError):
     """Graph input or retrieval output violates the bounded contract."""
@@ -34,7 +36,7 @@ _TOKEN_RE = re.compile(r"[\w-]{2,}", re.UNICODE)
 def _text(value: object, field: str, maximum: int, *, empty: bool = False) -> str:
     if type(value) is not str or len(value) > maximum or (not empty and not value.strip()):
         raise KnowledgeGraphError(f"{field} is invalid")
-    if any(0xD800 <= ord(ch) <= 0xDFFF for ch in value):
+    if contains_surrogate(value):
         raise KnowledgeGraphError(f"{field} contains invalid Unicode")
     return value
 

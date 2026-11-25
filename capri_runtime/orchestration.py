@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from typing import Protocol
 from uuid import uuid4
 
+from capri_core.validation import contains_surrogate
+
 from .runtime import Message, Session, SessionStore
 from .memory import UntrustedMemoryContext
 from .knowledge_graph import UntrustedKnowledgeContext
@@ -118,9 +120,7 @@ class MemoryAwareToolModelAdapter(Protocol):
 
 
 def _valid_text(value: str) -> bool:
-    return isinstance(value, str) and not any(
-        0xD800 <= ord(character) <= 0xDFFF for character in value
-    )
+    return isinstance(value, str) and not contains_surrogate(value)
 
 
 def _history_size(messages: list[Message]) -> int:

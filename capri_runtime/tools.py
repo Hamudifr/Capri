@@ -17,6 +17,8 @@ from typing import Any, Callable, Mapping, Protocol
 from types import MappingProxyType
 from uuid import uuid4
 
+from capri_core.validation import contains_surrogate as _contains_surrogate
+
 
 class ToolBoundaryError(Exception):
     """Base class for expected tool-boundary failures."""
@@ -66,10 +68,6 @@ _TYPES = {"object", "array", "string", "integer", "number", "boolean", "null"}
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 _OPERATION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
-
-
-def _contains_surrogate(value: str) -> bool:
-    return any(0xD800 <= ord(character) <= 0xDFFF for character in value)
 
 
 def _canonical_json(value: Any, *, max_bytes: int, label: str) -> tuple[str, bytes]:
