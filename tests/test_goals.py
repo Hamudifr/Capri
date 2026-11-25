@@ -52,15 +52,37 @@ class SQLiteGoalStoreTests(unittest.TestCase):
         self.assertEqual(reopened.constraints["max_tool_calls"], 8)
         self.assertEqual(reopened.deadline, "2026-11-26T11:00:00+00:00")
 
-    def test_principal_read_reuses_one_connection_without_weakening_owner_scope(self):
+    def test_principal_reads_and_history_reuse_one_connection(self):
         goal = self.create()
         original_connect = self.store._connect
         with patch.object(self.store, "_connect", wraps=original_connect) as connect:
             reopened = self.store.get_for_principal(goal.goal_id, "alice")
         self.assertEqual(reopened, goal)
         self.assertEqual(connect.call_count, 1)
-        with self.assertRaises(GoalNotFoundError):
-            self.store.get_for_principal(goal.goal_id, "bob")
+
+        with patch.object(self.store, "_connect", wraps=original_connect) as connect:
+            evidence = self.store.evidence_for_principal(goal.goal_id, "alice")
+        self.assertEqual(evidence, ())
+        self.assertEqual(connect.call_count, 1)
+
+        with patch.object(self.store, "_connect", wraps=original_connect) as connect:
+            events = self.store.events_for_principal(goal.goal_id, "alice")
+        self.assertEqual(events[0]["event_type"], "created")
+        self.assertEqual(connect.call_count, 1)
+
+        with patch.object(self.store, "_connect", wraps=original_connect) as connect:
+            domain_events = self.store.domain_events_for_principal(goal.goal_id, "alice")
+        self.assertTrue(domain_events)
+        self.assertEqual(connect.call_count, 1)
+
+        for operation in (
+            lambda: self.store.get_for_principal(goal.goal_id, "bob"),
+            lambda: self.store.evidence_for_principal(goal.goal_id, "bob"),
+            lambda: self.store.events_for_principal(goal.goal_id, "bob"),
+            lambda: self.store.domain_events_for_principal(goal.goal_id, "bob"),
+        ):
+            with self.assertRaises(GoalNotFoundError):
+                operation()
 
     def test_owner_isolation_and_immutable_owner_row(self):
         goal = self.create()
