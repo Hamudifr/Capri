@@ -436,5 +436,28 @@ class SQLiteWorkerRegistryTests(unittest.TestCase):
         with self.assertRaises(WorkerRegistryError):
             self.make_registry(SQLiteTaskStore(self.path))
 
+    def test_weak_append_only_trigger_fails_closed(self):
+        connection = self.store._connect()
+        try:
+            connection.execute("DROP TRIGGER worker_registry_events_immutable_update")
+            connection.execute(
+                """
+                CREATE TRIGGER worker_registry_events_immutable_update
+                BEFORE UPDATE ON worker_registry_events
+                WHEN 0
+                BEGIN
+                    SELECT RAISE(ABORT, 'worker registry audit events are append-only');
+                END
+                """
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        self.assertEqual(self.registry.integrity_check(), "worker registry validation failed")
+        with self.assertRaises(WorkerRegistryError):
+            self.make_registry(SQLiteTaskStore(self.path))
+
+
 if __name__ == "__main__":
     unittest.main()
