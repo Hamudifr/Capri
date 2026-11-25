@@ -196,9 +196,9 @@ class SkillValidationTests(unittest.TestCase):
             write_skill(
                 root,
                 "quoted-skill",
-                "name: quoted-skill # package id\\n"
-                "description: 'Use when checking a skill''s description # safely.'\\n"
-                "license: 'MIT' # license label\\n",
+                "name: quoted-skill # package id\n"
+                "description: 'Use when checking a skill''s description # safely.'\n"
+                "license: 'MIT' # license label\n",
             )
             report = validate_skill_tree(root)
             self.assertEqual(report["status"], "pass", report)
@@ -209,11 +209,11 @@ class SkillValidationTests(unittest.TestCase):
             write_skill(
                 root,
                 "metadata-duplicate",
-                "name: metadata-duplicate\\n"
-                "description: Use when testing metadata integrity.\\n"
-                "metadata:\\n"
-                "  author: Capri\\n"
-                "  author: another-value\\n",
+                "name: metadata-duplicate\n"
+                "description: Use when testing metadata integrity.\n"
+                "metadata:\n"
+                "  author: Capri\n"
+                "  author: another-value\n",
             )
             report = validate_skill_tree(root)
             self.assertTrue(any("duplicate metadata key" in item for item in report["skills"][0]["errors"]))
@@ -224,8 +224,8 @@ class SkillValidationTests(unittest.TestCase):
             write_skill(
                 root,
                 "real-skill",
-                "name: real-skill\\n"
-                "description: Use when testing symbolic link rejection.\\n",
+                "name: real-skill\n"
+                "description: Use when testing symbolic link rejection.\n",
             )
             try:
                 (root / "skills" / "linked-skill").symlink_to(
