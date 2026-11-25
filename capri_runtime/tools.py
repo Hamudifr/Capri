@@ -679,13 +679,32 @@ class InMemoryAuditSink(AuditSink):
             self._pending_worker_operations -= 1
 
     def _outstanding_worker_reservations_locked(self) -> int:
-        last_ack = max(
-            (
-                index for index, event in enumerate(self._events)
-                if event.tool_name == "worker.reconciliation.acknowledged"
-            ),
-            default=-1,
-        )
+        def decode(event: AuditEvent) -> dict[str, Any] | None:
+            if not isinstance(event.metadata_json, str):
+                return None
+            try:
+                metadata = json.loads(event.metadata_json)
+                canonical = json.dumps(
+                    metadata, sort_keys=True, separators=(",", ":"),
+                    ensure_ascii=False, allow_nan=False,
+                )
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return None
+            if (
+                not isinstance(metadata, dict)
+                or canonical != event.metadata_json
+                or hashlib.sha256(event.metadata_json.encode("utf-8")).hexdigest()
+                    != event.argument_digest
+            ):
+                return None
+            return metadata
+
+        last_ack = -1
+        for index, event in enumerate(self._events):
+            if event.tool_name == "worker.reconciliation.acknowledged":
+                if decode(event) is None:
+                    return 1
+                last_ack = index
         states: dict[str, str] = {}
         closed_events = {
             "worker.reservation.released",
@@ -698,11 +717,8 @@ class InMemoryAuditSink(AuditSink):
         for event in self._events[last_ack + 1:]:
             if not event.tool_name.startswith("worker.reservation."):
                 continue
-            try:
-                metadata = json.loads(event.metadata_json or "")
-            except (TypeError, ValueError, json.JSONDecodeError):
-                return 1
-            if not isinstance(metadata, dict):
+            metadata = decode(event)
+            if metadata is None:
                 return 1
             token_hash = metadata.get("reservation_token_sha256")
             if not isinstance(token_hash, str) or len(token_hash) != 64:
