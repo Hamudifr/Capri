@@ -1,5 +1,6 @@
 import os
 import json
+import multiprocessing
 import sqlite3
 import tempfile
 import threading
@@ -29,6 +30,30 @@ class FakeClock:
         delta = milliseconds * 1_000_000
         self.mono_ns += delta
         self.wall_ns += delta
+
+
+def _reserve_in_separate_process(path, task_id, barrier, result_queue, mono_ns, wall_ns):
+    store = SQLiteTaskStore(path)
+    registry = SQLiteWorkerRegistry(
+        store,
+        heartbeat_ttl_ms=5_000,
+        reservation_ttl_ms=1_000,
+        max_reservations=16,
+        clock_ns=lambda: mono_ns,
+        clock_wall_ns=lambda: wall_ns,
+    )
+    barrier.wait(timeout=10)
+    try:
+        reservation = registry.reserve_eligible(
+            "math.factorial",
+            protocol_version=1,
+            authorized_worker_ids={"worker-1"},
+            principal_id="alice",
+            task_id=task_id,
+        )
+        result_queue.put(reservation is not None)
+    except WorkerConflictError:
+        result_queue.put(False)
 
 
 class SQLiteWorkerRegistryTests(unittest.TestCase):
@@ -580,6 +605,46 @@ class SQLiteWorkerRegistryTests(unittest.TestCase):
         with self.assertRaisesRegex(TaskValidationError, "invalid worker registry snapshot"):
             self.store.backup_to(backup_path)
         self.assertFalse(os.path.exists(backup_path))
+
+    def test_capacity_reservation_is_serialized_across_processes(self):
+        if "fork" not in multiprocessing.get_all_start_methods():
+            self.skipTest("requires POSIX fork semantics")
+        self.register_healthy(max_concurrency=1)
+        context = multiprocessing.get_context("fork")
+        barrier = context.Barrier(2)
+        result_queue = context.Queue()
+        child = context.Process(
+            target=_reserve_in_separate_process,
+            args=(
+                self.path,
+                "task-child",
+                barrier,
+                result_queue,
+                self.clock.mono_ns,
+                self.clock.wall_ns,
+            ),
+        )
+        child.start()
+        barrier.wait(timeout=10)
+        try:
+            parent_reservation = self.reserve(self.registry, "task-parent")
+            parent_reserved = parent_reservation is not None
+        except WorkerConflictError:
+            parent_reserved = False
+        child.join(timeout=10)
+        if child.is_alive():
+            child.terminate()
+            child.join(timeout=5)
+        self.assertEqual(child.exitcode, 0)
+        child_reserved = result_queue.get(timeout=5)
+        result_queue.close()
+        self.assertEqual(int(parent_reserved) + int(child_reserved), 1)
+        recovered = (
+            self.registry.get_reservation_for_task("alice", "task-parent")
+            or self.registry.get_reservation_for_task("alice", "task-child")
+        )
+        self.assertIsNotNone(recovered)
+        self.assertEqual(self.registry.integrity_check(), "ok")
 
 if __name__ == "__main__":
     unittest.main()
