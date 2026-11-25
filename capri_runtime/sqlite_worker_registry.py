@@ -729,6 +729,8 @@ class SQLiteWorkerRegistry:
             updated_at_wall_ns = (
                 wall_now if state_changed else previous["updated_at_wall_ns"]
             )
+            if previous is not None and not state_changed:
+                continue
             connection.execute(
                 """
                 INSERT INTO worker_registry_state (
