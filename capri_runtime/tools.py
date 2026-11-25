@@ -702,6 +702,8 @@ class InMemoryAuditSink(AuditSink):
                 metadata = json.loads(event.metadata_json or "")
             except (TypeError, ValueError, json.JSONDecodeError):
                 return 1
+            if not isinstance(metadata, dict):
+                return 1
             token_hash = metadata.get("reservation_token_sha256")
             if not isinstance(token_hash, str) or len(token_hash) != 64:
                 return 1
