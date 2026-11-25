@@ -6,6 +6,7 @@ or treat worker output as trusted authorization.
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -14,6 +15,8 @@ PROTOCOL_VERSION = 1
 MAX_MESSAGE_BYTES = 1_048_576
 MAX_DEADLINE_MS = 120_000
 MAX_JSON_DEPTH = 32
+MAX_NUMBER_CHARS = 64
+MAX_INTEGER_BITS = 256
 _ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _CAPABILITY_PATTERN = re.compile(r"^[a-z][a-z0-9_.:-]{0,127}$")
 
@@ -33,6 +36,27 @@ def _pairs_without_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 def _reject_constant(value: str) -> None:
     raise WorkerProtocolError(f"non-standard JSON constant: {value}")
+
+
+def _parse_integer(value: str) -> int:
+    if len(value.lstrip("-")) > MAX_NUMBER_CHARS:
+        raise WorkerProtocolError("JSON integer exceeds the protocol numeric limit")
+    try:
+        return int(value)
+    except ValueError:
+        raise WorkerProtocolError("JSON integer is invalid") from None
+
+
+def _parse_float(value: str) -> float:
+    if len(value) > MAX_NUMBER_CHARS:
+        raise WorkerProtocolError("JSON number exceeds the protocol numeric limit")
+    try:
+        parsed = float(value)
+    except ValueError:
+        raise WorkerProtocolError("JSON number is invalid") from None
+    if not math.isfinite(parsed):
+        raise WorkerProtocolError("non-finite JSON numbers are not permitted")
+    return parsed
 
 
 def _depth(value: Any) -> int:
@@ -65,6 +89,10 @@ def _depth(value: Any) -> int:
                 children = current
             for child in reversed(children):
                 stack.append((child, level + 1, False))
+        elif kind is int and current.bit_length() > MAX_INTEGER_BITS:
+            raise WorkerProtocolError("JSON integer exceeds the protocol numeric limit")
+        elif kind is float and not math.isfinite(current):
+            raise WorkerProtocolError("non-finite JSON numbers are not permitted")
         elif current is not None and kind not in (str, int, float, bool):
             raise WorkerProtocolError("unsupported JSON value")
     return maximum
@@ -123,11 +151,12 @@ def _decode(raw: str | bytes) -> dict[str, Any]:
         decoded = encoded.decode("utf-8")
         value = json.loads(
             decoded, object_pairs_hook=_pairs_without_duplicates,
-            parse_constant=_reject_constant,
+            parse_constant=_reject_constant, parse_int=_parse_integer,
+            parse_float=_parse_float,
         )
     except WorkerProtocolError:
         raise
-    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
+    except (UnicodeDecodeError, ValueError, RecursionError):
         raise WorkerProtocolError("message is not valid UTF-8 JSON") from None
     if type(value) is not dict:
         raise WorkerProtocolError("message envelope must be a JSON object")
