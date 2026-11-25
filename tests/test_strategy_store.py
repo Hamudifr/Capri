@@ -311,6 +311,21 @@ class SQLiteStrategyStoreTests(unittest.TestCase):
         with self.assertRaises(StrategyAuthorizationError):
             self.store.activate_for_principal("alice", grant)
 
+    def test_registry_rejects_unversioned_and_unmatched_baseline_versions(self):
+        with self.assertRaises(StrategyStoreError):
+            self.store.register_baseline_for_principal(
+                "bob", "reasoning", "baseline", "unversioned", {},
+            )
+        self.store.register_baseline_for_principal(
+            "bob", "reasoning", "baseline", "2.0", {},
+        )
+        with self.assertRaises(StrategyNotFoundError):
+            self.store.register_candidate_for_principal(
+                "bob", "reasoning", "candidate", "1.0", {"mode": "candidate"},
+                self.evaluation, observations=self.observations,
+                evidence_manifest_ref="test://manifests/wrong-baseline-version",
+            )
+
     def test_baseline_version_is_immutable(self):
         with self.assertRaises(StrategyConflictError):
             self.store.register_baseline_for_principal(
