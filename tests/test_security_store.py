@@ -201,8 +201,15 @@ class SQLiteSecurityStoreTests(unittest.TestCase):
             ToolSpec("delete_item", "tools:delete", SCHEMA, requires_approval=True),
             lambda args: calls.append(args) or {"deleted": True},
         )
-        grant = self.grant()
-        context = ExecutionContext("principal-1", frozenset({"tools:delete"}), (grant,))
+        grant = ApprovalGrant(
+            "grant-1", "principal-1", "delete_item", argument_digest({"item": "item-1"}),
+            (self.now + timedelta(minutes=5)).isoformat(),
+            operation_id="session-1:durable-delete",
+        )
+        context = ExecutionContext(
+            "principal-1", frozenset({"tools:delete"}), (grant,),
+            operation_id="session-1:durable-delete",
+        )
         first_store = SQLiteSecurityStore(self.path)
         first_executor = ToolExecutor(
             registry, first_store, approval_store=first_store, clock=lambda: self.now
