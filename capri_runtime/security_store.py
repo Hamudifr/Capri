@@ -225,6 +225,43 @@ def _validate_approval_challenges(connection: sqlite3.Connection) -> None:
         raise ToolValidationError("security backup contains invalid worker audit state")
 
 
+def _outstanding_worker_reservations(connection: sqlite3.Connection) -> int:
+    rows = connection.execute(
+        "SELECT tool_name, metadata_json FROM audit_events ORDER BY rowid"
+    ).fetchall()
+    last_ack = max(
+        (index for index, row in enumerate(rows)
+         if row[0] == "worker.reconciliation.acknowledged"),
+        default=-1,
+    )
+    states: dict[str, str] = {}
+    closed_events = {
+        "worker.reservation.released",
+        "worker.reservation.denied",
+        "worker.reservation.commit_missing",
+        "worker.reservation.commit_rejected",
+        "worker.reservation.release_missing",
+        "worker.reservation.collision_released",
+    }
+    for event_type, metadata_json in rows[last_ack + 1:]:
+        if not isinstance(event_type, str) or not event_type.startswith("worker.reservation."):
+            continue
+        try:
+            metadata = json.loads(metadata_json or "")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return 1
+        token_hash = metadata.get("reservation_token_sha256")
+        if not isinstance(token_hash, str) or len(token_hash) != 64:
+            return 1
+        if event_type == "worker.reservation.created":
+            states[token_hash] = "pending"
+        elif event_type == "worker.reservation.committed":
+            states[token_hash] = "committed"
+        elif event_type in closed_events:
+            states[token_hash] = "closed"
+    return sum(state in {"pending", "committed"} for state in states.values())
+
+
 class SQLiteSecurityStore(AuditSink, ApprovalStore):
     """Durable, cross-process audit sink and one-use approval replay store.
 
@@ -538,7 +575,7 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
                 ).fetchone()
                 if row is None or type(row[0]) is not int or row[0] < 0:
                     raise ToolValidationError("worker audit state is invalid")
-                return row[0] > 0
+                return row[0] > 0 or _outstanding_worker_reservations(connection) > 0
             finally:
                 connection.close()
 
@@ -560,11 +597,16 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
                 if row is None or type(row[0]) is not int or row[0] < 0:
                     raise ToolValidationError("worker audit state is invalid")
                 pending = row[0]
-                if pending == 0:
+                outstanding = _outstanding_worker_reservations(connection)
+                if pending == 0 and outstanding == 0:
                     connection.rollback()
                     return False
                 metadata_json = json.dumps(
-                    {"pending_operations": pending, "reconciliation_note": note},
+                    {
+                        "pending_operations": pending,
+                        "outstanding_reservations": outstanding,
+                        "reconciliation_note": note,
+                    },
                     sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
                 )
                 digest = hashlib.sha256(metadata_json.encode("utf-8")).hexdigest()
