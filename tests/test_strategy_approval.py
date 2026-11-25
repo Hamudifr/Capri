@@ -87,6 +87,17 @@ class HostStrategyApprovalAuthorityTests(unittest.TestCase):
         with self.assertRaises(StrategyAuthorizationError):
             self.authority.issue_grant("valid", self.request)
 
+    def test_verifier_enforces_its_own_maximum_ttl(self):
+        wider = HostStrategyApprovalAuthority(
+            self.keyring,
+            authenticate_approver=lambda credential: self.identity,
+            authorize_approver=lambda identity, request: True,
+            clock=lambda: self.now,
+            max_ttl_seconds=900,
+        )
+        grant = wider.issue_grant("valid", self.request, ttl_seconds=600)
+        self.assertFalse(self.authority.verify(grant))
+
     def test_ttl_is_bounded(self):
         with self.assertRaises(StrategyAuthorizationError):
             self.authority.issue_grant("valid", self.request, ttl_seconds=301)
