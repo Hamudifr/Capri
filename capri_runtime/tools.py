@@ -685,7 +685,7 @@ class InMemoryAuditSink(AuditSink):
     def acknowledge_worker_lifecycle_reconciliation(self, note: str) -> bool:
         if (
             not isinstance(note, str) or not note or len(note) > 1024
-            or contains_surrogate(note)
+            or _contains_surrogate(note)
         ):
             raise ToolValidationError("worker lifecycle reconciliation note is invalid")
         with self._lock:
