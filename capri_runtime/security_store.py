@@ -6,6 +6,7 @@ are not stored. The database is private but not encrypted at rest.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -13,7 +14,9 @@ import sqlite3
 import stat
 import threading
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
+from uuid import uuid4
+from typing import Any
 
 from capri_core.validation import contains_surrogate
 
@@ -48,9 +51,13 @@ def _validate_backup_semantics(connection: sqlite3.Connection) -> None:
     """Reject logically malformed security rows even when SQLite is structurally sound."""
     audit_rows = connection.execute(
         """SELECT event_id, timestamp, principal_id, tool_name,
-        argument_digest, status, error_code FROM audit_events"""
+        argument_digest, status, error_code, resource_type, resource_id,
+        task_id, metadata_json FROM audit_events"""
     ).fetchall()
-    for event_id, timestamp, principal_id, tool_name, digest, status, error_code in audit_rows:
+    for (
+        event_id, timestamp, principal_id, tool_name, digest, status, error_code,
+        resource_type, resource_id, task_id, metadata_json,
+    ) in audit_rows:
         if not all((
             _valid_text(event_id, 64), _valid_text(timestamp, 64),
             _valid_text(principal_id, 256), _valid_text(tool_name, 64),
@@ -62,6 +69,31 @@ def _validate_backup_semantics(connection: sqlite3.Connection) -> None:
             ),
         )):
             raise ToolValidationError("security backup contains an invalid audit event")
+        resource_fields = (resource_type, resource_id, task_id)
+        if metadata_json is None:
+            if any(value is not None for value in resource_fields):
+                raise ToolValidationError("security backup contains incomplete audit resource metadata")
+        else:
+            if not all((
+                _valid_text(resource_type, 64), _valid_text(resource_id, 256),
+                task_id is None or _valid_text(task_id, 128),
+                _valid_text(metadata_json, 16_384),
+                len(metadata_json.encode("utf-8")) <= 16_384,
+            )):
+                raise ToolValidationError("security backup contains invalid audit resource metadata")
+            try:
+                metadata = json.loads(metadata_json)
+                canonical_metadata = json.dumps(
+                    metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
+                )
+            except (TypeError, ValueError, json.JSONDecodeError):
+                raise ToolValidationError("security backup contains invalid audit metadata JSON") from None
+            if (
+                not isinstance(metadata, dict)
+                or canonical_metadata != metadata_json
+                or hashlib.sha256(metadata_json.encode("utf-8")).hexdigest() != digest
+            ):
+                raise ToolValidationError("security backup contains an invalid audit metadata digest")
 
     approval_rows = connection.execute(
         """SELECT grant_id, principal_id, tool_name, argument_digest,
@@ -183,6 +215,76 @@ def _validate_approval_challenges(connection: sqlite3.Connection) -> None:
             )
         grant_ids.add(grant_id)
 
+    worker_state_rows = connection.execute(
+        "SELECT singleton_id, pending_operations FROM worker_audit_state"
+    ).fetchall()
+    if (
+        len(worker_state_rows) != 1
+        or worker_state_rows[0][0] != 1
+        or type(worker_state_rows[0][1]) is not int
+        or worker_state_rows[0][1] < 0
+    ):
+        raise ToolValidationError("security backup contains invalid worker audit state")
+
+
+def _decode_audit_metadata(metadata_json: str | None, digest: str | None) -> dict[str, Any] | None:
+    if not isinstance(metadata_json, str) or not isinstance(digest, str):
+        return None
+    if not _DIGEST_RE.fullmatch(digest):
+        return None
+    try:
+        metadata = json.loads(metadata_json)
+        canonical = json.dumps(
+            metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
+        )
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if (
+        not isinstance(metadata, dict)
+        or canonical != metadata_json
+        or hashlib.sha256(metadata_json.encode("utf-8")).hexdigest() != digest
+    ):
+        return None
+    return metadata
+
+
+def _outstanding_worker_reservations(connection: sqlite3.Connection) -> int:
+    rows = connection.execute(
+        """SELECT tool_name, argument_digest, metadata_json
+        FROM audit_events ORDER BY rowid"""
+    ).fetchall()
+    last_ack = -1
+    for index, (event_type, digest, metadata_json) in enumerate(rows):
+        if event_type == "worker.reconciliation.acknowledged":
+            if _decode_audit_metadata(metadata_json, digest) is None:
+                return 1
+            last_ack = index
+    states: dict[str, str] = {}
+    closed_events = {
+        "worker.reservation.released",
+        "worker.reservation.denied",
+        "worker.reservation.commit_missing",
+        "worker.reservation.commit_rejected",
+        "worker.reservation.release_missing",
+        "worker.reservation.collision_released",
+    }
+    for event_type, digest, metadata_json in rows[last_ack + 1:]:
+        if not isinstance(event_type, str) or not event_type.startswith("worker.reservation."):
+            continue
+        metadata = _decode_audit_metadata(metadata_json, digest)
+        if metadata is None:
+            return 1
+        token_hash = metadata.get("reservation_token_sha256")
+        if not isinstance(token_hash, str) or len(token_hash) != 64:
+            return 1
+        if event_type == "worker.reservation.created":
+            states[token_hash] = "pending"
+        elif event_type == "worker.reservation.committed":
+            states[token_hash] = "committed"
+        elif event_type in closed_events:
+            states[token_hash] = "closed"
+    return sum(state in {"pending", "committed"} for state in states.values())
+
 
 class SQLiteSecurityStore(AuditSink, ApprovalStore):
     """Durable, cross-process audit sink and one-use approval replay store.
@@ -278,8 +380,37 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
                         tool_name TEXT NOT NULL,
                         argument_digest TEXT NOT NULL,
                         status TEXT NOT NULL,
-                        error_code TEXT
+                        error_code TEXT,
+                        resource_type TEXT,
+                        resource_id TEXT,
+                        task_id TEXT,
+                        metadata_json TEXT
                     )"""
+                )
+                existing_audit_columns = {
+                    row[1] for row in connection.execute("PRAGMA table_info(audit_events)")
+                }
+                for column in ("resource_type", "resource_id", "task_id", "metadata_json"):
+                    if column not in existing_audit_columns:
+                        connection.execute(f"ALTER TABLE audit_events ADD COLUMN {column} TEXT")
+                connection.execute(
+                    """CREATE TABLE IF NOT EXISTS worker_audit_state (
+                        singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+                        pending_operations INTEGER NOT NULL CHECK(pending_operations >= 0)
+                    )"""
+                )
+                connection.execute(
+                    "INSERT OR IGNORE INTO worker_audit_state(singleton_id, pending_operations) VALUES (1, 0)"
+                )
+                connection.execute(
+                    """CREATE TRIGGER IF NOT EXISTS audit_events_immutable_update
+                    BEFORE UPDATE ON audit_events
+                    BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END"""
+                )
+                connection.execute(
+                    """CREATE TRIGGER IF NOT EXISTS audit_events_immutable_delete
+                    BEFORE DELETE ON audit_events
+                    BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END"""
                 )
                 connection.execute(
                     """CREATE TABLE IF NOT EXISTS consumed_approvals (
@@ -312,13 +443,50 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
             or contains_surrogate(event.error_code)
         ):
             raise ToolValidationError("audit event error code is invalid")
+        optional_fields = (
+            (event.resource_type, 64), (event.resource_id, 256), (event.task_id, 128),
+        )
+        if any(
+            value is not None and (
+                not isinstance(value, str) or not value or len(value) > limit
+                or contains_surrogate(value)
+            )
+            for value, limit in optional_fields
+        ):
+            raise ToolValidationError("audit event resource metadata is invalid")
+        if event.metadata_json is None:
+            if any(value is not None for value, _ in optional_fields):
+                raise ToolValidationError("audit resource fields require canonical metadata JSON")
+        else:
+            if (
+                not isinstance(event.metadata_json, str)
+                or len(event.metadata_json.encode("utf-8")) > 16_384
+                or contains_surrogate(event.metadata_json)
+                or event.resource_type is None or event.resource_id is None
+            ):
+                raise ToolValidationError("audit event metadata JSON is invalid")
+            try:
+                metadata = json.loads(event.metadata_json)
+                canonical_metadata = json.dumps(
+                    metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
+                )
+            except (TypeError, ValueError, json.JSONDecodeError):
+                raise ToolValidationError("audit event metadata JSON is invalid") from None
+            if (
+                not isinstance(metadata, dict)
+                or canonical_metadata != event.metadata_json
+                or hashlib.sha256(event.metadata_json.encode("utf-8")).hexdigest()
+                    != event.argument_digest
+            ):
+                raise ToolValidationError("audit event metadata digest or canonical form is invalid")
         with self._lock:
             connection = self._connect()
             try:
                 connection.execute(
                     """INSERT INTO audit_events
-                    (event_id, timestamp, principal_id, tool_name, argument_digest, status, error_code)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (event_id, timestamp, principal_id, tool_name, argument_digest, status,
+                     error_code, resource_type, resource_id, task_id, metadata_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         event.event_id,
                         event.timestamp,
@@ -327,6 +495,10 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
                         event.argument_digest,
                         event.status,
                         event.error_code,
+                        event.resource_type,
+                        event.resource_id,
+                        event.task_id,
+                        event.metadata_json,
                     ),
                 )
             finally:
@@ -380,13 +552,119 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
             finally:
                 connection.close()
 
+    def begin_worker_lifecycle_operation(self) -> None:
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                cursor = connection.execute(
+                    """UPDATE worker_audit_state
+                    SET pending_operations = pending_operations + 1
+                    WHERE singleton_id = 1"""
+                )
+                if cursor.rowcount != 1:
+                    raise ToolValidationError("worker audit state is unavailable")
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+            finally:
+                connection.close()
+
+    def finish_worker_lifecycle_operation(self) -> None:
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                cursor = connection.execute(
+                    """UPDATE worker_audit_state
+                    SET pending_operations = pending_operations - 1
+                    WHERE singleton_id = 1 AND pending_operations > 0"""
+                )
+                if cursor.rowcount != 1:
+                    raise ToolValidationError("no worker lifecycle operation is pending")
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+            finally:
+                connection.close()
+
+    def worker_lifecycle_reconciliation_required(self) -> bool:
+        with self._lock:
+            connection = self._connect()
+            try:
+                row = connection.execute(
+                    "SELECT pending_operations FROM worker_audit_state WHERE singleton_id = 1"
+                ).fetchone()
+                if row is None or type(row[0]) is not int or row[0] < 0:
+                    raise ToolValidationError("worker audit state is invalid")
+                return row[0] > 0 or _outstanding_worker_reservations(connection) > 0
+            finally:
+                connection.close()
+
+    def acknowledge_worker_lifecycle_reconciliation(self, note: str) -> bool:
+        if (
+            not isinstance(note, str) or not note or len(note) > 1024
+            or contains_surrogate(note)
+        ):
+            raise ToolValidationError("worker lifecycle reconciliation note is invalid")
+        event_id = uuid4().hex
+        timestamp = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    "SELECT pending_operations FROM worker_audit_state WHERE singleton_id = 1"
+                ).fetchone()
+                if row is None or type(row[0]) is not int or row[0] < 0:
+                    raise ToolValidationError("worker audit state is invalid")
+                pending = row[0]
+                outstanding = _outstanding_worker_reservations(connection)
+                if pending == 0 and outstanding == 0:
+                    connection.rollback()
+                    return False
+                metadata_json = json.dumps(
+                    {
+                        "pending_operations": pending,
+                        "outstanding_reservations": outstanding,
+                        "reconciliation_note": note,
+                    },
+                    sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
+                )
+                digest = hashlib.sha256(metadata_json.encode("utf-8")).hexdigest()
+                connection.execute(
+                    """INSERT INTO audit_events
+                    (event_id, timestamp, principal_id, tool_name, argument_digest, status,
+                     error_code, resource_type, resource_id, task_id, metadata_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        event_id, timestamp, "host", "worker.reconciliation.acknowledged",
+                        digest, "success", None, "worker_registry", "registry", None,
+                        metadata_json,
+                    ),
+                )
+                connection.execute(
+                    """UPDATE worker_audit_state SET pending_operations = 0
+                    WHERE singleton_id = 1"""
+                )
+                connection.commit()
+                return True
+            except Exception:
+                connection.rollback()
+                raise
+            finally:
+                connection.close()
+
     def events(self) -> tuple[AuditEvent, ...]:
         with self._lock:
             connection = self._connect()
             try:
                 rows = connection.execute(
                     """SELECT event_id, timestamp, principal_id, tool_name,
-                    argument_digest, status, error_code FROM audit_events ORDER BY rowid"""
+                    argument_digest, status, error_code, resource_type, resource_id,
+                    task_id, metadata_json FROM audit_events ORDER BY rowid"""
                 ).fetchall()
                 return tuple(AuditEvent(*row) for row in rows)
             finally:
