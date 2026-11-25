@@ -149,9 +149,9 @@ class DurableWorkerRestartTests(unittest.TestCase):
         registry = SQLiteWorkerRegistry(task_store)
         load_samples = 0
         sampled_after_lock = threading.Event()
+        purge_finished = threading.Event()
         blocker_acquired = threading.Event()
         release_blocker = threading.Event()
-        blocker = task_store._connect()
 
         def load_resolver(worker_id):
             nonlocal load_samples
@@ -169,17 +169,33 @@ class DurableWorkerRestartTests(unittest.TestCase):
         )
         host.heartbeat_worker("monitor-token", "worker-1")
         original_sweep = registry.active_reservations_with_expired
+        errors = []
 
-        def sweep_then_hold_writer():
+        def hold_writer_after_purge():
+            connection = task_store._connect()
+            try:
+                if not purge_finished.wait(timeout=3):
+                    raise RuntimeError("heartbeat did not reach the registry sweep")
+                connection.execute("BEGIN IMMEDIATE")
+                blocker_acquired.set()
+                if not release_blocker.wait(timeout=3):
+                    raise RuntimeError("test did not release the SQLite writer lock")
+                connection.execute("COMMIT")
+            except Exception:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+            finally:
+                connection.close()
+
+        def sweep_then_wait_for_writer():
             result = original_sweep()
-            blocker.execute("BEGIN IMMEDIATE")
-            blocker_acquired.set()
-            if not release_blocker.wait(timeout=3):
-                raise RuntimeError("test did not release the SQLite writer lock")
+            purge_finished.set()
+            if not blocker_acquired.wait(timeout=3):
+                raise RuntimeError("test writer did not acquire the post-sweep lock")
             return result
 
-        registry.active_reservations_with_expired = sweep_then_hold_writer
-        errors = []
+        registry.active_reservations_with_expired = sweep_then_wait_for_writer
 
         def heartbeat():
             try:
@@ -187,19 +203,28 @@ class DurableWorkerRestartTests(unittest.TestCase):
             except Exception as exc:
                 errors.append(exc)
 
+        def lock_holder():
+            try:
+                hold_writer_after_purge()
+            except Exception as exc:
+                errors.append(exc)
+
+        holder = threading.Thread(target=lock_holder)
         worker = threading.Thread(target=heartbeat)
+        holder.start()
         worker.start()
         try:
             self.assertTrue(blocker_acquired.wait(timeout=2))
             self.assertFalse(
                 sampled_after_lock.wait(timeout=0.15),
-                "host load was sampled before the registry acquired its write lock",
+                "host load was sampled before the heartbeat acquired its SQLite write lock",
             )
         finally:
             release_blocker.set()
         worker.join(timeout=3)
-        blocker.close()
+        holder.join(timeout=3)
         self.assertFalse(worker.is_alive())
+        self.assertFalse(holder.is_alive())
         self.assertEqual(errors, [])
         self.assertTrue(sampled_after_lock.is_set())
         self.assertEqual(load_samples, 2)
