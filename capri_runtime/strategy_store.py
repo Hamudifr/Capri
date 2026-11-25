@@ -1242,7 +1242,10 @@ class SQLiteStrategyStore:
                         evaluation_summary = json.loads(evaluation_summary_json)
                     except (TypeError, ValueError, json.JSONDecodeError):
                         raise StrategyIntegrityError("candidate evaluation summary is corrupt") from None
-                    if type(evaluation_summary) is not dict or not _promotion_record_matches(
+                    if (
+                        type(evaluation_summary) is not dict
+                        or evaluation_summary.get("candidate_version") != grant.version
+                        or not _promotion_record_matches(
                         promotion_record,
                         strategy_class=grant.strategy_class,
                         baseline_id=evaluation_baseline_id,
@@ -1250,7 +1253,8 @@ class SQLiteStrategyStore:
                         baseline_version=evaluation_summary.get("baseline_version"),
                         candidate_version=evaluation_summary.get("candidate_version"),
                         cohort_sha256=cohort_hash,
-                        require_current_policy=True,
+                            require_current_policy=True,
+                        )
                     ):
                         raise StrategyAuthorizationError("promotion assessment does not match the candidate evidence or current policy")
                 if required_action == "rollback":
