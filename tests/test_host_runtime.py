@@ -95,14 +95,15 @@ class CapriHostRuntimeTests(unittest.TestCase):
 
     @staticmethod
     def approve_worker_descriptor(worker_id, proposed):
+        # This is fixed host configuration, not a copy of worker-advertised fields.
         return WorkerDescriptor(
             worker_id,
-            proposed.protocol_versions,
+            (1,),
             ("math.factorial",),
-            priority=proposed.priority,
-            max_concurrency=proposed.max_concurrency,
-            enabled=proposed.enabled,
-            revision=proposed.revision,
+            priority=5,
+            max_concurrency=2,
+            enabled=True,
+            revision=1,
         )
 
     def make_worker_host(self, registry, identities, policy):
@@ -225,11 +226,17 @@ class CapriHostRuntimeTests(unittest.TestCase):
             registry, {"worker-token": "worker-1"}, lambda *args: {"worker-1"},
         )
         proposed = WorkerDescriptor(
-            "worker-1", (1,), ("math.factorial", "admin.execute"),
+            "worker-1", (2, 3), ("math.factorial", "admin.execute"),
+            priority=999, max_concurrency=256, enabled=False, revision=9,
         )
         host.register_worker("worker-token", proposed)
         stored = registry.get("worker-1")
+        self.assertEqual(stored.descriptor.protocol_versions, (1,))
         self.assertEqual(stored.descriptor.capabilities, ("math.factorial",))
+        self.assertEqual(stored.descriptor.priority, 5)
+        self.assertEqual(stored.descriptor.max_concurrency, 2)
+        self.assertTrue(stored.descriptor.enabled)
+        self.assertEqual(stored.descriptor.revision, 1)
 
     def test_worker_failure_observation_requires_host_supervisor_identity(self):
         registry = InMemoryWorkerRegistry()
