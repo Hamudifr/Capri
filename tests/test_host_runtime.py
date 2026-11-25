@@ -91,6 +91,46 @@ class CapriHostRuntimeTests(unittest.TestCase):
             **kwargs,
         )
 
+    def test_execution_budget_usage_is_wired_and_principal_scoped(self):
+        budgets = SQLiteBudgetStore(
+            os.path.join(self.temp.name, "host-budgets.sqlite3"),
+            BudgetPolicy(
+                window_seconds=60, max_provider_calls=2,
+                max_provider_input_bytes=10_000, max_tool_calls=2,
+                max_task_steps=2, max_task_input_bytes=10_000,
+            ),
+        )
+        host = self.make_host(budget_store=budgets)
+        self.assertEqual(
+            host.get_budget_usage("alice-token").used["provider_calls"], 0,
+        )
+        session = host.create_session("alice-token")
+        host.run_turn("alice-token", session.session_id, "count this call")
+        self.assertEqual(
+            host.get_budget_usage("alice-token").used["provider_calls"], 1,
+        )
+        self.assertEqual(
+            host.get_budget_usage("bob-token").used["provider_calls"], 0,
+        )
+        with self.assertRaises(HostRuntimeError):
+            host.get_budget_usage("invalid-token")
+
+    def test_host_discovers_budget_store_already_configured_on_tool_executor(self):
+        budgets = SQLiteBudgetStore(
+            os.path.join(self.temp.name, "preconfigured-budgets.sqlite3"),
+            BudgetPolicy(max_provider_calls=2),
+        )
+        self.orchestrator.bridge.executor.set_budget_store(budgets)
+        host = self.make_host()
+        self.assertEqual(
+            host.get_budget_usage("alice-token").used["provider_calls"], 0,
+        )
+        session = host.create_session("alice-token")
+        host.run_turn("alice-token", session.session_id, "use inherited budget")
+        self.assertEqual(
+            host.get_budget_usage("alice-token").used["provider_calls"], 1,
+        )
+
     def test_create_get_and_run_turn_are_bound_to_authenticated_principal(self):
         host = self.make_host()
         session = host.create_session("alice-token")
