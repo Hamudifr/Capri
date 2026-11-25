@@ -587,7 +587,11 @@ class SQLiteMemoryStore:
                             "supersedes_id",
                         )
                     )
-                    if current["status"] == "archived" and same_payload:
+                    if (
+                        current["status"] == "archived"
+                        and existing.status in {"active", "archived"}
+                        and same_payload
+                    ):
                         db.execute("COMMIT")
                         return existing
                     raise MemoryConflictError("memory predecessor already has a correction successor")
