@@ -363,49 +363,28 @@ class SQLiteTaskStore:
         Principal-scoped idempotency keys are stored as one-way namespaced
         digests so different principals can safely reuse the same client key.
         """
-        principal_id = _text(principal_id, "principal_id", 256)
+        principal_id = _text(principal_id, "principal_id", 128)
         if type(deferred) is not bool:
             raise TaskValidationError("deferred must be a boolean")
         scoped_key = None
-        legacy_scoped_key = None
         if idempotency_key is not None:
             key = _text(idempotency_key, "idempotency_key", 128)
-            principal_bytes = principal_id.encode("utf-8")
-            key_bytes = key.encode("utf-8")
-            # Versioned, length-prefixed tuple encoding is unambiguous even
-            # when either field contains NUL or other separator characters.
-            payload = (
-                b"capri.task-idempotency.v2\0"
-                + len(principal_bytes).to_bytes(4, "big")
-                + principal_bytes
-                + len(key_bytes).to_bytes(4, "big")
-                + key_bytes
-            )
-            digest = hashlib.sha256(payload).hexdigest()
-            scoped_key = "principal:v2:" + digest
-            # Preserve retries for rows written by the old delimiter encoding.
-            legacy_digest = hashlib.sha256(
+            digest = hashlib.sha256(
                 (principal_id + "\0" + key).encode("utf-8")
             ).hexdigest()
-            legacy_scoped_key = "principal:" + legacy_digest
+            scoped_key = "principal:" + digest
         return self._create(
             plan, scoped_key, now, principal_id=principal_id,
             initial_state="blocked" if deferred else "queued",
-            legacy_idempotency_key=legacy_scoped_key,
         )
 
     def _create(
         self, plan: Any, idempotency_key: str | None, now: datetime | None,
         *, principal_id: str | None, initial_state: str = "queued",
-        legacy_idempotency_key: str | None = None,
     ) -> TaskRecord:
         plan_json, _ = _validate_plan(plan)
         if idempotency_key is not None:
             idempotency_key = _text(idempotency_key, "idempotency_key", 128)
-        if legacy_idempotency_key is not None:
-            legacy_idempotency_key = _text(
-                legacy_idempotency_key, "legacy_idempotency_key", 128
-            )
         stamp = _iso(now or _now())
         task_id = str(uuid4())
         with self._lock:
@@ -413,26 +392,17 @@ class SQLiteTaskStore:
             try:
                 connection.execute("BEGIN IMMEDIATE")
                 if idempotency_key is not None:
-                    candidates = (idempotency_key, legacy_idempotency_key)
-                    for candidate in candidates:
-                        if candidate is None:
-                            continue
-                        existing = connection.execute(
-                            "SELECT task_id, idempotency_key, state, created_at, updated_at, current_step, attempts, available_at, cancel_requested, results_json, error_code, plan_json FROM tasks WHERE idempotency_key=?",
-                            (candidate,),
-                        ).fetchone()
-                        if existing is None:
-                            continue
+                    existing = connection.execute(
+                        "SELECT task_id, idempotency_key, state, created_at, updated_at, current_step, attempts, available_at, cancel_requested, results_json, error_code, plan_json FROM tasks WHERE idempotency_key=?",
+                        (idempotency_key,),
+                    ).fetchone()
+                    if existing:
                         owner = connection.execute(
                             "SELECT principal_id FROM task_owners WHERE task_id=?",
                             (existing[0],),
                         ).fetchone()
                         existing_owner = owner[0] if owner else None
                         if existing_owner != principal_id:
-                            # Legacy delimiter hashes could collide across distinct
-                            # principal/key pairs. Ignore that legacy row and use v2.
-                            if candidate == legacy_idempotency_key:
-                                continue
                             raise TaskIdempotencyConflict(
                                 "idempotency key is already bound to a different task owner"
                             )
@@ -473,7 +443,7 @@ class SQLiteTaskStore:
 
     def _assert_principal_owner(self, task_id: str, principal_id: str) -> None:
         _text(task_id, "task_id", 64)
-        _text(principal_id, "principal_id", 256)
+        _text(principal_id, "principal_id", 128)
         with self._lock:
             connection = self._connect()
             try:
@@ -488,7 +458,7 @@ class SQLiteTaskStore:
 
     def get_for_principal(self, task_id: str, principal_id: str) -> TaskRecord:
         _text(task_id, "task_id", 64)
-        principal_id = _text(principal_id, "principal_id", 256)
+        principal_id = _text(principal_id, "principal_id", 128)
         with self._lock:
             connection = self._connect()
             try:
@@ -513,7 +483,7 @@ class SQLiteTaskStore:
         """Idempotently release a deferred principal task after its goal link is durable."""
         stamp = _iso(now or _now())
         _text(task_id, "task_id", 64)
-        principal_id = _text(principal_id, "principal_id", 256)
+        principal_id = _text(principal_id, "principal_id", 128)
         with self._lock:
             connection = self._connect()
             try:
@@ -572,7 +542,7 @@ class SQLiteTaskStore:
         self, task_id: str, principal_id: str
     ) -> tuple[dict[str, Any], ...]:
         _text(task_id, "task_id", 64)
-        principal_id = _text(principal_id, "principal_id", 256)
+        principal_id = _text(principal_id, "principal_id", 128)
         with self._lock:
             connection = self._connect()
             try:
@@ -606,7 +576,7 @@ class SQLiteTaskStore:
     ) -> tuple[DomainEvent, ...]:
         """Return an owner-checked CloudEvents projection of this task's local events."""
         _text(task_id, "task_id", 64)
-        principal_id = _text(principal_id, "principal_id", 256)
+        principal_id = _text(principal_id, "principal_id", 128)
         with self._lock:
             connection = self._connect()
             try:
@@ -661,7 +631,7 @@ class SQLiteTaskStore:
     ) -> TaskRecord:
         _text(task_id, "task_id", 64)
         if principal_id is not None:
-            principal_id = _text(principal_id, "principal_id", 256)
+            principal_id = _text(principal_id, "principal_id", 128)
         stamp = _iso(now or _now())
         columns = """tasks.task_id,tasks.idempotency_key,tasks.state,
             tasks.created_at,tasks.updated_at,tasks.current_step,tasks.attempts,
@@ -898,7 +868,7 @@ class SQLiteTaskStore:
         _text(claim.idempotency_key, "idempotency_key", 128)
         _text(claim.tool, "tool", 64)
         if claim.principal_id is not None:
-            _text(claim.principal_id, "principal_id", 256)
+            _text(claim.principal_id, "principal_id", 128)
         if type(claim.input) is not dict:
             raise TaskValidationError("claim input must be a plain JSON object")
         # Validate and normalize the complete nested payload before equality checks.
@@ -1015,58 +985,48 @@ class SQLiteTaskStore:
             finally:
                 connection.close()
 
-    def _finish_step_in_transaction(
-        self, connection: sqlite3.Connection, claim: TaskClaim,
-        result: Any, stamp: str,
-    ) -> None:
-        """Apply a task result using the caller's already-open write transaction."""
-        if type(claim) is not TaskClaim:
-            raise TaskValidationError("claim must be a TaskClaim")
-        _, decoded = _json(result, label="step result")
-        row = connection.execute(
-            """SELECT tasks.state,tasks.lease_owner,tasks.lease_until,
-            tasks.current_step,tasks.attempts,tasks.plan_json,
-            task_owners.principal_id,tasks.cancel_requested,tasks.results_json
-            FROM tasks LEFT JOIN task_owners
-            ON task_owners.task_id=tasks.task_id WHERE tasks.task_id=?""",
-            (claim.task_id,),
-        ).fetchone()
-        if not row:
-            raise TaskNotFoundError("task does not exist")
-        plan = self._assert_claim_matches(claim, row[:7], stamp)
-        cancel, results_json = row[7], row[8]
-        index = claim.step_index
-        results = json.loads(results_json)
-        results.append(decoded)
-        next_index = index + 1
-        if cancel:
-            next_state = "cancelled"
-        elif next_index >= len(plan):
-            next_state = "succeeded"
-        else:
-            next_state = "queued"
-        connection.execute(
-            """UPDATE tasks SET state=?,current_step=?,attempts=0,results_json=?,updated_at=?,
-            available_at=?,lease_owner=NULL,lease_until=NULL,error_code=NULL WHERE task_id=?""",
-            (next_state, next_index, json.dumps(results, ensure_ascii=False, allow_nan=False,
-             sort_keys=True, separators=(",", ":")), stamp, stamp, claim.task_id),
-        )
-        connection.execute(
-            "INSERT INTO task_events(task_id,timestamp,state,step_index,attempt) VALUES(?,?,?,?,?)",
-            (claim.task_id, stamp, next_state, index, claim.attempt),
-        )
-
     def finish_step(self, claim: TaskClaim, result: Any,
                     now: datetime | None = None) -> TaskRecord:
         if type(claim) is not TaskClaim:
             raise TaskValidationError("claim must be a TaskClaim")
-        _, decoded = _json(result, label="step result")
+        result_json, decoded = _json(result, label="step result")
         stamp = _iso(now or _now())
         with self._lock:
             connection = self._connect()
             try:
                 connection.execute("BEGIN IMMEDIATE")
-                self._finish_step_in_transaction(connection, claim, decoded, stamp)
+                row = connection.execute(
+                    """SELECT tasks.state,tasks.lease_owner,tasks.lease_until,
+                    tasks.current_step,tasks.attempts,tasks.plan_json,
+                    task_owners.principal_id,tasks.cancel_requested,tasks.results_json
+                    FROM tasks LEFT JOIN task_owners
+                    ON task_owners.task_id=tasks.task_id WHERE tasks.task_id=?""",
+                    (claim.task_id,),
+                ).fetchone()
+                if not row:
+                    raise TaskNotFoundError("task does not exist")
+                plan = self._assert_claim_matches(claim, row[:7], stamp)
+                cancel, results_json = row[7], row[8]
+                index = claim.step_index
+                results = json.loads(results_json)
+                results.append(decoded)
+                next_index = index + 1
+                if cancel:
+                    next_state = "cancelled"
+                elif next_index >= len(plan):
+                    next_state = "succeeded"
+                else:
+                    next_state = "queued"
+                connection.execute(
+                    """UPDATE tasks SET state=?,current_step=?,attempts=0,results_json=?,updated_at=?,
+                    available_at=?,lease_owner=NULL,lease_until=NULL,error_code=NULL WHERE task_id=?""",
+                    (next_state, next_index, json.dumps(results, ensure_ascii=False, allow_nan=False,
+                     sort_keys=True, separators=(",", ":")), stamp, stamp, claim.task_id),
+                )
+                connection.execute(
+                    "INSERT INTO task_events(task_id,timestamp,state,step_index,attempt) VALUES(?,?,?,?,?)",
+                    (claim.task_id, stamp, next_state, index, claim.attempt),
+                )
                 connection.execute("COMMIT")
                 return self.get(claim.task_id)
             except Exception:
@@ -1343,7 +1303,7 @@ class SQLiteTaskStore:
         ).fetchall()
         for task_id, principal_id in owners:
             _text(task_id, "task owner task_id", 64)
-            _text(principal_id, "task owner principal_id", 256)
+            _text(principal_id, "task owner principal_id", 128)
             if task_id not in task_plan_lengths:
                 raise TaskValidationError("backup contains an owner for a missing task")
         events = connection.execute(
@@ -1388,16 +1348,6 @@ class SQLiteTaskStore:
             except Exception:
                 raise TaskValidationError(
                     "task store contains invalid provider usage events"
-                ) from None
-        if connection.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='execution_evidence_events'"
-        ).fetchone() is not None:
-            try:
-                from .execution_evidence import validate_execution_evidence_snapshot
-                validate_execution_evidence_snapshot(connection)
-            except Exception:
-                raise TaskValidationError(
-                    "task store contains invalid execution evidence events"
                 ) from None
 
     def backup_to(self, destination_path: str) -> str:
@@ -1451,8 +1401,6 @@ class TaskEngine:
         *,
         principal_handlers: Mapping[str, Callable[[dict[str, Any], str, str], Any]] | None = None,
         budget_store: SQLiteBudgetStore | None = None,
-        execution_evidence_journal: Any | None = None,
-        execution_evidence_credential: Callable[[TaskClaim], Any] | None = None,
     ) -> None:
         if not isinstance(store, SQLiteTaskStore):
             raise TaskValidationError("store must be a SQLiteTaskStore")
@@ -1485,21 +1433,6 @@ class TaskEngine:
         self.executor_id = executor_id
         self.lease_seconds = lease_seconds
         self.budget_store = budget_store
-        if (execution_evidence_journal is None) != (execution_evidence_credential is None):
-            raise TaskValidationError(
-                "execution evidence journal and credential resolver must be configured together"
-            )
-        if execution_evidence_journal is not None:
-            if (
-                getattr(execution_evidence_journal, "_tasks", None) is not store
-                or not callable(getattr(execution_evidence_journal, "record_execution_and_finish", None))
-                or not callable(execution_evidence_credential)
-            ):
-                raise TaskValidationError(
-                    "execution evidence must use this task store and a trusted credential resolver"
-                )
-        self.execution_evidence_journal = execution_evidence_journal
-        self.execution_evidence_credential = execution_evidence_credential
 
     def set_budget_store(self, budget_store: SQLiteBudgetStore) -> None:
         if not isinstance(budget_store, SQLiteBudgetStore):
@@ -1588,26 +1521,12 @@ class TaskEngine:
                 claim, "handler_outcome_uncertain", now=now
             )
         try:
-            _, result_snapshot = _json(result, label="handler result")
+            _json(result, label="handler result")
         except Exception:
             return self.store.require_reconciliation(
                 claim, "handler_result_invalid", now=now
             )
-        if self.execution_evidence_journal is not None and claim.principal_id is not None:
-            try:
-                credential = self.execution_evidence_credential(claim)
-                self.execution_evidence_journal.record_execution_and_finish(
-                    credential, claim, result_snapshot, now=now,
-                )
-            except Exception:
-                # Evidence and task completion share one transaction. If either
-                # fails after a handler may have caused side effects, quarantine
-                # the still-live claim for explicit reconciliation.
-                return self.store.require_reconciliation(
-                    claim, "execution_evidence_unavailable", now=now,
-                )
-            return self.store.get(claim.task_id)
-        return self.store.finish_step(claim, result_snapshot, now=now)
+        return self.store.finish_step(claim, result, now=now)
 
     def run_once(self, now: datetime | None = None) -> TaskRecord | None:
         claim = self.store.claim_next(

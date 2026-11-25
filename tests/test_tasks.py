@@ -334,45 +334,6 @@ class SQLiteTaskStoreTests(unittest.TestCase):
                 "alice", [{"tool": "different", "input": {}}], "same-key", NOW
             )
 
-    def test_principal_id_matches_host_and_session_256_character_bound(self):
-        principal_id = "p" * 256
-        task = self.store.create_for_principal(
-            principal_id, PLAN, "long-principal-key", NOW,
-        )
-        self.assertEqual(
-            self.store.get_for_principal(task.task_id, principal_id),
-            task,
-        )
-        self.assertEqual(self.store.integrity_check(), "ok")
-
-    def test_principal_idempotency_encoding_is_unambiguous_for_nul_fields(self):
-        first = self.store.create_for_principal(
-            "a\0b", PLAN, "c", NOW,
-        )
-        second = self.store.create_for_principal(
-            "a", PLAN, "b\0c", NOW,
-        )
-        self.assertNotEqual(first.task_id, second.task_id)
-        self.assertEqual(self.store.get_for_principal(first.task_id, "a\0b"), first)
-        self.assertEqual(self.store.get_for_principal(second.task_id, "a"), second)
-
-    def test_principal_idempotency_preserves_legacy_retry_identity(self):
-        import hashlib
-
-        principal_id = "legacy-owner"
-        idempotency_key = "legacy-key"
-        legacy_digest = hashlib.sha256(
-            (principal_id + "\0" + idempotency_key).encode("utf-8")
-        ).hexdigest()
-        legacy = self.store._create(
-            PLAN, "principal:" + legacy_digest, NOW,
-            principal_id=principal_id,
-        )
-        retried = self.store.create_for_principal(
-            principal_id, PLAN, idempotency_key, NOW,
-        )
-        self.assertEqual(retried.task_id, legacy.task_id)
-
     def test_principal_task_reads_and_event_reads_reuse_one_connection(self):
         alice = self.store.create_for_principal("alice", PLAN, "single-read", NOW)
         original_connect = self.store._connect

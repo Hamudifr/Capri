@@ -105,12 +105,6 @@ from .goals import (
     GoalPlanProposal, GoalPlanner, GoalRecord, GoalValidationError, SQLiteGoalStore,
     validate_goal_plan,
 )
-from .execution_evidence import (
-    SQLiteExecutionEvidenceJournal,
-    StrategyBinding,
-    TaskClassification,
-    VerifiedExecutionResult,
-)
 from .strategy_evidence_store import SQLiteStrategyEvidenceManifestStore
 from .strategy_evidence import HostStrategyEvidenceAuthority
 from .strategy_approval import (
@@ -266,10 +260,6 @@ __all__ = [
     "SQLiteApprovalChallengeStore",
     "SQLiteSecurityStore",
     "SQLiteSessionStore",
-    "SQLiteExecutionEvidenceJournal",
-    "StrategyBinding",
-    "TaskClassification",
-    "VerifiedExecutionResult",
     "SQLiteStrategyEvidenceManifestStore",
     "HostStrategyEvidenceAuthority",
     "HostStrategyApprovalAuthority",
