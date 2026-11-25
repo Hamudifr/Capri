@@ -70,3 +70,14 @@ The host must keep the approval verifier and grant issuance outside model-visibl
 2. Add shadow-mode runtime instrumentation that records recommendations without changing execution.
 3. Evaluate strategy versions across representative scenario classes and measure uncertainty, safety regressions, and operational cost.
 4. Only then consider host-controlled live selection. Preserve explicit approval and a tested rollback path.
+
+
+## Multi-cohort promotion records and grant binding (X8.5)
+
+The registry now exposes `register_promotion_assessment_for_principal` and `get_promotion_assessment_for_principal`. Registration accepts two to four `PromotionCohort` records plus an exact cohort-ID-to-manifest-reference mapping. It recomputes the assessment under the current fixed policy, independently evaluates each cohort, and requires the configured evidence verifier to return exact `True` for every context. Promotion contexts include `cohort_id` and host-classified `task_family`. The candidate version's already-registered evidence-verified cohort must be included with the identical manifest locator.
+
+The append-only `strategy_promotion_assessments` table stores only the canonical assessment summary, manifest references, and per-cohort fingerprints. Its SHA-256 binding covers all three. Raw observations remain in the host evidence source. A record is written only when the current multi-cohort policy returns eligible; blocked assessments are not persisted as canary approvals.
+
+For promotion-bound activation, the host places the assessment fingerprint in `StrategyApprovalRequest.promotion_assessment_sha256`. `HostStrategyApprovalAuthority` signs that field as part of the grant. The store verifies the fingerprint against the immutable record, checks the current policy version and exact candidate/baseline versions, and confirms that the grant's evaluation fingerprint is one of the recorded cohorts. The activation event hash includes the assessment fingerprint, and `ActiveStrategyRecord` / `StrategyActivationEvent` expose it for audit. Historical event-chain verification validates the record binding; active reads fail closed if the promotion policy version has since been retired.
+
+A grant without a promotion fingerprint remains a manually approved activation path for a candidate with individually verified evidence. It must not be interpreted as canary eligibility. This remains control-plane state only: the registry does not route traffic, implement shadow execution, or automatically promote a strategy.
