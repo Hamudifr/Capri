@@ -875,10 +875,10 @@ class CapriHostRuntimeTests(unittest.TestCase):
                 "task_id": task_id,
                 "scenario": "research",
                 "evidence_ref": f"host-execution-event:baseline:{task_id}",
-                "tool_calls": 1,
-                "context_tokens": 128,
-                "estimated_cost_units": 1,
-                "latency_ms": 25,
+                "tool_calls": 5,
+                "context_tokens": 1000,
+                "estimated_cost_units": 100,
+                "latency_ms": 2000,
             }
             observations.append(StrategyObservation(
                 strategy_id="baseline", strategy_version="1.0",
@@ -886,7 +886,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
             ))
             candidate = dict(base)
             candidate["evidence_ref"] = f"host-execution-event:candidate:{task_id}"
-            candidate["estimated_cost_units"] = 1
+            candidate["estimated_cost_units"] = 90
             observations.append(StrategyObservation(
                 strategy_id="candidate", strategy_version="2.0",
                 outcome="verified_success", **candidate,
