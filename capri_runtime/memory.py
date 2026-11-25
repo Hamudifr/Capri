@@ -717,7 +717,7 @@ class SQLiteMemoryStore:
                 else:
                     rows = db.execute(
                         """SELECT e.event_id,e.memory_id,e.event_type,e.occurred_at,
-                        m.supersedes_id,m.status,m.source FROM memory_events e
+                        m.supersedes_id,m.source FROM memory_events e
                         LEFT JOIN memories m ON m.memory_id=e.memory_id
                         WHERE e.memory_id=? ORDER BY e.rowid""",
                         (memory_id,),
