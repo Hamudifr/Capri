@@ -191,6 +191,14 @@ class SQLiteGoalStoreTests(unittest.TestCase):
         with self.assertRaises(GoalValidationError):
             self.store.backup_to(backup)
 
+    def test_goal_database_rejects_permissions_widened_after_open(self):
+        goal = self.create()
+        if os.name != "posix":
+            self.skipTest("POSIX file permissions are unavailable")
+        os.chmod(self.path, 0o644)
+        with self.assertRaises(GoalValidationError):
+            self.store.get_for_principal(goal.goal_id, "alice")
+
     def test_goal_database_rejects_symlink_path(self):
         if not hasattr(os, "symlink"):
             self.skipTest("symlinks are unavailable")
