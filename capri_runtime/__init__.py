@@ -258,6 +258,7 @@ __all__ = [
     "StrategyNotFoundError",
     "StrategyStoreError",
     "StrategyVersionRecord",
+    "StrategyPromotionRecord",
     "SQLiteTaskStore",
     "TaskClaim",
     "TaskConflictError",
