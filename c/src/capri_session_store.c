@@ -253,7 +253,34 @@ static CapriSessionError select_unowned(CapriSessionStore *s,const char *id,Capr
     sqlite3_bind_text(st,1,id,-1,SQLITE_TRANSIENT);rc=sqlite3_step(st);
     CapriSessionError e=rc==SQLITE_ROW?read_row(s,s->db,st,out):(rc==SQLITE_DONE?CAPRI_SESSION_NOT_FOUND:map_sqlite(rc));sqlite3_finalize(st);return e;
 }
+static bool owner_trigger_matches(sqlite3 *db,const char *name,const char *expected_sql) {
+    sqlite3_stmt *st=NULL;
+    int rc=sqlite3_prepare_v2(
+        db,
+        "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?1",
+        -1,&st,NULL
+    );
+    if(rc!=SQLITE_OK)return false;
+    sqlite3_bind_text(st,1,name,-1,SQLITE_STATIC);
+    rc=sqlite3_step(st);
+    bool matches=rc==SQLITE_ROW
+        && sqlite3_column_type(st,0)==SQLITE_TEXT
+        && strcmp((const char*)sqlite3_column_text(st,0),expected_sql)==0;
+    sqlite3_finalize(st);
+    return matches;
+}
+
 static CapriSessionError validate_backup_snapshot(CapriSessionStore *store,sqlite3 *db) {
+    if(!owner_trigger_matches(
+        db,"session_owners_immutable_update",
+        "CREATE TRIGGER session_owners_immutable_update BEFORE UPDATE ON session_owners BEGIN SELECT RAISE(ABORT,'session owner is immutable'); END"
+    ) || !owner_trigger_matches(
+        db,"session_owners_immutable_delete",
+        "CREATE TRIGGER session_owners_immutable_delete BEFORE DELETE ON session_owners BEGIN SELECT RAISE(ABORT,'session owner is immutable'); END"
+    ) || !owner_trigger_matches(
+        db,"session_owners_immutable_insert",
+        "CREATE TRIGGER session_owners_immutable_insert BEFORE INSERT ON session_owners WHEN EXISTS(SELECT 1 FROM session_owners WHERE session_id=NEW.session_id) BEGIN SELECT RAISE(ABORT,'session owner is immutable'); END"
+    ))return CAPRI_SESSION_CORRUPT;
     sqlite3_stmt *st=NULL;int rc=sqlite3_prepare_v2(db,"PRAGMA integrity_check",-1,&st,NULL);
     if(rc!=SQLITE_OK)return map_sqlite(rc);
     rc=sqlite3_step(st);bool integrity=rc==SQLITE_ROW&&sqlite3_column_text(st,0)&&strcmp((const char*)sqlite3_column_text(st,0),"ok")==0;sqlite3_finalize(st);
