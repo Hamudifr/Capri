@@ -137,7 +137,7 @@ class SQLiteGoalStoreTests(unittest.TestCase):
             goal.goal_id, "alice", PLAN, frozenset({"collect", "summarize"}),
             expected_version=planning.version, now=NOW,
         )
-        running = self.store.transition_for_principal(
+        self.store.transition_for_principal(
             goal.goal_id, "alice", "running", expected_version=planned.version, now=NOW,
         )
         awaiting = self.store.transition_for_principal(
