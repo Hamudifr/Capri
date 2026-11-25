@@ -52,3 +52,12 @@ OPS gives a near-linear-in-truth-table-length selector under NP ⊆ Circuit[poly
 The Lean result formalizes only the abstract causal-game terminal lemma. It does not formalize the bounded-arithmetic KPT theorem, SAT-specific package predicates, the search-circuit branch, or EF translation. No P-vs-NP proof is claimed.
 
 All five Python tests pass. Main remains untouched; the R37 work is isolated on this research branch.
+
+
+# R40–R41: KPT selector collapse under P = NP
+
+See [R40–R41 conditional KPT selector analysis](R40_KPT_COLLAPSE_CONDITIONAL.md).
+
+The new note proves a conditional implication: if the existential SAT-antichecker statements are provable in PV1 (or, separately, APX1) for every sufficiently large fixed circuit exponent, then P != NP. The proof uses a constant-round KPT path selector in FP^NP; under P = NP, this selector becomes uniform polynomial time and yields the witness functions required by Pich–Santhanam Corollary 1.
+
+This is **not** an unconditional P-vs-NP proof. The main open obligation remains proving the existential antichecker statement in the required bounded-arithmetic theory. The APX1 Refuter(Yao) theorem does not directly witness the higher-quantifier selector.
