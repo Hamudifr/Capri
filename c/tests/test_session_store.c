@@ -2,7 +2,6 @@
 #include "capri_session_store.h"
 #include <assert.h>
 #include <errno.h>
-#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,21 +22,6 @@ static int write_all(int fd,const void *buffer,size_t size) {
         size-=(size_t)written;
     }
     return 1;
-}
-
-static int write_all(int fd, const void *buffer, size_t length) {
-    const unsigned char *cursor = (const unsigned char *)buffer;
-    while (length > 0) {
-        ssize_t written = write(fd, cursor, length);
-        if (written < 0) {
-            if (errno == EINTR) continue;
-            return -1;
-        }
-        if (written == 0) return -1;
-        cursor += (size_t)written;
-        length -= (size_t)written;
-    }
-    return 0;
 }
 
 typedef struct {
