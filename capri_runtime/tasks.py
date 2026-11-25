@@ -489,14 +489,17 @@ class SQLiteTaskStore:
             try:
                 connection.execute("BEGIN IMMEDIATE")
                 row = connection.execute(
-                    """SELECT tasks.state FROM tasks JOIN task_owners
-                    ON task_owners.task_id=tasks.task_id
+                    """SELECT tasks.task_id,tasks.idempotency_key,tasks.state,
+                    tasks.created_at,tasks.updated_at,tasks.current_step,tasks.attempts,
+                    tasks.available_at,tasks.cancel_requested,tasks.results_json,
+                    tasks.error_code
+                    FROM tasks JOIN task_owners ON task_owners.task_id=tasks.task_id
                     WHERE tasks.task_id=? AND task_owners.principal_id=?""",
                     (task_id, principal_id),
                 ).fetchone()
                 if row is None:
                     raise TaskNotFoundError("task does not exist")
-                state = row[0]
+                state = row[2]
                 if state == "blocked":
                     connection.execute(
                         "UPDATE tasks SET state='queued',updated_at=?,available_at=? WHERE task_id=? AND state='blocked'",
@@ -508,8 +511,19 @@ class SQLiteTaskStore:
                     )
                 # A retry after a crash may find the task already queued, running,
                 # or complete. Those states are already released and are idempotent.
+                updated = connection.execute(
+                    """SELECT tasks.task_id,tasks.idempotency_key,tasks.state,
+                    tasks.created_at,tasks.updated_at,tasks.current_step,tasks.attempts,
+                    tasks.available_at,tasks.cancel_requested,tasks.results_json,
+                    tasks.error_code
+                    FROM tasks JOIN task_owners ON task_owners.task_id=tasks.task_id
+                    WHERE tasks.task_id=? AND task_owners.principal_id=?""",
+                    (task_id, principal_id),
+                ).fetchone()
+                if updated is None:
+                    raise TaskNotFoundError("task does not exist")
                 connection.execute("COMMIT")
-                return self.get(task_id)
+                return self._record(updated)
             except Exception:
                 try:
                     connection.execute("ROLLBACK")
