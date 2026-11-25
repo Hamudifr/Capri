@@ -224,6 +224,11 @@ class SQLiteStrategyEvidenceManifestStoreTests(unittest.TestCase):
                 connection.execute(
                     "UPDATE strategy_evidence_manifests SET task_family='coding'"
                 )
+                connection.execute(
+                    """CREATE TRIGGER strategy_evidence_immutable_update
+                    BEFORE UPDATE ON strategy_evidence_manifests
+                    BEGIN SELECT RAISE(ABORT, 'strategy evidence manifests are append-only'); END"""
+                )
             finally:
                 connection.close()
         self.assertEqual(self.task_store.integrity_check(), "task store validation failed")
