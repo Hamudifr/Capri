@@ -528,13 +528,15 @@ class CapriHostRuntimeTests(unittest.TestCase):
             1,
         )
 
-    def test_host_worker_reservation_expiry_purges_host_context(self):
+    def test_host_worker_reservation_expiry_requires_reconciliation(self):
         now = {"value": 10_000_000_000}
         registry = InMemoryWorkerRegistry(
             clock_ns=lambda: now["value"], reservation_ttl_ms=1_000,
         )
+        audit = InMemoryAuditSink()
+        identities = {"worker-token": "worker-1"}
         host = self.make_worker_host(
-            registry, {"worker-token": "worker-1"}, lambda *args: {"worker-1"},
+            registry, identities, lambda *args: {"worker-1"}, audit_sink=audit,
         )
         host.register_worker(
             "worker-token", WorkerDescriptor("worker-1", (1,), ("math.factorial",)),
@@ -548,14 +550,23 @@ class CapriHostRuntimeTests(unittest.TestCase):
         )
         self.assertIsNotNone(expired)
         now["value"] += 2_000_000_000
-        self.assertFalse(host.release_worker_reservation("monitor-token", expired))
-        replacement = host.reserve_worker_candidate(
-            "alice-token", task.task_id, "math.factorial", 1,
+        with self.assertRaisesRegex(HostRuntimeError, "expired or disappeared"):
+            host.release_worker_reservation("monitor-token", expired)
+        with self.assertRaisesRegex(HostRuntimeError, "disabled"):
+            host.reserve_worker_candidate(
+                "alice-token", task.task_id, "math.factorial", 1,
+            )
+        self.assertTrue(audit.worker_lifecycle_reconciliation_required())
+        self.assertTrue(
+            audit.acknowledge_worker_lifecycle_reconciliation(
+                "Supervisor confirmed the pending hold expired and no worker execution remained",
+            )
         )
-        self.assertIsNotNone(replacement)
-        self.assertNotEqual(
-            replacement.reservation.token, expired.reservation.token,
+        restarted = self.make_worker_host(
+            InMemoryWorkerRegistry(), identities,
+            lambda *args: {"worker-1"}, audit_sink=audit,
         )
+        self.assertIsNotNone(restarted)
 
     def test_host_worker_reservation_returns_none_when_no_policy_candidate(self):
         registry = InMemoryWorkerRegistry()
