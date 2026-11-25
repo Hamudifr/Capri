@@ -286,7 +286,7 @@ class SQLiteApprovalChallengeStore:
         if decision == "approve" and not callable(grant_factory):
             raise ToolValidationError("approval requires a trusted grant factory")
         if (not isinstance(approver_id, str) or not approver_id.strip()
-                or len(approver_id) > 256 or contains_surrogate(approver_id)):
+                or approver_id != approver_id.strip() or len(approver_id) > 256 or contains_surrogate(approver_id)):
             raise ToolValidationError("approver identity is invalid")
         with self._store._lock:
             connection = self._store._connect()
