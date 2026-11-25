@@ -433,6 +433,28 @@ class SQLiteStrategyStore:
                     ),
                     UNIQUE(evaluation_id)
                 )""")
+                connection.execute("""CREATE TABLE IF NOT EXISTS strategy_promotion_assessments (
+                    assessment_id TEXT PRIMARY KEY,
+                    principal_id TEXT NOT NULL,
+                    strategy_class TEXT NOT NULL,
+                    baseline_id TEXT NOT NULL,
+                    baseline_version TEXT NOT NULL,
+                    candidate_id TEXT NOT NULL,
+                    candidate_version TEXT NOT NULL,
+                    policy_version TEXT NOT NULL,
+                    task_family TEXT NOT NULL,
+                    primary_metric TEXT NOT NULL,
+                    assessment_sha256 TEXT NOT NULL CHECK(length(assessment_sha256)=64),
+                    summary_json TEXT NOT NULL CHECK(length(summary_json)<=32768),
+                    evidence_manifest_refs_json TEXT NOT NULL CHECK(length(evidence_manifest_refs_json)<=4096),
+                    eligible_for_canary INTEGER NOT NULL CHECK(eligible_for_canary=1),
+                    created_at TEXT NOT NULL,
+                    UNIQUE(principal_id,strategy_class,candidate_id,candidate_version,assessment_sha256),
+                    FOREIGN KEY(principal_id,strategy_class,baseline_id,baseline_version)
+                        REFERENCES strategy_versions(principal_id,strategy_class,strategy_id,version),
+                    FOREIGN KEY(principal_id,strategy_class,candidate_id,candidate_version)
+                        REFERENCES strategy_versions(principal_id,strategy_class,strategy_id,version)
+                )""")
                 connection.execute("""CREATE TABLE IF NOT EXISTS strategy_events (
                     event_id TEXT PRIMARY KEY,
                     principal_id TEXT NOT NULL,
@@ -450,6 +472,7 @@ class SQLiteStrategyStore:
                     created_at TEXT NOT NULL,
                     previous_hash TEXT NOT NULL,
                     event_hash TEXT NOT NULL,
+                    promotion_assessment_sha256 TEXT,
                     UNIQUE(principal_id, strategy_class, generation),
                     CHECK(
                         (from_strategy_id IS NULL AND from_version IS NULL)
@@ -460,6 +483,13 @@ class SQLiteStrategyStore:
                     FOREIGN KEY(principal_id, strategy_class, from_strategy_id, from_version)
                         REFERENCES strategy_versions(principal_id, strategy_class, strategy_id, version)
                 )""")
+                event_columns = {
+                    row[1] for row in connection.execute("PRAGMA table_info(strategy_events)")
+                }
+                if "promotion_assessment_sha256" not in event_columns:
+                    connection.execute(
+                        "ALTER TABLE strategy_events ADD COLUMN promotion_assessment_sha256 TEXT"
+                    )
                 connection.execute("""CREATE TABLE IF NOT EXISTS strategy_active (
                     principal_id TEXT NOT NULL,
                     strategy_class TEXT NOT NULL,
@@ -471,7 +501,10 @@ class SQLiteStrategyStore:
                     FOREIGN KEY(principal_id, strategy_class, strategy_id, version)
                         REFERENCES strategy_versions(principal_id, strategy_class, strategy_id, version)
                 )""")
-                for table in ("strategy_evaluations", "strategy_versions", "strategy_events"):
+                for table in (
+                    "strategy_evaluations", "strategy_versions",
+                    "strategy_promotion_assessments", "strategy_events",
+                ):
                     connection.execute(f"""CREATE TRIGGER IF NOT EXISTS {table}_immutable_update
                         BEFORE UPDATE ON {table}
                         BEGIN SELECT RAISE(ABORT, '{table} are immutable'); END""")
@@ -485,6 +518,10 @@ class SQLiteStrategyStore:
                 connection.execute(
                     "CREATE INDEX IF NOT EXISTS strategy_events_owner_idx "
                     "ON strategy_events(principal_id, strategy_class, generation)"
+                )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS strategy_promotion_assessments_owner_idx "
+                    "ON strategy_promotion_assessments(principal_id, strategy_class, candidate_id, candidate_version)"
                 )
             finally:
                 connection.close()
