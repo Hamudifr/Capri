@@ -81,7 +81,7 @@ if reservation is not None:
             # The trusted host dispatcher starts work here.
             pass
         finally:
-            # First publish the host-observed in-flight count, then release.
+            # Atomically replace the committed hold with host-observed load.
             registry.release_reservation(
                 committed,
                 authenticated_worker_id=authenticated_worker_id,
