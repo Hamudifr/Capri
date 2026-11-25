@@ -185,10 +185,13 @@ class CapriHostRuntimeTests(unittest.TestCase):
         pending = host.reserve_worker_candidate(
             "alice-token", task.task_id, "math.factorial", 1,
         )
+        self.assertTrue(audit.worker_lifecycle_reconciliation_required())
         committed = host.commit_worker_reservation(
             "alice-token", "monitor-token", pending,
         )
+        self.assertTrue(audit.worker_lifecycle_reconciliation_required())
         self.assertTrue(host.release_worker_reservation("monitor-token", committed))
+        self.assertFalse(audit.worker_lifecycle_reconciliation_required())
 
         events = audit.events()
         event_types = [event.tool_name for event in events]
@@ -218,6 +221,43 @@ class CapriHostRuntimeTests(unittest.TestCase):
             if event.tool_name == "worker.reservation.committed"
         )
         self.assertEqual(json.loads(committed_event.metadata_json)["observed_in_flight"], 0)
+
+    def test_worker_runtime_startup_requires_reconciliation_for_unreleased_reservation(self):
+        audit = SQLiteSecurityStore(os.path.join(self.temp.name, "restart-audit.sqlite3"))
+        identities = {"worker-token": "worker-1"}
+        registry = InMemoryWorkerRegistry()
+        host = self.make_worker_host(
+            registry, identities, lambda *args: {"worker-1"}, audit_sink=audit,
+        )
+        host.register_worker(
+            "worker-token", WorkerDescriptor("worker-1", (1,), ("math.factorial",)),
+        )
+        host.heartbeat_worker("monitor-token", "worker-1")
+        task = self.task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {}}],
+        )
+        pending = host.reserve_worker_candidate(
+            "alice-token", task.task_id, "math.factorial", 1,
+        )
+        host.commit_worker_reservation("alice-token", "monitor-token", pending)
+        self.assertTrue(audit.worker_lifecycle_reconciliation_required())
+
+        with self.assertRaisesRegex(HostRuntimeError, "reconcile and acknowledge"):
+            self.make_worker_host(
+                InMemoryWorkerRegistry(), identities,
+                lambda *args: {"worker-1"}, audit_sink=audit,
+            )
+        self.assertTrue(
+            audit.acknowledge_worker_lifecycle_reconciliation(
+                "Supervisor reconciled active worker load and discarded process-local reservations",
+            )
+        )
+        self.assertFalse(audit.worker_lifecycle_reconciliation_required())
+        restarted = self.make_worker_host(
+            InMemoryWorkerRegistry(), identities,
+            lambda *args: {"worker-1"}, audit_sink=audit,
+        )
+        self.assertIsNotNone(restarted)
 
     def test_worker_audit_failure_requires_reconciliation_before_restart(self):
         class FailingHeartbeatAuditSink(InMemoryAuditSink):
