@@ -80,9 +80,12 @@ This is a meaningful structural improvement: the bounded-arithmetic statement no
 
 But the crucial constructive requirement is still absent. Pich–Santhanam require a polynomial-time function f and an S^1_2 proof that f outputs one of these alternatives. R73 provides only existential bounded-arithmetic existence in a stronger theory, with an adaptive witnessing extraction still to be analyzed.
 
-A possible KPT direction is to extract a constant adaptive list of PV_3/FP^{Sigma_2} witnesses from the T^2_2+rWPHP(PV_3) statement. Under P=NP, PH collapses and FP^{Sigma_2}=FP, so such a list might become polynomial-time evaluable. However:
-- no KPT witnessing theorem has yet been verified for this exact theory with rWPHP(PV_3);
-- adaptive-list collapse does not itself produce the S^1_2 correctness proof required by Pich–Santhanam;
+A possible KPT direction is to extract a constant adaptive list of PV_3/FP^{Sigma_2} witnesses from the T^2_2+rWPHP(PV_3) statement. Under P=NP, PH collapses and FP^{Sigma_2}=FP, so such a list might become polynomial-time evaluable. This remains speculative. Pich–Santhanam §3 explicitly show that replacing their p-time generator by existential quantifiers yields a forall-Sigma-b-2 statement and KPT's constant adaptive list; later outputs depend on earlier challenges, so the list does not directly give short EF proofs. Their §1.1.3 also says the feasible-MinMax route they know needs polynomial-precision APC_1 counting. Our current route is APC_3 / Sigma-b-2 relative counting, so it is above that target and no APC_1 descent is established.
+
+The exact gaps are:
+- no KPT witnessing theorem has yet been verified for this exact T^2_2+rWPHP(PV_3) theory;
+- even if PH collapse makes the extracted functions polynomial-time, adaptive-list dependence does not itself produce the S^1_2 correctness proof required by Pich–Santhanam;
+- the APC_3 construction has not been reduced to APC_1 / PV_1;
 - it does not supply the short EF transfer certificates required by KPS Theorem 11.
 
 Do not claim that P=NP yields a contradiction from this disjunction.
