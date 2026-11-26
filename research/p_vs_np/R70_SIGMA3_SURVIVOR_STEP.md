@@ -58,8 +58,7 @@ A/M <= 5/8 + 3delta + 2delta^2
      < 0.626 < 0.63.
 The bound uses M >= 100r and r >= 4^3(ln 2+12) > 800. Thus A <= 0.63M.
 
-Applying Theorem 3.21 to G_x with the same precision epsilon_0=delta gives:
-M_next <= ceil(A(1+delta)) <= 0.64M.
+To propagate the upper parameter without assuming a minimality property, use Theorem 3.21's lower section/retraction pair for G_x. If its lower parameter is a_next, Theorem 3.8 applied to G_x <=_delta A gives a PV_3 surjection [d]^c -> G_x^c with d=ceil(A(1+delta)). Compose with the retraction G_x^c -> [a_next]^c. sWPHP(PV_3) forces a_next<=d. Theorem 3.21 then gives M_next<=ceil(a_next(1+delta))<=ceil(ceil(A(1+delta))(1+delta))<=0.64M. The extra multiplicative loss and both ceilings fit well inside the 0.64 target for M>=100r.
 
 ### Small branch
 
