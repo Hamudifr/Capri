@@ -221,3 +221,10 @@ R66 refines R64: Jeřábek's approximate-counting hierarchy relativizes, and APC
 See [R67 APC₃ formalization audit](R67_APC3_FORMALIZATION_AUDIT.md).
 
 R67 repairs two omissions in R66. First, Jeřábek Theorem 3.21 supplies near-cardinality parameters for sparse Σᵇ₂ survivor sets, avoiding ambient-universe counting. Second, the full iteration naturally needs S³₂+sWPHP(PV₃) and a ∀Σᵇ₃ conservation route to T²₂+rWPHP(PV₃), not S¹₂. The weighted tag-lift is now specified as an explicit mixed-radix PV₃ injection from bad tuples times [L] into tagged tuples. Exact approximate-counting constants, the complete S³₂ history induction, and any EF descent remain open.
+
+
+# R68: exact tagged-tail parameters
+
+See [R68 exact parameter closure](R68_EXACT_PARAMETER_CLOSURE.md).
+
+R68 closes the finite weighted-tail constants: with m≥4, L=floor([m(m+4)]^(r/2)), the mixed-radix injection gives |Badₓ|/|S|ʳ≤2exp(−r/m²). Choose m=⌈√s⌉ and odd r≥m²(n ln2+12); the union bound is at most 2e⁻¹², and majority size is O(ns²)≤s³ for s≥Kn. It also makes the small/large survivor branch explicit using Theorem 3.21's near-cardinality scale. The key remaining formal gap is the APC₃ tagged-fibre transfer lemma: derive Badₓ≼εT from the PV₃ injection and approximate product/counting laws with every ceiling/error explicit. The S³₂ history induction and EF descent remain open.
