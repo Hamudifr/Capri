@@ -167,3 +167,10 @@ Theorem 3.20 with t=1 gives a bad-pair fibre approximately bounded by one. Corol
 See [R59 explicit APC2 single-step](R59_EXPLICIT_APC2_SINGLE_STEP.md).
 
 R59 fixes the incidence ratio below 0.714 with r=6n and inverse-linear errors, uses the Theorem 3.21 section maps to certify the lower size of S^r, and handles the small-survivor case by Corollary 3.10 exact enumeration. Theorem 3.20's one-element fibre is now tied to the exact-list repair. The full history induction remains open.
+
+
+# R60: greedy APC2 induction
+
+See [R60 greedy APC2 induction](R60_GREEDY_APC2_INDUCTION.md).
+
+R60 writes the history-dependent survivor invariant: a polynomial-length history of satisfying formula/witness pairs leaves a PV-definable survivor set. A constant-factor single-step shrink would iterate under a Sigma^b_2 approximate-size invariant for O(s log(n+s)) stages. The exact conditional proof-theory and parameter propagation remain open.
