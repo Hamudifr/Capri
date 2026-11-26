@@ -89,7 +89,7 @@ Choose:
 - m = ⌈s^(1/3)⌉, with m≥4;
 - r the least odd integer at least m³(n ln 2 + 12);
 - δ = 1/(1000r);
-- κ = 1/(50r), the large-branch bound t₀/s₀≤1+κ from Theorem 3.21.
+- Run Theorem 3.21 with enumeration precision ε₀=δ. In the large branch s₀≥100r, its ceiling gives t₀/s₀≤1+δ+1/s₀≤1+κ, where κ=1/(50r). This ensures S≼δM at the same precision used by the incidence argument.
 
 For a large survivor set, let s₀≤|S|≤t₀=M and define
 θ = 1/2−1/(2m),
