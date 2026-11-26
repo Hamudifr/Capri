@@ -74,9 +74,10 @@ The runtime should depend on narrow host-supplied protocols, not a cloud-vendor 
 - `CheckpointSigner.sign(key_id, message) -> signature`
 - `CheckpointVerifier.verify(key_id, message, signature) -> bool` (or a verifier service when using HMAC)
 - `CheckpointStore.read_latest(scope_id) -> checkpoint | None`
-- `CheckpointStore.append_if_generation(scope_id, expected_generation, checkpoint) -> stored_checkpoint`
+- `CheckpointStore.read_checkpoint(scope_id, generation) -> checkpoint | None` (or an authenticated append-only history iterator)
+- `CheckpointStore.append_if_generation(scope_id, expected_generation, expected_fencing_epoch, checkpoint) -> stored_checkpoint`
 
-The external store must provide atomic compare-and-swap or equivalent conditional append. A plain mutable object key without conditional writes, retention protection or access separation is insufficient. The signer must enforce which stream, key ID and operation are authorized; model output and database content cannot select arbitrary signing keys or request signatures.
+The external store must provide atomic compare-and-swap or equivalent conditional append, immutable retention of prior signed records, and a monotonic fencing-epoch check. Generation CAS alone is insufficient: a stale supervisor that still holds signing credentials must not be able to append a higher generation after losing its lease. The signer or checkpoint store must authenticate the current lease epoch and reject an epoch older than the latest accepted epoch. A plain mutable object key without conditional writes, retention protection or access separation is insufficient. The signer must enforce which scope, key ID, fencing epoch and operation are authorized; model output and database content cannot select arbitrary signing keys or request signatures.
 
 No secret, private key, HMAC key, bearer token, KMS credential or raw reservation token is stored in the checkpoint or database.
 
@@ -109,7 +110,7 @@ The signed bytes are a canonical serialization of the complete envelope, prefixe
 
 Use [RFC 8785 JSON Canonicalization Scheme](https://www.rfc-editor.org/rfc/rfc8785) or a separately versioned canonical binary encoding. Do not assume Python's `json.dumps(sort_keys=True)` is automatically RFC 8785 compliant. Reject duplicate keys, invalid Unicode, non-finite numbers, unknown fields and unsupported versions before signing or verification. Keep numeric fields within a precisely specified integer range.
 
-The external store retains the exact signed envelope, signature, generation and append timestamp. The database may retain only a non-authoritative cache/reference to the latest checkpoint; verification must always consult the external latest checkpoint.
+The external store retains the exact signed envelope, signature, generation, fencing epoch and append timestamp as immutable history. Define `previous_checkpoint_sha256` as SHA-256 over the canonical envelope bytes concatenated with the signature bytes of the immediately previous checkpoint; the genesis value is explicitly null (or a fixed versioned genesis digest). The database may retain only a non-authoritative cache/reference to the latest checkpoint; verification must always consult the external latest checkpoint and authenticated history when validating generation continuity or key transitions.
 
 ### Cross-store host lifecycle audit coverage
 
