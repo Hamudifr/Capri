@@ -149,3 +149,12 @@ See [R55 robust APC2 fibre dichotomy](R55_APC2_ROBUST_FIBRE_DICHOTOMY.md).
 R55 uses Jeřábek's disjoint-union dichotomy to repair the per-fibre counting gap in R54. For each satisfiable formula, either the successful survivor set is approximately at most 3/4 of S, giving the desired constant-factor survivor reduction, or the failure set is approximately at most 1/4 of S. In the latter case, product counting and the parameterized averaging theorem make the bad tuple incidence set small; the empty-fibre theorem leaves at most one uncovered formula/witness pair, repaired by appending one successful circuit. With r=n+1 the target incidence ratio is below 0.255 including the outer ceiling for the stated small relative error and large-parameter branch. The interval lower-bound comparison and small-survivor exact-counting branch now have explicit proof routes, though their formal composition remains to be written. The small-survivor case has a separate exact-list treatment using Theorem 3.21's polynomial-length enumeration.
 
 This is a promising APC2 single-step proof route, not yet a completed formal derivation. The small-parameter exact-counting branch, interval lower-bound implication, bounded formula classes, and witness extraction still need explicit proofs. Greedy iteration, uniform generation, the Pich–Santhanam/KPS decision and EF-certificate bridge, and P != NP remain open.
+
+
+# R56: empty-fibre rounding repair and selector audit
+
+See [R56 empty-fibre rounding repair](R56_EMPTY_FIBRE_ROUNDING_REPAIR.md).
+
+R56 corrects R55's use of Theorem 3.20: with t=1 the theorem's ceiling gives at most two exceptional formula/witness pairs, not one. Append one successful search circuit for each distinct exceptional formula, at most two circuits total. The selector then uses at most n+3 circuits and remains polynomial size under the standard O(n)-size SAT witness verifier and s≥Kn.
+
+R56 also separates Theorem 3.20's internal precision delta from the outer approximation epsilon, records the source's exact Theorem 3.21 section/retraction maps, and gives a candidate recurrence for repeated survivor reduction. The recurrence and one-step arithmetic are promising, but full APC2 formula-class/witness extraction and history-dependent iteration remain unproved. No uniform generator, KPS EF transfer certificate, or P≠NP proof is claimed.
