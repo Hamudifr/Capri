@@ -1689,6 +1689,8 @@ class CapriHostRuntimeTests(unittest.TestCase):
             "alice-token", next_task.task_id, "math.factorial", 1,
         )
         self.assertIsNotNone(replacement)
+        now["value"] = expiry
+        now["sequence"] = None
         expiry_events = [
             event for event in audit.events()
             if event.tool_name == "worker.reservation.expired"
