@@ -35,7 +35,7 @@ is Δᵇ₂: both it and its negation have Σᵇ₂ definitions. All r error bit
 
 Consequently, the mixed-radix injection and its inverse-on-image are PV₃(α) procedures, with α representing the Σᵇ₁ SAT-witness predicate. The sets S, Fₓ, Bₓ, Tₓʳ and Bₓ×[L] are Σᵇ₂-definable. The graph of a general PV₃ function need not itself be Σᵇ₂; the proof uses the PV₃ function interface in Corollary 3.11, not an unjustified claim that every PV₃ graph is Σᵇ₂.
 
-If Bₓ is nonempty, totalize the inverse map Tₓʳ→Bₓ×[L] by sending points outside the image to one fixed element of Bₓ×[L]. This is a PV₃(α) surjection with ιₓ as a PV₃ coretraction. If Bₓ is empty, the desired fibre upper bound is immediate.
+If Bₓ is nonempty, totalize the inverse map Tₓʳ→Bₓ×[L] by sending points outside the image to one fixed element of Bₓ×[L]. A default element can be found by lexicographic prefix self-reduction with the Σᵇ₂ predicate Bₓ, using polynomially many Σ₂-oracle queries; this is PV₃, not an exponential scan. The totalized map is a PV₃(α) surjection with ιₓ as a PV₃ coretraction. If Bₓ is empty, the desired fibre upper bound is immediate.
 
 ### 2.2 Pull back the approximate upper bound
 
@@ -151,7 +151,7 @@ All ceiling estimates above use r≥m³(n ln2+12), m≥4, and s₀≥100r; the a
 
 To turn this into a contradiction, use the Theorem 3.21 retraction pair S↔[s₀], coordinatewise on r-tuples. Put a=s₀ʳ. If U=Sʳ≼δ⌊a/2⌋, Theorem 3.8 would give a PV₃ surjection [d]^c↠U^c with d=⌈⌊a/2⌋(1+δ)⌉<a. Compose it with the retraction U^c→[a]^c. This would give a surjection from a smaller interval power onto [a]^c, contradicting sWPHP(PV₃). Hence U≰δ⌊a/2⌋.
 
-If every tuple had a majority error on some x, the projection E→U would be surjective. A PV₃ section can choose the least such x using the Σᵇ₂ incidence predicate, so Corollary 3.11 transfers E≼δE₀ to U≼δ⌈E₀(1+δ)⌉. The ratio bound above makes this parameter strictly below ⌊a/2⌋, contradiction. Thus some tuple has a majority circuit correct on every input. Its circuit size is O(rs)=O(ns²)≤s³ for sufficiently large s≥Kn, contradicting the assumed SAT circuit lower bound.
+If every tuple had a majority error on some x, the projection E→U would be surjective. A PV₃ section can choose the lexicographically first such x by prefix self-reduction with the Σᵇ₂ incidence predicate, using polynomially many Σ₂-oracle queries. Corollary 3.11 therefore transfers E≼δE₀ to U≼δ⌈E₀(1+δ)⌉. The ratio bound above makes this parameter strictly below ⌊a/2⌋, contradiction. Thus some tuple has a majority circuit correct on every input. Its circuit size is O(rs)=O(ns²)≤s³ for sufficiently large s≥Kn, contradicting the assumed SAT circuit lower bound.
 
 Consequently, not every fibre Fₓ can satisfy Fₓ≼δq. There is an x with Fₓ not≼δq, hence |Fₓ|>q≥(1/2−1/m)|S|. Retaining the agreeing circuits shrinks the survivor set by at least 3/4.
 
