@@ -855,10 +855,18 @@ class CapriHostRuntime:
                     protocol_version=protocol_version,
                     authorized_worker_ids=allowed,
                 )
+            except HostRuntimeError:
+                raise
             except WorkerRegistryError:
                 if isinstance(self._worker_registry, SQLiteWorkerRegistry):
                     self._finish_worker_audit_operation()
                 raise HostRuntimeError("host worker candidate lookup was rejected") from None
+            except Exception:
+                if isinstance(self._worker_registry, SQLiteWorkerRegistry):
+                    self._worker_audit_healthy = False
+                raise HostRuntimeError(
+                    "host worker candidate lookup failed; reconciliation is required"
+                ) from None
 
     def get_worker_reservation_for_task(
         self, credential: Any, task_id: str,
