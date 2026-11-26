@@ -237,3 +237,12 @@ See [R69 APC₃ tagged-fibre transfer](R69_APC3_TAGGED_FIBRE_TRANSFER.md).
 R69 identifies a valid approximate-counting bridge for the R68 mixed-radix injection. Jeřábek Corollary 3.11 transfers an approximate upper bound through a PV₃ surjection with a coretraction; Theorem 3.16 then divides the product bound and rules out the interval factor using Theorem 3.8's soundness. The tagged-universe bound follows from product and union laws. R69 also introduces a more robust parameter margin, m=⌈s^(1/3)⌉ and r=O(ns), and now gives an explicit global incidence ceiling envelope: E₀/s₀ʳ≤2exp(−(3/4)n ln2−20.95)<1/4. The Theorem 3.21 lower-interval argument then contradicts a surjective projection if every tuple has a majority error, yielding a hard formula and a 3/4 survivor shrink at the parameter level.
 
 The quantitative one-step incidence calculation is now closed at the displayed parameter level, but its uniform bounded-formula proof and S³₂ survivor-history induction remain open. BBΣᵇ₄ collection, conservation verification, PV₁/S¹₂ descent, KPS EF transfer, and P≠NP are not established.
+
+
+# R70: Sigma-3 survivor step
+
+See [R70 Sigma-3 survivor step](R70_SIGMA3_SURVIVOR_STEP.md).
+
+R70 applies Jeřábek Theorem 3.17 to the decision-error / agreeing-circuit partition. Combined with R69's incidence contradiction, it yields a positive successor certificate: some formula x has next survivor set Gₓ approximately bounded by A. This is the right form for iteration because Gₓ≼A is Σᵇ₃ for Σᵇ₂ survivor sets. In the large branch A≤0.63M and the next Theorem 3.21 upper parameter shrinks by at least 0.64; the small branch uses a majority over a deduplicated enumeration of O(r) survivors.
+
+The natural proof target is S³₂+sWPHP(PV₃) with BBΣᵇ₄ collection. The full history invariant, exact uniform formula-class proof, and ∀Σᵇ₃ conservation transfer remain open. No PV₁ generator, S¹₂ proof, KPS EF bridge, or P≠NP result is claimed.
