@@ -104,6 +104,34 @@ Use [RFC 8785 JSON Canonicalization Scheme](https://www.rfc-editor.org/rfc/rfc87
 
 The external store retains the exact signed envelope, signature, generation and append timestamp. The database may retain only a non-authoritative cache/reference to the latest checkpoint; verification must always consult the external latest checkpoint.
 
+### Cross-store host lifecycle audit coverage
+
+The registry event chain is not the only worker audit source. Host lifecycle events are written separately to `SQLiteSecurityStore.audit_events`. Those rows currently have canonical per-event metadata digests and append-only triggers, but they do not form an independently authenticated global chain. A checkpoint that binds only `worker_registry_events` must be described as authenticating only that stream; it must not imply that the host lifecycle audit history is also protected.
+
+If the production security claim covers the complete worker lifecycle, extend the envelope to a composite checkpoint with both store identities and both stream positions:
+
+- `registry_database_id`, `registry_schema_version`, `registry_sequence`, `registry_head_sha256`
+- `lifecycle_database_id`, `lifecycle_schema_version`, `lifecycle_sequence`, `lifecycle_head_sha256`
+
+The lifecycle stream needs its own deterministic sequence and rolling digest. Each chained record should bind the event ID, event order, timestamp, principal, event type, status, error code, resource type/ID, task ID, and canonical metadata digest. Do not treat the current per-row `argument_digest` as a chain. A dedicated worker-lifecycle chain table/state row or equivalent strictly validated schema may implement this; backup validation, integrity checks, and restore semantics must cover it.
+
+Both database identities must be stable, random installation identities. A filesystem path is not an identity. A copied database retains its identity for rollback detection; intentional installation cloning requires explicit re-enrolment and a new checkpoint scope.
+
+### Consistent cross-store snapshot
+
+The two SQLite stores cannot be read as one atomic transaction. Before signing a composite checkpoint:
+
+1. Acquire the embedding host's exclusive supervisor/lifecycle fence. SQLite transaction locking alone does not prevent another host process from interleaving a multi-store operation.
+2. Quiesce all registry and lifecycle writers under that fence.
+3. Confirm the security store has zero pending lifecycle-operation markers and that the host's reservation/audit reconciliation is healthy.
+4. Capture and validate both stream identities, sequences, and heads while no writer can mutate either store.
+5. Sign and publish the composite envelope with external generation compare-and-swap.
+6. Read back and verify the external checkpoint before releasing the fence.
+
+If registry persistence commits but its corresponding host lifecycle event does not, the pending operation marker must block checkpoint publication. If the external checkpoint is published but local acknowledgement fails, startup must verify the external checkpoint against both stores and repair only local diagnostic state. If either store is ahead of the checkpoint, that suffix remains unanchored and requires explicit reconciliation; do not silently sign it during restart.
+
+The checkpoint store's compare-and-swap prevents competing checkpoint generations, but it does not replace the host-level fencing lease. A lease/fencing epoch should be supplied by the embedding host and included in the checkpoint or its authenticated metadata when the deployment supports multiple supervisors.
+
 ## 5. Checkpoint creation and atomicity
 
 A checkpoint cannot be made atomic with a local SQLite commit and a remote signing/store operation. The coordinator must therefore expose and test the crash windows rather than pretending there is a distributed transaction.
