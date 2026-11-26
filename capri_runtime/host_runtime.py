@@ -550,9 +550,10 @@ class CapriHostRuntime:
             self._purge_worker_reservation_contexts()
             self._begin_worker_audit_operation()
             try:
-                snapshot = self._worker_registry.register(
-                    approved, authenticated_worker_id=identity,
-                )
+                with self._capture_worker_registry_expirations():
+                    snapshot = self._worker_registry.register(
+                        approved, authenticated_worker_id=identity,
+                    )
             except WorkerRegistryError:
                 self._finish_worker_audit_operation()
                 raise HostRuntimeError("worker registration was rejected") from None
@@ -602,18 +603,20 @@ class CapriHostRuntime:
             self._begin_worker_audit_operation()
             try:
                 if isinstance(self._worker_registry, SQLiteWorkerRegistry):
-                    snapshot = self._worker_registry.heartbeat_with_load_resolver(
-                        worker_id,
-                        authenticated_worker_id=worker_id,
-                        in_flight_resolver=self._worker_in_flight,
-                    )
+                    with self._capture_worker_registry_expirations():
+                        snapshot = self._worker_registry.heartbeat_with_load_resolver(
+                            worker_id,
+                            authenticated_worker_id=worker_id,
+                            in_flight_resolver=self._worker_in_flight,
+                        )
                     in_flight = snapshot.health.in_flight
                 else:
                     # In-memory registry updates are serialized by the host lock.
                     in_flight = self._worker_in_flight(worker_id)
-                    snapshot = self._worker_registry.heartbeat(
-                        worker_id, authenticated_worker_id=worker_id, in_flight=in_flight,
-                    )
+                    with self._capture_worker_registry_expirations():
+                        snapshot = self._worker_registry.heartbeat(
+                            worker_id, authenticated_worker_id=worker_id, in_flight=in_flight,
+                        )
             except HostRuntimeError:
                 # A rejected host load observation happens before the registry
                 # callback mutates state; close the operation marker and retain
@@ -651,9 +654,10 @@ class CapriHostRuntime:
             )
             self._begin_worker_audit_operation()
             try:
-                snapshot = self._worker_registry.record_failure(
-                    worker_id, authenticated_worker_id=worker_id,
-                )
+                with self._capture_worker_registry_expirations():
+                    snapshot = self._worker_registry.record_failure(
+                        worker_id, authenticated_worker_id=worker_id,
+                    )
             except WorkerRegistryError:
                 self._finish_worker_audit_operation()
                 raise HostRuntimeError("worker failure observation was rejected") from None
@@ -927,13 +931,14 @@ class CapriHostRuntime:
             self._purge_worker_reservation_contexts()
             self._begin_worker_audit_operation()
             try:
-                reservation = self._worker_registry.reserve_eligible(
-                    capability,
-                    protocol_version=protocol_version,
-                    authorized_worker_ids=allowed,
-                    principal_id=context.principal_id,
-                    task_id=task_id,
-                )
+                with self._capture_worker_registry_expirations():
+                    reservation = self._worker_registry.reserve_eligible(
+                        capability,
+                        protocol_version=protocol_version,
+                        authorized_worker_ids=allowed,
+                        principal_id=context.principal_id,
+                        task_id=task_id,
+                    )
             except WorkerRegistryError:
                 self._finish_worker_audit_operation()
                 raise HostRuntimeError("host worker reservation was rejected") from None
@@ -1087,9 +1092,10 @@ class CapriHostRuntime:
             heartbeat_snapshot = self.heartbeat_worker(observer_credential, worker_id)
             self._begin_worker_audit_operation()
             try:
-                committed = self._worker_registry.commit_reservation(
-                    stored.reservation, authenticated_worker_id=worker_id,
-                )
+                with self._capture_worker_registry_expirations():
+                    committed = self._worker_registry.commit_reservation(
+                        stored.reservation, authenticated_worker_id=worker_id,
+                    )
             except WorkerRegistryError:
                 self._finish_worker_audit_operation()
                 self._purge_worker_reservation_contexts()
@@ -1169,15 +1175,17 @@ class CapriHostRuntime:
             self._begin_worker_audit_operation()
             try:
                 if stored.reservation.committed:
-                    released = self._worker_registry.release_reservation(
-                        stored.reservation,
-                        authenticated_worker_id=worker_id,
-                        observed_unreserved_in_flight=observed_in_flight,
-                    )
+                    with self._capture_worker_registry_expirations():
+                        released = self._worker_registry.release_reservation(
+                            stored.reservation,
+                            authenticated_worker_id=worker_id,
+                            observed_unreserved_in_flight=observed_in_flight,
+                        )
                 else:
-                    released = self._worker_registry.release_reservation(
-                        stored.reservation, authenticated_worker_id=worker_id,
-                    )
+                    with self._capture_worker_registry_expirations():
+                        released = self._worker_registry.release_reservation(
+                            stored.reservation, authenticated_worker_id=worker_id,
+                        )
             except WorkerRegistryError:
                 self._finish_worker_audit_operation()
                 raise HostRuntimeError("worker reservation release was rejected") from None
