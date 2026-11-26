@@ -579,6 +579,88 @@ class LearningStoreTests(unittest.TestCase):
             "invalidated",
         )
 
+    def test_rejects_oversized_example_fields(self):
+        cases = {
+            "example_id": "x" * (learning_module.MAX_EXAMPLE_ID_CHARS + 1),
+            "task_id": "x" * (learning_module.MAX_TASK_ID_CHARS + 1),
+            "capability": "x" * (learning_module.MAX_CAPABILITY_CHARS + 1),
+            "prompt": "x" * (learning_module.MAX_PROMPT_CHARS + 1),
+            "completion": "x" * (learning_module.MAX_COMPLETION_CHARS + 1),
+            "evidence_ref": "x" * (learning_module.MAX_EVIDENCE_REF_CHARS + 1),
+            "source": "x" * (learning_module.MAX_SOURCE_CHARS + 1),
+        }
+        for field, value in cases.items():
+            with self.subTest(field=field):
+                with self.assertRaises(LearningDataError):
+                    self.store.record(example(**{field: value}))
+
+    def test_rejects_oversized_and_invalid_capability_allowlists(self):
+        output = self.root / "too-many-capabilities.jsonl"
+        capabilities = (f"capability-{index}" for index in range(
+            learning_module.MAX_ALLOWED_CAPABILITIES + 1
+        ))
+        with self.assertRaises(LearningDataError):
+            self.store.export_jsonl(output, allowed_capabilities=capabilities)
+        self.assertFalse(output.exists())
+
+        for value in ("tool_execution", [None], ["x" * (learning_module.MAX_CAPABILITY_CHARS + 1)]):
+            with self.subTest(value_type=type(value).__name__):
+                with self.assertRaises(LearningDataError):
+                    self.store.export_jsonl(self.root / "invalid-allowlist.jsonl", allowed_capabilities=value)
+
+    def test_export_applies_capability_allowlist_before_duplicate_selection(self):
+        self.store.record(example(capability="blocked"))
+        self.store.record(example(
+            example_id="ex-002", task_id="task-002", capability="tool_execution",
+        ))
+        output = self.root / "allowlisted-duplicate.jsonl"
+        counts = self.store.export_jsonl(output, allowed_capabilities={"tool_execution"})
+        rows = [json.loads(line) for line in output.read_text().splitlines()]
+        self.assertEqual([row["example_id"] for row in rows], ["ex-002"])
+        self.assertEqual(counts["excluded_duplicate"], 0)
+
+    def test_export_streams_many_rows_and_preserves_duplicate_counts(self):
+        for index in range(300):
+            self.store.record(example(
+                example_id=f"stream-{index:04d}",
+                task_id=f"stream-task-{index:04d}",
+                prompt=f"prompt-{index}",
+                completion=f"completion-{index}",
+            ))
+        output = self.root / "streamed.jsonl"
+        counts = self.store.export_jsonl(output)
+        rows = [json.loads(line) for line in output.read_text().splitlines()]
+        self.assertEqual(len(rows), 300)
+        self.assertEqual(sum(counts[name] for name in ("train", "validation", "test")), 300)
+        self.assertEqual(counts["excluded_duplicate"], 0)
+
+    def test_export_rejects_too_many_consent_dependencies(self):
+        dependency_count = learning_module.MAX_EXPORT_CONSENTS + 1
+        with self.store._connection() as connection:
+            for index in range(dependency_count):
+                consent_id = f"bulk-consent-{index}"
+                connection.execute(
+                    """INSERT INTO learning_consents
+                    (consent_id, scope, policy_version, evidence_ref, granted_at, revoked_at)
+                    VALUES (?, 'curated_training_examples', 'learning-consent-v1', ?, 
+                            '2026-11-06T11:00:00+00:00', NULL)""",
+                    (consent_id, f"test://consent/{index}"),
+                )
+                connection.execute(
+                    """INSERT INTO learning_examples (
+                        example_id, task_id, capability, prompt, completion, outcome,
+                        evidence_ref, quality_score, consent, privacy_reviewed, sensitive,
+                        source, schema_version, content_hash, consent_id
+                    ) VALUES (?, ?, 'tool_execution', 'p', 'c', 'verified_success',
+                              'test://evidence/bulk', 0.98, 1, 1, 0, 'capri_task', 1, ?, ?)""",
+                    (f"bulk-example-{index}", f"bulk-task-{index}", "a" * 64, consent_id),
+                )
+        output = self.root / "too-many-consents.jsonl"
+        with self.assertRaises(LearningDataError):
+            self.store.export_jsonl(output)
+        self.assertFalse(output.exists())
+        self.assertEqual(list(self.root.glob(f".{output.name}.*.jsonl.tmp")), [])
+
     def test_capability_allowlist(self):
         self.store.record(example(capability="research"))
         counts = self.store.export_jsonl(
