@@ -333,7 +333,7 @@ class DurableWorkerRestartTests(unittest.TestCase):
             return SQLiteWorkerRegistry(
                 store,
                 heartbeat_ttl_ms=5_000,
-                reservation_ttl_ms=10,
+                reservation_ttl_ms=1_000,
                 clock_ns=lambda: now["value"],
                 clock_wall_ns=lambda: now["value"],
             )
@@ -382,7 +382,7 @@ class DurableWorkerRestartTests(unittest.TestCase):
 
         # Move beyond the pending-reservation TTL. Committed work must remain
         # durable and must not be expired merely because time and the host process advanced.
-        now["value"] += 20_000_000
+        now["value"] += 2_000_000_000
         tasks_after_second_restart = SQLiteTaskStore(self.tasks_path)
         audit_after_second_restart = SQLiteSecurityStore(self.audit_path)
         self.assertTrue(
