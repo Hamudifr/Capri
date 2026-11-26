@@ -1784,6 +1784,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
                 "alice-token", task.task_id, "math.factorial", 1,
             )
         self.assertFalse(host._worker_audit_healthy)
+        self.assertEqual(audit._pending_worker_operations, 1)
         self.assertTrue(audit.worker_lifecycle_reconciliation_required())
 
 if __name__ == "__main__":
