@@ -200,3 +200,10 @@ R63 confirms from Jeřábek's original Theorems 3.19–3.20 that the incidence m
 See [R64 decision fibre obstruction](R64_DECISION_FIBRE_OBSTRUCTION.md).
 
 R64 revisits the R49 majority-sampling anti-checker, which is the right nonuniform decision-circuit object for Pich–Santhanam. A weighted Chernoff/tagging inequality gives a compact finite combinatorial tail bound. But the decision-error fibre C(x)≠SAT(x) is generally BΣᵇ₁/Δ₂, not Σᵇ₁, because it includes the unsatisfiable case. Jeřábek's relative Sipser counting theorems require Σᵇ₁ sets. The older Δ₂ counting framework has ambient-additive precision, insufficient for the exponentially small majority-error fibres needed to union-bound over 2ⁿ formulas. Thus R49's external nonuniform proof remains sound, but this direct bounded-arithmetic formalization is blocked by both definability and sparsity. R51/R56/R62 search anti-checker remains the better APC₂ route, with the separate search-to-decision gap unresolved.
+
+
+# R65: exact Pich–Santhanam label interface
+
+See [R65 label interface audit](R65_LABEL_INTERFACE_AUDIT.md).
+
+R65 checks the full statement of Pich–Santhanam Theorem 7. R49's direct nonuniform decision anti-checker already has the required object shape: a polynomial-size formula set plus one label per formula, valid whenever the formula is satisfiable, and defeating every target decision circuit. It does not need conversion from the search anti-checker. The missing step is feasible generation and an S¹₂ proof. The valid-label condition is Πᵇ₁ (∀w, SAT(x,w)→SAT(x,yₓ)); a final polynomial-size label table exists nonuniformly, but the R49 majority argument needs the SAT bit over all 2ⁿ formulas before constructing the final set. The global decision-error fibres remain Δ₂/Boolean-combination objects, outside Jeřábek's current Σᵇ₁ relative-counting theorems. Search and decision anti-checker routes remain distinct.
