@@ -44,18 +44,21 @@ This direct argument avoids forcing the large-a incidence ratio through small ro
 
 For r=n+1, epsilon=1/(1000r), a>=100r, b<=ceil(a(1+epsilon)), and B<=ceil(ceil(b/4)(1+2epsilon)), we have
 
-b/a <= 1+0.011/r,
-4B/a <= (b/a)(1+2epsilon)+8/a
-      <= (1+0.011/r)(1+0.002/r)+0.08/r
-      <= 1+0.094/r.
+b/a <= 1+0.011/r.
+
+Retaining both ceiling errors gives B <= b/4(1+2epsilon)+3, hence
+
+4B/a <= (b/a)(1+2epsilon)+12/a
+      <= (1+0.011/r)(1+0.002/r)+0.12/r
+      <= 1+0.134/r.
 
 Consequently,
 
 Z/a^r <= (1/4)(1+epsilon)^(r+1)(1+4epsilon)(4B/a)^r
-      < (1/4) exp(0.0015+0.002+0.094)
-      < 0.276.
+      < (1/4) exp(0.0015+0.002+0.134)
+      < 0.287.
 
-Including the outer ceiling remains below 0.28 because a>=100r and r>=2. Since s0=floor(a^r/2), the incidence bound is comfortably below s0.
+Including the outer ceiling remains below 0.29 because a>=100r and r>=2. Since s0=floor(a^r/2), the incidence bound is comfortably below s0.
 
 ## Iteration audit: a plausible recurrence, not yet a formal theorem
 
@@ -88,7 +91,7 @@ Relevant source passages: Theorem 3.17 (PDF pp. 76–77), Corollary 3.18 and The
 - Finite combinatorial repair: append one successful circuit per distinct exceptional formula; at most two additions.
 - Selector size: O(ns+n^2), with explicit standard-encoding and s>=Kn assumptions.
 - Small-a branch: direct O(n)-circuit enumeration and selector contradiction; no incidence estimate needed.
-- Large-a branch: refined incidence ratio below 0.28, safely below s0≈a^r/2.
+- Large-a branch: retaining both ceiling errors gives incidence ratio below 0.29, safely below s0≈a^r/2.
 - Theorem 3.20 internal precision: separated from outer approximation epsilon.
 - Single-step APC2 formalization: not complete.
 - History-dependent iteration: not proved; recurrence is a candidate.
