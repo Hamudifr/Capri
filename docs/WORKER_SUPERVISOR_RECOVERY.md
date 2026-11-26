@@ -58,12 +58,12 @@ Only after all relevant workers and reservations have been inspected:
 
 - Reconfirm the old writer is fenced and the current supervisor still holds the external lease.
 - Re-run integrity and projection checks.
-- **Do not acknowledge while active reservations remain.** `worker_lifecycle_reconciliation_required()` returns true for either pending operation markers or outstanding reservations. `acknowledge_worker_lifecycle_reconciliation(note)` records an audit boundary and clears the pending-operation count, but it does not remove reservations; therefore the startup gate remains closed while any reservation remains.
-- Resolve every active reservation against the external task system. A committed reservation may be released only after the external outcome and current unreserved load are established. An unknown outcome remains a hard stop.
-- **Current implementation blocker:** `CapriHostRuntime` checks `worker_lifecycle_reconciliation_required()` during construction and rejects outstanding reservations, but the repository does not yet expose a separate host-audited supervisor API that can resolve/release those reservations before constructing the replacement runtime. The normal host release API requires a constructed runtime, creating a recovery deadlock for this case.
-- Do not work around this gap with direct SQL, a fresh in-memory audit sink, or an un-audited direct registry mutation. Keep admission stopped until a dedicated supervisor reconciliation API is implemented and tested.
-- Once that API has resolved all reservations and persisted the corresponding registry and host lifecycle events, call `acknowledge_worker_lifecycle_reconciliation(note)` on the **same durable security store** used by the prior runtime. The note should identify the recovery record and summarize the reconciliation outcome without containing secrets.
-- Read back the lifecycle state and verify that no pending operation or outstanding reservation remains. Then construct the replacement `CapriHostRuntime` over the same task and security stores, re-authenticate workers, re-check policy and capacity, and resume admission only while the external supervisor lease remains held.
+- Reconcile every active reservation against the external task system and freshly authenticated worker identity before acknowledgement. Distinguish pending from committed work; an unknown external outcome remains uncertain and must not be replayed or released.
+- A committed reservation that is still in flight may remain active across restart. Preserve it until the external task outcome and host-observed unreserved load justify a supported release. Do not require all reservation rows to be deleted before restart recovery.
+- Call `acknowledge_worker_lifecycle_reconciliation(note)` on the **same durable security store** used by the prior runtime only after the supervisor has fenced old writers, revalidated workers, and reconciled the state. The note should identify the recovery record and summarize the outcome without containing secrets.
+- The acknowledgement event establishes a new audit reconciliation boundary: the audit store's outstanding-reservation calculation starts after the latest valid acknowledgement. It does **not** delete or mutate the worker-registry reservation rows. Those rows remain recoverable by authenticated principal/task after the replacement host is constructed.
+- Read back the lifecycle state and verify that no pending operation remains after the boundary. Then construct the replacement `CapriHostRuntime` over the same task and security stores, recover still-active reservations by principal/task, re-authenticate workers, re-check policy and capacity, and resume admission only while the external supervisor lease remains held.
+- The current acknowledgement method accepts a reconciliation note but does not itself validate an external supervisor-lease token. The embedding host must enforce the documented single-supervisor fencing requirement; the API must not be mistaken for a lease provider.
 
 If acknowledgement or runtime construction fails, keep admission stopped. Do not switch to a fresh in-memory audit store to bypass the durable gate.
 
@@ -82,9 +82,9 @@ If acknowledgement or runtime construction fails, keep admission stopped. Do not
 | Supervisor acknowledgement is interrupted | Reopen under the same durable store; inspect pending state and repeat reconciliation, not direct SQL repair |
 | Two supervisors contend | External lease must select one; SQLite transaction locking is not a substitute |
 
-## Current implementation blocker
+## Implementation boundary
 
-The current startup gate and acknowledgement API do not yet provide a complete restart path when outstanding reservations exist. The gate rejects outstanding reservations, while the acknowledgement method clears only pending-operation markers and deliberately leaves reservation rows intact. Because the normal host release path is unavailable until a runtime has been constructed, there is no verified out-of-band route to complete this reconciliation cycle. This is a concrete implementation gap, not an operator procedure that can safely be completed manually. Issue #246 must add a narrowly scoped, authenticated, host-audited supervisor reconciliation API before this runbook can be treated as executable.
+The current store supports an explicit audit reconciliation boundary and preserves registry reservation rows across that boundary. The embedding host still has to enforce external single-supervisor fencing and verify actual worker/task state before calling the acknowledgement method. The method's note is audit context, not proof of lease ownership or worker authentication. A future host-facing supervisor API should bind acknowledgement to a verifiable fencing epoch/lease and make the validation boundary explicit.
 
 ## Adversarial validation still required
 
