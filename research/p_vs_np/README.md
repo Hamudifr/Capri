@@ -246,3 +246,14 @@ See [R70 Sigma-3 survivor step](R70_SIGMA3_SURVIVOR_STEP.md).
 R70 applies Jeřábek Theorem 3.17 to the decision-error / agreeing-circuit partition. Combined with R69's incidence contradiction, it yields a positive successor certificate: some formula x has next survivor set Gₓ approximately bounded by A. This is the right form for iteration because Gₓ≼A is Σᵇ₃ for Σᵇ₂ survivor sets. Theorem 3.21 is run at the same precision δ=1/(1000r); its PV₃ enumeration gives S≼δM by Corollary 3.5. In the large branch A≤0.63M and the next upper parameter shrinks by at least 0.64; the small branch uses a deduplicated enumeration and an exact next-survivor list.
 
 Definition 3.1 stipulates S_T≼δ0 iff S_T is empty, so this is not a hash-matrix certificate. Since S_T(C) is Σᵇ₁(α), terminal emptiness is Πᵇ₁(α); packed with the history and stage hash certificates it is intended to yield a Σᵇ₂(α), hence Σᵇ₃, history statement. Theorem 2.1's i=1 conservation theorem matches the resulting ∀Σᵇ₃ target after substituting SAT for α, provided the packed certificate is formally verified. The natural proof target is S³₂+BBΣᵇ₄+sWPHP(PV₃). The full history invariant and exact uniform proof remain open. No PV₁ generator, S¹₂ proof, KPS EF bridge, or P≠NP result is claimed.
+
+
+# R71: packed survivor-history invariant
+
+See [R71 packed survivor-history invariant](R71_PACKED_SURVIVOR_HISTORY_INVARIANT.md).
+
+R71 writes the candidate history formula explicitly: current survivors are PV₁(α)/Σᵇ₁(α), stage hash certificates are packed into one polynomial-length string, and the invariant is Σᵇ₂(α). The terminal empty-survivor condition is Πᵇ₁(α), so it combines with stage verification under the same universal block. The conditional final statement is a candidate ∀Σᵇ₂(α) theorem, matching Jeřábek Theorem 2.1's i=1 conservation route after SAT substitution.
+
+The large-branch survivor parameter propagation is derived from Theorem 3.8 plus the Theorem 3.21 retraction and sWPHP(PV₃), avoiding an unproved minimality shortcut. The small branch uses the exact deduplicated survivor count N_i, not the approximate upper parameter b_i, so the majority argument guarantees strict halving even when the enumeration has slack.
+
+Still open: the uniform one-step proof in S²₂(α)+BBΣ₃(α)+sWPHP(PV₂(α)), exact invariant/collection formalization, and the final conservation application. No PV₁ generator, S¹₂ proof, KPS EF bridge, or P≠NP result is claimed.
