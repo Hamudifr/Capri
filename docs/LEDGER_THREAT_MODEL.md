@@ -10,7 +10,7 @@ This document covers only the local JSONL execution-ledger prototype in `capri_c
 - Availability and readability of the ledger file.
 - Confidentiality of any external evidence referenced by a record.
 
-Do not store protected blind-evaluation content, credentials, secrets, or personal data in records or evidence references.
+Do not store credentials, secrets, private personal data, or customer-confidential information in records or evidence references. Ordinary benchmark prompts, rubrics, expected outcomes, and scores may be stored when they contain no such sensitive data.
 
 ## Trust assumptions
 
