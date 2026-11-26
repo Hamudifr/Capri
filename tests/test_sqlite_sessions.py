@@ -655,6 +655,165 @@ class SQLiteSessionStoreTests(unittest.TestCase):
         with self.assertRaises(SessionLimitError):
             limited.commit_turn(session.session_id, 1, "x", "y")
 
+    def test_concurrent_first_open_initializes_one_shared_schema(self):
+        path = os.path.join(self.temp.name, "concurrent-first-open.sqlite3")
+        barrier = threading.Barrier(2)
+        stores = []
+        errors = []
+        result_lock = threading.Lock()
+
+        def open_store():
+            try:
+                barrier.wait(timeout=3)
+                store = SQLiteSessionStore(path)
+                with result_lock:
+                    stores.append(store)
+            except Exception as exc:
+                with result_lock:
+                    errors.append(exc)
+
+        workers = [threading.Thread(target=open_store) for _ in range(2)]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join(timeout=5)
+
+        self.assertTrue(all(not worker.is_alive() for worker in workers))
+        self.assertEqual(errors, [])
+        self.assertEqual(len(stores), 2)
+        session = stores[0].create_for_principal("principal-concurrent")
+        self.assertEqual(
+            stores[1].get_for_principal(session.session_id, "principal-concurrent"),
+            session,
+        )
+
+    def test_reopen_rejects_removed_versioned_session_check_constraint(self):
+        session = self.store.create_for_principal("principal-owner")
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute("PRAGMA foreign_keys=OFF")
+            connection.executescript(
+                "DROP INDEX sessions_updated_at;"
+                "CREATE TABLE sessions_new ("
+                "session_id TEXT PRIMARY KEY, created_at TEXT NOT NULL, "
+                "updated_at TEXT NOT NULL, version INTEGER NOT NULL, "
+                "closed INTEGER NOT NULL CHECK(closed IN (0, 1)), "
+                "messages_json TEXT NOT NULL "
+                "CHECK(json_valid(messages_json) AND json_type(messages_json) = 'array'));"
+                "INSERT INTO sessions_new SELECT * FROM sessions;"
+                "DROP TABLE sessions;"
+                "CREATE TABLE sessions ("
+                "session_id TEXT PRIMARY KEY, created_at TEXT NOT NULL, "
+                "updated_at TEXT NOT NULL, version INTEGER NOT NULL, "
+                "closed INTEGER NOT NULL CHECK(closed IN (0, 1)), "
+                "messages_json TEXT NOT NULL "
+                "CHECK(json_valid(messages_json) AND json_type(messages_json) = 'array'));"
+                "INSERT INTO sessions SELECT * FROM sessions_new;"
+                "DROP TABLE sessions_new;"
+                "CREATE INDEX sessions_updated_at ON sessions(updated_at);"
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        with self.assertRaisesRegex(ValidationError, "schema constraints are invalid"):
+            SQLiteSessionStore(self.path)
+
+        connection = sqlite3.connect(self.path)
+        try:
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+            persisted = connection.execute(
+                "SELECT count(*) FROM sessions WHERE session_id = ?",
+                (session.session_id,),
+            ).fetchone()[0]
+            self.assertEqual(version, 1)
+            self.assertEqual(persisted, 1)
+        finally:
+            connection.close()
+
+    def test_reopen_accepts_legacy_unversioned_python_session_schema(self):
+        session = self.store.create_for_principal("principal-legacy")
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute("PRAGMA foreign_keys=OFF")
+            connection.executescript(
+                "DROP INDEX sessions_updated_at;"
+                "CREATE TABLE sessions_new ("
+                "session_id TEXT PRIMARY KEY, created_at TEXT NOT NULL, "
+                "updated_at TEXT NOT NULL, version INTEGER NOT NULL CHECK(version >= 0), "
+                "closed INTEGER NOT NULL CHECK(closed IN (0, 1)), "
+                "messages_json TEXT NOT NULL);"
+                "INSERT INTO sessions_new SELECT * FROM sessions;"
+                "DROP TABLE sessions;"
+                "CREATE TABLE sessions ("
+                "session_id TEXT PRIMARY KEY, created_at TEXT NOT NULL, "
+                "updated_at TEXT NOT NULL, version INTEGER NOT NULL CHECK(version >= 0), "
+                "closed INTEGER NOT NULL CHECK(closed IN (0, 1)), "
+                "messages_json TEXT NOT NULL);"
+                "INSERT INTO sessions SELECT * FROM sessions_new;"
+                "DROP TABLE sessions_new;"
+                "CREATE INDEX sessions_updated_at ON sessions(updated_at);"
+                "PRAGMA user_version=0;"
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        reopened = SQLiteSessionStore(self.path)
+        self.assertEqual(
+            reopened.get_for_principal(session.session_id, "principal-legacy"),
+            session,
+        )
+
+    def test_reopen_rejects_missing_ownership_table_without_recreating_it(self):
+        session = self.store.create_for_principal("principal-owner")
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute("PRAGMA foreign_keys=OFF")
+            connection.execute("DROP TABLE session_owners")
+            connection.commit()
+        finally:
+            connection.close()
+
+        with self.assertRaisesRegex(ValidationError, "schema objects are incomplete"):
+            SQLiteSessionStore(self.path)
+
+        connection = sqlite3.connect(self.path)
+        try:
+            row = connection.execute(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='session_owners'"
+            ).fetchone()
+            self.assertEqual(row[0], 0)
+            persisted = connection.execute(
+                "SELECT count(*) FROM sessions WHERE session_id = ?",
+                (session.session_id,),
+            ).fetchone()
+            self.assertEqual(persisted[0], 1)
+        finally:
+            connection.close()
+
+    def test_reopen_rejects_missing_owner_trigger_without_recreating_it(self):
+        self.store.create_for_principal("principal-owner")
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute("DROP TRIGGER session_owners_immutable_update")
+            connection.commit()
+        finally:
+            connection.close()
+
+        with self.assertRaisesRegex(ValidationError, "schema objects are incomplete"):
+            SQLiteSessionStore(self.path)
+
+        connection = sqlite3.connect(self.path)
+        try:
+            row = connection.execute(
+                "SELECT count(*) FROM sqlite_master WHERE type='trigger' "
+                "AND name='session_owners_immutable_update'"
+            ).fetchone()
+            self.assertEqual(row[0], 0)
+        finally:
+            connection.close()
+
     def test_rejects_symlink_database_path(self):
         target = os.path.join(self.temp.name, "target.sqlite3")
         with open(target, "wb") as handle:
