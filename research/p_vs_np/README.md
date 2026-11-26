@@ -153,3 +153,10 @@ See [R56 APC2 approximate thresholds](R56_APC2_APPROXIMATE_THRESHOLDS.md). Intro
 # R57: APC2 theory compatibility and constant shrink
 
 See [R57 APC2 constant shrink](R57_APC2_CONSTANT_SHRINK.md). Confirms the rWPHP/sWPHP compatibility of Jeřábek's theorems with APC2 and records the candidate constant-factor survivor invariant. Exact formalization remains open.
+
+
+# R58: exact one-fibre extraction
+
+See [R58 exact one-fibre extraction](R58_EXACT_ONE_FIBRE.md).
+
+Theorem 3.20 with t=1 gives a bad-pair fibre approximately bounded by one. Corollary 3.10 upgrades this to an actual list of length at most one, enabling the extra-circuit repair. The overall APC2 formalization and greedy iteration remain open.
