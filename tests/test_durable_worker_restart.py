@@ -327,9 +327,20 @@ class DurableWorkerRestartTests(unittest.TestCase):
 
 
     def test_committed_reservation_survives_repeated_supervisor_restarts(self):
+        now = {"value": 1_000_000_000}
+
+        def registry_for(store):
+            return SQLiteWorkerRegistry(
+                store,
+                heartbeat_ttl_ms=5_000,
+                reservation_ttl_ms=10,
+                clock_ns=lambda: now["value"],
+                clock_wall_ns=lambda: now["value"],
+            )
+
         task_store = SQLiteTaskStore(self.tasks_path)
         audit_store = SQLiteSecurityStore(self.audit_path)
-        first_host = self._host(task_store, audit_store)
+        first_host = self._host(task_store, audit_store, registry=registry_for(task_store))
         first_host.register_worker(
             "worker-token",
             WorkerDescriptor("worker-1", (1,), ("math.factorial",), max_concurrency=1),
@@ -349,7 +360,11 @@ class DurableWorkerRestartTests(unittest.TestCase):
         self.assertTrue(audit_after_first_restart.acknowledge_worker_lifecycle_reconciliation(
             "Supervisor one fenced the prior host and verified the worker after restart",
         ))
-        second_host = self._host(tasks_after_first_restart, audit_after_first_restart)
+        second_host = self._host(
+            tasks_after_first_restart,
+            audit_after_first_restart,
+            registry=registry_for(tasks_after_first_restart),
+        )
         recovered_pending = second_host.get_worker_reservation_for_task(
             "alice-token", task.task_id,
         )
@@ -365,8 +380,9 @@ class DurableWorkerRestartTests(unittest.TestCase):
             audit_after_first_restart.worker_lifecycle_reconciliation_required()
         )
 
-        # Second restart: a committed reservation must remain durable and must
-        # not be expired merely because the host process was recreated.
+        # Move beyond the pending-reservation TTL. Committed work must remain
+        # durable and must not be expired merely because time and the host process advanced.
+        now["value"] += 20_000_000
         tasks_after_second_restart = SQLiteTaskStore(self.tasks_path)
         audit_after_second_restart = SQLiteSecurityStore(self.audit_path)
         self.assertTrue(
@@ -382,7 +398,11 @@ class DurableWorkerRestartTests(unittest.TestCase):
                 "Supervisor two re-authenticated the worker and reconciled committed task state",
             )
         )
-        third_host = self._host(tasks_after_second_restart, audit_after_second_restart)
+        third_host = self._host(
+            tasks_after_second_restart,
+            audit_after_second_restart,
+            registry=registry_for(tasks_after_second_restart),
+        )
         recovered_committed = third_host.get_worker_reservation_for_task(
             "alice-token", task.task_id,
         )
