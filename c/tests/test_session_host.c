@@ -272,6 +272,26 @@ int main(void) {
         session_a.session_id, "lease-owner-a", 30.0)
         == CAPRI_SESSION_HOST_OK);
     assert(capri_session_host_renew_turn_lease(
+        host, credential_b, sizeof(credential_b) - 1u,
+        session_a.session_id, "lease-owner-a", 30.0)
+        == CAPRI_SESSION_HOST_NOT_FOUND);
+    denied_release = 1;
+    assert(capri_session_host_release_turn_lease(
+        host, credential_b, sizeof(credential_b) - 1u,
+        session_a.session_id, "lease-owner-a", &denied_release)
+        == CAPRI_SESSION_HOST_NOT_FOUND);
+    assert(denied_release == 0);
+    assert(capri_session_host_renew_turn_lease(
+        host, bad_credential, sizeof(bad_credential) - 1u,
+        session_a.session_id, "lease-owner-a", 30.0)
+        == CAPRI_SESSION_HOST_UNAUTHORIZED);
+    denied_release = 1;
+    assert(capri_session_host_release_turn_lease(
+        host, bad_credential, sizeof(bad_credential) - 1u,
+        session_a.session_id, "lease-owner-a", &denied_release)
+        == CAPRI_SESSION_HOST_UNAUTHORIZED);
+    assert(denied_release == 0);
+    assert(capri_session_host_renew_turn_lease(
         host, credential_a, sizeof(credential_a) - 1u,
         session_a.session_id, "lease-owner-a", 30.0)
         == CAPRI_SESSION_HOST_OK);
@@ -375,6 +395,8 @@ int main(void) {
         0);
     sqlite3_close(database);
 
+    capri_session_free(&denied_output);
+    capri_session_free(&owner_after_denials);
     capri_session_free(&session_a);
     capri_session_free(&loaded_a);
     capri_session_free(&foreign);
