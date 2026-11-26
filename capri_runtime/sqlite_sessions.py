@@ -805,13 +805,26 @@ class SQLiteSessionStore(SessionStore):
             connection = self._connect()
             try:
                 connection.execute("BEGIN IMMEDIATE")
-                if principal_id is not None:
-                    owner = connection.execute(
-                        "SELECT 1 FROM session_owners WHERE session_id = ? AND principal_id = ?",
+                if principal_id is None:
+                    session = connection.execute(
+                        """SELECT closed FROM sessions
+                        WHERE session_id = ? AND NOT EXISTS (
+                            SELECT 1 FROM session_owners
+                            WHERE session_id = sessions.session_id
+                        )""",
+                        (session_id,),
+                    ).fetchone()
+                else:
+                    session = connection.execute(
+                        """SELECT s.closed FROM sessions AS s
+                        JOIN session_owners AS o ON o.session_id = s.session_id
+                        WHERE s.session_id = ? AND o.principal_id = ?""",
                         (session_id, principal_id),
                     ).fetchone()
-                    if owner is None:
-                        raise SessionNotFoundError("session does not exist")
+                if session is None:
+                    raise SessionNotFoundError("session does not exist")
+                if session[0] == 1:
+                    raise SessionClosedError("session is closed")
                 now = self._lease_now()
                 expires_at = (now + timedelta(seconds=lease_seconds)).isoformat()
                 current = connection.execute(
