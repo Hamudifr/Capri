@@ -228,3 +228,12 @@ R67 repairs two omissions in R66. First, Jeřábek Theorem 3.21 supplies near-ca
 See [R68 exact parameter closure](R68_EXACT_PARAMETER_CLOSURE.md).
 
 R68 closes the finite weighted-tail constants: with m≥4, L=floor([m(m+4)]^(r/2)), the mixed-radix injection gives |Badₓ|/|S|ʳ≤2exp(−r/m²). Choose m=⌈√s⌉ and odd r≥m²(n ln2+12); the union bound is at most 2e⁻¹², and majority size is O(ns²)≤s³ for s≥Kn. It also makes the small/large survivor branch explicit using Theorem 3.21's near-cardinality scale. The key remaining formal gap is the APC₃ tagged-fibre transfer lemma: derive Badₓ≼εT from the PV₃ injection and approximate product/counting laws with every ceiling/error explicit. The S³₂ history induction and EF descent remain open.
+
+
+# R69: APC₃ tagged-fibre transfer
+
+See [R69 APC₃ tagged-fibre transfer](R69_APC3_TAGGED_FIBRE_TRANSFER.md).
+
+R69 identifies a valid approximate-counting bridge for the R68 mixed-radix injection. Jeřábek Corollary 3.11 transfers an approximate upper bound through a PV₃ surjection with a coretraction; Theorem 3.16 then divides the product bound and rules out the interval factor using Theorem 3.8's soundness. The transfer is conditional on an upper bound for the tagged universe, which is derived from product and union laws. The note also introduces a more robust parameter margin, m=⌈s^(1/3)⌉ and r=O(ns), so the approximation threshold and final hard-formula threshold remain separated despite the Theorem 3.21 enumeration slack.
+
+This closes the abstract tagged-fibre transfer route, not the global incidence calculation. Exact nested-ceiling comparison, S³₂ history induction, BBΣᵇ₄ collection, conservation verification, PV₁/S¹₂ descent, KPS EF transfer, and P≠NP remain open.
