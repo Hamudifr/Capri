@@ -124,3 +124,12 @@ See [R52 APC2 relative-counting search survivor](R52_APC2_RELATIVE_COUNTING_SEAR
 R52 strengthens the R51 search-survivor argument by counting formula/witness pairs. With r=2n+2 candidate search circuits, the bad-pair set has size at most |S|^r/4 if every satisfiable formula is solved by more than half of the survivors. Its projection cannot cover S^r, so some tuple contains a valid solver for every satisfiable formula. This gives a first-valid-output SAT decision circuit and hence a halving witness under the stated circuit-size slack.
 
 The formalization target is now APC2, not APC1: the survivor and bad-pair sets are PV / Sigma^b_1, and APC2 supplies relative counting for sparse sets plus parameterized-family averaging. The exact APC2 derivation and polynomial iteration remain open. The anti-checker is still nonuniform; the Pich-Santhanam feasible generator and KPS EF transfer certificates are not obtained. No P-vs-NP proof is claimed.
+
+
+# R53: APC2 empty-fibre route
+
+See [R53 APC2 empty-fibre route](R53_APC2_EMPTY_FIBRE.md).
+
+R53 applies Jeřábek's Theorem 3.20 to the R52 bad-pair incidence relation, with candidate search-circuit tuples as the first coordinate and satisfying formula/witness pairs as the second. Together with Theorems 3.19 and 3.21, the constant 1/4 incidence gap appears to force an empty fibre, giving the APC2 single-step survivor lemma. Theorem 4.2 supplies a close template for the greedy iteration, but its adaptation is not complete.
+
+The search-to-decision bridge remains open because SAT self-reduction is adaptive and its full query tree can be exponential. No deterministic generator, KPS EF transfer certificate, or P-vs-NP proof is claimed.
