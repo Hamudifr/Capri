@@ -41,6 +41,11 @@ The R70 proof should be stated uniformly for every history H_i and its current T
 - the next survivor set is S_{i+1}=G_{i,x_i};
 - its next Theorem 3.21 upper parameter satisfies b_{i+1} <= (16/25)b_i.
 
+Parameter propagation (do not skip this step): if G_{i,x_i} <=_delta A_i and Theorem 3.21 returns lower parameter a_{i+1}, its section/retraction pair gives a PV_3 retraction G_{i,x_i} -> [a_{i+1}]. Theorem 3.8 gives a PV_3 surjection [d]^c -> G_{i,x_i}^c with d=ceil(A_i(1+delta)). Compose the two maps. sWPHP(PV_3) forces a_{i+1}<=d. Therefore
+b_{i+1} <= ceil(a_{i+1}(1+delta))
+         <= ceil(ceil(A_i(1+delta))(1+delta)).
+This is the justified two-loss recurrence; it does not assume the unproved shortcut a_{i+1}<=A_i.
+
 Large branch:
 - If a_i>=100r, use R69's tagged-fibre incidence bound and R70's Theorem 3.17 dichotomy.
 - Theorem 3.17 gives F_{i,x}<=_delta q_i or G_{i,x}<=_delta A_i for every x.
