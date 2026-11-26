@@ -53,29 +53,86 @@ _AUDIT_CHAIN_ZERO = "0" * 64
 _AUDIT_CHAIN_COLUMNS = {"sequence", "previous_hash", "event_hash"}
 
 
+def _validate_audit_event(event: AuditEvent) -> None:
+    if not isinstance(event, AuditEvent):
+        raise ToolValidationError("audit sink accepts AuditEvent records only")
+    text_fields = (
+        (event.event_id, 64), (event.timestamp, 64), (event.principal_id, 256),
+        (event.tool_name, 64), (event.status, 64),
+    )
+    if any(not isinstance(value, str) or not value or len(value) > limit
+           or contains_surrogate(value)
+           for value, limit in text_fields):
+        raise ToolValidationError("audit event contains invalid or oversized metadata")
+    if not isinstance(event.argument_digest, str) or not _DIGEST_RE.fullmatch(event.argument_digest):
+        raise ToolValidationError("audit event argument digest must be SHA-256 hex")
+    if event.error_code is not None and (
+        not isinstance(event.error_code, str) or len(event.error_code) > 128
+        or contains_surrogate(event.error_code)
+    ):
+        raise ToolValidationError("audit event error code is invalid")
+    optional_fields = (
+        (event.resource_type, 64), (event.resource_id, 256), (event.task_id, 128),
+    )
+    if any(
+        value is not None and (
+            not isinstance(value, str) or not value or len(value) > limit
+            or contains_surrogate(value)
+        )
+        for value, limit in optional_fields
+    ):
+        raise ToolValidationError("audit event resource metadata is invalid")
+    if event.metadata_json is None:
+        if any(value is not None for value, _ in optional_fields):
+            raise ToolValidationError("audit resource fields require canonical metadata JSON")
+    else:
+        if (
+            not isinstance(event.metadata_json, str)
+            or len(event.metadata_json.encode("utf-8")) > 16_384
+            or contains_surrogate(event.metadata_json)
+            or event.resource_type is None or event.resource_id is None
+        ):
+            raise ToolValidationError("audit event metadata JSON is invalid")
+        try:
+            metadata = json.loads(event.metadata_json)
+            canonical_metadata = json.dumps(
+                metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
+            )
+        except (TypeError, ValueError, json.JSONDecodeError):
+            raise ToolValidationError("audit event metadata JSON is invalid") from None
+        if (
+            not isinstance(metadata, dict)
+            or canonical_metadata != event.metadata_json
+            or hashlib.sha256(event.metadata_json.encode("utf-8")).hexdigest()
+                != event.argument_digest
+        ):
+            raise ToolValidationError("audit event metadata digest or canonical form is invalid")
+
+
 def _audit_chain_payload(sequence: int, fields: tuple[Any, ...]) -> str:
     (
         event_id, timestamp, principal_id, tool_name, argument_digest, status,
         error_code, resource_type, resource_id, task_id, metadata_json,
     ) = fields
-    payload = {
-        "sequence": sequence,
-        "event_id": event_id,
-        "timestamp": timestamp,
-        "principal_id": principal_id,
-        "event_type": tool_name,
-        "argument_digest": argument_digest,
-        "status": status,
-        "error_code": error_code,
-        "resource_type": resource_type,
-        "resource_id": resource_id,
-        "task_id": task_id,
-        "metadata_sha256": (
+    try:
+        metadata_digest = (
             hashlib.sha256(metadata_json.encode("utf-8")).hexdigest()
             if isinstance(metadata_json, str) else None
-        ),
-    }
-    try:
+        )
+        payload = {
+            "sequence": sequence,
+            "event_id": event_id,
+            "timestamp": timestamp,
+            "principal_id": principal_id,
+            "event_type": tool_name,
+            "argument_digest": argument_digest,
+            "status": status,
+            "error_code": error_code,
+            "resource_type": resource_type,
+            "resource_id": resource_id,
+            "task_id": task_id,
+            "metadata_sha256": metadata_digest,
+        }
         return json.dumps(
             payload, sort_keys=True, separators=(",", ":"),
             ensure_ascii=False, allow_nan=False,
@@ -256,63 +313,6 @@ def _migrate_lifecycle_audit_chain(connection: sqlite3.Connection) -> None:
     connection.execute(
         "CREATE UNIQUE INDEX audit_events_sequence_unique ON audit_events(sequence)"
     )
-
-
-def _validate_audit_event(event: AuditEvent) -> None:
-    if not isinstance(event, AuditEvent):
-        raise ToolValidationError("audit sink accepts AuditEvent records only")
-    text_fields = (
-        (event.event_id, 64), (event.timestamp, 64), (event.principal_id, 256),
-        (event.tool_name, 64), (event.status, 64),
-    )
-    if any(not isinstance(value, str) or not value or len(value) > limit
-           or contains_surrogate(value)
-           for value, limit in text_fields):
-        raise ToolValidationError("audit event contains invalid or oversized metadata")
-    if not isinstance(event.argument_digest, str) or not _DIGEST_RE.fullmatch(event.argument_digest):
-        raise ToolValidationError("audit event argument digest must be SHA-256 hex")
-    if event.error_code is not None and (
-        not isinstance(event.error_code, str) or len(event.error_code) > 128
-        or contains_surrogate(event.error_code)
-    ):
-        raise ToolValidationError("audit event error code is invalid")
-    optional_fields = (
-        (event.resource_type, 64), (event.resource_id, 256), (event.task_id, 128),
-    )
-    if any(
-        value is not None and (
-            not isinstance(value, str) or not value or len(value) > limit
-            or contains_surrogate(value)
-        )
-        for value, limit in optional_fields
-    ):
-        raise ToolValidationError("audit event resource metadata is invalid")
-    if event.metadata_json is None:
-        if any(value is not None for value, _ in optional_fields):
-            raise ToolValidationError("audit resource fields require canonical metadata JSON")
-    else:
-        if (
-            not isinstance(event.metadata_json, str)
-            or len(event.metadata_json.encode("utf-8")) > 16_384
-            or contains_surrogate(event.metadata_json)
-            or event.resource_type is None or event.resource_id is None
-        ):
-            raise ToolValidationError("audit event metadata JSON is invalid")
-        try:
-            metadata = json.loads(event.metadata_json)
-            canonical_metadata = json.dumps(
-                metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
-            )
-        except (TypeError, ValueError, json.JSONDecodeError):
-            raise ToolValidationError("audit event metadata JSON is invalid") from None
-        if (
-            not isinstance(metadata, dict)
-            or canonical_metadata != event.metadata_json
-            or hashlib.sha256(event.metadata_json.encode("utf-8")).hexdigest()
-                != event.argument_digest
-        ):
-            raise ToolValidationError("audit event metadata digest or canonical form is invalid")
-
 
 
 def _validate_backup_semantics(connection: sqlite3.Connection) -> None:
@@ -650,7 +650,66 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
                         event_id TEXT PRIMARY KEY,
                         timestamp TEXT NOT NULL,
                         principal_id TEXT NOT NULL,
-                           def append_event_in_transaction(
+                        tool_name TEXT NOT NULL,
+                        argument_digest TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        error_code TEXT,
+                        resource_type TEXT,
+                        resource_id TEXT,
+                        task_id TEXT,
+                        metadata_json TEXT
+                    )"""
+                )
+                existing_audit_columns = {
+                    row[1] for row in connection.execute("PRAGMA table_info(audit_events)")
+                }
+                for column in ("resource_type", "resource_id", "task_id", "metadata_json"):
+                    if column not in existing_audit_columns:
+                        connection.execute(f"ALTER TABLE audit_events ADD COLUMN {column} TEXT")
+                _migrate_lifecycle_audit_chain(connection)
+                connection.execute(
+                    """CREATE TABLE IF NOT EXISTS worker_audit_state (
+                        singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+                        pending_operations INTEGER NOT NULL CHECK(pending_operations >= 0)
+                    )"""
+                )
+                connection.execute(
+                    "INSERT OR IGNORE INTO worker_audit_state(singleton_id, pending_operations) VALUES (1, 0)"
+                )
+                connection.execute(
+                    """CREATE TRIGGER IF NOT EXISTS audit_events_immutable_update
+                    BEFORE UPDATE ON audit_events
+                    BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END"""
+                )
+                connection.execute(
+                    """CREATE TRIGGER IF NOT EXISTS audit_events_immutable_delete
+                    BEFORE DELETE ON audit_events
+                    BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END"""
+                )
+                connection.execute(
+                    """CREATE TABLE IF NOT EXISTS consumed_approvals (
+                        grant_id TEXT PRIMARY KEY,
+                        principal_id TEXT NOT NULL,
+                        tool_name TEXT NOT NULL,
+                        argument_digest TEXT NOT NULL,
+                        expires_at TEXT NOT NULL,
+                        consumed_at TEXT NOT NULL
+                    )"""
+                )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+            finally:
+                connection.close()
+        with self._lock:
+            connection = self._connect()
+            try:
+                _validate_audit_chain(connection)
+            finally:
+                connection.close()
+
+    def append_event_in_transaction(
         self, connection: sqlite3.Connection, event: AuditEvent,
     ) -> None:
         """Append one event and its chain link inside the caller's active transaction."""
