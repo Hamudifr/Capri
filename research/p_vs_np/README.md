@@ -79,3 +79,21 @@ See [APC1 KPT uniformization conditional theorem](R43_APC1_KPT_COLLAPSE.md).
 The new conditional implication is: if APC1 proves the existential SAT-antichecker statement S_K for every sufficiently large fixed exponent, then P != NP. The key is the witnessed dWPHP form of the APC1 KPT theorem. Under P = NP, each missing-range witness function h_e can be computed in P by searching for a value outside the range of a polynomial-time function; the KPT terms then become uniform P-time, and the R40 path selector yields the witness functions needed by Pich–Santhanam Corollary 1.
 
 This does not prove S_K in APC1 or P != NP unconditionally. R42 is a separate KPS canonical-pair route: it covers only unsatisfiable formulas with short P-refutations, not every negative SAT instance. The direct S_K MinMax problem remains open.
+
+
+# R44–R45: validity-constrained SAT labels and APC2 game
+
+- R44 identifies the label-validity predicate Valid(x,y) := forall y' [SAT(x,y') -> SAT(x,y)] and shows why unrestricted formula-assignment pairs create false anticheckers.
+- R45 constructs the full-SAT valid-pair game. Its payoff is coNP/Delta2, and ordinary finite minimax plus majority amplification yields a constant-error, polynomial-support antichecker if the SAT circuit lower-bound premise holds.
+- The APC2 formalization is still open: counting a Delta2 payoff does not by itself prove a mixed minimax theorem for the exponentially large succinct matrix or produce the polynomial-size sampled support in the theory.
+
+See the canonical Notion workpaper for the full derivation and quantifier audit.
+
+
+# R46: dWPHP label-shift obstruction and APC2 MinMax gap
+
+See [R46 dWPHP label-shift and APC2 MinMax audit](R46_DWPHP_LABEL_SHIFT_AND_APC2_MINIMAX.md).
+
+CKKOT ITCS 2025 Theorem 9 proves arbitrary succinct hard labelled samples in APC1 by dWPHP, but does not force the labels to be true SAT labels or provide satisfying witnesses. A proposed XOR-shift conversion fails because an arbitrary m-bit mask may require an ordinary circuit description of length Ω(m), so the dWPHP output length cannot exceed the transformed input description length. This is a failed route, not a general impossibility theorem.
+
+R45's full-SAT validity-constrained game remains combinatorially sound. The remaining proof obligation is a polynomial-precision, succinct mixed-MinMax/strategy-existence theorem in APC2, followed by the exact Pich–Santhanam S_K translation and proof-system certification. No P-vs-NP proof is claimed.
