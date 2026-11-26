@@ -17,8 +17,8 @@ e SAT_n(x)}), the erroneous circuits;
 
 Both predicates are Σᵇ₂ when the SAT decision predicate is represented by a Σᵇ₁ oracle α. The decision-error predicate is Δᵇ₂, so the partition map (C\mapsto(C,mathrm{Err}(C,x))) is PV₃(α).
 
-If (S\preceq_\delta M), Corollary 3.11 transfers this bound through the PV₃ bijection between (S) and the tagged disjoint union (F_x\dot\cup G_x). Use
-(M^\sharp=\lceil M(1+\delta)\rceil)
+If (S\preceq_\delta M), Corollary 3.11 transfers this bound through the PV₃ bijection between (S) and the tagged disjoint union (F_x\dot\cup G_x). Run Theorem 3.21 with enumeration precision \(\epsilon_0=\delta=1/(1000r)\). In the large branch, \(s_0\ge100r\), its ceiling gives \(M/s_0\le1+\delta+1/s_0\le1+\kappa\), where \(\kappa=1/(50r)\). Thus \(S\preceq_\delta M\) is available at the same precision used by the incidence argument. Use
+\(M^\sharp=\lceil M(1+\delta)\rceil\)
 as the disjoint-union upper parameter.
 
 Jeřábek Theorem 3.17 says that if (X\dot\cup Y\preceq_\delta s+t+1), then
@@ -62,19 +62,17 @@ Since (\theta\ge3/8), this gives
 [
 \frac AM
 \le \frac58+3\delta+2\delta^2
-+\frac38(\kappa+\delta+\kappa\delta)+\frac3M
++\frac38(\kappa+\delta+\kappa\delta)+\frac4M
 <0.626<0.63.
 ]
 The bound uses (M\ge100r), (r\ge4^3(\ln2+12)>800). Thus (A\le0.63M).
 
-Applying Theorem 3.21 to (G_x), with enumeration precision (\epsilon_0=1/(100r)), gives
-(M_{next}\le\lceil A(1+\epsilon_0)\rceil\le0.64M).
+Applying Theorem 3.21 to (G_x) with the same precision \(\epsilon_0=\delta\) gives
+\(M_{next}\le\lceil A(1+\delta)\rceil\le0.64M\).
 
 ### Small branch
 
-If (s_0<100r), then Theorem 3.21 gives (M\le100r+2) and a PV₃ enumeration of S with at most M entries. Deduplicate the list to obtain the distinct survivor circuits. If no x had (G_x\preceq\lfloor M/2\rfloor), then (|G_x|>M/2\ge|S|/2) for every x. The majority of the distinct S circuits would decide SAT. Its size is (O(Ms)=O(rs)\le s^3), contradicting the circuit-hardness hypothesis. Therefore some x has
-(G_x\preceq\lfloor M/2\rfloor),
-and the next Theorem 3.21 upper parameter is at most (0.51M) (for the stated large r).
+If \(s_0<100r\), Theorem 3.21 gives \(M\le100r\) and a PV₃ enumeration of S with at most M entries. Deduplicate to obtain the distinct survivor circuits. If no x had \(G_x\preceq\lfloor M/2\rfloor\), then \(|G_x|>M/2\ge|S|/2\) for every x. The majority of the distinct S circuits would decide SAT. Its size is \(O(Ms)=O(rs)\le s^3\), contradicting circuit hardness. Therefore some x has \(G_x\preceq\lfloor M/2\rfloor\). In this branch the filtered, deduplicated enumeration gives an exact list of the next survivors, so its next upper parameter can be taken to be \(|G_x|\le\lfloor M/2\rfloor\); this avoids a rounding stall when M is very small.
 
 Thus every nonterminal round shrinks the upper survivor parameter by at least a factor 0.64. The process terminates after (O(\log M_0)) rounds.
 
