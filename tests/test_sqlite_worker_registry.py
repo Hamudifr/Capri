@@ -222,6 +222,53 @@ class SQLiteWorkerRegistryTests(unittest.TestCase):
         self.assertEqual(self.registry.expire_reservations(), ())
         self.assertEqual(self.registry.integrity_check(), "ok")
 
+    def test_release_after_pending_expiry_is_audited_as_expiry(self):
+        self.register_healthy()
+        pending = self.reserve(self.registry, "task-release-expired")
+        self.assertIsNotNone(pending)
+
+        self.clock.advance_ms(1_001)
+        self.assertFalse(
+            self.registry.release_reservation(
+                pending,
+                authenticated_worker_id="worker-1",
+                observed_unreserved_in_flight=0,
+            )
+        )
+        expired_events = [
+            event for event in self.registry.events_for_worker("worker-1")
+            if event["task_id"] == "task-release-expired"
+        ]
+        self.assertEqual(
+            [event["event_type"] for event in expired_events],
+            ["reservation_created", "reservation_expired"],
+        )
+        self.assertEqual(
+            expired_events[-1]["payload"]["reason"],
+            "pending_ttl_elapsed",
+        )
+
+        committed_pending = self.reserve(self.registry, "task-committed-release")
+        committed = self.registry.commit_reservation(
+            committed_pending, authenticated_worker_id="worker-1",
+        )
+        self.assertIsNotNone(committed)
+        self.assertTrue(
+            self.registry.release_reservation(
+                committed,
+                authenticated_worker_id="worker-1",
+                observed_unreserved_in_flight=0,
+            )
+        )
+        committed_events = [
+            event for event in self.registry.events_for_worker("worker-1")
+            if event["task_id"] == "task-committed-release"
+        ]
+        self.assertEqual(
+            [event["event_type"] for event in committed_events],
+            ["reservation_created", "reservation_committed", "reservation_released"],
+        )
+
     def test_two_registry_instances_cannot_overbook_one_capacity_slot(self):
         self.register_healthy(max_concurrency=1)
         second_store = SQLiteTaskStore(self.path)
