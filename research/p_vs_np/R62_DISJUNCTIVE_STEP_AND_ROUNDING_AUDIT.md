@@ -172,7 +172,7 @@ https://users.math.cas.cz/~jerabek/papers/hash.pdf
 
 1. Write the R59 incidence argument as a formal derivation in S^2_2(alpha)+sWPHP(PV_2(alpha)), with E's orientation, all ceilings, and the two-exceptional-pair repair explicit.
 2. Verify the small branch's selector size and the global D size bound L(n,s)+V(n)≤s^3.
-3. Prove Theorem 3.21 parameter propagation: if G_x ≼ 0.31a(H), then the next lower parameter a(Hx)≤0.31a(H), and derive the next upper parameter with exact ceilings.
+3. Prove Theorem 3.21 parameter propagation with its extra approximation loss: from G_x ≼_η B, the binary-search threshold gives a(Hx)≤ceil(B(1+η)), and Theorem 3.21 then gives b(Hx)≤ceil(a(Hx)(1+η)). For B=0.31a(H), a(H)≥100r≥600, and η=1/(1000r), these two ceilings still give the conservative bound b(Hx)≤0.32a(H) (verify the exact integer rounding in the formal encoding).
 4. Choose a cumulative error schedule for K=O(s log(n+s)) stages and prove the 0.35-to-0.4 margin.
 5. Write the exact Sigma^b_2 formula P(k), the local disjunction, and the length-induction instance.
 6. Verify that the final disjunction is genuinely forall-Sigma^b_2 and apply Theorem 2.1 exactly as stated.
