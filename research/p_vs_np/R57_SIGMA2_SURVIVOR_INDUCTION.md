@@ -81,7 +81,7 @@ b_{i+1}/b_i
 
 For r>=2, epsilon=1/(1000r), and b_i>=a_i>=100r, the right side is <0.77. Thus every large step shrinks the upper parameter by at least a factor 0.77.
 
-Initially b_0 can be chosen at most 2^m, where m=O(s log(n+s)) is the circuit-description length. Hence at most
+Initially b_0 can be chosen at most 2^(m+1), where m=O(s log(n+s)) is the circuit-description length: S_0 is contained in the 2^m possible descriptions, and Theorem 3.21's upper parameter adds only a factor 1+epsilon plus rounding. Hence at most
 
 L = O(log(2^m/(100r))) = O(m)
 
