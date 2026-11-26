@@ -174,3 +174,15 @@ This is not yet a bounded-arithmetic anti-checker theorem. The exact one-step Si
 See [R58 fibre-complexity audit](R58_FIBRE_COMPLEXITY_AUDIT.md).
 
 R58 identifies a specific gap in R57: packing the polynomially many *stage* certificates does not pack the exponentially many per-formula fibre certificates used by the R56 incidence bound. Jeřábek Theorem 3.19 requires a pointwise fibre-size premise and is explicitly not a direct forall-Sigma^b_2 statement; Theorem 3.20, by contrast, has an explicit forall-Sigma^b_2 formulation. Thus the finite incidence arithmetic remains conditional on its fibre bounds, but the uniform one-step survivor implication has not been shown to lie in Sigma^b_2. Candidate repairs are a uniform PV_2 fibre-certificate selector, a specialized forall-Sigma^b_2 incidence lemma, or a direct tournament/partial-colouring reformulation. No bounded-arithmetic anti-checker or P≠NP proof is claimed.
+
+**R62 correction:** The literal exponential certificate list is not required: Theorem 3.19 can be invoked as an internal theorem on the universally defined fibre family. Its not being a direct forall-Sigma^b_2 statement does not block this internal use. R62 also corrects the t=1 rounding to at most two exceptional pairs, fixes the selector length to 6n+2 in the r=6n route, and corrects the global search-circuit alternative D to Sigma^b_2 (not Sigma^b_1). See R62 for the disjunctive local step and conservative parameter split.
+
+
+
+# R62: corrected disjunctive survivor step and fibre rounding
+
+See [R62 corrected disjunctive step and rounding audit](R62_DISJUNCTIVE_STEP_AND_ROUNDING_AUDIT.md).
+
+R62 retracts R58's claim that the exponential family of per-formula fibre certificates must be explicitly packed. Theorem 3.19 can be used as an internal bounded-arithmetic lemma on the universally defined fibre family. R62 formulates the desired local result as a disjunction: either a globally correct small search circuit exists, or there is a formula causing a constant-factor survivor shrink. The global search-circuit alternative is Sigma^b_2, not Sigma^b_1, because its universal quantifiers range over all n-bit formulas and witnesses; the disjunctive induction invariant nevertheless remains Sigma^b_2.
+
+R62 also restores Theorem 3.20's correct t=1 rounding: at most two exceptional pairs, repaired by appending at most two circuits. For the r=6n construction it replaces the fragile threshold-20 split by a conservative a≥100r / a<100r split and chooses parameters that absorb the ceiling in Theorem 3.17. The bounded-arithmetic search anti-checker is still not proved: exact formalization of the local disjunction, parameter propagation, cumulative error schedule, and conservativity transfer remain open. No uniform generator, Pich–Santhanam decision anti-checker, KPS EF transfer, or P≠NP proof is claimed.
