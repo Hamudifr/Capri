@@ -47,6 +47,213 @@ def _aware_timestamp(value: object) -> datetime | None:
     return parsed
 
 
+
+_AUDIT_CHAIN_DOMAIN = b"capri:security-store:lifecycle-audit:v1\0"
+_AUDIT_CHAIN_ZERO = "0" * 64
+_AUDIT_CHAIN_COLUMNS = {"sequence", "previous_hash", "event_hash"}
+
+
+def _audit_chain_payload(sequence: int, fields: tuple[Any, ...]) -> str:
+    (
+        event_id, timestamp, principal_id, tool_name, argument_digest, status,
+        error_code, resource_type, resource_id, task_id, metadata_json,
+    ) = fields
+    payload = {
+        "sequence": sequence,
+        "event_id": event_id,
+        "timestamp": timestamp,
+        "principal_id": principal_id,
+        "event_type": tool_name,
+        "argument_digest": argument_digest,
+        "status": status,
+        "error_code": error_code,
+        "resource_type": resource_type,
+        "resource_id": resource_id,
+        "task_id": task_id,
+        "metadata_sha256": (
+            hashlib.sha256(metadata_json.encode("utf-8")).hexdigest()
+            if isinstance(metadata_json, str) else None
+        ),
+    }
+    try:
+        return json.dumps(
+            payload, sort_keys=True, separators=(",", ":"),
+            ensure_ascii=False, allow_nan=False,
+        )
+    except (TypeError, ValueError, UnicodeError):
+        raise ToolValidationError("audit event cannot be encoded for lifecycle chaining") from None
+
+
+def _audit_chain_hash(previous_hash: str, payload_json: str) -> str:
+    if not isinstance(previous_hash, str) or not _DIGEST_RE.fullmatch(previous_hash):
+        raise ToolValidationError("lifecycle audit chain predecessor is invalid")
+    return hashlib.sha256(
+        _AUDIT_CHAIN_DOMAIN
+        + bytes.fromhex(previous_hash)
+        + payload_json.encode("utf-8")
+    ).hexdigest()
+
+
+def _append_audit_event(connection: sqlite3.Connection, fields: tuple[Any, ...]) -> None:
+    """Append the audit row and its chain position inside the caller's transaction."""
+    state = connection.execute(
+        """SELECT schema_version, last_sequence, head_hash
+        FROM audit_chain_state WHERE singleton_id = 1"""
+    ).fetchone()
+    if (
+        state is None or state[0] != 1 or type(state[1]) is not int
+        or state[1] < 0 or not isinstance(state[2], str)
+        or not _DIGEST_RE.fullmatch(state[2])
+    ):
+        raise ToolValidationError("lifecycle audit chain state is invalid")
+    sequence = state[1] + 1
+    previous_hash = state[2]
+    payload_json = _audit_chain_payload(sequence, fields)
+    event_hash = _audit_chain_hash(previous_hash, payload_json)
+    connection.execute(
+        """INSERT INTO audit_events
+        (event_id, timestamp, principal_id, tool_name, argument_digest, status,
+         error_code, resource_type, resource_id, task_id, metadata_json,
+         sequence, previous_hash, event_hash)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (*fields, sequence, previous_hash, event_hash),
+    )
+    cursor = connection.execute(
+        """UPDATE audit_chain_state
+        SET last_sequence = ?, head_hash = ?
+        WHERE singleton_id = 1 AND schema_version = 1 AND last_sequence = ?
+          AND head_hash = ?""",
+        (sequence, event_hash, state[1], previous_hash),
+    )
+    if cursor.rowcount != 1:
+        raise ToolValidationError("lifecycle audit chain head changed during append")
+
+
+def _validate_audit_chain(connection: sqlite3.Connection) -> None:
+    """Verify one-to-one event coverage, sequence continuity, and the rolling digest."""
+    objects = {
+        row[0]: row[1] for row in connection.execute(
+            "SELECT name, type FROM sqlite_master WHERE name IN "
+            "('audit_chain_state', 'audit_events_sequence_unique', "
+            "'audit_events_immutable_update', 'audit_events_immutable_delete')"
+        )
+    }
+    if objects.get("audit_chain_state") != "table":
+        raise ToolValidationError("security store is missing lifecycle audit chain state")
+    if objects.get("audit_events_sequence_unique") != "index":
+        raise ToolValidationError("security store is missing the lifecycle audit sequence index")
+    if (
+        objects.get("audit_events_immutable_update") != "trigger"
+        or objects.get("audit_events_immutable_delete") != "trigger"
+    ):
+        raise ToolValidationError("security store is missing immutable audit event triggers")
+    columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(audit_events)")
+    }
+    if not _AUDIT_CHAIN_COLUMNS.issubset(columns):
+        raise ToolValidationError("security store is missing lifecycle audit chain columns")
+    state_rows = connection.execute(
+        """SELECT singleton_id, schema_version, last_sequence, head_hash
+        FROM audit_chain_state ORDER BY singleton_id"""
+    ).fetchall()
+    if (
+        len(state_rows) != 1 or state_rows[0][0] != 1 or state_rows[0][1] != 1
+        or type(state_rows[0][2]) is not int or state_rows[0][2] < 0
+        or not isinstance(state_rows[0][3], str)
+        or not _DIGEST_RE.fullmatch(state_rows[0][3])
+    ):
+        raise ToolValidationError("security store lifecycle audit chain state is malformed")
+    expected_sequence = 0
+    previous_hash = _AUDIT_CHAIN_ZERO
+    rows = connection.execute(
+        """SELECT event_id, timestamp, principal_id, tool_name, argument_digest,
+        status, error_code, resource_type, resource_id, task_id, metadata_json,
+        sequence, previous_hash, event_hash
+        FROM audit_events ORDER BY sequence"""
+    )
+    for row in rows:
+        fields = tuple(row[:11])
+        sequence, stored_previous, stored_hash = row[11:]
+        expected_sequence += 1
+        if (
+            type(sequence) is not int or sequence != expected_sequence
+            or stored_previous != previous_hash
+            or not isinstance(stored_hash, str) or not _DIGEST_RE.fullmatch(stored_hash)
+        ):
+            raise ToolValidationError("security store lifecycle audit sequence is discontinuous")
+        payload_json = _audit_chain_payload(sequence, fields)
+        calculated = _audit_chain_hash(previous_hash, payload_json)
+        if calculated != stored_hash:
+            raise ToolValidationError("security store lifecycle audit chain digest mismatch")
+        previous_hash = stored_hash
+    state = state_rows[0]
+    if state[2] != expected_sequence or state[3] != previous_hash:
+        raise ToolValidationError("security store lifecycle audit chain head does not match its events")
+
+
+def _migrate_lifecycle_audit_chain(connection: sqlite3.Connection) -> None:
+    """One-time local consistency-chain bootstrap for pre-chain audit databases."""
+    state_object = connection.execute(
+        "SELECT type FROM sqlite_master WHERE name='audit_chain_state'"
+    ).fetchone()
+    if state_object is not None and state_object[0] != "table":
+        raise ToolValidationError("security store lifecycle audit state object is invalid")
+    columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(audit_events)")
+    }
+    present = columns & _AUDIT_CHAIN_COLUMNS
+    if state_object is not None:
+        if present != _AUDIT_CHAIN_COLUMNS:
+            raise ToolValidationError("security store lifecycle audit chain schema is incomplete")
+        return
+    if present:
+        raise ToolValidationError("security store lifecycle audit chain state is missing")
+    connection.execute("ALTER TABLE audit_events ADD COLUMN sequence INTEGER")
+    connection.execute("ALTER TABLE audit_events ADD COLUMN previous_hash TEXT")
+    connection.execute("ALTER TABLE audit_events ADD COLUMN event_hash TEXT")
+    connection.execute(
+        """CREATE TABLE audit_chain_state (
+            singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+            schema_version INTEGER NOT NULL CHECK(schema_version = 1),
+            last_sequence INTEGER NOT NULL CHECK(last_sequence >= 0),
+            head_hash TEXT NOT NULL
+        )"""
+    )
+    connection.execute(
+        """INSERT INTO audit_chain_state
+        (singleton_id, schema_version, last_sequence, head_hash)
+        VALUES (1, 1, 0, ?)""",
+        (_AUDIT_CHAIN_ZERO,),
+    )
+    sequence = 0
+    previous_hash = _AUDIT_CHAIN_ZERO
+    rows = connection.execute(
+        """SELECT rowid, event_id, timestamp, principal_id, tool_name,
+        argument_digest, status, error_code, resource_type, resource_id,
+        task_id, metadata_json FROM audit_events ORDER BY rowid"""
+    ).fetchall()
+    for row in rows:
+        sequence += 1
+        fields = tuple(row[1:])
+        payload_json = _audit_chain_payload(sequence, fields)
+        event_hash = _audit_chain_hash(previous_hash, payload_json)
+        connection.execute(
+            """UPDATE audit_events
+            SET sequence = ?, previous_hash = ?, event_hash = ?
+            WHERE rowid = ?""",
+            (sequence, previous_hash, event_hash, row[0]),
+        )
+        previous_hash = event_hash
+    connection.execute(
+        """UPDATE audit_chain_state SET last_sequence = ?, head_hash = ?
+        WHERE singleton_id = 1""",
+        (sequence, previous_hash),
+    )
+    connection.execute(
+        "CREATE UNIQUE INDEX audit_events_sequence_unique ON audit_events(sequence)"
+    )
+
+
 def _validate_backup_semantics(connection: sqlite3.Connection) -> None:
     """Reject logically malformed security rows even when SQLite is structurally sound."""
     audit_rows = connection.execute(
@@ -94,6 +301,8 @@ def _validate_backup_semantics(connection: sqlite3.Connection) -> None:
                 or hashlib.sha256(metadata_json.encode("utf-8")).hexdigest() != digest
             ):
                 raise ToolValidationError("security backup contains an invalid audit metadata digest")
+
+    _validate_audit_chain(connection)
 
     approval_rows = connection.execute(
         """SELECT grant_id, principal_id, tool_name, argument_digest,
@@ -374,6 +583,7 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
             connection = self._connect()
             try:
                 connection.execute("PRAGMA journal_mode=WAL")
+                connection.execute("BEGIN IMMEDIATE")
                 connection.execute(
                     """CREATE TABLE IF NOT EXISTS audit_events (
                         event_id TEXT PRIMARY KEY,
@@ -395,6 +605,7 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
                 for column in ("resource_type", "resource_id", "task_id", "metadata_json"):
                     if column not in existing_audit_columns:
                         connection.execute(f"ALTER TABLE audit_events ADD COLUMN {column} TEXT")
+                _migrate_lifecycle_audit_chain(connection)
                 connection.execute(
                     """CREATE TABLE IF NOT EXISTS worker_audit_state (
                         singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
@@ -424,6 +635,16 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
                         consumed_at TEXT NOT NULL
                     )"""
                 )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+            finally:
+                connection.close()
+        with self._lock:
+            connection = self._connect()
+            try:
+                _validate_audit_chain(connection)
             finally:
                 connection.close()
 
@@ -484,25 +705,17 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
         with self._lock:
             connection = self._connect()
             try:
-                connection.execute(
-                    """INSERT INTO audit_events
-                    (event_id, timestamp, principal_id, tool_name, argument_digest, status,
-                     error_code, resource_type, resource_id, task_id, metadata_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        event.event_id,
-                        event.timestamp,
-                        event.principal_id,
-                        event.tool_name,
-                        event.argument_digest,
-                        event.status,
-                        event.error_code,
-                        event.resource_type,
-                        event.resource_id,
-                        event.task_id,
-                        event.metadata_json,
-                    ),
-                )
+                connection.execute("BEGIN IMMEDIATE")
+                _append_audit_event(connection, (
+                    event.event_id, event.timestamp, event.principal_id,
+                    event.tool_name, event.argument_digest, event.status,
+                    event.error_code, event.resource_type, event.resource_id,
+                    event.task_id, event.metadata_json,
+                ))
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
             finally:
                 connection.close()
 
@@ -636,17 +849,11 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
                     sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
                 )
                 digest = hashlib.sha256(metadata_json.encode("utf-8")).hexdigest()
-                connection.execute(
-                    """INSERT INTO audit_events
-                    (event_id, timestamp, principal_id, tool_name, argument_digest, status,
-                     error_code, resource_type, resource_id, task_id, metadata_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        event_id, timestamp, "host", "worker.reconciliation.acknowledged",
-                        digest, "success", None, "worker_registry", "registry", None,
-                        metadata_json,
-                    ),
-                )
+                _append_audit_event(connection, (
+                    event_id, timestamp, "host", "worker.reconciliation.acknowledged",
+                    digest, "success", None, "worker_registry", "registry", None,
+                    metadata_json,
+                ))
                 connection.execute(
                     """UPDATE worker_audit_state SET pending_operations = 0
                     WHERE singleton_id = 1"""
@@ -781,6 +988,9 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
             connection = self._connect()
             try:
                 row = connection.execute("PRAGMA integrity_check").fetchone()
-                return str(row[0]) if row else "no result"
+                if not row or row[0] != "ok":
+                    return str(row[0]) if row else "no result"
+                _validate_backup_semantics(connection)
+                return "ok"
             finally:
                 connection.close()

@@ -159,6 +159,128 @@ class SQLiteSecurityStoreTests(unittest.TestCase):
                 connection.close()
         self.assertEqual(store.events(), (event,))
 
+    def test_lifecycle_audit_chain_is_monotonic_and_detects_event_tampering(self):
+        store = SQLiteSecurityStore(self.path)
+        first = AuditEvent(
+            "chain-event-1", self.now.isoformat(), "principal-1", "search",
+            argument_digest({"item": "one"}), "succeeded", None,
+        )
+        second = AuditEvent(
+            "chain-event-2", self.now.isoformat(), "principal-2", "search",
+            argument_digest({"item": "two"}), "succeeded", None,
+        )
+        store.write(first)
+        store.write(second)
+        connection = sqlite3.connect(self.path)
+        try:
+            rows = connection.execute(
+                "SELECT sequence, previous_hash, event_hash FROM audit_events ORDER BY sequence"
+            ).fetchall()
+            state = connection.execute(
+                "SELECT last_sequence, head_hash FROM audit_chain_state WHERE singleton_id=1"
+            ).fetchone()
+        finally:
+            connection.close()
+        self.assertEqual([row[0] for row in rows], [1, 2])
+        self.assertEqual(rows[1][1], rows[0][2])
+        self.assertEqual(state, (2, rows[1][2]))
+        self.assertEqual(store.integrity_check(), "ok")
+
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute("DROP TRIGGER audit_events_immutable_update")
+            connection.execute(
+                "UPDATE audit_events SET status='tampered' WHERE event_id='chain-event-1'"
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        with self.assertRaisesRegex(ToolValidationError, "chain digest mismatch"):
+            store.integrity_check()
+        destination = os.path.join(self.temp.name, "tampered-chain-backup.sqlite3")
+        with self.assertRaisesRegex(ToolValidationError, "chain digest mismatch"):
+            store.backup_to(destination)
+        self.assertFalse(os.path.lexists(destination))
+
+    def test_lifecycle_audit_chain_append_is_atomic_with_event_insert(self):
+        store = SQLiteSecurityStore(self.path)
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute(
+                """CREATE TRIGGER reject_audit_chain_head
+                BEFORE UPDATE ON audit_chain_state
+                BEGIN SELECT RAISE(ABORT, 'injected chain head failure'); END"""
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        event = AuditEvent(
+            "chain-atomic-failure", self.now.isoformat(), "principal-1", "search",
+            argument_digest({"item": "atomic"}), "succeeded", None,
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            store.write(event)
+        connection = sqlite3.connect(self.path)
+        try:
+            count = connection.execute(
+                "SELECT COUNT(*) FROM audit_events WHERE event_id='chain-atomic-failure'"
+            ).fetchone()[0]
+            state = connection.execute(
+                "SELECT last_sequence, head_hash FROM audit_chain_state WHERE singleton_id=1"
+            ).fetchone()
+        finally:
+            connection.close()
+        self.assertEqual(count, 0)
+        self.assertEqual(state, (0, "0" * 64))
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute("DROP TRIGGER reject_audit_chain_head")
+            connection.commit()
+        finally:
+            connection.close()
+        self.assertEqual(store.integrity_check(), "ok")
+
+    def test_lifecycle_audit_chain_serializes_writers_across_store_instances(self):
+        stores = [SQLiteSecurityStore(self.path) for _ in range(4)]
+
+        def append(index):
+            event = AuditEvent(
+                f"parallel-chain-{index}", self.now.isoformat(), "principal-1", "search",
+                argument_digest({"item": str(index)}), "succeeded", None,
+            )
+            stores[index % len(stores)].write(event)
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(append, range(24)))
+        store = SQLiteSecurityStore(self.path)
+        self.assertEqual(len(store.events()), 24)
+        self.assertEqual(store.integrity_check(), "ok")
+        connection = sqlite3.connect(self.path)
+        try:
+            state = connection.execute(
+                "SELECT last_sequence FROM audit_chain_state WHERE singleton_id=1"
+            ).fetchone()
+        finally:
+            connection.close()
+        self.assertEqual(state[0], 24)
+
+    def test_reconciliation_acknowledgement_is_in_lifecycle_audit_chain(self):
+        store = SQLiteSecurityStore(self.path)
+        store.begin_worker_lifecycle_operation()
+        self.assertTrue(store.acknowledge_worker_lifecycle_reconciliation(
+            "Supervisor completed durable lifecycle reconciliation",
+        ))
+        self.assertEqual(store.integrity_check(), "ok")
+        connection = sqlite3.connect(self.path)
+        try:
+            sequence, event_type = connection.execute(
+                "SELECT sequence, tool_name FROM audit_events ORDER BY sequence DESC LIMIT 1"
+            ).fetchone()
+        finally:
+            connection.close()
+        self.assertEqual(sequence, 1)
+        self.assertEqual(event_type, "worker.reconciliation.acknowledged")
+
     def test_legacy_audit_schema_is_migrated_with_resource_columns(self):
         connection = sqlite3.connect(self.path)
         try:
@@ -179,8 +301,12 @@ class SQLiteSecurityStoreTests(unittest.TestCase):
             columns = {row[1] for row in connection.execute("PRAGMA table_info(audit_events)")}
         finally:
             connection.close()
-        self.assertTrue({"resource_type", "resource_id", "task_id", "metadata_json"}.issubset(columns))
+        self.assertTrue({
+            "resource_type", "resource_id", "task_id", "metadata_json",
+            "sequence", "previous_hash", "event_hash",
+        }.issubset(columns))
         self.assertEqual(store.events(), ())
+        self.assertEqual(store.integrity_check(), "ok")
 
     def grant(self, grant_id="grant-1"):
         args = {"item": "item-1"}
