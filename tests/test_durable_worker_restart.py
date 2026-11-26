@@ -326,5 +326,119 @@ class DurableWorkerRestartTests(unittest.TestCase):
         self.assertFalse(reopened_audit.worker_lifecycle_reconciliation_required())
 
 
+    def test_committed_reservation_survives_repeated_supervisor_restarts(self):
+        now = {"value": 1_000_000_000}
+
+        def registry_for(store):
+            return SQLiteWorkerRegistry(
+                store,
+                heartbeat_ttl_ms=5_000,
+                reservation_ttl_ms=1_000,
+                clock_ns=lambda: now["value"],
+                clock_wall_ns=lambda: now["value"],
+            )
+
+        task_store = SQLiteTaskStore(self.tasks_path)
+        audit_store = SQLiteSecurityStore(self.audit_path)
+        first_host = self._host(task_store, audit_store, registry=registry_for(task_store))
+        first_host.register_worker(
+            "worker-token",
+            WorkerDescriptor("worker-1", (1,), ("math.factorial",), max_concurrency=1),
+        )
+        first_host.heartbeat_worker("monitor-token", "worker-1")
+        task = task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {"scope": "repeated-restart"}}],
+        )
+        reservation_created_at = now["value"]
+        pending = first_host.reserve_worker_candidate(
+            "alice-token", task.task_id, "math.factorial", 1,
+        )
+        self.assertIsNotNone(pending)
+
+        # First restart: acknowledge the durable pending reservation and recover it.
+        tasks_after_first_restart = SQLiteTaskStore(self.tasks_path)
+        audit_after_first_restart = SQLiteSecurityStore(self.audit_path)
+        self.assertTrue(audit_after_first_restart.acknowledge_worker_lifecycle_reconciliation(
+            "Supervisor one fenced the prior host and verified the worker after restart",
+        ))
+        second_host = self._host(
+            tasks_after_first_restart,
+            audit_after_first_restart,
+            registry=registry_for(tasks_after_first_restart),
+        )
+        recovered_pending = second_host.get_worker_reservation_for_task(
+            "alice-token", task.task_id,
+        )
+        self.assertIsNotNone(recovered_pending)
+        self.assertEqual(recovered_pending.reservation.token, pending.reservation.token)
+        self.assertFalse(recovered_pending.reservation.committed)
+
+        committed = second_host.commit_worker_reservation(
+            "alice-token", "monitor-token", recovered_pending,
+        )
+        self.assertTrue(committed.reservation.committed)
+        self.assertTrue(
+            audit_after_first_restart.worker_lifecycle_reconciliation_required()
+        )
+
+        # Move beyond the pending-reservation TTL. Committed work must remain
+        # durable and must not be expired merely because time and the host process advanced.
+        now["value"] += 2_000_000_000
+        self.assertGreater(
+            now["value"] - reservation_created_at, 1_000_000_000,
+        )
+        tasks_after_second_restart = SQLiteTaskStore(self.tasks_path)
+        audit_after_second_restart = SQLiteSecurityStore(self.audit_path)
+        self.assertTrue(
+            audit_after_second_restart.worker_lifecycle_reconciliation_required()
+        )
+        with self.assertRaisesRegex(
+            HostRuntimeError, "pending operations or reservations"
+        ):
+            self._host(
+                tasks_after_second_restart,
+                audit_after_second_restart,
+                registry=registry_for(tasks_after_second_restart),
+            )
+
+        self.assertTrue(
+            audit_after_second_restart.acknowledge_worker_lifecycle_reconciliation(
+                "Supervisor two re-authenticated the worker and reconciled committed task state",
+            )
+        )
+        third_host = self._host(
+            tasks_after_second_restart,
+            audit_after_second_restart,
+            registry=registry_for(tasks_after_second_restart),
+        )
+        recovered_committed = third_host.get_worker_reservation_for_task(
+            "alice-token", task.task_id,
+        )
+        self.assertIsNotNone(recovered_committed)
+        self.assertEqual(recovered_committed.reservation.token, pending.reservation.token)
+        self.assertTrue(recovered_committed.reservation.committed)
+
+        self.assertTrue(
+            third_host.release_worker_reservation("monitor-token", recovered_committed)
+        )
+        self.assertFalse(
+            audit_after_second_restart.worker_lifecycle_reconciliation_required()
+        )
+        self.assertIsNone(
+            registry_for(tasks_after_second_restart).get_reservation(
+                pending.reservation.token
+            )
+        )
+        event_types = [
+            event.tool_name for event in audit_after_second_restart.events()
+        ]
+        self.assertEqual(event_types.count("worker.reservation.created"), 1)
+        self.assertEqual(event_types.count("worker.reservation.committed"), 1)
+        self.assertEqual(event_types.count("worker.reservation.released"), 1)
+        self.assertEqual(
+            event_types.count("worker.reconciliation.acknowledged"), 2,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
