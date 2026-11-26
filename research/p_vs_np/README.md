@@ -193,3 +193,10 @@ R62 also restores Theorem 3.20's correct t=1 rounding: at most two exceptional p
 See [R63 uniformity gap audit](R63_UNIFORMITY_GAP_AUDIT.md).
 
 R63 confirms from Jeřábek's original Theorems 3.19–3.20 that the incidence method handles uniformly described large fibre families and that the t=1 exceptional fibre is at most two. The next major obstacle is uniformity: the bounded-arithmetic route uses PV₂/FP^NP resources and yields existential anti-checker objects, whereas Pich–Santhanam Theorem 7 requires a single p-time generator whose correctness is proved in S¹₂. Their KPT discussion shows that replacing the generator by existential quantifiers yields an adaptive constant list, not automatically one fixed generator. The current search anti-checker also still needs conversion to their decision anti-checker with unique assignment labels. No feasible anti-checker generator or P≠NP proof is claimed.
+
+
+# R64: direct decision anti-checker fibre obstruction
+
+See [R64 decision fibre obstruction](R64_DECISION_FIBRE_OBSTRUCTION.md).
+
+R64 revisits the R49 majority-sampling anti-checker, which is the right nonuniform decision-circuit object for Pich–Santhanam. A weighted Chernoff/tagging inequality gives a compact finite combinatorial tail bound. But the decision-error fibre C(x)≠SAT(x) is generally BΣᵇ₁/Δ₂, not Σᵇ₁, because it includes the unsatisfiable case. Jeřábek's relative Sipser counting theorems require Σᵇ₁ sets. The older Δ₂ counting framework has ambient-additive precision, insufficient for the exponentially small majority-error fibres needed to union-bound over 2ⁿ formulas. Thus R49's external nonuniform proof remains sound, but this direct bounded-arithmetic formalization is blocked by both definability and sparsity. R51/R56/R62 search anti-checker remains the better APC₂ route, with the separate search-to-decision gap unresolved.
