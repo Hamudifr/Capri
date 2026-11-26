@@ -19,13 +19,16 @@ build/capri_core.o: src/capri_core.c include/capri_core.h | build
 build/capri_session_store.o: src/capri_session_store.c include/capri_session_store.h | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) -pthread -c src/capri_session_store.c -o $@
 
+build/capri_session_host.o: src/capri_session_host.c include/capri_session_host.h include/capri_session_store.h | build
+	$(CC) $(CPPFLAGS) $(CFLAGS) -pthread -c src/capri_session_host.c -o $@
+
 build/libccel.a: build/ccel.o
 	$(AR) rcs $@ $^
 
 build/libcapri_core.a: build/capri_core.o
 	$(AR) rcs $@ $^
 
-build/libcapri_runtime.a: build/capri_session_store.o
+build/libcapri_runtime.a: build/capri_session_store.o build/capri_session_host.o
 	$(AR) rcs $@ $^
 
 build/test_ccel: tests/test_ccel.c build/ccel.o
@@ -40,10 +43,14 @@ build/test_session_store: tests/test_session_store.c build/capri_session_store.o
 build/session_store_parity: tests/session_store_parity.c build/libcapri_runtime.a
 	$(CC) $(CPPFLAGS) $(CFLAGS) $^ $(LDLIBS) -o $@
 
-test: build/test_ccel build/test_core build/test_session_store
+build/test_session_host: tests/test_session_host.c build/capri_session_host.o build/capri_session_store.o
+	$(CC) $(CPPFLAGS) $(CFLAGS) -pthread $^ $(LDLIBS) -o $@
+
+test: build/test_ccel build/test_core build/test_session_store build/test_session_host
 	./build/test_ccel
 	./build/test_core
 	./build/test_session_store
+	./build/test_session_host
 
 clean:
 	rm -rf build
