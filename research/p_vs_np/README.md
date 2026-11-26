@@ -214,3 +214,10 @@ R65 checks the full statement of Pich–Santhanam Theorem 7. R49's direct nonuni
 See [R66 APC₃ decision route](R66_APC3_DECISION_ROUTE.md).
 
 R66 refines R64: Jeřábek's approximate-counting hierarchy relativizes, and APC₃ = T²₂+sWPHP(PV₃) can count Σᵇ₂-definable sets with relative precision. The decision-error predicate C(x)≠SATₙ(x) is Δᵇ₂ and has an explicit Σᵇ₂ representation. Therefore the direct R49 majority/tagged-Chernoff route may be formalizable one level higher, using PV₃ maps and APC₃ relative counting. This does not solve the EF target: the theory is substantially stronger than S¹₂, and no conservativity/descent to EF has been established. Weighted tag-lift formalization, exact approximation losses, and iteration remain open.
+
+
+# R67: APC₃ formalization audit
+
+See [R67 APC₃ formalization audit](R67_APC3_FORMALIZATION_AUDIT.md).
+
+R67 repairs two omissions in R66. First, Jeřábek Theorem 3.21 supplies near-cardinality parameters for sparse Σᵇ₂ survivor sets, avoiding ambient-universe counting. Second, the full iteration naturally needs S³₂+sWPHP(PV₃) and a ∀Σᵇ₃ conservation route to T²₂+rWPHP(PV₃), not S¹₂. The weighted tag-lift is now specified as an explicit mixed-radix PV₃ injection from bad tuples times [L] into tagged tuples. Exact approximate-counting constants, the complete S³₂ history induction, and any EF descent remain open.
