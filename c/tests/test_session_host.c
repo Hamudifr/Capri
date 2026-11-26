@@ -206,7 +206,8 @@ int main(void) {
     CapriSession after_close = {0};
     assert(capri_session_host_get_session(
         host, credential_a, sizeof(credential_a) - 1u,
-        session_a.session_id, &after_close) == CAPRI_SESSION_HOST_NOT_FOUND);
+        session_a.session_id, &after_close) == CAPRI_SESSION_HOST_OK);
+    assert(after_close.closed == 1);
     CapriSession closed_commit = {0};
     assert(capri_session_host_commit_turn(
         host, credential_a, sizeof(credential_a) - 1u,
