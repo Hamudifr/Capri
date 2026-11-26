@@ -28,6 +28,16 @@ from .validation import contains_surrogate
 Outcome = Literal["verified_success", "verified_failure", "unverified"]
 Split = Literal["train", "validation", "test"]
 
+MAX_EXAMPLE_ID_CHARS = 128
+MAX_TASK_ID_CHARS = 128
+MAX_CAPABILITY_CHARS = 64
+MAX_PROMPT_CHARS = 16_000
+MAX_COMPLETION_CHARS = 64_000
+MAX_EVIDENCE_REF_CHARS = 256
+MAX_SOURCE_CHARS = 64
+MAX_ALLOWED_CAPABILITIES = 256
+MAX_EXPORT_CONSENTS = 4096
+
 
 @dataclass(frozen=True)
 class LearningConsent:
@@ -413,11 +423,23 @@ class LearningStore:
             raise LearningDataError("an explicit consent_id is required")
         if type(example.schema_version) is not int or example.schema_version != 1:
             raise LearningDataError("unsupported schema_version")
-        for name in ("example_id", "task_id", "capability", "prompt",
-                     "completion", "evidence_ref", "source"):
+        field_limits = {
+            "example_id": MAX_EXAMPLE_ID_CHARS,
+            "task_id": MAX_TASK_ID_CHARS,
+            "capability": MAX_CAPABILITY_CHARS,
+            "prompt": MAX_PROMPT_CHARS,
+            "completion": MAX_COMPLETION_CHARS,
+            "evidence_ref": MAX_EVIDENCE_REF_CHARS,
+            "source": MAX_SOURCE_CHARS,
+        }
+        for name, limit in field_limits.items():
             value = getattr(example, name)
             if not isinstance(value, str) or not value.strip():
                 raise LearningDataError(f"{name} must be non-empty text")
+            if len(value) > limit:
+                raise LearningDataError(f"{name} exceeds {limit} characters")
+            if contains_surrogate(value):
+                raise LearningDataError(f"{name} must contain valid Unicode scalar values")
         if example.consent is not True:
             raise LearningDataError("explicit boolean consent is required")
         if example.privacy_reviewed is not True:
@@ -484,32 +506,67 @@ class LearningStore:
         minimum_quality: float = 0.9,
         allowed_capabilities: Iterable[str] | None = None,
     ) -> tuple[Path, dict[str, int], list[str], list[str], int]:
-        """Create a private, fsynced JSONL staging file and its consent dependencies."""
+        """Create a private, fsynced JSONL staging file with bounded dependencies."""
         if (
             isinstance(minimum_quality, bool)
             or not isinstance(minimum_quality, (int, float))
             or not 0.0 <= minimum_quality <= 1.0
         ):
             raise LearningDataError("minimum_quality must be a finite number between 0 and 1")
-        allowed = set(allowed_capabilities) if allowed_capabilities is not None else None
-        with self._connection() as connection:
-            rows = connection.execute(
-                """
-                SELECT learning_examples.*, learning_consents.policy_version
-                FROM learning_examples
-                JOIN learning_consents
-                  ON learning_consents.consent_id = learning_examples.consent_id
-                WHERE learning_examples.outcome = 'verified_success'
-                  AND learning_examples.consent = 1
-                  AND learning_examples.privacy_reviewed = 1
-                  AND learning_examples.sensitive = 0
-                  AND learning_examples.quality_score >= ?
-                  AND learning_consents.scope = 'curated_training_examples'
-                  AND learning_consents.revoked_at IS NULL
-                ORDER BY learning_examples.created_at, learning_examples.example_id
-                """,
-                (minimum_quality,),
-            ).fetchall()
+
+        allowed: set[str] | None = None
+        if allowed_capabilities is not None:
+            if isinstance(allowed_capabilities, (str, bytes, bytearray)):
+                raise LearningDataError("allowed_capabilities must be an iterable of capability names")
+            try:
+                iterator = iter(allowed_capabilities)
+            except TypeError:
+                raise LearningDataError("allowed_capabilities must be iterable") from None
+            allowed = set()
+            try:
+                for index, capability in enumerate(iterator):
+                    if index >= MAX_ALLOWED_CAPABILITIES:
+                        raise LearningDataError(
+                            f"allowed_capabilities exceeds {MAX_ALLOWED_CAPABILITIES} entries"
+                        )
+                    if (
+                        not isinstance(capability, str)
+                        or not capability.strip()
+                        or len(capability) > MAX_CAPABILITY_CHARS
+                        or contains_surrogate(capability)
+                    ):
+                        raise LearningDataError("allowed_capabilities contains an invalid capability name")
+                    allowed.add(capability)
+            except LearningDataError:
+                raise
+            except Exception:
+                raise LearningDataError("allowed_capabilities could not be read") from None
+
+        where = """
+            learning_examples.outcome = 'verified_success'
+            AND learning_examples.consent = 1
+            AND learning_examples.privacy_reviewed = 1
+            AND learning_examples.sensitive = 0
+            AND learning_examples.quality_score >= ?
+            AND learning_consents.scope = 'curated_training_examples'
+            AND learning_consents.revoked_at IS NULL
+        """
+        parameters: list[object] = [minimum_quality]
+        if allowed is not None:
+            if not allowed:
+                where += " AND 0"
+            else:
+                ordered_allowed = sorted(allowed)
+                placeholders = ",".join("?" for _ in ordered_allowed)
+                where += f" AND learning_examples.capability IN ({placeholders})"
+                parameters.extend(ordered_allowed)
+
+        from_where = f"""
+            FROM learning_examples
+            JOIN learning_consents
+              ON learning_consents.consent_id = learning_examples.consent_id
+            WHERE {where}
+        """
 
         target = Path(destination)
         _require_private_directory(target.parent)
@@ -517,7 +574,6 @@ class LearningStore:
             prefix=f".{target.name}.", suffix=".jsonl.tmp", dir=target.parent
         )
         counts = {"train": 0, "validation": 0, "test": 0, "excluded_duplicate": 0}
-        seen_hashes: set[str] = set()
         consent_ids: set[str] = set()
         policy_versions: set[str] = set()
         try:
@@ -525,31 +581,61 @@ class LearningStore:
             stream = os.fdopen(descriptor, "w", encoding="utf-8", newline="\n")
             descriptor = -1
             with stream:
-                for row in rows:
-                    if allowed is not None and row["capability"] not in allowed:
-                        continue
-                    if row["content_hash"] in seen_hashes:
-                        counts["excluded_duplicate"] += 1
-                        continue
-                    seen_hashes.add(row["content_hash"])
-                    split = self._split(row["task_id"])
-                    payload = {
-                        "schema_version": 1,
-                        "example_id": row["example_id"],
-                        "task_id": row["task_id"],
-                        "capability": row["capability"],
-                        "prompt": row["prompt"],
-                        "completion": row["completion"],
-                        "evidence_ref": row["evidence_ref"],
-                        "quality_score": row["quality_score"],
-                        "consent_id": row["consent_id"],
-                        "consent_policy_version": row["policy_version"],
-                        "split": split,
-                    }
-                    stream.write(json.dumps(payload, ensure_ascii=False) + "\n")
-                    counts[split] += 1
-                    consent_ids.add(row["consent_id"])
-                    policy_versions.add(row["policy_version"])
+                # Keep stats and row selection on one read snapshot, then consume
+                # the SQLite cursor incrementally instead of materializing rows.
+                with self._connection() as connection:
+                    connection.execute("BEGIN")
+                    stats = connection.execute(
+                        f"""
+                        SELECT
+                            COUNT(*) AS total_count,
+                            COUNT(DISTINCT learning_examples.content_hash) AS unique_count,
+                            COUNT(DISTINCT learning_examples.consent_id) AS consent_count
+                        {from_where}
+                        """,
+                        tuple(parameters),
+                    ).fetchone()
+                    if stats["consent_count"] > MAX_EXPORT_CONSENTS:
+                        raise LearningDataError(
+                            f"export exceeds {MAX_EXPORT_CONSENTS} consent dependencies"
+                        )
+                    counts["excluded_duplicate"] = stats["total_count"] - stats["unique_count"]
+                    rows = connection.execute(
+                        f"""
+                        SELECT * FROM (
+                            SELECT
+                                learning_examples.*,
+                                learning_consents.policy_version,
+                                ROW_NUMBER() OVER (
+                                    PARTITION BY learning_examples.content_hash
+                                    ORDER BY learning_examples.created_at, learning_examples.example_id
+                                ) AS duplicate_rank
+                            {from_where}
+                        ) AS eligible
+                        WHERE duplicate_rank = 1
+                        ORDER BY created_at, example_id
+                        """,
+                        tuple(parameters),
+                    )
+                    for row in rows:
+                        split = self._split(row["task_id"])
+                        payload = {
+                            "schema_version": 1,
+                            "example_id": row["example_id"],
+                            "task_id": row["task_id"],
+                            "capability": row["capability"],
+                            "prompt": row["prompt"],
+                            "completion": row["completion"],
+                            "evidence_ref": row["evidence_ref"],
+                            "quality_score": row["quality_score"],
+                            "consent_id": row["consent_id"],
+                            "consent_policy_version": row["policy_version"],
+                            "split": split,
+                        }
+                        stream.write(json.dumps(payload, ensure_ascii=False) + "\n")
+                        counts[split] += 1
+                        consent_ids.add(row["consent_id"])
+                        policy_versions.add(row["policy_version"])
                 stream.flush()
                 os.fsync(stream.fileno())
         except Exception:
