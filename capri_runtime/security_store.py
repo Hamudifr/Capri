@@ -189,26 +189,60 @@ def _append_audit_event(connection: sqlite3.Connection, fields: tuple[Any, ...])
 def _validate_audit_chain(connection: sqlite3.Connection) -> None:
     """Verify one-to-one event coverage, sequence continuity, and the rolling digest."""
     objects = {
-        row[0]: row[1] for row in connection.execute(
-            "SELECT name, type FROM sqlite_master WHERE name IN "
+        row[0]: (row[1], row[2]) for row in connection.execute(
+            "SELECT name, type, sql FROM sqlite_master WHERE name IN "
             "('audit_chain_state', 'audit_events_sequence_unique', "
             "'audit_events_immutable_update', 'audit_events_immutable_delete')"
         )
     }
-    if objects.get("audit_chain_state") != "table":
+    if objects.get("audit_chain_state", (None, None))[0] != "table":
         raise ToolValidationError("security store is missing lifecycle audit chain state")
-    if objects.get("audit_events_sequence_unique") != "index":
+    if objects.get("audit_events_sequence_unique", (None, None))[0] != "index":
         raise ToolValidationError("security store is missing the lifecycle audit sequence index")
-    if (
-        objects.get("audit_events_immutable_update") != "trigger"
-        or objects.get("audit_events_immutable_delete") != "trigger"
+    for trigger_name, operation in (
+        ("audit_events_immutable_update", "update"),
+        ("audit_events_immutable_delete", "delete"),
     ):
-        raise ToolValidationError("security store is missing immutable audit event triggers")
-    columns = {
-        row[1] for row in connection.execute("PRAGMA table_info(audit_events)")
+        trigger = objects.get(trigger_name)
+        if trigger is None or trigger[0] != "trigger":
+            raise ToolValidationError("security store is missing immutable audit event triggers")
+        trigger_sql = " ".join((trigger[1] or "").lower().split())
+        if (
+            f"before {operation} on audit_events" not in trigger_sql
+            or "raise(abort, 'audit events are append-only')" not in trigger_sql
+        ):
+            raise ToolValidationError("security store immutable audit event trigger definition is invalid")
+    index_rows = {
+        row[1]: row for row in connection.execute("PRAGMA index_list(audit_events)")
     }
-    if not _AUDIT_CHAIN_COLUMNS.issubset(columns):
+    sequence_index = index_rows.get("audit_events_sequence_unique")
+    if (
+        sequence_index is None or sequence_index[2] != 1
+        or (len(sequence_index) > 4 and sequence_index[4] != 0)
+    ):
+        raise ToolValidationError("security store lifecycle audit sequence index is not unique")
+    indexed_columns = [
+        row[2] for row in connection.execute(
+            "PRAGMA index_info(audit_events_sequence_unique)"
+        )
+    ]
+    if indexed_columns != ["sequence"]:
+        raise ToolValidationError("security store lifecycle audit sequence index is malformed")
+    table_info = {
+        row[1]: row[2].upper() for row in connection.execute("PRAGMA table_info(audit_events)")
+    }
+    if (
+        not _AUDIT_CHAIN_COLUMNS.issubset(table_info)
+        or table_info.get("sequence") != "INTEGER"
+        or table_info.get("previous_hash") != "TEXT"
+        or table_info.get("event_hash") != "TEXT"
+    ):
         raise ToolValidationError("security store is missing lifecycle audit chain columns")
+    state_columns = [
+        row[1] for row in connection.execute("PRAGMA table_info(audit_chain_state)")
+    ]
+    if state_columns != ["singleton_id", "schema_version", "last_sequence", "head_hash"]:
+        raise ToolValidationError("security store lifecycle audit state schema is malformed")
     state_rows = connection.execute(
         """SELECT singleton_id, schema_version, last_sequence, head_hash
         FROM audit_chain_state ORDER BY singleton_id"""

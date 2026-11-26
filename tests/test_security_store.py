@@ -269,6 +269,35 @@ class SQLiteSecurityStoreTests(unittest.TestCase):
             store.backup_to(destination)
         self.assertFalse(os.path.lexists(destination))
 
+    def test_lifecycle_audit_chain_rejects_replaced_noop_immutable_trigger(self):
+        store = SQLiteSecurityStore(self.path)
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute("DROP TRIGGER audit_events_immutable_update")
+            connection.execute(
+                """CREATE TRIGGER audit_events_immutable_update
+                BEFORE UPDATE ON audit_events BEGIN SELECT 1; END"""
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        with self.assertRaisesRegex(ToolValidationError, "trigger definition is invalid"):
+            store.integrity_check()
+
+    def test_lifecycle_audit_chain_rejects_non_unique_sequence_index(self):
+        store = SQLiteSecurityStore(self.path)
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute("DROP INDEX audit_events_sequence_unique")
+            connection.execute(
+                "CREATE INDEX audit_events_sequence_unique ON audit_events(event_id)"
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        with self.assertRaisesRegex(ToolValidationError, "sequence index is not unique"):
+            store.integrity_check()
+
     def test_lifecycle_audit_chain_append_is_atomic_with_event_insert(self):
         store = SQLiteSecurityStore(self.path)
         connection = sqlite3.connect(self.path)
