@@ -1,7 +1,7 @@
 # Nexus Independently Protected Audit Checkpoints
 
 **Status:** architecture proposal; not implemented and not production authorization  
-**Scope:** independent authenticity and rollback detection for the durable Nexus worker-registry audit stream  
+**Scope:** independent authenticity and rollback detection for both durable Nexus registry events and host lifecycle audit events  
 **Tracker:** [issue #246](https://github.com/Hamudifr/Capri/issues/246)  
 **Related:** [worker registry design](superpowers/specs/2026-11-25-sqlite-worker-registry.md), [supervisor recovery contract](WORKER_SUPERVISOR_RECOVERY.md), [security review](SECURITY_REVIEW.md)
 
@@ -73,8 +73,8 @@ The runtime should depend on narrow host-supplied protocols, not a cloud-vendor 
 
 - `CheckpointSigner.sign(key_id, message) -> signature`
 - `CheckpointVerifier.verify(key_id, message, signature) -> bool` (or a verifier service when using HMAC)
-- `CheckpointStore.read_latest(stream_id) -> checkpoint | None`
-- `CheckpointStore.append_if_generation(stream_id, expected_generation, checkpoint) -> stored_checkpoint`
+- `CheckpointStore.read_latest(scope_id) -> checkpoint | None`
+- `CheckpointStore.append_if_generation(scope_id, expected_generation, checkpoint) -> stored_checkpoint`
 
 The external store must provide atomic compare-and-swap or equivalent conditional append. A plain mutable object key without conditional writes, retention protection or access separation is insufficient. The signer must enforce which stream, key ID and operation are authorized; model output and database content cannot select arbitrary signing keys or request signatures.
 
@@ -132,7 +132,7 @@ The two SQLite stores cannot be read as one atomic transaction. Before signing a
 5. Sign and publish the composite envelope with external generation compare-and-swap.
 6. Read back and verify the external checkpoint before releasing the fence.
 
-If registry persistence commits but its corresponding host lifecycle event does not, the pending operation marker must block checkpoint publication. If the external checkpoint is published but local acknowledgement fails, startup must verify the external checkpoint against both stores and repair only local diagnostic state. If either store is ahead of the checkpoint, that suffix remains unanchored and requires explicit reconciliation; do not silently sign it during restart.
+If registry persistence commits but its corresponding host lifecycle event does not, the pending operation marker must block checkpoint publication. If the external checkpoint is published but the coordinator crashes before returning success, startup must read the external latest checkpoint and verify it against both stores; it must not re-sign, lower the generation, or silently repair event history. If either store is ahead of the checkpoint, that suffix remains unanchored and requires explicit reconciliation; do not silently sign it during restart.
 
 The checkpoint store's compare-and-swap prevents competing checkpoint generations, but it does not replace the host-level fencing lease. Where multiple supervisors can write, a verifiable lease/fencing epoch from the embedding host is mandatory and must be included in the signed checkpoint. The current note-based `acknowledge_worker_lifecycle_reconciliation()` API is not itself a lease provider or proof of lease ownership.
 
