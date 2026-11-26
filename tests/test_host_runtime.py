@@ -1654,6 +1654,11 @@ class CapriHostRuntimeTests(unittest.TestCase):
         ))
         self.assertFalse(audit.worker_lifecycle_reconciliation_required())
         self.assertEqual(registry.integrity_check(), "ok")
+        backup_path = os.path.join(self.temp.name, "expiry-race-backup.sqlite3")
+        self.task_store.backup_to(backup_path)
+        restored_store = SQLiteTaskStore(backup_path)
+        restored_registry = SQLiteWorkerRegistry(restored_store)
+        self.assertEqual(restored_registry.integrity_check(), "ok")
 
     def test_restarted_host_audits_expiry_from_mutating_registry_operation(self):
         now = {"value": 20_000_000_000, "sequence": None}
