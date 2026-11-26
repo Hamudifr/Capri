@@ -140,3 +140,12 @@ The search-to-decision bridge remains open because SAT self-reduction is adaptiv
 See [R54 one-element APC2 fibre repair](R54_ONE_ELEMENT_APC2_REPAIR.md).
 
 R54 corrects R53: Jeřábek Theorem 3.20 with t=1 gives a fibre of size at most one, not necessarily zero. A finite combinatorial repair appends one additional surviving search circuit that solves the sole remaining formula, yielding a tuple of at most 2n+3 circuits covering every satisfiable formula. The APC2 derivation is not complete: the key missing step is deriving per-fibre approximate size bounds from the formalized contrary hypothesis. The tournament principle is only an induction template, not a direct application. No P-vs-NP proof is claimed.
+
+
+# R55: robust APC2 fibre dichotomy
+
+See [R55 robust APC2 fibre dichotomy](R55_APC2_ROBUST_FIBRE_DICHOTOMY.md).
+
+R55 uses Jeřábek's disjoint-union dichotomy to repair the per-fibre counting gap in R54. For each satisfiable formula, either the successful survivor set is approximately at most 3/4 of S, giving the desired constant-factor survivor reduction, or the failure set is approximately at most 1/4 of S. In the latter case, product counting and the parameterized averaging theorem make the bad tuple incidence set small; the empty-fibre theorem leaves at most one uncovered formula/witness pair, repaired by appending one successful circuit. With r=n+1 the target incidence ratio is below 0.26 for the stated small relative error and large-parameter branch.
+
+This is a promising APC2 single-step proof route, not yet a completed formal derivation. The small-parameter exact-counting branch, interval lower-bound implication, bounded formula classes, and witness extraction still need explicit proofs. Greedy iteration, uniform generation, the Pich–Santhanam/KPS decision and EF-certificate bridge, and P != NP remain open.
