@@ -192,3 +192,18 @@ https://users.math.cas.cz/~jerabek/papers/hash.pdf
 - Uniform generator, decision anti-checker, KPS EF transfer, P≠NP: open.
 
 R62 is a corrected proof blueprint and source audit, not a completed P-vs-NP proof.
+
+
+## 8. The disjunction is not a P-vs-NP separation
+
+Even if the disjunctive induction is fully formalized, its output is only
+
+D(n,s) OR Anti(n,s),
+
+where D is the existence of a globally correct search circuit of size L(n,s)=O(n(s+n)), and Anti is a nonuniform search anti-checker against size-s circuits. This dichotomy does not itself imply P != NP.
+
+If P=NP, SAT has a polynomial-time search algorithm (decision plus self-reduction), hence for sufficiently large polynomial s the D branch is true. The theorem may then be satisfied entirely by D, with no anti-checker conclusion. The implication not-D -> Anti is equivalent to the same disjunction and does not eliminate D.
+
+Therefore R62's disjunctive induction can at best formalize the conditional combinatorial statement “if there is no small global search circuit, then a nonuniform anti-checker exists.” To contribute to P != NP, a separate argument must eliminate the D branch under the relevant witnessing/collapse hypothesis, or establish the anti-checker statement unconditionally in the proof theory required by Pich–Santhanam/KPS. A direct application of KPT witnessing to D OR Anti is insufficient: under P=NP, a KPT witness may simply produce the D witness.
+
+This is a conceptual limitation, not a failure of the local counting arithmetic. The search-to-decision and KPS EF-certificate gaps remain independent.
