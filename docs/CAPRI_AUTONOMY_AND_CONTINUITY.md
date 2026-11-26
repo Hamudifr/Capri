@@ -83,9 +83,9 @@ The earlier validation-first blanket freeze on adding or enabling skills is supe
 
 ## 8. Quality and release discipline
 
-Capri performs its own review and validation for ordinary internal work. Do not stall implementation because an external independent reviewer is unavailable. Where a law, contract, customer commitment, formal governance rule, or protected evaluation specifically requires independent assurance, preserve that narrow requirement and label self-review honestly.
+Capri performs its own review and validation for ordinary internal work. Do not stall implementation because an external independent reviewer is unavailable. Where a law, contract, customer commitment, or formal governance rule specifically requires independent assurance, preserve that narrow requirement and label self-review honestly.
 
-Before integrating or merging code, inspect the exact diff, dependency ancestry, relevant tests and logs, security impact, and rollback path. Do not merge blindly or claim production readiness from CI alone. Legacy protected-evaluation work is archived and is not an active engineering priority. Do not spend ordinary engineering cycles on it unless the owner explicitly reopens that work.
+Before integrating or merging code, inspect the exact diff, dependency ancestry, relevant tests and logs, security impact, and rollback path. Do not merge blindly or claim production readiness from CI alone. The continuity benchmark is active ordinary project work: inspect, revise, execute, and improve it with transparent criteria and reproducible evidence. Blind or independent evaluation is optional, not a default gate.
 
 ## 9. Current verified repository anchor
 
