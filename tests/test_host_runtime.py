@@ -1596,6 +1596,14 @@ class CapriHostRuntimeTests(unittest.TestCase):
         self.assertNotIn(pending.reservation.token, host._worker_reservation_contexts)
         self.assertFalse(audit.worker_lifecycle_reconciliation_required())
         self.assertEqual(registry.integrity_check(), "ok")
+        backup_path = os.path.join(self.temp.name, "expiry-read-race-backup.sqlite3")
+        self.task_store.backup_to(backup_path)
+        restored_store = SQLiteTaskStore(backup_path)
+        self.assertEqual(restored_store.integrity_check(), "ok")
+        restored_registry = SQLiteWorkerRegistry(
+            restored_store, heartbeat_ttl_ms=5_000, reservation_ttl_ms=1_000,
+        )
+        self.assertEqual(restored_registry.integrity_check(), "ok")
 
     def test_sqlite_expiry_between_host_sweep_and_reserve_is_audited_after_restart(self):
         class SequenceClock:
