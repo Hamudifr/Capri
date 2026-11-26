@@ -122,3 +122,22 @@ Relevant source locations:
 - Theorem 3.19: parameterized-family averaging.
 - Theorem 3.20: approximate empty-fibre averaging.
 - Theorem 3.21: approximate enumeration with PV2 maps and sections.
+
+
+## R55 parameter and small-survivor audit
+
+Write r=n+1, eta=1/(1000r), and let a be the lower parameter from Theorem 3.21. For a>=1000r, b/a<=1+2/(1000r), and
+
+4B/a <= (b/a)(1+2eta)+8/a <= 1+0.012002/r.
+
+Thus the normalized incidence bound is
+
+Z/a^r <= (1/4)(1+eta)^(r+1)(1+4eta)(4B/a)^r
+       < (1/4) exp(0.0015+0.002+0.012002)
+       < 0.254,
+
+using r>=2. This is a conservative analytic bound, stronger than the earlier <0.26 estimate.
+
+If a<1000r, then b=O(n). Theorem 3.21 gives a PV2 enumeration of S of polynomial length. Deduplicate the list and count G_x and F_x exactly by scanning it. Under the contrary hypothesis that no satisfiable x has |G_x|<=3|S|/4, every satisfying x has |F_x|<|S|/4. The per-q fibre bound is then exact, and Theorem 3.19 can still handle the large product universe U=S^r. This avoids applying the large-a ceiling estimate in the small case.
+
+Remaining formal check: write the section/coretraction composition explicitly to show U not <=_eta floor(a^r/2)-1. Theorem 3.21 supplies a section for the injection [a] -> S; taking r-fold products gives a section [a]^r -> U. Combine this with the surjection characterization of approximate upper size and exact counting on the interval [a^r].
