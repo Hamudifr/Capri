@@ -54,9 +54,9 @@ Large branch:
 
 Small branch:
 - If a_i<100r, then b_i<=100r+2.
-- Use the PV_3 enumeration [b_i]->S_i, deduplicate it, and form the exact list of distinct survivors.
-- If every formula had more than b_i/2 agreeing circuits, the majority of the distinct list would decide SAT. Therefore some x has |G_{i,x}|<=floor(b_i/2).
-- Filtering/deduplicating the list gives an exact enumeration of G_{i,x}, hence G_{i,x}<=_delta floor(b_i/2) by Corollary 3.5. Use its exact size as b_{i+1}; this avoids a rounding stall for small integers.
+- Use the PV_3 enumeration [b_i]->S_i, deduplicate it, and let N_i=|S_i| be the exact number of distinct survivors. If N_i=0, terminate.
+- If every formula had more than N_i/2 agreeing circuits, the majority of the distinct list would decide SAT. Therefore some x has |G_{i,x}|<=floor(N_i/2).
+- Filtering/deduplicating the list gives an exact enumeration of G_{i,x}, hence G_{i,x}<=_delta floor(N_i/2) by Corollary 3.5. Use its exact size as b_{i+1}; then b_{i+1}<=floor(N_i/2)<=b_i/2. This avoids a rounding stall for small integers and guarantees strict shrink.
 
 Thus each nonterminal stage shrinks b_i by at least 16/25. The chosen T exceeds the number of rounds needed to reach b_T=0.
 
