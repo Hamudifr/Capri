@@ -52,8 +52,8 @@ where a(H) is the lower approximate-size parameter supplied by Theorem 3.21.
 Proof by contradiction:
 - Assume not D and assume no satisfying x has G_x ≼ 0.31a.
 - Theorem 3.17 forces the failure side F_x to be approximately small for every satisfying x.
-- Corollary 3.18(ii) and Theorem 3.19 bound the global bad-incidence relation.
-- Theorem 3.20 yields a tuple with at most two exceptional formula/witness pairs.
+- Write the bad-incidence relation as E⊆Q×U, where Q is the set of satisfying formula/witness pairs and U=S^r is the tuple space. Apply Theorem 3.19 with X=Q and Y=U, so its fibres are F_x^r.
+- Transpose to E^op⊆U×Q and apply Theorem 3.20 with X=U, Y=Q, s=s0, t=1. The theorem yields a tuple with at most two exceptional formula/witness pairs.
 - Under the no-shrink assumption, each exceptional formula has a successful survivor circuit. Append one such circuit per distinct exceptional formula, at most two circuits.
 - The resulting first-valid-output selector is a globally correct search circuit of size at most L(n,s), contradicting not D.
 
