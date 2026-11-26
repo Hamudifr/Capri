@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import threading
 import time
 import uuid
 from contextlib import contextmanager
@@ -522,6 +523,7 @@ class SQLiteWorkerRegistry:
         self._max_reservations = max_reservations
         self._clock_ns = clock_ns
         self._clock_wall_ns = clock_wall_ns
+        self._expiry_capture = threading.local()
         self._config = {
             "heartbeat_ttl_ms": heartbeat_ttl_ms,
             "failure_threshold": failure_threshold,
@@ -539,6 +541,29 @@ class SQLiteWorkerRegistry:
             clock_ns=clock_ns,
         )
         self._initialize()
+
+    @contextmanager
+    def capture_expired_reservations(self) -> Iterator[list[WorkerReservation]]:
+        """Collect expirations committed by registry operations in this thread.
+
+        HostRuntime uses this around each operation so expirations performed by
+        the operation itself are written to the host lifecycle audit before its
+        durable operation marker is closed.
+        """
+        stack = getattr(self._expiry_capture, "stack", None)
+        if stack is None:
+            stack = []
+            self._expiry_capture.stack = stack
+        captured: list[WorkerReservation] = []
+        stack.append(captured)
+        try:
+            yield captured
+        finally:
+            if not stack or stack[-1] is not captured:
+                raise WorkerRegistryError("worker expiry capture stack is inconsistent")
+            stack.pop()
+            if not stack:
+                del self._expiry_capture.stack
 
     @contextmanager
     def _transaction(self) -> Iterator[sqlite3.Connection]:
@@ -1022,7 +1047,12 @@ class SQLiteWorkerRegistry:
                 operation=operation, actor_id=actor_id, wall_now=wall_now,
                 mono_now=mono_now, event_context=event_context,
             )
-            return (result, expired_reservations) if include_expired else result
+        # Publish captured expirations only after the registry transaction commits.
+        # If host audit persistence subsequently fails, its operation marker stays
+        # pending and startup fails closed until an operator reconciles the gap.
+        for capture in getattr(self._expiry_capture, "stack", ()):
+            capture.extend(expired_reservations)
+        return (result, expired_reservations) if include_expired else result
 
     @staticmethod
     def _current_reservation(
