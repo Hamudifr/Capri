@@ -168,7 +168,7 @@ Never reset the external checkpoint store because a restored database appears ol
 
 ### HMAC-SHA-256 alternative
 
-[ RFC 2104 ](https://www.rfc-editor.org/rfc/rfc2104) defines HMAC as keyed message authentication. Use a cryptographically random key with sufficient entropy, held in a non-exportable host-managed key service. Because verification also requires the symmetric key, do not distribute it to offline verifiers. Prefer a trusted verification service or Ed25519 where independent offline verification is required.
+[RFC 2104](https://www.rfc-editor.org/rfc/rfc2104) defines HMAC as keyed message authentication. Use a cryptographically random key with sufficient entropy, held in a non-exportable host-managed key service. Because verification also requires the symmetric key, do not distribute it to offline verifiers. Prefer a trusted verification service or Ed25519 where independent offline verification is required.
 
 ### Rotation, retirement and compromise
 
