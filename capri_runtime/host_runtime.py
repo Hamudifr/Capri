@@ -965,17 +965,21 @@ class CapriHostRuntime:
                 context.principal_id, task_id, capability, protocol_version, reservation,
             )
             if reservation.token in self._worker_reservation_contexts:
+                expired_during_collision = False
                 try:
                     _, expired = self._release_pending_reservation_with_expiry(reservation)
-                    if any(item.token == reservation.token for item in expired):
-                        self._finish_worker_audit_operation()
-                        raise HostRuntimeError("worker reservation context collision")
+                    expired_during_collision = any(
+                        item.token == reservation.token for item in expired
+                    )
                 except WorkerRegistryError:
                     self._worker_audit_healthy = False
                     raise HostRuntimeError("worker reservation collision cleanup failed") from None
                 except Exception:
                     self._worker_audit_healthy = False
                     raise HostRuntimeError("worker reservation collision cleanup failed") from None
+                if expired_during_collision:
+                    self._finish_worker_audit_operation()
+                    raise HostRuntimeError("worker reservation context collision")
                 self._record_worker_lifecycle_event(
                     "worker.reservation.collision_released",
                     reservation.worker_id,
