@@ -160,3 +160,10 @@ See [R57 APC2 constant shrink](R57_APC2_CONSTANT_SHRINK.md). Confirms the rWPHP/
 See [R58 exact one-fibre extraction](R58_EXACT_ONE_FIBRE.md).
 
 Theorem 3.20 with t=1 gives a bad-pair fibre approximately bounded by one. Corollary 3.10 upgrades this to an actual list of length at most one, enabling the extra-circuit repair. The overall APC2 formalization and greedy iteration remain open.
+
+
+# R59: explicit APC2 single-step
+
+See [R59 explicit APC2 single-step](R59_EXPLICIT_APC2_SINGLE_STEP.md).
+
+R59 fixes the incidence ratio below 0.714 with r=6n and inverse-linear errors, uses the Theorem 3.21 section maps to certify the lower size of S^r, and handles the small-survivor case by Corollary 3.10 exact enumeration. Theorem 3.20's one-element fibre is now tied to the exact-list repair. The full history induction remains open.
