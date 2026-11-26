@@ -96,3 +96,9 @@ No deterministic generator, KPS EF certificates, or P != NP proof has been obtai
 ## Status
 
 R61 is a proof-theoretic route refinement and audit note, not a proved APC2 anti-checker theorem. The disjunctive induction is promising but conditional on the explicit obligations above.
+
+### R61 addendum: source precedent for the conservation step
+
+A nuance from the primary paper: Jeřábek's proof of Theorem 3.20 explicitly says that its argument formalizes in S²₂(α)+sWPHP(PV₂(α)), that the resulting statement is ∀Σᵇ₂, and that Theorem 2.1 transfers it to T¹₂(α)+rWPHP(PV₂(α)). Thus the BBΣᵇ₃ clause in the general statement of Theorem 2.1 should not be treated as an automatic fatal obstruction. The source's own application indicates that the needed auxiliary condition is available in that specific formalization or through an equivalent application of the theorem. For the new disjunctive induction, we must reproduce that precise formal route rather than merely cite S²₂ in isolation.
+
+Primary source: https://users.math.cas.cz/~jerabek/papers/hash.pdf (proof of Theorem 3.20 and Theorem 2.1).
