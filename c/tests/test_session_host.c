@@ -202,10 +202,16 @@ int main(void) {
     assert(capri_session_host_close_session(
         host, credential_a, sizeof(credential_a) - 1u,
         session_a.session_id, &closed) == CAPRI_SESSION_HOST_OK);
+    assert(closed.closed == 1);
     CapriSession after_close = {0};
     assert(capri_session_host_get_session(
         host, credential_a, sizeof(credential_a) - 1u,
-        session_a.session_id, &after_close) == CAPRI_SESSION_HOST_CLOSED);
+        session_a.session_id, &after_close) == CAPRI_SESSION_HOST_NOT_FOUND);
+    CapriSession closed_commit = {0};
+    assert(capri_session_host_commit_turn(
+        host, credential_a, sizeof(credential_a) - 1u,
+        session_a.session_id, 1, turn, NULL, &closed_commit)
+        == CAPRI_SESSION_HOST_CLOSED);
 
     assert(capri_session_host_create_session(
         host, bad_credential, sizeof(bad_credential) - 1u, &foreign)
@@ -291,6 +297,7 @@ int main(void) {
     capri_session_free(&committed);
     capri_session_free(&closed);
     capri_session_free(&after_close);
+    capri_session_free(&closed_commit);
     capri_session_free(&unicode_session);
     capri_session_free(&thread_a.session);
     capri_session_free(&thread_b.session);
