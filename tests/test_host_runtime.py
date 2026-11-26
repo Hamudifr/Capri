@@ -1732,5 +1732,59 @@ class CapriHostRuntimeTests(unittest.TestCase):
         self.assertFalse(audit.worker_lifecycle_reconciliation_required())
         self.assertEqual(registry.integrity_check(), "ok")
 
+
+    def test_expiry_audit_failure_keeps_registry_operation_marker_pending(self):
+        class FailingExpiryAuditSink(InMemoryAuditSink):
+            def write(self, event):
+                if event.tool_name == "worker.reservation.expired":
+                    raise OSError("simulated expiry audit outage")
+                super().write(event)
+
+        now = {"value": 30_000_000_000, "sequence": None}
+        wall = {"value": 1_800_000_000_000_000_000, "sequence": None}
+
+        def clock_ns():
+            sequence = now["sequence"]
+            if sequence is not None:
+                return sequence.pop(0)
+            return now["value"]
+
+        def clock_wall_ns():
+            sequence = wall["sequence"]
+            if sequence is not None:
+                return sequence.pop(0)
+            return wall["value"]
+
+        audit = FailingExpiryAuditSink()
+        registry = SQLiteWorkerRegistry(
+            self.task_store, reservation_ttl_ms=1_000,
+            clock_ns=clock_ns, clock_wall_ns=clock_wall_ns,
+        )
+        host = self.make_worker_host(
+            registry, {"worker-token": "worker-1"},
+            lambda *args: {"worker-1"}, audit_sink=audit,
+        )
+        host.register_worker(
+            "worker-token", WorkerDescriptor("worker-1", (1,), ("math.factorial",)),
+        )
+        host.heartbeat_worker("monitor-token", "worker-1")
+        task = self.task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {"scope": "expiry-audit-failure"}}],
+        )
+        pending = host.reserve_worker_candidate(
+            "alice-token", task.task_id, "math.factorial", 1,
+        )
+        expiry = pending.reservation.expires_at_ns
+        wall_expiry = wall["value"] + 1_000_000_000
+        now["sequence"] = [expiry - 1, expiry]
+        wall["sequence"] = [wall_expiry - 1, wall_expiry]
+
+        with self.assertRaisesRegex(HostRuntimeError, "lifecycle audit persistence failed"):
+            host.get_worker_candidates(
+                "alice-token", task.task_id, "math.factorial", 1,
+            )
+        self.assertFalse(host._worker_audit_healthy)
+        self.assertTrue(audit.worker_lifecycle_reconciliation_required())
+
 if __name__ == "__main__":
     unittest.main()
