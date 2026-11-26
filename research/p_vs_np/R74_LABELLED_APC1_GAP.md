@@ -31,7 +31,7 @@ Its survivor, success, failure, and incidence predicates can be kept PV_1 when s
 
 This is attractive for APC_1. But its support consists of satisfiable formulas with witnesses. It only guarantees that every small search circuit fails on at least one satisfiable formula.
 
-A decision circuit C that outputs 1 on every formula solves the search task on all satisfiable inputs, so the search anti-checker does not catch its false positives on unsatisfiable formulas. Such a C is not a correct SAT decision circuit. Therefore the search anti-checker does not imply the labelled decision anti-checker required by Theorem 7.
+A decision circuit C with false positives can be converted by SAT self-reduction into a search circuit that fails on a satisfiable input because it follows a false-positive restriction. But the search anti-checker only says that the induced search circuit fails on some support formula; it does not identify a decision error of C on that formula. The false-positive restriction that caused the failure may lie outside the fixed support. Converting that failure into a fixed labelled decision counterexample requires a universal restriction family, and the naive family of all restrictions is exponential. Therefore the search anti-checker does not by itself imply the labelled decision anti-checker required by Theorem 7.
 
 Naive repairs fail:
 - Add arbitrary (x,y) pairs: a satisfiable x with an invalid y has R(x,y)=0 and can falsely label it unsatisfiable.
