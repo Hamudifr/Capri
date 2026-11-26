@@ -108,7 +108,7 @@ The owner delegates routine engineering direction to Capri: choose priorities, a
 
 ### Permissioned tool execution — scope and limits
 
-The tool boundary is a host-invoked execution gate, not a sandbox and not a model-provider integration. The model cannot grant itself permissions or approvals. Host code must authenticate the principal and construct trusted `ExecutionContext` and `ApprovalGrant` objects. The default in-memory approval store and audit sink are development-only. `SQLiteSecurityStore` provides durable local audit/replay metadata but is not encrypted and requires host-managed backups, retention, monitoring, and restore testing. Handlers run with Python process privileges and must be trusted. No shell, filesystem, network, dynamic import, automatic plugin discovery, or continuity benchmark access is included.
+The tool boundary is a host-invoked execution gate, not a sandbox and not a model-provider integration. The model cannot grant itself permissions or approvals. Host code must authenticate the principal and construct trusted `ExecutionContext` and `ApprovalGrant` objects. The default in-memory approval store and audit sink are development-only. `SQLiteSecurityStore` provides durable local audit/replay metadata but is not encrypted and requires host-managed backups, retention, monitoring, and restore testing. Handlers run with Python process privileges and must be trusted. No shell, filesystem, network, dynamic import, or automatic plugin discovery is included. This runtime does not ship a dedicated benchmark runner; that product-scope boundary does not restrict inspection or use of ordinary project evaluation materials.
 
 ### Remaining engineering priorities
 
