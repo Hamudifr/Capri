@@ -167,10 +167,9 @@ Consequently, not every fibre Fₓ can satisfy Fₓ≼δq. There is an x with F�
 - A revised finite tail with m=⌈s^(1/3)⌉, r=O(ns), and a stronger e^(−21) union-bound margin.
 
 ### Still open
-1. Finish the global incidence comparison with exact nested-ceiling inequalities and the Theorem 3.21 lower-bound contradiction.
-2. Write the one-step statement as a uniform Σᵇ₃ implication with all parameters and formula classes explicit.
-3. Complete the S³₂ survivor-history induction and BBΣᵇ₄ collection obligations.
-4. Verify the precise ∀Σᵇ₃ conservation transfer to T²₂+rWPHP(PV₃).
-5. Find a descent to PV₁/S¹₂ and the Pich–Santhanam/KPS EF certificate target, or establish that this APC₃ route does not reach it.
+1. Formalize the now-explicit one-step incidence contradiction with the correct bounded formula classes and induction/collection strength; in particular, verify the uniform-family use of Theorem 3.19 and the PV₃ least-witness section.
+2. Complete the S³₂ survivor-history induction and BBΣᵇ₄ collection obligations.
+3. Verify the precise ∀Σᵇ₃ conservation transfer to T²₂+rWPHP(PV₃).
+4. Find a descent to PV₁/S¹₂ and the Pich–Santhanam/KPS EF certificate target, or establish that this APC₃ route does not reach it.
 
 No uniform PV₁ generator, S¹₂ proof, KPS EF transfer certificate, EF lower bound, or P≠NP result is claimed.
