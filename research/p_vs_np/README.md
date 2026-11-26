@@ -115,3 +115,10 @@ See [R51 search-circuit survivor anti-checker](R51_SEARCH_SURVIVOR_ANTICHECKER.m
 A separate greedy construction for search circuits: if every satisfiable formula is solved by more than half of the current survivor set, (n+1) independent samples contain a solver for every satisfiable (n)-bit formula with positive probability. A first-valid-output selector then yields a SAT decision circuit, contradicting the chosen circuit-hardness premise. Thus a satisfiable formula defeats at least half the survivors; retaining only circuits that solve each selected formula halves the set at every step.
 
 This gives a polynomial-size **nonuniform search anti-checker** with explicit satisfying witnesses. Its survivor and failure predicates are PV, avoiding the coNP-valid-label issue of arbitrary decision labels. The APC₁ relative-counting formalization, uniform generator, exact bridge to KPS's decision anti-checker, and EF transfer certificates remain open. No P-vs-NP proof is claimed.
+
+
+# R52: APC₁ precision and search-to-decision interface audit
+
+See [R52 APC₁ precision and search-to-decision audit](R52_APC1_AND_SEARCH_DECISION_AUDIT.md).
+
+R52 sharpens R51's formalization caveat: APC₁ has approximate-cardinality machinery, but its standard comparison uses ambient-additive error. After i survivor-halving rounds, the survivor density can be at most 2^-i, so a direct relative estimate requires additive precision below that density. This is not an impossibility theorem for APC₁; it is an obstacle to the direct ambient-counting proof. R52 also audits the tempting search-to-decision conversion: self-reduction queries depend on the decision circuit's answers, and the full fixed restriction closure has exponential size. The R51 search anti-checker therefore does not yet instantiate Pich–Santhanam's decision anti-checker or KPS's transfer premise.
