@@ -79,7 +79,7 @@ The current task quarantine state intentionally has no automatic reconciliation/
 
 ## Required abuse-case tests before enabling real-world model-driven actions
 
-Use harmless fixtures and instrumented fake adapters/tools. Do not use real destructive actions or protected evaluation material.
+Use harmless fixtures and instrumented fake adapters/tools. Do not use real destructive actions or private, credential-bearing, customer-confidential, or otherwise restricted data.
 
 - Session ID guessing/reuse cannot cross user or tenant boundaries.
 - User-supplied or retrieved instructions cannot change tool authorization.
