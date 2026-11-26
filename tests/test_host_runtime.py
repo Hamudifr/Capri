@@ -1596,6 +1596,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
 
     def test_sqlite_registry_operation_expiry_is_audited_after_pre_sweep(self):
         now = {"value": 10_000_000_000, "sequence": None}
+        wall = {"value": 1_800_000_000_000_000_000, "sequence": None}
 
         def clock_ns():
             sequence = now["sequence"]
@@ -1603,9 +1604,16 @@ class CapriHostRuntimeTests(unittest.TestCase):
                 return sequence.pop(0)
             return now["value"]
 
+        def clock_wall_ns():
+            sequence = wall["sequence"]
+            if sequence is not None:
+                return sequence.pop(0)
+            return wall["value"]
+
         audit = SQLiteSecurityStore(os.path.join(self.temp.name, "expiry-audit.sqlite3"))
         registry = SQLiteWorkerRegistry(
-            self.task_store, reservation_ttl_ms=1_000, clock_ns=clock_ns,
+            self.task_store, reservation_ttl_ms=1_000,
+            clock_ns=clock_ns, clock_wall_ns=clock_wall_ns,
         )
         identities = {"worker-token": "worker-1"}
         host = self.make_worker_host(
@@ -1627,7 +1635,9 @@ class CapriHostRuntimeTests(unittest.TestCase):
         # subsequent eligible() transaction crosses the TTL and must return
         # the rows it expires to the host audit path.
         expiry = pending.reservation.expires_at_ns
+        wall_expiry = wall["value"] + 1_000_000_000
         now["sequence"] = [expiry - 1, expiry]
+        wall["sequence"] = [wall_expiry - 1, wall_expiry]
         candidates = host.get_worker_candidates(
             "alice-token", task.task_id, "math.factorial", 1,
         )
@@ -1647,6 +1657,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
 
     def test_restarted_host_audits_expiry_from_mutating_registry_operation(self):
         now = {"value": 20_000_000_000, "sequence": None}
+        wall = {"value": 1_800_000_000_000_000_000, "sequence": None}
 
         def clock_ns():
             sequence = now["sequence"]
@@ -1654,9 +1665,16 @@ class CapriHostRuntimeTests(unittest.TestCase):
                 return sequence.pop(0)
             return now["value"]
 
+        def clock_wall_ns():
+            sequence = wall["sequence"]
+            if sequence is not None:
+                return sequence.pop(0)
+            return wall["value"]
+
         audit = SQLiteSecurityStore(os.path.join(self.temp.name, "restart-expiry-audit.sqlite3"))
         registry = SQLiteWorkerRegistry(
-            self.task_store, reservation_ttl_ms=1_000, clock_ns=clock_ns,
+            self.task_store, reservation_ttl_ms=1_000,
+            clock_ns=clock_ns, clock_wall_ns=clock_wall_ns,
         )
         identities = {"worker-token": "worker-1"}
         original = self.make_worker_host(
@@ -1674,9 +1692,12 @@ class CapriHostRuntimeTests(unittest.TestCase):
         )
         self.assertIsNotNone(expired)
 
-        # Simulate a fresh HostRuntime with no process-local wrapper for the
-        # durable reservation. The expiry occurs inside reserve_eligible(),
-        # after its host pre-sweep has observed the reservation as active.
+        # Acknowledge the active reservation as reconciled before restart,
+        # mirroring the host's explicit startup gate. The new runtime has no
+        # process-local wrapper for this durable reservation.
+        self.assertTrue(audit.acknowledge_worker_lifecycle_reconciliation(
+            "Supervisor confirmed the durable pending reservation before host restart",
+        ))
         restarted = self.make_worker_host(
             registry, identities, lambda *args: {"worker-1"}, audit_sink=audit,
         )
@@ -1684,13 +1705,17 @@ class CapriHostRuntimeTests(unittest.TestCase):
             "alice", [{"tool": "collect", "input": {"scope": "restart-next-reservation"}}],
         )
         expiry = expired.reservation.expires_at_ns
+        wall_expiry = wall["value"] + 1_000_000_000
         now["sequence"] = [expiry - 1, expiry]
+        wall["sequence"] = [wall_expiry - 1, wall_expiry]
         replacement = restarted.reserve_worker_candidate(
             "alice-token", next_task.task_id, "math.factorial", 1,
         )
         self.assertIsNotNone(replacement)
         now["value"] = expiry
         now["sequence"] = None
+        wall["value"] = wall_expiry
+        wall["sequence"] = None
         expiry_events = [
             event for event in audit.events()
             if event.tool_name == "worker.reservation.expired"
