@@ -1671,5 +1671,57 @@ class CapriHostRuntimeTests(unittest.TestCase):
         self.assertFalse(audit.worker_lifecycle_reconciliation_required())
         self.assertEqual(registry.integrity_check(), "ok")
 
+
+    def test_sqlite_policy_cleanup_audits_operation_local_expiry(self):
+        now = {"value": 15_000_000_000}
+        wall = {"value": 1_800_000_000_000_000_000}
+        registry = SQLiteWorkerRegistry(
+            self.task_store,
+            heartbeat_ttl_ms=5_000,
+            reservation_ttl_ms=1_000,
+            clock_ns=lambda: now["value"],
+            clock_wall_ns=lambda: wall["value"],
+        )
+        audit = SQLiteSecurityStore(os.path.join(self.temp.name, "policy-cleanup-expiry-audit.sqlite3"))
+        host = self.make_worker_host(
+            registry, {"worker-token": "worker-1"}, lambda *args: {"worker-1"},
+            audit_sink=audit,
+        )
+        host.register_worker(
+            "worker-token",
+            WorkerDescriptor("worker-1", (1,), ("math.factorial",), max_concurrency=1),
+        )
+        host.heartbeat_worker("monitor-token", "worker-1")
+        task = self.task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {"scope": "policy-cleanup-expiry"}}],
+        )
+        pending = host.reserve_worker_candidate(
+            "alice-token", task.task_id, "math.factorial", 1,
+        )
+        self.assertIsNotNone(pending)
+
+        def fail_policy_after_ttl(principal_id, task_id, capability):
+            now["value"] = pending.reservation.expires_at_ns + 2
+            wall["value"] += 1_000_000_001
+            raise HostRuntimeError("simulated policy lookup failure")
+
+        host._worker_policy_allowlist = fail_policy_after_ttl
+        with self.assertRaisesRegex(HostRuntimeError, "simulated policy lookup failure"):
+            host.commit_worker_reservation("alice-token", "monitor-token", pending)
+
+        events = audit.events()
+        self.assertEqual(
+            sum(event.tool_name == "worker.reservation.expired" for event in events), 1,
+        )
+        self.assertEqual(
+            sum(event.tool_name == "worker.reservation.denied" for event in events), 1,
+        )
+        self.assertEqual(
+            sum(event.tool_name == "worker.reservation.released" for event in events), 0,
+        )
+        self.assertNotIn(pending.reservation.token, host._worker_reservation_contexts)
+        self.assertFalse(audit.worker_lifecycle_reconciliation_required())
+        self.assertEqual(registry.integrity_check(), "ok")
+
 if __name__ == "__main__":
     unittest.main()
