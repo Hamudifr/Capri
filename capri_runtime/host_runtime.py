@@ -1070,9 +1070,10 @@ class CapriHostRuntime:
             if worker_id not in allowed:
                 self._begin_worker_audit_operation()
                 try:
-                    self._worker_registry.release_reservation(
-                        stored.reservation, authenticated_worker_id=worker_id,
-                    )
+                    with self._capture_worker_registry_expirations():
+                        self._worker_registry.release_reservation(
+                            stored.reservation, authenticated_worker_id=worker_id,
+                        )
                 except WorkerRegistryError:
                     self._worker_audit_healthy = False
                     raise HostRuntimeError("worker reservation policy cleanup failed") from None
