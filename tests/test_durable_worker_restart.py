@@ -387,6 +387,21 @@ class DurableWorkerRestartTests(unittest.TestCase):
         self.assertEqual(len(expiry_events), 1)
         self.assertFalse(audit_store.worker_lifecycle_reconciliation_required())
 
+        # Expiry must leave a backup that can be reopened and independently
+        # validated, including the registry projection and append-only event chain.
+        backup_path = os.path.join(self.temp.name, "expiry-toctou-backup.sqlite3")
+        task_store.backup_to(backup_path)
+        restored_tasks = SQLiteTaskStore(backup_path)
+        self.assertEqual(restored_tasks.integrity_check(), "ok")
+        restored_registry = SQLiteWorkerRegistry(
+            restored_tasks,
+            heartbeat_ttl_ms=5_000,
+            reservation_ttl_ms=1_000,
+            clock_ns=lambda: now["value"],
+            clock_wall_ns=lambda: now["value"],
+        )
+        self.assertEqual(restored_registry.integrity_check(), "ok")
+
 
     def test_expiry_audit_failure_after_registry_commit_keeps_restart_gate_pending(self):
         now = {"value": 1_000_000_000}
