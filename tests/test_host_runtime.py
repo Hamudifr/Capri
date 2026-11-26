@@ -1662,7 +1662,8 @@ class CapriHostRuntimeTests(unittest.TestCase):
         self.task_store.backup_to(backup_path)
         restored_store = SQLiteTaskStore(backup_path)
         restored_registry = SQLiteWorkerRegistry(
-            restored_store, clock_ns=clock_ns, clock_wall_ns=clock_wall_ns,
+            restored_store, reservation_ttl_ms=1_000,
+            clock_ns=clock_ns, clock_wall_ns=clock_wall_ns,
         )
         self.assertEqual(restored_registry.integrity_check(), "ok")
 
