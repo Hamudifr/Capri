@@ -42,6 +42,8 @@ For each x, the map C -> (C,Err(C,x)) is a PV_2(alpha) bijection between S and t
 M_sharp=ceil(b(1+delta))
 as an approximate upper parameter for F_x dotcup G_x.
 
+By Theorem 3.8 soundness, F_x<=_delta q implies |F_x|<=q(1+delta)<=theta*a<=theta*|S|. Thus the finite tag universe has size |T_x|=m|S|+4|F_x|<=(m+2-2/m)|S|, which is the exact coefficient used in the tail ratio below.
+
 Put:
 - theta=1/2-1/(2m);
 - q=floor(theta*a/(1+delta));
