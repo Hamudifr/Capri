@@ -39,6 +39,20 @@ not a self-modifying hosted model and not an automatic training service.
 - Files remain plaintext. Private permissions are not encryption, secure
   deletion, backup protection, or a substitute for host-level storage controls.
 
+## Resource bounds
+
+- Example identifiers, task IDs, capability names, evidence references and source
+  labels have explicit character limits. Prompt and completion limits align with
+  the runtime's default 16,000-character input and 64,000-character output bounds.
+- Capability allowlists accept at most 256 valid names. One export may reference
+  at most 4,096 distinct consent records so its manifest dependencies stay bounded.
+- Eligible rows are streamed from a SQLite cursor. Duplicate selection and counts
+  are computed in SQLite with deterministic ordering, avoiding an in-memory
+  `fetchall()` result and a Python set containing every content hash.
+- These limits bound application-level inputs and manifest state; they are not a
+  total disk quota or a guarantee against resource exhaustion from a privileged
+  local operator.
+
 ## Consent provenance and revocation
 
 - Each admitted example must reference an active `LearningConsent` record with
