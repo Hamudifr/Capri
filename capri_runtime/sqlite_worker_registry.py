@@ -964,12 +964,12 @@ class SQLiteWorkerRegistry:
         for token, previous in before_reservations.items():
             if token in after_reservations:
                 continue
-            if operation == "release_reservation":
-                event_type = "reservation_released"
-                reason = "host_release"
-            elif not previous.committed and previous.expires_at_ns <= mono_now:
+            if not previous.committed and previous.expires_at_ns <= mono_now:
                 event_type = "reservation_expired"
                 reason = "pending_ttl_elapsed"
+            elif operation == "release_reservation":
+                event_type = "reservation_released"
+                reason = "host_release"
             else:
                 event_type = "reservation_revoked"
                 reason = operation
