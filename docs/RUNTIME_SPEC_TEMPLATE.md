@@ -128,7 +128,7 @@ For each model/provider/tool, define:
 
 ## 10. Acceptance criteria
 
-Every acceptance criterion must be testable without protected continuity benchmark material.
+Every acceptance criterion must be reproducible from documented scenarios, expected outcomes, and evidence. Evaluation fixtures are ordinary project materials; apply normal privacy, confidentiality, and licensing controls.
 
 | ID | Scenario | Given | When | Then / observable result | Test owner |
 |---|---|---|---|---|---|
