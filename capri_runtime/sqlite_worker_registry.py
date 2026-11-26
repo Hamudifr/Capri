@@ -1043,14 +1043,15 @@ class SQLiteWorkerRegistry:
 
     def register(
         self, descriptor: WorkerDescriptor, *, authenticated_worker_id: str,
-        now_ns: int | None = None,
-    ) -> WorkerSnapshot:
+        now_ns: int | None = None, include_expired: bool = False,
+    ) -> WorkerSnapshot | tuple[WorkerSnapshot, tuple[WorkerReservation, ...]]:
         return self._run(
             "register",
             lambda memory, timestamp: memory.register(
                 descriptor, authenticated_worker_id=authenticated_worker_id, now_ns=timestamp,
             ),
             now_ns=now_ns, actor_id=authenticated_worker_id,
+            include_expired=include_expired,
         )
 
     def get(self, worker_id: str) -> WorkerSnapshot:
@@ -1065,13 +1066,14 @@ class SQLiteWorkerRegistry:
 
     def get_reservation_for_task(
         self, principal_id: str, task_id: str, *, now_ns: int | None = None,
-    ) -> WorkerReservation | None:
+        include_expired: bool = False,
+    ) -> WorkerReservation | None | tuple[WorkerReservation | None, tuple[WorkerReservation, ...]]:
         return self._run(
             "get_reservation_for_task",
             lambda memory, timestamp: memory.get_reservation_for_task(
                 principal_id, task_id, now_ns=timestamp,
             ),
-            now_ns=now_ns,
+            now_ns=now_ns, include_expired=include_expired,
         )
 
     def active_reservations_with_expired(
@@ -1099,8 +1101,8 @@ class SQLiteWorkerRegistry:
 
     def heartbeat(
         self, worker_id: str, *, authenticated_worker_id: str,
-        in_flight: int, now_ns: int | None = None,
-    ) -> WorkerSnapshot:
+        in_flight: int, now_ns: int | None = None, include_expired: bool = False,
+    ) -> WorkerSnapshot | tuple[WorkerSnapshot, tuple[WorkerReservation, ...]]:
         return self._run(
             "heartbeat",
             lambda memory, timestamp: memory.heartbeat(
@@ -1108,6 +1110,7 @@ class SQLiteWorkerRegistry:
                 in_flight=in_flight, now_ns=timestamp,
             ),
             now_ns=now_ns, actor_id=authenticated_worker_id,
+            include_expired=include_expired,
         )
 
     def heartbeat_with_load_resolver(
@@ -1117,7 +1120,8 @@ class SQLiteWorkerRegistry:
         authenticated_worker_id: str,
         in_flight_resolver: Callable[[str], int],
         now_ns: int | None = None,
-    ) -> WorkerSnapshot:
+        include_expired: bool = False,
+    ) -> WorkerSnapshot | tuple[WorkerSnapshot, tuple[WorkerReservation, ...]]:
         """Sample host load only after the durable write lock has been acquired."""
         if not callable(in_flight_resolver):
             raise WorkerRegistryError("in_flight_resolver must be callable")
@@ -1139,17 +1143,19 @@ class SQLiteWorkerRegistry:
             heartbeat,
             now_ns=now_ns,
             actor_id=authenticated_worker_id,
+            include_expired=include_expired,
         )
 
     def record_failure(
         self, worker_id: str, *, authenticated_worker_id: str,
-    ) -> WorkerSnapshot:
+        include_expired: bool = False,
+    ) -> WorkerSnapshot | tuple[WorkerSnapshot, tuple[WorkerReservation, ...]]:
         return self._run(
             "record_failure",
             lambda memory, timestamp: memory.record_failure(
                 worker_id, authenticated_worker_id=authenticated_worker_id,
             ),
-            actor_id=authenticated_worker_id,
+            actor_id=authenticated_worker_id, include_expired=include_expired,
         )
 
     def quarantine(self, worker_id: str, *, expected_health_revision: int) -> WorkerSnapshot:
@@ -1185,7 +1191,8 @@ class SQLiteWorkerRegistry:
         principal_id: str,
         task_id: str,
         now_ns: int | None = None,
-    ) -> WorkerReservation | None:
+        include_expired: bool = False,
+    ) -> WorkerReservation | None | tuple[WorkerReservation | None, tuple[WorkerReservation, ...]]:
         return self._run(
             "reserve_eligible",
             lambda memory, timestamp: memory.reserve_eligible(
@@ -1193,13 +1200,13 @@ class SQLiteWorkerRegistry:
                 authorized_worker_ids=authorized_worker_ids,
                 principal_id=principal_id, task_id=task_id, now_ns=timestamp,
             ),
-            now_ns=now_ns,
+            now_ns=now_ns, include_expired=include_expired,
         )
 
     def commit_reservation(
         self, reservation: WorkerReservation, *, authenticated_worker_id: str,
-        now_ns: int | None = None,
-    ) -> WorkerReservation | None:
+        now_ns: int | None = None, include_expired: bool = False,
+    ) -> WorkerReservation | None | tuple[WorkerReservation | None, tuple[WorkerReservation, ...]]:
         def commit(memory: InMemoryWorkerRegistry, timestamp: int):
             current = self._current_reservation(memory, reservation)
             if current is None or current.committed:
@@ -1209,6 +1216,7 @@ class SQLiteWorkerRegistry:
             )
         return self._run(
             "commit_reservation", commit, now_ns=now_ns, actor_id=authenticated_worker_id,
+            include_expired=include_expired,
         )
 
     def release_reservation(
@@ -1219,7 +1227,8 @@ class SQLiteWorkerRegistry:
         observed_unreserved_in_flight: int | None = None,
         observed_in_flight: int | None = None,
         now_ns: int | None = None,
-    ) -> bool:
+        include_expired: bool = False,
+    ) -> bool | tuple[bool, tuple[WorkerReservation, ...]]:
         if observed_unreserved_in_flight is not None and observed_in_flight is not None:
             raise WorkerRegistryError("supply only one observed in-flight load value")
         if observed_unreserved_in_flight is None:
@@ -1239,6 +1248,7 @@ class SQLiteWorkerRegistry:
             "release_reservation", release, now_ns=now_ns,
             actor_id=authenticated_worker_id,
             event_context={"observed_unreserved_in_flight": observed_unreserved_in_flight},
+            include_expired=include_expired,
         )
 
     def expire_reservations(self, *, now_ns: int | None = None) -> tuple[WorkerReservation, ...]:
@@ -1261,7 +1271,8 @@ class SQLiteWorkerRegistry:
         authorized_worker_ids: set[str] | frozenset[str],
         now_ns: int | None = None,
         limit: int = 20,
-    ) -> tuple[WorkerSnapshot, ...]:
+        include_expired: bool = False,
+    ) -> tuple[WorkerSnapshot, ...] | tuple[tuple[WorkerSnapshot, ...], tuple[WorkerReservation, ...]]:
         return self._run(
             "eligible",
             lambda memory, timestamp: memory.eligible(
@@ -1269,7 +1280,7 @@ class SQLiteWorkerRegistry:
                 authorized_worker_ids=authorized_worker_ids,
                 now_ns=timestamp, limit=limit,
             ),
-            now_ns=now_ns,
+            now_ns=now_ns, include_expired=include_expired,
         )
 
     def events_for_worker(self, worker_id: str) -> tuple[dict[str, Any], ...]:
