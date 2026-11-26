@@ -42,7 +42,7 @@ The Python tests are finite sanity checks only. They do not prove the asymptotic
 
 - OPS_SELECTOR_ROUTE.md: OPS Lemma 4.1 / Theorem 1.4 hardness-magnification route, the fixed-family versus input-dependent anti-checker distinction, the APC1 relative-counting obstruction, and the soft-weight floor experiment.
 - ops_selector_toy.py and test_ops_selector_toy.py: finite adaptive-selector example; 3 tests.
-- soft_weights_floor_test.py and test_soft_weights_floor_test.py: finite counterexample to naive raw per-expert polynomial floors in multiplicative weights; 2 tests.
+- soft_weights_floor_test.py and test_soft_weights_floor_test.py: finite counterexample to naive raw-weight floor in multiplicative weights; 2 tests.
 - formalization/: Lean 4.24.0 proof of the abstract finite causal-game terminal-package lemma. GitHub Actions run 45696083281 passed; axiom audit checked five declarations under the allowlist propext, Classical.choice, Quot.sound.
 
 ## R37 mathematical status
@@ -58,7 +58,7 @@ All five Python tests pass. Main remains untouched; the R37 work is isolated on 
 
 See [R40–R41 conditional KPT selector analysis](R40_KPT_COLLAPSE_CONDITIONAL.md).
 
-The new note proves a conditional implication: if the existential SAT-antichecker statements are provable in PV1 (or, separately, APX1) for every sufficiently large fixed circuit exponent, then P != NP. The proof uses a constant-round KPT path selector in FP^NP; under P = NP, this selector becomes uniform polynomial time and yields the witness functions required by Pich–Santhanam Corollary 1.
+The new conditional implication is: if the existential SAT-antichecker statements are provable in PV1 (or, separately, APX1) for every sufficiently large fixed circuit exponent, then P != NP. The proof uses a constant-round KPT path selector in FP^NP; under P = NP, this selector becomes uniform polynomial time and yields the witness functions required by Pich–Santhanam Corollary 1.
 
 This is not an unconditional P-vs-NP proof. The main open obligation remains proving the existential antichecker statement in the required bounded-arithmetic theory. The APX1 Refuter(Yao) theorem does not directly witness the higher-quantifier selector.
 
@@ -67,7 +67,7 @@ This is not an unconditional P-vs-NP proof. The main open obligation remains pro
 
 See [certificate-lifted canonical-pair MinMax analysis](R42_CERTIFICATE_LIFTED_MINMAX.md).
 
-The key representation change is to use certified encodings z=(formula, label, witness-or-refutation) as the MinMax column domain. The payoff valid(z) AND (C(formula) != label) is a total PV predicate, unlike the direct SAT-disagreement payoff. Under canonical-pair hardness, majority amplification gives a constant game value and a polynomial-size certificate-carrying antichecker support.
+The key representation change is to use certified encodings z=(formula, label, witness-or-refutation) as the MinMax column domain. The payoff valid(z) AND (C(formula) != label) is a total PV predicate, unlike the direct SAT-disagreement payoff. Under canonical-pair hardness, majority amplification gives a constant-error, polynomial-support antichecker if the SAT circuit-hardness premise holds.
 
 This is a formalization route, not a proof of canonical-pair hardness or of the APC1/APX1 MinMax theorem. The universal antichecker proof and full KPS transfer implication remain open.
 
@@ -167,3 +167,10 @@ See [R57 Sigma-2 survivor induction](R57_SIGMA2_SURVIVOR_INDUCTION.md).
 R57 investigates formalizing repeated R56 survivor reduction by Sigma^b_2-LIND. Jeřábek's approximate-size relation is Sigma^b_2 for Sigma^b_1 sets, and Theorem 4.2 demonstrates history-dependent approximate shrinking by this induction pattern. The candidate invariant stores the satisfiable-formula history and all approximate-size certificates in one polynomial-length string. The large-step recurrence shrinks the upper parameter by <0.77 while it is at least 100(n+1); the small branch enumerates O(n) circuits and terminates by a selector contradiction.
 
 This is not yet a bounded-arithmetic anti-checker theorem. The exact one-step Sigma^b_2 implication, certificate packing, induction invariant, and theory transfer remain to be formalized. If completed, it would yield a nonuniform search anti-checker, not the Pich–Santhanam decision anti-checker or KPS EF transfer certificates.
+
+
+# R58: fibre-complexity audit
+
+See [R58 fibre-complexity audit](R58_FIBRE_COMPLEXITY_AUDIT.md).
+
+R58 identifies a specific gap in R57: packing the polynomially many *stage* certificates does not pack the exponentially many per-formula fibre certificates used by the R56 incidence bound. Jeřábek Theorem 3.19 requires a pointwise fibre-size premise and is explicitly not a direct forall-Sigma^b_2 statement; Theorem 3.20, by contrast, has an explicit forall-Sigma^b_2 formulation. Thus the finite incidence arithmetic remains conditional on its fibre bounds, but the uniform one-step survivor implication has not been shown to lie in Sigma^b_2. Candidate repairs are a uniform PV_2 fibre-certificate selector, a specialized forall-Sigma^b_2 incidence lemma, or a direct tournament/partial-colouring reformulation. No bounded-arithmetic anti-checker or P≠NP proof is claimed.
