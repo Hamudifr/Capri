@@ -4,7 +4,7 @@
 
 R69 revisits the exact gap left by R68. The key result is a source-backed transfer route: the mixed-radix injection can be converted into an approximate-size bound using Jeřábek's Corollary 3.11 (surjection/pullback) and Theorem 3.16 (product division). This is more precise than saying that an injection automatically divides cardinalities.
 
-The transfer is now a **conditional lemma with an explicit construction and parameter schedule**. The full global incidence ceiling calculation and the S³₂ survivor-history induction still need a formal line-by-line proof. R69 does not claim an APC₃ anti-checker theorem, an EF result, or P≠NP.
+The transfer is now a **conditional lemma with an explicit construction and parameter schedule**. The global incidence ceiling is bounded explicitly at the parameter level; the uniform bounded-formula proof and S³₂ survivor-history induction remain open. R69 does not claim an APC₃ anti-checker theorem, an EF result, or P≠NP.
 
 ## 1. Primary-source facts
 
