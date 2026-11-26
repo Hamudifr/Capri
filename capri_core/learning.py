@@ -567,6 +567,16 @@ class LearningStore:
               ON learning_consents.consent_id = learning_examples.consent_id
             WHERE {where}
         """
+        eligible_query = f"""
+            SELECT
+                learning_examples.*,
+                learning_consents.policy_version,
+                ROW_NUMBER() OVER (
+                    PARTITION BY learning_examples.content_hash
+                    ORDER BY learning_examples.created_at, learning_examples.example_id
+                ) AS duplicate_rank
+            {from_where}
+        """
 
         target = Path(destination)
         _require_private_directory(target.parent)
@@ -587,11 +597,14 @@ class LearningStore:
                     connection.execute("BEGIN")
                     stats = connection.execute(
                         f"""
+                        WITH eligible AS ({eligible_query})
                         SELECT
                             COUNT(*) AS total_count,
-                            COUNT(DISTINCT learning_examples.content_hash) AS unique_count,
-                            COUNT(DISTINCT learning_examples.consent_id) AS consent_count
-                        {from_where}
+                            COUNT(DISTINCT content_hash) AS unique_count,
+                            COUNT(DISTINCT CASE
+                                WHEN duplicate_rank = 1 THEN consent_id
+                            END) AS consent_count
+                        FROM eligible
                         """,
                         tuple(parameters),
                     ).fetchone()
@@ -602,16 +615,8 @@ class LearningStore:
                     counts["excluded_duplicate"] = stats["total_count"] - stats["unique_count"]
                     rows = connection.execute(
                         f"""
-                        SELECT * FROM (
-                            SELECT
-                                learning_examples.*,
-                                learning_consents.policy_version,
-                                ROW_NUMBER() OVER (
-                                    PARTITION BY learning_examples.content_hash
-                                    ORDER BY learning_examples.created_at, learning_examples.example_id
-                                ) AS duplicate_rank
-                            {from_where}
-                        ) AS eligible
+                        WITH eligible AS ({eligible_query})
+                        SELECT * FROM eligible
                         WHERE duplicate_rank = 1
                         ORDER BY created_at, example_id
                         """,
