@@ -254,6 +254,11 @@ class SQLiteSecurityStoreTests(unittest.TestCase):
             connection.execute(
                 "UPDATE audit_events SET status='tampered' WHERE event_id='chain-event-1'"
             )
+            connection.execute(
+                """CREATE TRIGGER audit_events_immutable_update
+                BEFORE UPDATE ON audit_events
+                BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END"""
+            )
             connection.commit()
         finally:
             connection.close()
