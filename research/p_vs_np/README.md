@@ -257,3 +257,12 @@ R71 writes the candidate history formula explicitly: current survivors are PV₁
 The large-branch survivor parameter propagation is derived from Theorem 3.8 plus the Theorem 3.21 retraction and sWPHP(PV₃), avoiding an unproved minimality shortcut. The small branch uses the exact deduplicated survivor count N_i, not the approximate upper parameter b_i, so the majority argument guarantees strict halving even when the enumeration has slack.
 
 Still open: the uniform one-step proof in S²₂(α)+BBΣ₃(α)+sWPHP(PV₂(α)), exact invariant/collection formalization, and the final conservation application. No PV₁ generator, S¹₂ proof, KPS EF bridge, or P≠NP result is claimed.
+
+
+# R72: uniform Sigma-b-2(alpha) successor proof
+
+See [R72 uniform successor proof](R72_UNIFORM_SUCCESSOR_PROOF.md).
+
+R72 assembles the R69 tagged-fibre incidence bound and R70 Theorem 3.17 dichotomy into a uniform successor lemma for any history-defined survivor set. It spells out the PV₂(alpha) partition/default/section maps, the exact tag-fraction inequality, the global incidence contradiction, and the formula class of the positive successor statement Gₓ≼A.
+
+The target one-step theory is S²₂(alpha)+BBΣᵇ₃(alpha)+sWPHP(PV₂(alpha)), becoming S³₂+BBΣᵇ₄+sWPHP(PV₃) after SAT substitution. The history induction and conservation route are specified in R71, but the one-step derivation is still a proof blueprint, not a checked formal proof. No PV₁ generator, S¹₂ proof, EF bridge, or P≠NP conclusion is claimed.
