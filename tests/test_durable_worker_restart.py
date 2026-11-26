@@ -448,5 +448,123 @@ class DurableWorkerRestartTests(unittest.TestCase):
             self._host(task_store, reopened_audit, registry=registry)
 
 
+    def test_commit_operation_expiry_is_audited_once_after_preliminary_sweep(self):
+        now = {"value": 1_000_000_000}
+        task_store = SQLiteTaskStore(self.tasks_path)
+        audit_store = SQLiteSecurityStore(self.audit_path)
+        registry = SQLiteWorkerRegistry(
+            task_store,
+            heartbeat_ttl_ms=5_000,
+            reservation_ttl_ms=1_000,
+            clock_ns=lambda: now["value"],
+            clock_wall_ns=lambda: now["value"],
+        )
+        host = self._host(task_store, audit_store, registry=registry)
+        host.register_worker(
+            "worker-token",
+            WorkerDescriptor("worker-1", (1,), ("math.factorial",), max_concurrency=1),
+        )
+        host.heartbeat_worker("monitor-token", "worker-1")
+        task = task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {"scope": "commit-expiry-toctou"}}],
+        )
+        pending = host.reserve_worker_candidate(
+            "alice-token", task.task_id, "math.factorial", 1,
+        )
+        self.assertIsNotNone(pending)
+
+        original_commit = registry.commit_reservation
+
+        def cross_ttl_before_commit(*args, **kwargs):
+            # Host purge and heartbeat both see a live hold. The registry's
+            # commit transaction then observes the elapsed TTL itself.
+            now["value"] += 2_000_000_000
+            return original_commit(*args, **kwargs)
+
+        registry.commit_reservation = cross_ttl_before_commit
+        with self.assertRaisesRegex(
+            HostRuntimeError, "worker reservation expired or is no longer eligible"
+        ):
+            host.commit_worker_reservation(
+                "alice-token", "monitor-token", pending,
+            )
+
+        self.assertIsNone(registry.get_reservation(pending.reservation.token))
+        self.assertNotIn(pending.reservation.token, host._worker_reservation_contexts)
+        token_digest = hashlib.sha256(
+            pending.reservation.token.encode("utf-8")
+        ).hexdigest()
+        events = audit_store.events()
+        expiry_events = [
+            event for event in events
+            if event.tool_name == "worker.reservation.expired"
+            and json.loads(event.metadata_json)["reservation_token_sha256"] == token_digest
+        ]
+        rejected_events = [
+            event for event in events
+            if event.tool_name == "worker.reservation.commit_rejected"
+            and json.loads(event.metadata_json)["reservation_token_sha256"] == token_digest
+        ]
+        self.assertEqual(len(expiry_events), 1)
+        self.assertEqual(len(rejected_events), 1)
+        self.assertFalse(audit_store.worker_lifecycle_reconciliation_required())
+
+    def test_release_operation_expiry_is_not_misreported_as_release(self):
+        now = {"value": 1_000_000_000}
+        task_store = SQLiteTaskStore(self.tasks_path)
+        audit_store = SQLiteSecurityStore(self.audit_path)
+        registry = SQLiteWorkerRegistry(
+            task_store,
+            heartbeat_ttl_ms=5_000,
+            reservation_ttl_ms=1_000,
+            clock_ns=lambda: now["value"],
+            clock_wall_ns=lambda: now["value"],
+        )
+        host = self._host(task_store, audit_store, registry=registry)
+        host.register_worker(
+            "worker-token",
+            WorkerDescriptor("worker-1", (1,), ("math.factorial",), max_concurrency=1),
+        )
+        host.heartbeat_worker("monitor-token", "worker-1")
+        task = task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {"scope": "release-expiry-toctou"}}],
+        )
+        pending = host.reserve_worker_candidate(
+            "alice-token", task.task_id, "math.factorial", 1,
+        )
+        self.assertIsNotNone(pending)
+
+        original_release = registry.release_reservation
+
+        def cross_ttl_before_release(*args, **kwargs):
+            # The host's preliminary sweep has completed and the local wrapper
+            # is still present. The release transaction performs the expiry.
+            now["value"] += 2_000_000_000
+            return original_release(*args, **kwargs)
+
+        registry.release_reservation = cross_ttl_before_release
+        self.assertFalse(host.release_worker_reservation("monitor-token", pending))
+
+        self.assertIsNone(registry.get_reservation(pending.reservation.token))
+        self.assertNotIn(pending.reservation.token, host._worker_reservation_contexts)
+        token_digest = hashlib.sha256(
+            pending.reservation.token.encode("utf-8")
+        ).hexdigest()
+        events = audit_store.events()
+        expiry_events = [
+            event for event in events
+            if event.tool_name == "worker.reservation.expired"
+            and json.loads(event.metadata_json)["reservation_token_sha256"] == token_digest
+        ]
+        release_events = [
+            event for event in events
+            if event.tool_name == "worker.reservation.released"
+            and json.loads(event.metadata_json)["reservation_token_sha256"] == token_digest
+        ]
+        self.assertEqual(len(expiry_events), 1)
+        self.assertEqual(release_events, [])
+        self.assertFalse(audit_store.worker_lifecycle_reconciliation_required())
+
+
 if __name__ == "__main__":
     unittest.main()
