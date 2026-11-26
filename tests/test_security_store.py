@@ -159,6 +159,68 @@ class SQLiteSecurityStoreTests(unittest.TestCase):
                 connection.close()
         self.assertEqual(store.events(), (event,))
 
+    def test_legacy_audit_rows_migrate_under_existing_immutable_trigger(self):
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute(
+                """CREATE TABLE audit_events (
+                    event_id TEXT PRIMARY KEY, timestamp TEXT NOT NULL,
+                    principal_id TEXT NOT NULL, tool_name TEXT NOT NULL,
+                    argument_digest TEXT NOT NULL, status TEXT NOT NULL,
+                    error_code TEXT, resource_type TEXT, resource_id TEXT,
+                    task_id TEXT, metadata_json TEXT
+                )"""
+            )
+            event = AuditEvent(
+                "legacy-chain-event", self.now.isoformat(), "principal-1", "search",
+                argument_digest({"item": "legacy"}), "succeeded", None,
+            )
+            connection.execute(
+                """INSERT INTO audit_events
+                (event_id, timestamp, principal_id, tool_name, argument_digest,
+                 status, error_code, resource_type, resource_id, task_id, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    event.event_id, event.timestamp, event.principal_id, event.tool_name,
+                    event.argument_digest, event.status, event.error_code,
+                    event.resource_type, event.resource_id, event.task_id, event.metadata_json,
+                ),
+            )
+            connection.execute(
+                """CREATE TRIGGER audit_events_immutable_update
+                BEFORE UPDATE ON audit_events
+                BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END"""
+            )
+            connection.execute(
+                """CREATE TRIGGER audit_events_immutable_delete
+                BEFORE DELETE ON audit_events
+                BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END"""
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        store = SQLiteSecurityStore(self.path)
+        self.assertEqual(store.events(), (event,))
+        self.assertEqual(store.integrity_check(), "ok")
+        connection = sqlite3.connect(self.path)
+        try:
+            row = connection.execute(
+                "SELECT sequence, previous_hash, event_hash FROM audit_events WHERE event_id=?",
+                (event.event_id,),
+            ).fetchone()
+            triggers = {
+                item[0] for item in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='trigger'"
+                )
+            }
+        finally:
+            connection.close()
+        self.assertEqual(row[0], 1)
+        self.assertEqual(row[1], "0" * 64)
+        self.assertIn("audit_events_immutable_update", triggers)
+        self.assertIn("audit_events_immutable_delete", triggers)
+
     def test_lifecycle_audit_chain_is_monotonic_and_detects_event_tampering(self):
         store = SQLiteSecurityStore(self.path)
         first = AuditEvent(

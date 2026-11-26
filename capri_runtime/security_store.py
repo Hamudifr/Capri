@@ -225,6 +225,10 @@ def _migrate_lifecycle_audit_chain(connection: sqlite3.Connection) -> None:
         VALUES (1, 1, 0, ?)""",
         (_AUDIT_CHAIN_ZERO,),
     )
+    # Existing stores already protect audit_events with an UPDATE trigger.
+    # Temporarily remove it only inside this exclusive migration transaction;
+    # _initialize recreates it before committing the schema upgrade.
+    connection.execute("DROP TRIGGER IF EXISTS audit_events_immutable_update")
     sequence = 0
     previous_hash = _AUDIT_CHAIN_ZERO
     rows = connection.execute(
