@@ -42,14 +42,14 @@ For each x, the map C -> (C,Err(C,x)) is a PV_2(alpha) bijection between S and t
 M_sharp=ceil(b(1+delta))
 as an approximate upper parameter for F_x dotcup G_x.
 
-By Theorem 3.8 soundness, F_x<=_delta q implies |F_x|<=q(1+delta)<=theta*a<=theta*|S|. Thus the finite tag universe has size |T_x|=m|S|+4|F_x|<=(m+2-2/m)|S|, which is the exact coefficient used in the tail ratio below.
-
 Put:
 - theta=1/2-1/(2m);
 - q=floor(theta*a/(1+delta));
 - s_F=floor(q/(1+2delta));
 - t_G=M_sharp-s_F-1;
 - A=ceil(t_G(1+2delta)).
+
+By Theorem 3.8 soundness, F_x<=_delta q implies |F_x|<=q(1+delta)<=theta*a<=theta*|S|. Thus the finite tag universe has size |T_x|=m|S|+4|F_x|<=(m+2-2/m)|S|, which is the exact coefficient used in the tail ratio below.
 
 Then s_F+t_G+1=M_sharp and ceil(s_F(1+2delta))<=q. Jeřábek Theorem 3.17 gives, for every x:
 F_x<=_delta q OR G_x<=_delta A.
