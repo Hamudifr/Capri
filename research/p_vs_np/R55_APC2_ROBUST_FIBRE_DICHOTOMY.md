@@ -141,3 +141,33 @@ using r>=2. This is a conservative analytic bound, stronger than the earlier <0.
 If a<1000r, then b=O(n). Theorem 3.21 gives a PV2 enumeration of S of polynomial length. Deduplicate the list and count G_x and F_x exactly by scanning it. Under the contrary hypothesis that no satisfiable x has |G_x|<=3|S|/4, every satisfying x has |F_x|<|S|/4. The per-q fibre bound is then exact, and Theorem 3.19 can still handle the large product universe U=S^r. This avoids applying the large-a ceiling estimate in the small case.
 
 Remaining formal check: write the section/coretraction composition explicitly to show U not <=_eta floor(a^r/2)-1. Theorem 3.21 supplies a section for the injection [a] -> S; taking r-fold products gives a section [a]^r -> U. Combine this with the surjection characterization of approximate upper size and exact counting on the interval [a^r].
+
+
+## R55 audit addendum: close the interval and small-a branches
+
+### Interval lower bound for U
+
+Theorem 3.21 gives an injection g':[a] -> S with a PV2 retraction g:S -> [a] satisfying g∘g'=id. Taking r-fold products gives a PV2 retraction g^r:U=S^r -> [a]^r with a section. Under base-a encoding, [a]^r is an interval of length a^r.
+
+Suppose U <=_eta s0-1. By Theorem 3.8, there is a PV2 surjection from [d]^c onto U^c, with d=ceil((s0-1)(1+eta)). Compose it with (g^r)^c. This gives a surjection from [d]^c onto ([a]^r)^c, canonically an interval of length a^(rc). But for s0=floor(a^r/2), eta=1/(1000r), and a>=1000r, we have d<a^r. Exact counting of intervals makes such a surjection impossible. Therefore U is not <=_eta s0-1. This supplies the missing interval comparison, provided the section/coretraction data are retained in the formal composition.
+
+### Small-a branch
+
+If a<1000r, then b<=a(1+eta)+1=O(n). Theorem 3.21 gives a PV2 enumeration of S of polynomial length. Corollary 3.10 applies because the approximate-size parameter A is at most eta^(-1): for these small parameters, G_x <=_eta A is equivalent to the existence of a sequence of length at most A covering G_x. Thus the no-small-success hypothesis implies |G_x|>A>=3M/4, and exact counting in the enumerated S gives |F_x|<M/4. The product fibre bound is then exact. Theorem 3.19 still handles the succinct large product U=S^r; no explicit enumeration of U is required.
+
+### Refined large-a ratio
+
+For r=n+1, eta=1/(1000r), a>=1000r, b<=a(1+eta)+1, and B<=b(1+2eta)/4+2, we have
+
+4B/a <= (1+2/(1000r))(1+2/(1000r))+8/(1000r)
+      <= 1+0.012002/r.
+
+Consequently, before the harmless outer ceiling,
+
+Z/a^r <= (1/4)(1+eta)^(r+1)(1+4eta)(4B/a)^r < 0.254.
+
+Including the outer ceiling remains below 0.255. The earlier <0.26 statement is therefore conservative; use <0.255 in the formal write-up to leave room for integer rounding.
+
+### Status correction
+
+The interval lower-bound and small-a branches now have explicit proof routes. They are no longer conceptual unknowns, but their formal composition and exact notation still need to be written in the theory. The remaining major gaps are formula-class/quantifier bookkeeping, the complete APC2 single-step derivation, and the history-dependent greedy iteration.
