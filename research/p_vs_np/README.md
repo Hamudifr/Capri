@@ -158,3 +158,12 @@ See [R56 empty-fibre rounding repair](R56_EMPTY_FIBRE_ROUNDING_REPAIR.md).
 R56 corrects R55's use of Theorem 3.20: with t=1 the theorem's ceiling gives at most two exceptional formula/witness pairs, not one. Append one successful search circuit for each distinct exceptional formula, at most two circuits total. The selector then uses at most n+3 circuits and remains polynomial size under the standard O(n)-size SAT witness verifier and s≥Kn.
 
 R56 also separates Theorem 3.20's internal precision delta from the outer approximation epsilon, records the source's exact Theorem 3.21 section/retraction maps, and gives a candidate recurrence for repeated survivor reduction. A stronger small-parameter repair now bypasses incidence counting entirely: if the lower parameter a<100(n+1), Theorem 3.21 and Corollary 3.10 enumerate S with O(n) circuits, and their parallel selector contradicts SAT circuit hardness unless one formula defeats every circuit. For a≥100(n+1), retaining both ceiling errors, the refined incidence ratio is below 0.29a^r, still below the half-size threshold. The recurrence and one-step arithmetic are promising, but full APC2 formula-class/witness extraction and history-dependent iteration remain unproved. No uniform generator, KPS EF transfer certificate, or P≠NP proof is claimed.
+
+
+# R57: Sigma-2 survivor induction blueprint
+
+See [R57 Sigma-2 survivor induction](R57_SIGMA2_SURVIVOR_INDUCTION.md).
+
+R57 investigates formalizing repeated R56 survivor reduction by Sigma^b_2-LIND. Jeřábek's approximate-size relation is Sigma^b_2 for Sigma^b_1 sets, and Theorem 4.2 demonstrates history-dependent approximate shrinking by this induction pattern. The candidate invariant stores the satisfiable-formula history and all approximate-size certificates in one polynomial-length string. The large-step recurrence shrinks the upper parameter by <0.77 while it is at least 100(n+1); the small branch enumerates O(n) circuits and terminates by a selector contradiction.
+
+This is not yet a bounded-arithmetic anti-checker theorem. The exact one-step Sigma^b_2 implication, certificate packing, induction invariant, and theory transfer remain to be formalized. If completed, it would yield a nonuniform search anti-checker, not the Pich–Santhanam decision anti-checker or KPS EF transfer certificates.
