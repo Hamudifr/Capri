@@ -4,6 +4,7 @@
 #include "capri_session_store.h"
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -89,7 +90,7 @@ CapriSessionHostError capri_session_host_commit_turn(
     const unsigned char *credential,
     size_t credential_len,
     const char *session_id,
-    long long expected_version,
+    int64_t expected_version,
     const char *turn_json,
     const char *lease_owner,
     CapriSession *out);
