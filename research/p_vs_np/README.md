@@ -266,3 +266,12 @@ See [R72 uniform successor proof](R72_UNIFORM_SUCCESSOR_PROOF.md).
 R72 assembles the R69 tagged-fibre incidence bound and R70 Theorem 3.17 dichotomy into a uniform successor lemma for any history-defined survivor set. It spells out the PV₂(alpha) partition/default/section maps, the exact tag-fraction inequality, the global incidence contradiction, and the formula class of the positive successor statement Gₓ≼A.
 
 The target one-step theory is S²₂(alpha)+BBΣᵇ₃(alpha)+sWPHP(PV₂(alpha)), becoming S³₂+BBΣᵇ₄+sWPHP(PV₃) after SAT substitution. The history induction and conservation route are specified in R71, but the one-step derivation is still a proof blueprint, not a checked formal proof. No PV₁ generator, S¹₂ proof, EF bridge, or P≠NP conclusion is claimed.
+
+
+# R73: unconditional SAT-solver / anti-checker dichotomy
+
+See [R73 solver-or-anti-checker dichotomy](R73_SOLVER_OR_ANTICHECKER_DICHOTOMY.md).
+
+R73 keeps the alternative discarded in the conditional R70/R72 route: if no shrink formula exists, the R69 majority tuple itself yields a size-s³ SAT decision circuit. Otherwise, Theorem 3.17 supplies a certified survivor shrink. Iterating gives an unconditional existential disjunction: a SAT solver circuit, or a labelled decision anti-checker. The disjunction is a candidate Sigma-b-2(alpha) statement.
+
+This matches the broad semantic alternatives of Pich–Santhanam Theorem 7 but not its feasible generator. Their KPT discussion explicitly warns that existential replacement yields an adaptive list, and their feasible-MinMax discussion targets APC₁ precision. R73 is APC₃ / PV₃-level; no APC₁/PV₁ descent, S¹₂ proof, KPS EF certificate, or P≠NP result is claimed.
