@@ -125,6 +125,23 @@ int main(void) {
     int released=0; assert(capri_session_release_turn_lease_for_principal(store,session_id,"principal-alice","worker-a",&released)==CAPRI_SESSION_OK && released==1);
     assert(capri_session_renew_turn_lease_for_principal(store,session_id,"principal-alice","worker-a",30.0)==CAPRI_SESSION_CONFLICT);
     assert(capri_session_close_for_principal(store,session_id,"principal-alice",&bob)==CAPRI_SESSION_OK && bob.closed);
+    CapriSession closed_owned={0},closed_owned_out={0};
+    assert(capri_session_create_for_principal(store,"principal-closed",&closed_owned)==CAPRI_SESSION_OK);
+    assert(capri_session_claim_turn_lease_for_principal(store,closed_owned.session_id,"principal-closed","closed-worker",30.0)==CAPRI_SESSION_OK);
+    assert(capri_session_close_for_principal(store,closed_owned.session_id,"principal-closed",&closed_owned_out)==CAPRI_SESSION_OK&&closed_owned_out.closed);
+    assert(capri_session_renew_turn_lease_for_principal(store,closed_owned.session_id,"principal-closed","closed-worker",30.0)==CAPRI_SESSION_CLOSED);
+    int closed_owned_released=0;
+    assert(capri_session_release_turn_lease_for_principal(store,closed_owned.session_id,"principal-closed","closed-worker",&closed_owned_released)==CAPRI_SESSION_OK&&closed_owned_released==1);
+    capri_session_free(&closed_owned);capri_session_free(&closed_owned_out);
+
+    CapriSession closed_legacy={0},closed_legacy_out={0};
+    assert(capri_session_create(store,&closed_legacy)==CAPRI_SESSION_OK);
+    assert(capri_session_claim_turn_lease(store,closed_legacy.session_id,"closed-legacy-worker",30.0)==CAPRI_SESSION_OK);
+    assert(capri_session_close(store,closed_legacy.session_id,&closed_legacy_out)==CAPRI_SESSION_OK&&closed_legacy_out.closed);
+    assert(capri_session_renew_turn_lease(store,closed_legacy.session_id,"closed-legacy-worker",30.0)==CAPRI_SESSION_CLOSED);
+    int closed_legacy_released=0;
+    assert(capri_session_release_turn_lease(store,closed_legacy.session_id,"closed-legacy-worker",&closed_legacy_released)==CAPRI_SESSION_OK&&closed_legacy_released==1);
+    capri_session_free(&closed_legacy);capri_session_free(&closed_legacy_out);
     assert(capri_session_commit_turn_for_principal(store,session_id,"principal-alice",2,turn,NULL,&committed)==CAPRI_SESSION_CLOSED);
     capri_session_free(&alice); capri_session_free(&committed); capri_session_free(&stale); capri_session_free(&bob); capri_session_store_close(store);
     store=capri_session_store_open(path,200,16000,64000,131072,&error); assert(store!=NULL);
