@@ -56,6 +56,17 @@ static CapriHostCredentialStatus resolver(
         *principal_id_len = principal_id_capacity;
         return CAPRI_HOST_CREDENTIAL_RESOLVED;
     }
+    if (credential_is(credential, credential_len, "overlong-principal")) {
+        memset(principal_id_out, 'a', 257u);
+        *principal_id_len = 257u;
+        return CAPRI_HOST_CREDENTIAL_RESOLVED;
+    }
+    if (credential_is(credential, credential_len, "whitespace-principal")) {
+        principal_id_out[0] = ' ';
+        principal_id_out[1] = '\t';
+        *principal_id_len = 2u;
+        return CAPRI_HOST_CREDENTIAL_RESOLVED;
+    }
 
     const char *principal = NULL;
     if (credential_is(credential, credential_len, "credential-a")) {
@@ -133,6 +144,8 @@ int main(void) {
     const unsigned char embedded_nul[] = "embedded-nul";
     const unsigned char empty_principal[] = "empty-principal";
     const unsigned char too_long_principal[] = "too-long-principal";
+    const unsigned char overlong_principal[] = "overlong-principal";
+    const unsigned char whitespace_principal[] = "whitespace-principal";
 
     CapriSession session_a = {0};
     assert(capri_session_host_create_session(
@@ -211,6 +224,12 @@ int main(void) {
         == CAPRI_SESSION_HOST_RESOLVER_ERROR);
     assert(capri_session_host_create_session(
         host, too_long_principal, sizeof(too_long_principal) - 1u, &foreign)
+        == CAPRI_SESSION_HOST_RESOLVER_ERROR);
+    assert(capri_session_host_create_session(
+        host, overlong_principal, sizeof(overlong_principal) - 1u, &foreign)
+        == CAPRI_SESSION_HOST_RESOLVER_ERROR);
+    assert(capri_session_host_create_session(
+        host, whitespace_principal, sizeof(whitespace_principal) - 1u, &foreign)
         == CAPRI_SESSION_HOST_RESOLVER_ERROR);
     assert(capri_session_host_create_session(host, NULL, 1u, &foreign)
         == CAPRI_SESSION_HOST_INVALID);
