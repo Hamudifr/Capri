@@ -176,6 +176,90 @@ int main(void) {
     const char *turn =
         "[{\"role\":\"user\",\"content\":\"hello\"},"
         "{\"role\":\"assistant\",\"content\":\"world\"}]";
+    const char *missing_session_id = "00000000-0000-4000-8000-000000000000";
+    CapriSession denied_output = {0};
+    assert(capri_session_host_get_session(
+        host, bad_credential, sizeof(bad_credential) - 1u,
+        session_a.session_id, &denied_output) == CAPRI_SESSION_HOST_UNAUTHORIZED);
+    assert(denied_output.session_id[0] == '\0'
+        && denied_output.messages_json == NULL
+        && denied_output.version == 0 && denied_output.closed == 0);
+
+    /* Every mutating gateway path must hide foreign and nonexistent sessions. */
+    assert(capri_session_host_commit_turn(
+        host, credential_b, sizeof(credential_b) - 1u,
+        session_a.session_id, 0, turn, NULL, &denied_output)
+        == CAPRI_SESSION_HOST_NOT_FOUND);
+    assert(denied_output.session_id[0] == '\0' && denied_output.messages_json == NULL);
+    assert(capri_session_host_commit_turn(
+        host, credential_b, sizeof(credential_b) - 1u,
+        missing_session_id, 0, turn, NULL, &denied_output)
+        == CAPRI_SESSION_HOST_NOT_FOUND);
+    assert(denied_output.session_id[0] == '\0' && denied_output.messages_json == NULL);
+    assert(capri_session_host_commit_turn(
+        host, bad_credential, sizeof(bad_credential) - 1u,
+        session_a.session_id, 0, turn, NULL, &denied_output)
+        == CAPRI_SESSION_HOST_UNAUTHORIZED);
+    assert(denied_output.session_id[0] == '\0' && denied_output.messages_json == NULL);
+
+    assert(capri_session_host_close_session(
+        host, credential_b, sizeof(credential_b) - 1u,
+        session_a.session_id, &denied_output) == CAPRI_SESSION_HOST_NOT_FOUND);
+    assert(denied_output.session_id[0] == '\0' && denied_output.messages_json == NULL);
+    assert(capri_session_host_close_session(
+        host, credential_b, sizeof(credential_b) - 1u,
+        missing_session_id, &denied_output) == CAPRI_SESSION_HOST_NOT_FOUND);
+    assert(denied_output.session_id[0] == '\0' && denied_output.messages_json == NULL);
+    assert(capri_session_host_close_session(
+        host, bad_credential, sizeof(bad_credential) - 1u,
+        session_a.session_id, &denied_output) == CAPRI_SESSION_HOST_UNAUTHORIZED);
+    assert(denied_output.session_id[0] == '\0' && denied_output.messages_json == NULL);
+
+    assert(capri_session_host_claim_turn_lease(
+        host, credential_b, sizeof(credential_b) - 1u,
+        session_a.session_id, "lease-owner-b", 30.0) == CAPRI_SESSION_HOST_NOT_FOUND);
+    assert(capri_session_host_claim_turn_lease(
+        host, credential_b, sizeof(credential_b) - 1u,
+        missing_session_id, "lease-owner-b", 30.0) == CAPRI_SESSION_HOST_NOT_FOUND);
+    assert(capri_session_host_claim_turn_lease(
+        host, bad_credential, sizeof(bad_credential) - 1u,
+        session_a.session_id, "lease-owner-b", 30.0) == CAPRI_SESSION_HOST_UNAUTHORIZED);
+
+    assert(capri_session_host_renew_turn_lease(
+        host, credential_b, sizeof(credential_b) - 1u,
+        session_a.session_id, "lease-owner-a", 30.0) == CAPRI_SESSION_HOST_NOT_FOUND);
+    assert(capri_session_host_renew_turn_lease(
+        host, credential_b, sizeof(credential_b) - 1u,
+        missing_session_id, "lease-owner-a", 30.0) == CAPRI_SESSION_HOST_NOT_FOUND);
+    assert(capri_session_host_renew_turn_lease(
+        host, bad_credential, sizeof(bad_credential) - 1u,
+        session_a.session_id, "lease-owner-a", 30.0) == CAPRI_SESSION_HOST_UNAUTHORIZED);
+
+    int denied_release = 1;
+    assert(capri_session_host_release_turn_lease(
+        host, credential_b, sizeof(credential_b) - 1u,
+        session_a.session_id, "lease-owner-a", &denied_release)
+        == CAPRI_SESSION_HOST_NOT_FOUND);
+    assert(denied_release == 0);
+    denied_release = 1;
+    assert(capri_session_host_release_turn_lease(
+        host, credential_b, sizeof(credential_b) - 1u,
+        missing_session_id, "lease-owner-a", &denied_release)
+        == CAPRI_SESSION_HOST_NOT_FOUND);
+    assert(denied_release == 0);
+    denied_release = 1;
+    assert(capri_session_host_release_turn_lease(
+        host, bad_credential, sizeof(bad_credential) - 1u,
+        session_a.session_id, "lease-owner-a", &denied_release)
+        == CAPRI_SESSION_HOST_UNAUTHORIZED);
+    assert(denied_release == 0);
+
+    CapriSession owner_after_denials = {0};
+    assert(capri_session_host_get_session(
+        host, credential_a, sizeof(credential_a) - 1u,
+        session_a.session_id, &owner_after_denials) == CAPRI_SESSION_HOST_OK);
+    assert(owner_after_denials.version == 0 && owner_after_denials.closed == 0);
+
     CapriSession committed = {0};
     assert(capri_session_host_commit_turn(
         host, credential_a, sizeof(credential_a) - 1u,
