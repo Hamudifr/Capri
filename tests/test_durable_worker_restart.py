@@ -349,6 +349,7 @@ class DurableWorkerRestartTests(unittest.TestCase):
         task = task_store.create_for_principal(
             "alice", [{"tool": "collect", "input": {"scope": "repeated-restart"}}],
         )
+        reservation_created_at = now["value"]
         pending = first_host.reserve_worker_candidate(
             "alice-token", task.task_id, "math.factorial", 1,
         )
@@ -383,6 +384,9 @@ class DurableWorkerRestartTests(unittest.TestCase):
         # Move beyond the pending-reservation TTL. Committed work must remain
         # durable and must not be expired merely because time and the host process advanced.
         now["value"] += 2_000_000_000
+        self.assertGreater(
+            now["value"] - reservation_created_at, 1_000_000_000,
+        )
         tasks_after_second_restart = SQLiteTaskStore(self.tasks_path)
         audit_after_second_restart = SQLiteSecurityStore(self.audit_path)
         self.assertTrue(
