@@ -7,6 +7,7 @@ from capri_core.health import build_health_report
 def checks():
     return [
         {"id": "python_version", "status": "pass"},
+        {"id": "sqlite_session_schema", "status": "pass"},
         {"id": "repository_structure", "status": "pass"},
         {"id": "ci_workflow_readable", "status": "pass"},
         {"id": "ci_actions_pinned", "status": "pass"},
@@ -19,8 +20,19 @@ class HealthModelTests(unittest.TestCase):
     def test_all_observed_checks_produce_healthy_graph(self):
         report = build_health_report(checks(), observed_at="2026-11-05T12:00:00Z")
         self.assertEqual(report["status"], "healthy")
-        self.assertEqual(report["summary"]["healthy"], 7)
+        self.assertEqual(report["summary"]["healthy"], 8)
         self.assertEqual(report["summary"]["unknown"], 0)
+
+    def test_failed_sqlite_capability_degrades_environment_and_baseline(self):
+        observations = [
+            {**item, "status": "fail"} if item["id"] == "sqlite_session_schema" else item
+            for item in checks()
+        ]
+        report = build_health_report(observations)
+        states = {item["id"]: item["status"] for item in report["components"]}
+        self.assertEqual(states["sqlite_environment"], "degraded")
+        self.assertEqual(states["developer_baseline"], "degraded")
+        self.assertEqual(report["status"], "degraded")
 
     def test_failed_workflow_degrades_dependent_components(self):
         observations = [

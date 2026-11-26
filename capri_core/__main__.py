@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
+from .capability import sqlite_json_capability
 from .ledger import HashChainLedger, LedgerIntegrityError
 from .health import build_health_report
 from .skill_validation import validate_skill_tree
@@ -185,7 +186,7 @@ def _workflow_event_branches(workflow: str, event: str) -> set[str] | None:
 
 
 def run_doctor(root: Path, json_output: bool = False) -> int:
-    """Run bounded, read-only checks against known Capri project files."""
+    """Run bounded, read-only checks against the local environment and known Capri project files."""
     root = root.resolve()
     checks: list[tuple[str, bool, str]] = []
 
@@ -193,6 +194,13 @@ def run_doctor(root: Path, json_output: bool = False) -> int:
         "Python version",
         sys.version_info[:2] == (3, 15),
         "Python 3.15.x is required",
+    ))
+
+    sqlite_capable, sqlite_detail = sqlite_json_capability()
+    checks.append((
+        "SQLite session schema",
+        sqlite_capable,
+        sqlite_detail,
     ))
 
     required = (
@@ -264,6 +272,7 @@ def run_doctor(root: Path, json_output: bool = False) -> int:
 
     check_ids = {
         "Python version": "python_version",
+        "SQLite session schema": "sqlite_session_schema",
         "Repository structure": "repository_structure",
         "CI workflow readable": "ci_workflow_readable",
         "CI actions pinned": "ci_actions_pinned",

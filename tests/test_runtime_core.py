@@ -415,11 +415,12 @@ class DoctorTests(unittest.TestCase):
             self.assertEqual(report["schema_version"], 1)
             self.assertEqual(report["tool"], "capri-doctor")
             self.assertEqual(report["status"], "pass")
-            self.assertEqual(report["summary"], {"passed": 6, "failed": 0, "total": 6})
+            self.assertEqual(report["summary"], {"passed": 7, "failed": 0, "total": 7})
             self.assertEqual(
                 [item["id"] for item in report["checks"]],
                 [
                     "python_version",
+                    "sqlite_session_schema",
                     "repository_structure",
                     "ci_workflow_readable",
                     "ci_actions_pinned",

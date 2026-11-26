@@ -15,7 +15,7 @@ The core validator is a native library component, not a wrapper around Python. I
 
 - Language baseline: GNU C11.
 - Portability target: POSIX.1-2024 for host-facing system interfaces.
-- CCEL links the C math library. Native session persistence requires SQLite 3.38+ with built-in JSON support and POSIX threads.
+- CCEL links the C math library. Native session persistence requires SQLite 3.41+ with built-in JSON support (json CHECK constraints run under `trusted_schema=OFF`) and POSIX threads.
 - Public interfaces are declared in include/; implementations are in src/.
 - Bounded inputs are validated before processing. Allocation failures are explicit errors.
 - Ownership is explicit: result objects returned by CCEL synthesis, prediction, and probe selection must be released with their matching *_free function. Session records returned by the native store own a heap-allocated messages_json field and must be released with capri_session_free().
