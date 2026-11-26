@@ -16,6 +16,8 @@ Add a host-integrated checkpoint layer with two independent trust dependencies:
 
 Prefer an Ed25519 signing provider when the host can keep the private key in a KMS/HSM or other protected signer. Verifiers need only pinned public keys, so they do not receive signing authority. Permit HMAC-SHA-256 as an alternative where the host's protected key service supports non-exportable MAC keys and trusted verification; never copy the shared key into the SQLite database or repository.
 
+The production target is a **composite worker-lifecycle checkpoint** that binds both the durable registry event stream and the separate host lifecycle audit stream. A registry-only checkpoint may be used for a narrowly labelled registry-integrity claim, but it does not satisfy the complete worker-lifecycle authenticity gate in issue #246. The two stores must be captured under one exclusive host-level supervisor fence.
+
 This is an interface and trust-boundary decision, not a request to provision a cloud service, buy a KMS, or add a runtime dependency. A host may supply an existing free/local signer and an independently administered checkpoint store. If no external signer and store are configured, report the audit mode as **host-local consistency only** and keep the current production-readiness restriction.
 
 ## 2. Threat model
@@ -80,18 +82,23 @@ No secret, private key, HMAC key, bearer token, KMS credential or raw reservatio
 
 ## 4. Checkpoint envelope
 
-Use a versioned, domain-separated payload. At minimum it binds:
+Use a versioned, domain-separated **composite** payload. At minimum it binds:
 
 | Field | Meaning |
 |---|---|
 | `format_version` | Checkpoint envelope version |
-| `stream_id` | Stable logical audit stream identifier |
-| `database_id` | Random immutable identifier created with the registry schema |
-| `schema_version` | Worker-registry schema version |
+| `scope_id` | Stable logical scope, e.g. `nexus-worker-lifecycle-v1` |
 | `generation` | Monotonic checkpoint-store generation |
-| `event_sequence` | Highest included event sequence |
-| `event_head_sha256` | Hash of the event at that sequence |
 | `previous_checkpoint_sha256` | Digest of the immediately previous signed checkpoint, or a defined genesis value |
+| `registry_database_id` | Random immutable installation ID for the task/registry SQLite store |
+| `registry_schema_version` | Worker-registry schema version |
+| `registry_sequence` | Highest included registry-event sequence |
+| `registry_head_sha256` | Hash of the registry event at that sequence |
+| `lifecycle_database_id` | Random immutable installation ID for the security/audit SQLite store |
+| `lifecycle_schema_version` | Security/lifecycle schema version |
+| `lifecycle_sequence` | Highest included host-lifecycle audit sequence |
+| `lifecycle_head_sha256` | Hash of the lifecycle event at that sequence |
+| `supervisor_fencing_epoch` | Authenticated host lease epoch; required where multiple supervisors can write |
 | `key_id` | External signer key identifier |
 | `algorithm` | Explicit signature/MAC algorithm identifier |
 | `issued_at` | Trusted signer/coordinator timestamp, informational rather than the rollback control |
@@ -106,14 +113,11 @@ The external store retains the exact signed envelope, signature, generation and 
 
 ### Cross-store host lifecycle audit coverage
 
-The registry event chain is not the only worker audit source. Host lifecycle events are written separately to `SQLiteSecurityStore.audit_events`. Those rows currently have canonical per-event metadata digests and append-only triggers, but they do not form an independently authenticated global chain. A checkpoint that binds only `worker_registry_events` must be described as authenticating only that stream; it must not imply that the host lifecycle audit history is also protected.
+The registry event chain is not the only worker audit source. Host lifecycle events are written separately to `SQLiteSecurityStore.audit_events`. Those rows validate each event's `argument_digest` against canonical `metadata_json` when present and have append-only triggers, but they do not have a deterministic global sequence/hash chain. The per-row digest is not a chain and does not prevent an attacker from replacing or reordering the complete table. A checkpoint that binds only `worker_registry_events` must be described as authenticating only that stream; it must not imply that the host lifecycle audit history is also protected.
 
-If the production security claim covers the complete worker lifecycle, extend the envelope to a composite checkpoint with both store identities and both stream positions:
+The production target is the composite envelope shown above, with both store identities and both stream positions. Do not mark the complete worker-lifecycle audit gate satisfied until both streams are chained and checkpointed.
 
-- `registry_database_id`, `registry_schema_version`, `registry_sequence`, `registry_head_sha256`
-- `lifecycle_database_id`, `lifecycle_schema_version`, `lifecycle_sequence`, `lifecycle_head_sha256`
-
-The lifecycle stream needs its own deterministic sequence and rolling digest. Each chained record should bind the event ID, event order, timestamp, principal, event type, status, error code, resource type/ID, task ID, and canonical metadata digest. Do not treat the current per-row `argument_digest` as a chain. A dedicated worker-lifecycle chain table/state row or equivalent strictly validated schema may implement this; backup validation, integrity checks, and restore semantics must cover it.
+The lifecycle stream needs its own deterministic, monotonic sequence and rolling digest. Each chained record should bind the event ID, event order, timestamp, principal, event type, status, error code, resource type/ID, task ID, and canonical metadata digest. Do not treat the current per-row `argument_digest` as a chain. A dedicated worker-lifecycle chain table/state row or equivalent strictly validated schema may implement this; backup validation, integrity checks, and restore semantics must cover it.
 
 Both database identities must be stable, random installation identities. A filesystem path is not an identity. A copied database retains its identity for rollback detection; intentional installation cloning requires explicit re-enrolment and a new checkpoint scope.
 
@@ -130,7 +134,7 @@ The two SQLite stores cannot be read as one atomic transaction. Before signing a
 
 If registry persistence commits but its corresponding host lifecycle event does not, the pending operation marker must block checkpoint publication. If the external checkpoint is published but local acknowledgement fails, startup must verify the external checkpoint against both stores and repair only local diagnostic state. If either store is ahead of the checkpoint, that suffix remains unanchored and requires explicit reconciliation; do not silently sign it during restart.
 
-The checkpoint store's compare-and-swap prevents competing checkpoint generations, but it does not replace the host-level fencing lease. A lease/fencing epoch should be supplied by the embedding host and included in the checkpoint or its authenticated metadata when the deployment supports multiple supervisors.
+The checkpoint store's compare-and-swap prevents competing checkpoint generations, but it does not replace the host-level fencing lease. Where multiple supervisors can write, a verifiable lease/fencing epoch from the embedding host is mandatory and must be included in the signed checkpoint. The current note-based `acknowledge_worker_lifecycle_reconciliation()` API is not itself a lease provider or proof of lease ownership.
 
 ## 5. Checkpoint creation and atomicity
 
@@ -138,19 +142,21 @@ A checkpoint cannot be made atomic with a local SQLite commit and a remote signi
 
 Recommended sequence:
 
-1. Read and validate the local audit chain and projection under a stable SQLite read snapshot.
-2. Capture `(database_id, schema_version, event_sequence, event_head_sha256)`.
-3. Construct the next generation using the latest externally stored checkpoint.
-4. Ask the host signer to sign the domain-separated canonical envelope.
-5. Append it to the external store with `expected_generation` equal to the latest observed generation.
-6. On compare-and-swap conflict, discard the candidate, reload the latest checkpoint and retry only after revalidating the local chain. Never overwrite or replace a newer checkpoint.
-7. Read back the external checkpoint and verify its signature and fields before reporting success.
+1. Acquire the embedding host's exclusive supervisor/lifecycle fence and quiesce every writer to both SQLite stores.
+2. Confirm the lifecycle audit store has zero pending operation markers and that worker reservation reconciliation is healthy.
+3. Read and validate both local chains and their registry/audit projections under stable read snapshots while the fence prevents cross-store interleaving.
+4. Capture both stream identities, schema versions, sequences and heads into one composite envelope.
+5. Construct the next generation using the latest externally stored checkpoint and the authenticated fencing epoch.
+6. Ask the host signer to sign the domain-separated canonical envelope.
+7. Append it to the external store with `expected_generation` equal to the latest observed generation.
+8. On compare-and-swap conflict, discard the candidate, reload the latest checkpoint and retry only after revalidating both local chains under the fence. Never overwrite or replace a newer checkpoint.
+9. Read back the external checkpoint and verify its signature and every field before reporting success; only then release the host fence.
 
-A crash before external append leaves no new checkpoint. A crash after append but before local acknowledgement is recoverable by reading the external latest checkpoint and matching its sequence/head to the local chain. An ambiguous timeout must be reconciled by reading the store, not by blindly appending another generation.
+A crash before external append leaves no new checkpoint. A crash after append but before local acknowledgement is recoverable by reading the external latest checkpoint and matching both stream positions/heads to the two local stores. An ambiguous timeout must be reconciled by reading the store, not by blindly appending another generation. A pending host lifecycle-operation marker blocks checkpoint publication.
 
 ### Checkpoint cadence and unanchored tail
 
-A signed checkpoint protects history only through its `event_sequence`. Events after that sequence remain protected only by the existing unkeyed local chain until a later checkpoint is committed.
+A signed composite checkpoint protects each stream only through its respective `registry_sequence` and `lifecycle_sequence`. Events after either anchor remain protected only by the local unkeyed chain until a later composite checkpoint is committed.
 
 - **High assurance:** checkpoint every security-sensitive lifecycle transaction before acknowledging that operation to its caller.
 - **Batched mode:** permit a bounded event/time lag only when the host explicitly accepts the maximum unanchored tail and the runtime exposes that lag in health state.
@@ -159,27 +165,29 @@ A signed checkpoint protects history only through its `event_sequence`. Events a
 
 ## 6. Verification and rollback rules
 
-Given a database and the latest external checkpoint:
+Given both SQLite stores and the latest external checkpoint:
 
 1. Authenticate the external store response and verify the checkpoint signature/MAC using the key identified by `key_id`.
-2. Verify stream ID, database ID, schema version, format version and algorithm against the expected deployment.
-3. Verify that the database chain is structurally valid and that the event at `event_sequence` has exactly `event_head_sha256`.
-4. Reject if the database sequence is lower than the checkpoint sequence (rollback/truncation), or if the hash at the checkpoint sequence differs.
-5. Verify the local event chain from the checkpoint anchor through the current local head. Any gap, duplicate sequence, invalid previous hash or projection mismatch fails closed.
+2. Verify scope ID, format version, algorithm, supervisor fencing epoch policy, and both database identities/schema versions against the expected deployment.
+3. Verify that each database chain is structurally valid and that the event at `registry_sequence` / `lifecycle_sequence` has exactly the corresponding anchored head hash.
+4. Reject if either database sequence is lower than its checkpoint sequence (rollback/truncation), or if either hash at its checkpoint sequence differs.
+5. Verify each local event chain from its checkpoint anchor through its current local head. Any gap, duplicate sequence, invalid previous hash or projection mismatch fails closed.
 6. Verify the checkpoint generation and previous-checkpoint digest against the external store's authoritative ordered history or authenticated latest record.
 7. Reject an older signed checkpoint presented as the latest. A valid signature alone does not establish freshness.
+8. Reject a mixed backup/restore pair whose database IDs, lifecycle state, pending-operation markers or cross-store sequence relationship do not match one consistent fenced snapshot.
 
-The database must not be allowed to nominate its own trusted checkpoint or public key. The verifier obtains the latest checkpoint from the separate trust store and trust roots from host configuration.
+The databases must not be allowed to nominate their own trusted checkpoint or public key. The verifier obtains the latest checkpoint from the separate trust store and trust roots from host configuration.
 
 ### Backup and restore
 
-A backup carries the same immutable `database_id` and local event chain. Restore validation compares it with the external latest checkpoint:
+A restore set contains both the task/registry database and the security/lifecycle database captured under the same exclusive host fence. Each carries its immutable installation ID and local chain. Restore validation compares the pair with the external latest composite checkpoint:
 
-- Backup behind the latest checkpoint: reject as stale; do not lower the external generation.
-- Backup exactly at the checkpoint: accept only if the sequence and head match exactly.
-- Backup ahead of the checkpoint: verify the anchored prefix, then validate the local tail. The tail remains unanchored until a new checkpoint is committed.
-- Database ID mismatch: reject unless an explicit clone/re-key procedure creates a new stream identity and new external trust history.
-- External checkpoint store unavailable: checkpointed mode cannot claim successful authenticity verification. Preserve the backup and stop protected writes until verification is possible.
+- Missing one store, mismatched capture identity, inconsistent lifecycle/registry operation markers or an unfenced mixed-time pair: reject.
+- Either backup behind its corresponding latest checkpoint: reject as stale; do not lower the external generation.
+- Both backups exactly at the checkpoint: accept only if both sequence/head pairs and database IDs match exactly.
+- One or both backups ahead of the checkpoint: verify both anchored prefixes, then validate both local tails and their cross-store lifecycle markers. The tails remain unanchored until a new composite checkpoint is committed under the host fence.
+- Either database ID mismatch: reject unless an explicit clone/re-enrolment procedure creates new identities for both stores and a new external trust history.
+- External checkpoint store unavailable: checkpointed mode cannot claim successful authenticity verification. Preserve both backups and stop protected writes until verification is possible.
 
 Never reset the external checkpoint store because a restored database appears older. Recovery must preserve the highest trusted generation.
 
@@ -247,15 +255,22 @@ Use deterministic fake signer and checkpoint-store adapters in offline CI. Test 
 14. Simulate key compromise and verify the affected interval is marked suspect rather than silently re-signed.
 15. Clone a database ID and verify stream binding prevents cross-stream checkpoint acceptance.
 16. Remove the signer/store configuration from a checkpointed deployment; no silent local-only downgrade.
+17. Tamper with a host lifecycle audit row and recompute its per-row `argument_digest`; composite verification still fails.
+18. Insert, delete or reorder lifecycle rows; deterministic lifecycle-chain validation fails.
+19. Leave a worker lifecycle operation marker pending after a registry commit; composite checkpoint publication is blocked.
+20. Interleave a registry write between the two store snapshots; the exclusive host fence prevents publication of a mixed-time checkpoint.
+21. Restore task/registry and security/lifecycle backups from different snapshots; restore validation rejects the pair.
+22. Supply an older supervisor fencing epoch; the host/signing boundary rejects the stale supervisor.
 
 ## 10. Incremental implementation plan
 
-1. **Contracts and data model:** add typed signer, verifier and checkpoint-store protocols plus immutable envelope validation. No real key provider.
-2. **Verifier first:** verify external latest checkpoint against a local chain; add rollback/tamper tests using deterministic fakes.
-3. **Checkpoint writer:** implement generation-fenced append, idempotent timeout recovery and explicit checkpoint health state.
-4. **Host integration:** require explicit policy for local-only versus checkpointed mode; no implicit downgrade. Bind signer permissions and supervisor identity at the embedding-host boundary.
-5. **Rotation and restore:** implement authenticated trust transitions, backup/restore validation and compromise recovery.
-6. **Operational evidence:** document checkpoint lag, external store retention, backup drills, alerting and outage procedures. Run exact-head quality tests and a separate security review.
+1. **Lifecycle chain first:** add a deterministic sequence/hash chain for `SQLiteSecurityStore.audit_events`, with strict schema validation, append-only enforcement, integrity checks and backup/restore coverage.
+2. **Contracts and data model:** add typed signer, verifier and checkpoint-store protocols plus immutable composite-envelope validation. No real key provider.
+3. **Verifier first:** verify the external latest composite checkpoint against both local chains; add rollback, tamper, mixed-backup and cross-store consistency tests using deterministic fakes.
+4. **Checkpoint writer:** implement generation-fenced append, idempotent timeout recovery and explicit checkpoint health state.
+5. **Host integration:** require explicit policy for local-only versus checkpointed mode; no implicit downgrade. Acquire an enforceable supervisor fencing lease and capture both stores under one exclusive host fence.
+6. **Rotation and restore:** implement authenticated trust transitions, paired backup/restore validation and compromise recovery.
+7. **Operational evidence:** document checkpoint lag, external store retention, backup drills, alerting and outage procedures. Run exact-head quality tests and a separate security review.
 
 Do not implement all phases in one patch. Each phase needs its own reviewable interface, failure tests and compatibility decision.
 
