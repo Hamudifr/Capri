@@ -140,3 +140,16 @@ The search-to-decision bridge remains open because SAT self-reduction is adaptiv
 See [R54 one-element APC2 fibre repair](R54_ONE_ELEMENT_APC2_REPAIR.md).
 
 R54 corrects R53: Jeřábek Theorem 3.20 with t=1 gives a fibre of size at most one, not necessarily zero. A finite combinatorial repair appends one additional surviving search circuit that solves the sole remaining formula, yielding a tuple of at most 2n+3 circuits covering every satisfiable formula. The APC2 derivation is not complete: the key missing step is deriving per-fibre approximate size bounds from the formalized contrary hypothesis. The tournament principle is only an induction template, not a direct application. No P-vs-NP proof is claimed.
+
+
+# R55: constant-factor APC2 survivor reduction
+
+See [R55 constant-factor APC2 reduction](R55_CONSTANT_FACTOR_APC2.md). Use r=6n and a 3/4 failure threshold; the finite incidence ratio is (729/1024)^n.
+
+# R56: APC2 approximate-size thresholds
+
+See [R56 APC2 approximate thresholds](R56_APC2_APPROXIMATE_THRESHOLDS.md). Introduces lower/upper approximate size parameters a<=b<=a(1+eta), with a candidate one-fibre repair and survivor-size shrink.
+
+# R57: APC2 theory compatibility and constant shrink
+
+See [R57 APC2 constant shrink](R57_APC2_CONSTANT_SHRINK.md). Confirms the rWPHP/sWPHP compatibility of Jeřábek's theorems with APC2 and records the candidate constant-factor survivor invariant. Exact formalization remains open.
