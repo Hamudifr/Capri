@@ -10,6 +10,12 @@ on:
       - "capri_runtime/tasks.py"
       - "capri_runtime/tools.py"
       - "capri_runtime/orchestration.py"
+      - "capri_runtime/host_runtime.py"
+      - "capri_runtime/sqlite_worker_registry.py"
+      - "capri_runtime/worker_registry.py"
+      - "tests/test_host_runtime.py"
+      - "tests/test_sqlite_worker_registry.py"
+      - "tests/test_durable_worker_restart.py"
       - ".github/workflows/runtime-benchmark.yml"
   workflow_dispatch:
 
