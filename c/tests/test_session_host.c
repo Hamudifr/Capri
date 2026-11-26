@@ -246,12 +246,16 @@ int main(void) {
         host, unicode_credential, sizeof(unicode_credential) - 1u, &unicode_session)
         == CAPRI_SESSION_HOST_OK);
 
-    CreateThread thread_a = {
-        host, credential_a, sizeof(credential_a) - 1u, CAPRI_SESSION_HOST_INVALID, {0}
-    };
-    CreateThread thread_b = {
-        host, credential_b, sizeof(credential_b) - 1u, CAPRI_SESSION_HOST_INVALID, {0}
-    };
+    CreateThread thread_a = {0};
+    thread_a.host = host;
+    thread_a.credential = credential_a;
+    thread_a.credential_len = sizeof(credential_a) - 1u;
+    thread_a.result = CAPRI_SESSION_HOST_INVALID;
+    CreateThread thread_b = {0};
+    thread_b.host = host;
+    thread_b.credential = credential_b;
+    thread_b.credential_len = sizeof(credential_b) - 1u;
+    thread_b.result = CAPRI_SESSION_HOST_INVALID;
     pthread_t thread_a_id, thread_b_id;
     assert(pthread_create(&thread_a_id, NULL, create_session_thread, &thread_a) == 0);
     assert(pthread_create(&thread_b_id, NULL, create_session_thread, &thread_b) == 0);
