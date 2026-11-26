@@ -117,16 +117,45 @@ The majority circuit size is O(rs)=O(ns²), because m³=O(s) and r=O(ns). Hence 
 
 The small-survivor branch remains separate: if s₀<100r, Theorem 3.21 enumerates O(r) survivors. If every formula had error fraction below 1/2−1/m, the majority of the entire survivor list would decide SAT, contradicting the size-s³ circuit lower bound. Thus a hard formula exists without using the large-branch incidence estimate.
 
-## 5. Global incidence calculation: next proof checkpoint
+## 5. Global incidence comparison with explicit ceilings
 
-Let Q=[2ⁿ], U=Sʳ, and E⊆Q×U be the majority-error incidence relation. It is Σᵇ₂. If every fibre has the bound Bₓ≼δK from Section 2, the Σᵇ₂-relativized Theorem 3.19 gives
-E ≼δ ⌈2ⁿ K(1+4δ)⌉.
+Let Q=[2ⁿ], U=Sʳ, and E⊆Q×U be the majority-error incidence relation. It is Σᵇ₂. From Sections 2–3, every fibre has Bₓ≼δK, where
+- A=m+2−2/m and D=√(m(m+4));
+- L=⌊Dʳ⌋;
+- H=⌈(1+2δ)(⌈mM(1+δ)²⌉+⌈4q(1+δ)²⌉)⌉;
+- U₀=⌈(1+δ)ʳ⁺¹Hʳ⌉;
+- P=⌈U₀(1+δ)⌉;
+- t*=⌊L/(1+4δ)⌋;
+- K=⌈⌈P/t*⌉(1+δ)⌉.
 
-The remaining arithmetic is to compare this upper parameter with the lower near-cardinality scale s₀ʳ supplied by Theorem 3.21. The leading ratio is
-2ⁿ (M/s₀)ʳ · 2ρʳ,
-where M/s₀≤1+κ and ρʳ≤exp(−7r/(4m³)). The chosen r gives an e^(−21) margin before approximation losses. The displayed product/union/transfer/averaging losses are O(δr), while the enumeration loss is at most (1+κ)^r≤e^(1/50). The nested ceiling terms are negligible in the large branch because M≥100r and L grows as [m(m+4)]^(r/2).
+Theorem 3.19 gives
+E≼δ E₀, where E₀=⌈2ⁿK(1+4δ)⌉.
 
-This is a strong quantitative margin, but the final written proof must still turn those observations into one explicit inequality with every additive ceiling bounded. Do not mark the global incidence contradiction as closed until that calculation is written and checked independently.
+Here is an explicit ceiling envelope in the large branch. We have M≥s₀≥100r, A≥m≥4, and δ=1/(1000r). Therefore AM≥400r and
+H≤AM(1+2δ)(1+δ)²+4
+ ≤ AM(1+2δ)(1+δ)²(1+4/(AM)).
+Using 1+u≤eᵘ,
+Hʳ≤(AM)ʳ exp(r(4δ+4/(AM)))≤(AM)ʳe^0.014.
+Also (1+δ)ʳ⁺¹≤e^0.002. The ceiling in U₀ contributes less than e^0.001 because its argument is at least (400r)ʳ. Hence U₀≤(AM)ʳe^0.017, and P≤(AM)ʳe^0.022.
+
+Since L≥2/δ, t*≥L/(1+5δ). Also A/D≥1/2, so
+P/L≥(AM/D)ʳ≥(M/2)ʳ≥(50r)ʳ.
+The two ceilings in K, together with (1+5δ)(1+δ), contribute less than e^0.002; thus K≤(P/L)e^0.002. The final ceiling and factor (1+4δ) contribute less than e^0.001. Combining these conservative bounds gives
+E₀ ≤ 2ⁿ(AM)ʳ/L · e^0.026
+   ≤ 2ⁿ·2ρʳ Mʳ e^0.026,
+where ρ=A/D. Since M/s₀≤1+κ and κr=1/50,
+E₀/s₀ʳ ≤ 2ⁿ·2ρʳe^0.046
+          ≤ 2exp(−(3/4)n ln2−20.95)
+          < 2e^(−20.95) < 1/4.
+All ceiling estimates above use r≥m³(n ln2+12), m≥4, and s₀≥100r; the additive +1 terms are absorbed by the displayed lower bounds (in particular L≥2/δ and P/L≥(50r)ʳ).
+
+To turn this into a contradiction, use the Theorem 3.21 retraction pair S↔[s₀], coordinatewise on r-tuples. Put a=s₀ʳ. If U=Sʳ≼δ⌊a/2⌋, Theorem 3.8 would give a PV₃ surjection [d]^c↠U^c with d=⌈⌊a/2⌋(1+δ)⌉<a. Compose it with the retraction U^c→[a]^c. This would give a surjection from a smaller interval power onto [a]^c, contradicting sWPHP(PV₃). Hence U≰δ⌊a/2⌋.
+
+If every tuple had a majority error on some x, the projection E→U would be surjective. A PV₃ section can choose the least such x using the Σᵇ₂ incidence predicate, so Corollary 3.11 transfers E≼δE₀ to U≼δ⌈E₀(1+δ)⌉. The ratio bound above makes this parameter strictly below ⌊a/2⌋, contradiction. Thus some tuple has a majority circuit correct on every input. Its circuit size is O(rs)=O(ns²)≤s³ for sufficiently large s≥Kn, contradicting the assumed SAT circuit lower bound.
+
+Consequently, not every fibre Fₓ can satisfy Fₓ≼δq. There is an x with Fₓ not≼δq, hence |Fₓ|>q≥(1/2−1/m)|S|. Retaining the agreeing circuits shrinks the survivor set by at least 3/4.
+
+**Quantitative status:** the nested-ceiling and lower-interval comparison is now explicitly bounded at the parameter level. The remaining issue is not a missing finite counting factor; it is to formalize this entire implication with the correct bounded formula classes and induction/collection strength.
 
 ## 6. Status and remaining obligations
 
