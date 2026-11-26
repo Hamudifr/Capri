@@ -89,7 +89,7 @@ Choose:
 - m = ⌈s^(1/3)⌉, with m≥4;
 - r the least odd integer at least m³(n ln 2 + 12);
 - δ = 1/(1000r);
-- Run Theorem 3.21 with enumeration precision ε₀=δ. In the large branch s₀≥100r, its ceiling gives t₀/s₀≤1+δ+1/s₀≤1+κ, where κ=1/(50r). This ensures S≼δM at the same precision used by the incidence argument.
+- Run Theorem 3.21 with enumeration precision ε₀=δ. In the large branch s₀≥100r, its ceiling gives t₀/s₀≤1+δ+1/s₀≤1+κ, where κ=1/(50r). The PV₃ surjection [t₀]→S supplied by Theorem 3.21 gives S≼δM directly by Corollary 3.5, at the same precision used by the incidence argument.
 
 For a large survivor set, let s₀≤|S|≤t₀=M and define
 θ = 1/2−1/(2m),
