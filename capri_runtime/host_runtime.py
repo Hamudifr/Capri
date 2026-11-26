@@ -549,9 +549,15 @@ class CapriHostRuntime:
             self._purge_worker_reservation_contexts()
             self._begin_worker_audit_operation()
             try:
-                snapshot = self._worker_registry.register(
-                    approved, authenticated_worker_id=identity,
-                )
+                if isinstance(self._worker_registry, SQLiteWorkerRegistry):
+                    snapshot, expired = self._worker_registry.register(
+                        approved, authenticated_worker_id=identity, include_expired=True,
+                    )
+                    self._record_expired_worker_reservations(expired)
+                else:
+                    snapshot = self._worker_registry.register(
+                        approved, authenticated_worker_id=identity,
+                    )
             except WorkerRegistryError:
                 self._finish_worker_audit_operation()
                 raise HostRuntimeError("worker registration was rejected") from None
@@ -601,11 +607,13 @@ class CapriHostRuntime:
             self._begin_worker_audit_operation()
             try:
                 if isinstance(self._worker_registry, SQLiteWorkerRegistry):
-                    snapshot = self._worker_registry.heartbeat_with_load_resolver(
+                    snapshot, expired = self._worker_registry.heartbeat_with_load_resolver(
                         worker_id,
                         authenticated_worker_id=worker_id,
                         in_flight_resolver=self._worker_in_flight,
+                        include_expired=True,
                     )
+                    self._record_expired_worker_reservations(expired)
                     in_flight = snapshot.health.in_flight
                 else:
                     # In-memory registry updates are serialized by the host lock.
@@ -650,9 +658,15 @@ class CapriHostRuntime:
             )
             self._begin_worker_audit_operation()
             try:
-                snapshot = self._worker_registry.record_failure(
-                    worker_id, authenticated_worker_id=worker_id,
-                )
+                if isinstance(self._worker_registry, SQLiteWorkerRegistry):
+                    snapshot, expired = self._worker_registry.record_failure(
+                        worker_id, authenticated_worker_id=worker_id, include_expired=True,
+                    )
+                    self._record_expired_worker_reservations(expired)
+                else:
+                    snapshot = self._worker_registry.record_failure(
+                        worker_id, authenticated_worker_id=worker_id,
+                    )
             except WorkerRegistryError:
                 self._finish_worker_audit_operation()
                 raise HostRuntimeError("worker failure observation was rejected") from None
@@ -668,8 +682,11 @@ class CapriHostRuntime:
             )
             # record_failure revokes pending holds but deliberately preserves
             # committed work. Close only the pending host wrappers it removed.
+            expired_tokens = {item.token for item in expired} if isinstance(self._worker_registry, SQLiteWorkerRegistry) else set()
             for context in pending_contexts:
                 token = context.reservation.token
+                if token in expired_tokens:
+                    continue
                 self._worker_reservation_contexts.pop(token, None)
                 self._record_worker_lifecycle_event(
                     "worker.reservation.revoked",
@@ -712,6 +729,26 @@ class CapriHostRuntime:
             and left.reservation.worker_id == right.reservation.worker_id
         )
 
+    def _record_expired_worker_reservations(
+        self, expired: tuple[WorkerReservation, ...],
+    ) -> None:
+        """Persist lifecycle events for expirations captured by the same registry transaction."""
+        for reservation in expired:
+            self._worker_reservation_contexts.pop(reservation.token, None)
+            self._record_worker_lifecycle_event(
+                "worker.reservation.expired",
+                reservation.worker_id,
+                principal_id=reservation.principal_id or "host",
+                task_id=reservation.task_id,
+                capability=reservation.capability,
+                protocol_version=reservation.protocol_version,
+                descriptor_revision=reservation.descriptor_revision,
+                reservation_token=reservation.token,
+                expires_at_ns=reservation.expires_at_ns,
+                status="expired",
+                error_code="reservation_ttl_elapsed",
+            )
+
     def _purge_worker_reservation_contexts(self) -> None:
         if self._worker_registry is None:
             self._worker_reservation_contexts.clear()
@@ -724,20 +761,7 @@ class CapriHostRuntime:
                 active, expired = self._worker_registry.active_reservations_with_expired()
                 active_by_token = {item.token: item for item in active}
                 expired_by_token = {item.token: item for item in expired}
-                for reservation in expired:
-                    self._record_worker_lifecycle_event(
-                        "worker.reservation.expired",
-                        reservation.worker_id,
-                        principal_id=reservation.principal_id or "host",
-                        task_id=reservation.task_id,
-                        capability=reservation.capability,
-                        protocol_version=reservation.protocol_version,
-                        descriptor_revision=reservation.descriptor_revision,
-                        reservation_token=reservation.token,
-                        expires_at_ns=reservation.expires_at_ns,
-                        status="expired",
-                        error_code="reservation_ttl_elapsed",
-                    )
+                self._record_expired_worker_reservations(expired)
                 for token, context in tuple(self._worker_reservation_contexts.items()):
                     current = active_by_token.get(token)
                     if current is not None:
@@ -814,12 +838,25 @@ class CapriHostRuntime:
         with self._worker_reservation_lock:
             self._purge_worker_reservation_contexts()
             try:
+                if isinstance(self._worker_registry, SQLiteWorkerRegistry):
+                    self._begin_worker_audit_operation()
+                    candidates, expired = self._worker_registry.eligible(
+                        capability,
+                        protocol_version=protocol_version,
+                        authorized_worker_ids=allowed,
+                        include_expired=True,
+                    )
+                    self._record_expired_worker_reservations(expired)
+                    self._finish_worker_audit_operation()
+                    return candidates
                 return self._worker_registry.eligible(
                     capability,
                     protocol_version=protocol_version,
                     authorized_worker_ids=allowed,
                 )
             except WorkerRegistryError:
+                if isinstance(self._worker_registry, SQLiteWorkerRegistry):
+                    self._finish_worker_audit_operation()
                 raise HostRuntimeError("host worker candidate lookup was rejected") from None
 
     def get_worker_reservation_for_task(
@@ -837,10 +874,20 @@ class CapriHostRuntime:
         with self._worker_reservation_lock:
             self._purge_worker_reservation_contexts()
             try:
-                reservation = self._worker_registry.get_reservation_for_task(
-                    context.principal_id, task_id,
-                )
+                if isinstance(self._worker_registry, SQLiteWorkerRegistry):
+                    self._begin_worker_audit_operation()
+                    reservation, expired = self._worker_registry.get_reservation_for_task(
+                        context.principal_id, task_id, include_expired=True,
+                    )
+                    self._record_expired_worker_reservations(expired)
+                    self._finish_worker_audit_operation()
+                else:
+                    reservation = self._worker_registry.get_reservation_for_task(
+                        context.principal_id, task_id,
+                    )
             except Exception:
+                if isinstance(self._worker_registry, SQLiteWorkerRegistry):
+                    self._worker_audit_healthy = False
                 raise HostRuntimeError("durable worker reservation recovery failed") from None
             if reservation is None:
                 return None
@@ -878,13 +925,24 @@ class CapriHostRuntime:
             self._purge_worker_reservation_contexts()
             self._begin_worker_audit_operation()
             try:
-                reservation = self._worker_registry.reserve_eligible(
-                    capability,
-                    protocol_version=protocol_version,
-                    authorized_worker_ids=allowed,
-                    principal_id=context.principal_id,
-                    task_id=task_id,
-                )
+                if isinstance(self._worker_registry, SQLiteWorkerRegistry):
+                    reservation, expired = self._worker_registry.reserve_eligible(
+                        capability,
+                        protocol_version=protocol_version,
+                        authorized_worker_ids=allowed,
+                        principal_id=context.principal_id,
+                        task_id=task_id,
+                        include_expired=True,
+                    )
+                    self._record_expired_worker_reservations(expired)
+                else:
+                    reservation = self._worker_registry.reserve_eligible(
+                        capability,
+                        protocol_version=protocol_version,
+                        authorized_worker_ids=allowed,
+                        principal_id=context.principal_id,
+                        task_id=task_id,
+                    )
             except WorkerRegistryError:
                 self._finish_worker_audit_operation()
                 raise HostRuntimeError("host worker reservation was rejected") from None
@@ -1038,9 +1096,16 @@ class CapriHostRuntime:
             heartbeat_snapshot = self.heartbeat_worker(observer_credential, worker_id)
             self._begin_worker_audit_operation()
             try:
-                committed = self._worker_registry.commit_reservation(
-                    stored.reservation, authenticated_worker_id=worker_id,
-                )
+                if isinstance(self._worker_registry, SQLiteWorkerRegistry):
+                    committed, expired = self._worker_registry.commit_reservation(
+                        stored.reservation, authenticated_worker_id=worker_id,
+                        include_expired=True,
+                    )
+                    self._record_expired_worker_reservations(expired)
+                else:
+                    committed = self._worker_registry.commit_reservation(
+                        stored.reservation, authenticated_worker_id=worker_id,
+                    )
             except WorkerRegistryError:
                 self._finish_worker_audit_operation()
                 self._purge_worker_reservation_contexts()
@@ -1120,15 +1185,31 @@ class CapriHostRuntime:
             self._begin_worker_audit_operation()
             try:
                 if stored.reservation.committed:
-                    released = self._worker_registry.release_reservation(
-                        stored.reservation,
-                        authenticated_worker_id=worker_id,
-                        observed_unreserved_in_flight=observed_in_flight,
-                    )
+                    if isinstance(self._worker_registry, SQLiteWorkerRegistry):
+                        released, expired = self._worker_registry.release_reservation(
+                            stored.reservation,
+                            authenticated_worker_id=worker_id,
+                            observed_unreserved_in_flight=observed_in_flight,
+                            include_expired=True,
+                        )
+                        self._record_expired_worker_reservations(expired)
+                    else:
+                        released = self._worker_registry.release_reservation(
+                            stored.reservation,
+                            authenticated_worker_id=worker_id,
+                            observed_unreserved_in_flight=observed_in_flight,
+                        )
                 else:
-                    released = self._worker_registry.release_reservation(
-                        stored.reservation, authenticated_worker_id=worker_id,
-                    )
+                    if isinstance(self._worker_registry, SQLiteWorkerRegistry):
+                        released, expired = self._worker_registry.release_reservation(
+                            stored.reservation, authenticated_worker_id=worker_id,
+                            include_expired=True,
+                        )
+                        self._record_expired_worker_reservations(expired)
+                    else:
+                        released = self._worker_registry.release_reservation(
+                            stored.reservation, authenticated_worker_id=worker_id,
+                        )
             except WorkerRegistryError:
                 self._finish_worker_audit_operation()
                 raise HostRuntimeError("worker reservation release was rejected") from None
