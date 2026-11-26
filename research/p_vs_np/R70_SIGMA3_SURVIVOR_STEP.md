@@ -85,6 +85,8 @@ The natural bounded-arithmetic route is:
 4. Use S^3_2+sWPHP(PV_3), which supports Sigma-b-3 length induction and BB-Sigma-b-4, to iterate the successor step for O(log M_0) rounds.
 5. Check whether the resulting universal closure is within the exact forall-Sigma-b-3 conservation scope of Theorem 2.1, yielding a statement in T^2_2+rWPHP(PV_3).
 
+The terminal condition should also be encoded by a hash certificate, not by writing the raw statement “for every circuit C, C is absent from S_T.” The raw universal emptiness statement, existentially preceded by the history, risks an extra quantifier alternation. Instead include a certificate of S_T <=_delta 0. This is a positive Sigma-b-3 approximate-size statement; its soundness implies |S_T|=0. The terminal certificate and all stage certificates can be packed with the history into one leading existential string and a single universal verification block. This is the intended route to keep the final existential history statement in Sigma-b-3.
+
 The initial circuit universe has at most 2^(O(s log(n+s))) descriptions, so log M_0=O(s log(n+s)). Each round adds one n-bit formula and polynomially many hash-matrix bits; the total history remains polynomial length.
 
 ## 4. What this would and would not establish
