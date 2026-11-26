@@ -275,3 +275,12 @@ See [R73 solver-or-anti-checker dichotomy](R73_SOLVER_OR_ANTICHECKER_DICHOTOMY.m
 R73 keeps the alternative discarded in the conditional R70/R72 route: if no shrink formula exists, the R69 majority tuple itself yields a size-s³ SAT decision circuit. Otherwise, Theorem 3.17 supplies a certified survivor shrink. Iterating gives an unconditional existential disjunction: a SAT solver circuit, or a labelled decision anti-checker. The disjunction is a candidate Sigma-b-2(alpha) statement.
 
 This matches the broad semantic alternatives of Pich–Santhanam Theorem 7 but not its feasible generator. Their KPT discussion explicitly warns that existential replacement yields an adaptive list, and their feasible-MinMax discussion targets APC₁ precision. R73 is APC₃ / PV₃-level; no APC₁/PV₁ descent, S¹₂ proof, KPS EF certificate, or P≠NP result is claimed.
+
+
+# R74: labelled anti-checker / APC1 bottleneck
+
+See [R74 labelled APC1 gap](R74_LABELLED_APC1_GAP.md).
+
+R74 isolates the exact gap between the search anti-checker and Pich–Santhanam's labelled decision anti-checker. Search anti-checkers cover satisfiable inputs but a search failure caused by a false-positive restriction need not give a decision error on the fixed support. The direct decision route handles both error types but rises to APC₃/PV₃. The missing APC₁ result is a feasible MinMax theorem that enforces the Πᵇ₁ valid-label relation without a global SAT selector or APC₃ counting.
+
+No APC₁ MinMax theorem or P≠NP proof is claimed.
