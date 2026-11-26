@@ -623,9 +623,10 @@ class CapriHostRuntime:
                     )
             except HostRuntimeError:
                 # A rejected host load observation happens before the registry
-                # callback mutates state; close the operation marker and retain
-                # the specific validation error for the caller.
-                self._finish_worker_audit_operation()
+                # callback mutates state. An audit persistence failure, however,
+                # must leave the durable marker pending for reconciliation.
+                if self._worker_audit_healthy:
+                    self._finish_worker_audit_operation()
                 raise
             except WorkerRegistryError:
                 self._finish_worker_audit_operation()
