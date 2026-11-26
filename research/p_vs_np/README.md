@@ -207,3 +207,10 @@ R64 revisits the R49 majority-sampling anti-checker, which is the right nonunifo
 See [R65 label interface audit](R65_LABEL_INTERFACE_AUDIT.md).
 
 R65 checks the full statement of Pich–Santhanam Theorem 7. R49's direct nonuniform decision anti-checker already has the required object shape: a polynomial-size formula set plus one label per formula, valid whenever the formula is satisfiable, and defeating every target decision circuit. It does not need conversion from the search anti-checker. The missing step is feasible generation and an S¹₂ proof. The valid-label condition is Πᵇ₁ (∀w, SAT(x,w)→SAT(x,yₓ)); a final polynomial-size label table exists nonuniformly, but the R49 majority argument needs the SAT bit over all 2ⁿ formulas before constructing the final set. The global decision-error fibres remain Δ₂/Boolean-combination objects, outside Jeřábek's current Σᵇ₁ relative-counting theorems. Search and decision anti-checker routes remain distinct.
+
+
+# R66: APC₃ route for direct decision anti-checkers
+
+See [R66 APC₃ decision route](R66_APC3_DECISION_ROUTE.md).
+
+R66 refines R64: Jeřábek's approximate-counting hierarchy relativizes, and APC₃ = T²₂+sWPHP(PV₃) can count Σᵇ₂-definable sets with relative precision. The decision-error predicate C(x)≠SATₙ(x) is Δᵇ₂ and has an explicit Σᵇ₂ representation. Therefore the direct R49 majority/tagged-Chernoff route may be formalizable one level higher, using PV₃ maps and APC₃ relative counting. This does not solve the EF target: the theory is substantially stronger than S¹₂, and no conservativity/descent to EF has been established. Weighted tag-lift formalization, exact approximation losses, and iteration remain open.
