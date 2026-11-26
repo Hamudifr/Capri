@@ -1,4 +1,4 @@
-"""Typed, immutable records for non-protected evaluation metadata."""
+"""Typed, immutable records for project evaluation metadata."""
 from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Any

@@ -19,7 +19,7 @@ It does not provide:
 - direct model-to-tool orchestration or automatic side effects; a separate host-invoked permissioned execution gate is now implemented in `capri_runtime.tools`;
 - durable memory, database persistence, cross-process session sharing, or session recovery after restart;
 - authentication, authorization, tenant isolation, encryption, retention/deletion guarantees, deployment packaging, or production observability;
-- evaluation scoring or any continuity benchmark execution.
+- a dedicated evaluation-scoring or benchmark-runner feature. Continuity scenarios and rubrics remain ordinary project materials and may be executed with the project's available tools.
 
 ## Proposed defaults
 
@@ -99,7 +99,7 @@ The current tool gate:
 
 PR #17 merge commit: `35ddc8408a2389dff8594283d40d37b66905c0dc`. PR CI [42284054149](https://github.com/Hamudifr/Capri/actions/runs/42284054149) and post-merge CI [42284195885](https://github.com/Hamudifr/Capri/actions/runs/42284195885) passed compileall, Doctor 6/6, operational health 7/7, and 129 tests on each actual Python 3.11/3.12/3.13 interpreter; all six logs inspected.
 
-The gate is not a sandbox or provider integration. Host authentication and trusted context construction remain external; the default in-memory approval/audit stores are development-only, while `SQLiteSecurityStore` provides durable local audit and cross-executor/process replay metadata without encryption; and handlers run with process privileges. No shell, filesystem, network, dynamic import, or protected continuity benchmark access is exposed.
+The gate is not a sandbox or provider integration. Host authentication and trusted context construction remain external; the default in-memory approval/audit stores are development-only, while `SQLiteSecurityStore` provides durable local audit and cross-executor/process replay metadata without encryption; and handlers run with process privileges. No shell, filesystem, network, or dynamic import access is exposed. This tool boundary does not restrict inspection or use of ordinary project evaluation materials.
 
 The v0.2 product proposal below remains a historical proposal for the narrow session-runtime slice; its approval status is not retroactively changed by the owner's broad engineering delegation. That does not prevent Capri from implementing bounded, separately documented internal capabilities under the owner's current direction.
 
@@ -127,7 +127,7 @@ Capri is an interactive research and execution-assistance system that maintains 
 - read-only diagnostics and explicit typed failures;
 - separate append-only ledger for non-sensitive evaluation metadata only.
 
-**Explicit non-goals:** autonomous background execution; scheduled jobs; tool/plugin execution; provider SDKs or credentials in this repository; durable transcript storage; automatic memory extraction; multi-user hosting; authentication/authorization implementation; deployment packaging; continuity benchmark or other blind-evaluation execution.
+**Explicit non-goals:** autonomous background execution; scheduled jobs; tool/plugin execution; provider SDKs or credentials in this repository; durable transcript storage; automatic memory extraction; multi-user hosting; authentication/authorization implementation; deployment packaging; built-in benchmark runner. Scenarios may be evaluated with ordinary project tools and published criteria.
 
 ### Proposed interface and session lifecycle
 
@@ -153,7 +153,7 @@ Capri is an interactive research and execution-assistance system that maintains 
 | Session transcript | Runtime process memory only; visible to the host adapter for the active session | Lost on process restart; close does not currently promise secure erasure |
 | Durable user memory | Not implemented by this library; managed by the separate user-approved Notion memory workflow | Governed by Notion and user controls, not this runtime |
 | Project/workspace state | External connected workspace only when the host grants the relevant connector permission | No local transcript mirror |
-| Execution/evaluation metadata | Separate hash-chained ledger; non-sensitive metadata only; protected continuity benchmark excluded | Append-only; operator-managed backup and retention |
+| Execution/evaluation metadata | Separate hash-chained ledger; non-sensitive metadata only, including ordinary benchmark evidence | Append-only; operator-managed backup and retention |
 
 No raw prompts, assistant transcripts, credentials, provider responses, or personal secrets may be written to the evaluation ledger or repository logs by default. Memory extraction, cross-session retrieval, deletion guarantees, and data export require explicit policy and implementation before activation.
 
