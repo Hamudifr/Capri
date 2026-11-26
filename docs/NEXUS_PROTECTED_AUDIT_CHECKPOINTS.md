@@ -1,6 +1,6 @@
 # Nexus Independently Protected Audit Checkpoints
 
-**Status:** architecture proposal; not implemented and not production authorization  
+**Status:** architecture proposal; local lifecycle-chain phase 1 is implemented in Draft PR #269; external signing/checkpoint trust is not implemented and this is not production authorization  
 **Scope:** independent authenticity and rollback detection for both durable Nexus registry events and host lifecycle audit events  
 **Tracker:** [issue #246](https://github.com/Hamudifr/Capri/issues/246)  
 **Related:** [worker registry design](superpowers/specs/2026-11-25-sqlite-worker-registry.md), [supervisor recovery contract](WORKER_SUPERVISOR_RECOVERY.md), [security review](SECURITY_REVIEW.md)
@@ -114,11 +114,11 @@ The external store retains the exact signed envelope, signature, generation, fen
 
 ### Cross-store host lifecycle audit coverage
 
-The registry event chain is not the only worker audit source. Host lifecycle events are written separately to `SQLiteSecurityStore.audit_events`. Those rows validate each event's `argument_digest` against canonical `metadata_json` when present and have append-only triggers, but they do not have a deterministic global sequence/hash chain. The per-row digest is not a chain and does not prevent an attacker from replacing or reordering the complete table. A checkpoint that binds only `worker_registry_events` must be described as authenticating only that stream; it must not imply that the host lifecycle audit history is also protected.
+The registry event chain is not the only worker audit source. Host lifecycle events are written separately to `SQLiteSecurityStore.audit_events`. Draft PR [#269](https://github.com/Hamudifr/Capri/pull/269) now adds a local deterministic sequence and rolling SHA-256 chain to this stream, binding event identity/order, timestamp, principal, event type, status, error/resource/task fields and the canonical metadata digest. It routes ordinary writes, supervisor reconciliation acknowledgements and approval lifecycle writes through the same atomic append helper, and validates the chain at startup, during integrity checks and during backup validation. This local unkeyed chain detects inconsistent/partial rewriting, but does not authenticate history against a privileged writer able to rewrite the complete database and recompute the chain. A checkpoint that binds only `worker_registry_events` must still be described as authenticating only that stream; it must not imply that the host lifecycle audit history is independently protected.
 
 The production target is the composite envelope shown above, with both store identities and both stream positions. Do not mark the complete worker-lifecycle audit gate satisfied until both streams are chained and checkpointed.
 
-The lifecycle stream needs its own deterministic, monotonic sequence and rolling digest. Each chained record should bind the event ID, event order, timestamp, principal, event type, status, error code, resource type/ID, task ID, and canonical metadata digest. Do not treat the current per-row `argument_digest` as a chain. A dedicated worker-lifecycle chain table/state row or equivalent strictly validated schema may implement this; backup validation, integrity checks, and restore semantics must cover it.
+The local lifecycle chain phase 1 is implemented in Draft PR #269 (exact head `db4f42d60419cc4e6fb00685f4fa373150c87118`; Repository Quality run 45888281284 passed 1,055 tests). It uses chain columns on `audit_events` plus a singleton state row, strict sequence/index/trigger validation, and atomic append/head updates. The per-row `argument_digest` remains a separate event-field digest, not the chain. Backup and integrity validation are covered; paired cross-store restore semantics remain unimplemented. This local chain is not an external authenticity anchor.
 
 Both database identities must be stable, random installation identities. A filesystem path is not an identity. A copied database retains its identity for rollback detection; intentional installation cloning requires explicit re-enrolment and a new checkpoint scope.
 
@@ -265,7 +265,7 @@ Use deterministic fake signer and checkpoint-store adapters in offline CI. Test 
 
 ## 10. Incremental implementation plan
 
-1. **Lifecycle chain first:** add a deterministic sequence/hash chain for `SQLiteSecurityStore.audit_events`, with strict schema validation, append-only enforcement, integrity checks and backup/restore coverage.
+1. **Lifecycle chain first (phase 1 drafted):** PR #269 adds the deterministic local sequence/hash chain, strict schema validation, append-only enforcement, integrity checks and backup validation. Remaining work is paired cross-store restore semantics and an independently protected composite checkpoint.
 2. **Contracts and data model:** add typed signer, verifier and checkpoint-store protocols plus immutable composite-envelope validation. No real key provider.
 3. **Verifier first:** verify the external latest composite checkpoint against both local chains; add rollback, tamper, mixed-backup and cross-store consistency tests using deterministic fakes.
 4. **Checkpoint writer:** implement generation-fenced append, idempotent timeout recovery and explicit checkpoint health state.
