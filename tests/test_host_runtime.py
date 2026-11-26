@@ -1885,8 +1885,11 @@ class CapriHostRuntimeTests(unittest.TestCase):
         def cross_ttl_before_commit(*args, **kwargs):
             # Host purge and heartbeat see a live hold. The commit transaction
             # itself crosses the TTL and must return the expired row to HostRuntime.
-            now["value"] = pending.reservation.expires_at_ns + 1
-            wall["value"] += 1_000_000_001 + 1
+            # Use monotonic and wall-clock values far beyond the persisted expiry.
+            # SQLite reload reconstructs an already-expired hold at mono_now,
+            # and the operation's pre-callback sweep must remove it.
+            now["value"] = 8_000_000_000_000_000_000
+            wall["value"] = 8_000_000_000_000_000_000
             return original_commit(*args, **kwargs)
 
         registry.commit_reservation = cross_ttl_before_commit
@@ -1939,8 +1942,11 @@ class CapriHostRuntimeTests(unittest.TestCase):
         def cross_ttl_before_release(*args, **kwargs):
             # The host pre-sweep has finished while the wrapper is still live.
             # The registry release transaction itself observes the elapsed TTL.
-            now["value"] = pending.reservation.expires_at_ns + 1
-            wall["value"] += 1_000_000_001 + 1
+            # Use monotonic and wall-clock values far beyond the persisted expiry.
+            # SQLite reload reconstructs an already-expired hold at mono_now,
+            # and the operation's pre-callback sweep must remove it.
+            now["value"] = 8_000_000_000_000_000_000
+            wall["value"] = 8_000_000_000_000_000_000
             return original_release(*args, **kwargs)
 
         registry.release_reservation = cross_ttl_before_release
