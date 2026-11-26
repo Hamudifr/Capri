@@ -131,6 +131,29 @@ class SQLiteSessionStoreTests(unittest.TestCase):
             session.session_id, "principal-alice", "worker-alice"
         ))
 
+    def test_closed_sessions_cannot_renew_turn_leases(self):
+        owned = self.store.create_for_principal("principal-alice")
+        self.store.claim_turn_lease_for_principal(
+            owned.session_id, "principal-alice", "owned-worker", 30
+        )
+        self.store.close_for_principal(owned.session_id, "principal-alice")
+        with self.assertRaises(SessionClosedError):
+            self.store.renew_turn_lease_for_principal(
+                owned.session_id, "principal-alice", "owned-worker", 30
+            )
+        self.assertTrue(self.store.release_turn_lease_for_principal(
+            owned.session_id, "principal-alice", "owned-worker"
+        ))
+
+        legacy = self.store.create()
+        self.store.claim_turn_lease(legacy.session_id, "legacy-worker", 30)
+        self.store.close(legacy.session_id)
+        with self.assertRaises(SessionClosedError):
+            self.store.renew_turn_lease(legacy.session_id, "legacy-worker", 30)
+        self.assertTrue(self.store.release_turn_lease(
+            legacy.session_id, "legacy-worker"
+        ))
+
     def test_principal_lease_operations_authorize_with_one_connection(self):
         session = self.store.create_for_principal("principal-alice")
         original_connect = self.store._connect
