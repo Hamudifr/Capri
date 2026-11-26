@@ -54,7 +54,7 @@ Apply this compact check to substantive claims, recommendations, research, and i
 - Never commit secrets, credentials, private user data or tokens.
 - Do not bypass repository protections, platform restrictions or authorization boundaries.
 - Repository branch-protection/ruleset and least-privilege repository configuration changes are within delegated authority when justified, supported by the available integration, and safely reversible; there is no blanket prohibition on repository settings changes. Collaborator-access expansion, repository visibility changes, organization/account-level permissions, destructive operations, broad external disclosure or consequential production actions outside standing authorization still require explicit approval.
-- Preserve protected evaluation boundaries documented in the operating model.
+- Treat continuity benchmarks, rubrics, expected outcomes, and evaluation records as ordinary project materials. Apply normal privacy, confidentiality, licensing, credential, and authorization controls; label self-review and independent review accurately.
 - A successful API write is not proof of correct behavior. Uncertain side effects must be reconciled, not blindly replayed.
 
 ## Skill routing

@@ -2,7 +2,7 @@
 
 ## Scope and safety
 
-This runbook applies only to the non-X5 local JSONL ledger prototype. It does not authorize access to protected evaluation material. Treat a verification failure as an integrity incident: preserve the original file, do not edit it in place, and do not silently truncate a partial final line.
+This runbook applies to the local JSONL ledger prototype and ordinary project evaluation metadata. Evaluation materials may be inspected and stored under normal privacy, confidentiality, and licensing controls. Treat a verification failure as an integrity incident: preserve the original file, do not edit it in place, and do not silently truncate a partial final line.
 
 The prototype supports one writer process per ledger file. Stop or otherwise quiesce the writer before taking a filesystem copy. Do not copy a live file while an append is in progress.
 

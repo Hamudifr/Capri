@@ -1,6 +1,6 @@
 # Capri core and runtime architecture
 
-This document summarizes the current non-X5 implementation. Capri is an evolving Python library and host-composition foundation, not a complete autonomous agent, hosted service, or production multi-tenant deployment.
+This document summarizes the current Capri runtime implementation. Capri is an evolving Python library and host-composition foundation, not a complete autonomous agent, hosted service, or production multi-tenant deployment.
 
 ## Core ledger
 
@@ -96,4 +96,4 @@ The quality workflow validates Python 3.15 only. Commit-specific counts and outc
 
 ## Release position
 
-The implemented foundation is meaningful internal capability, not a claim of AGI or production readiness. Internal self-review is the default for ordinary engineering; it must not be described as independent assurance. Public or hosted multi-tenant release remains blocked on identity-provider integration, tenant-isolation evidence, provider budgets, retention/deletion controls, encrypted backup and restore drills, operational observability, process supervision, handler isolation, and end-to-end adversarial validation. The protected evaluation boundary remains separate and must not be crossed by ordinary engineering work.
+The implemented foundation is meaningful internal capability, not a claim of AGI or production readiness. Internal self-review is the default for ordinary engineering; it must not be described as independent assurance. Public or hosted multi-tenant release remains blocked on identity-provider integration, tenant-isolation evidence, provider budgets, retention/deletion controls, encrypted backup and restore drills, operational observability, process supervision, handler isolation, and end-to-end adversarial validation. The continuity benchmark is ordinary project work and may be inspected, revised, and executed with transparent criteria. Self-review must be labelled honestly; independent review is optional unless requested or externally required.

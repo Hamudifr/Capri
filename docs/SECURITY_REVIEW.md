@@ -1,8 +1,8 @@
-# Non-X5 runtime security review
+# Runtime security review
 
 **Status: DESIGN REVIEW / PARTIALLY IMPLEMENTED CONTROLS / NOT A SECURITY CERTIFICATION**
 
-This document records the current trust boundaries, verified controls, and unresolved risks for the non-X5 runtime foundation. It does not define protected evaluation behavior.
+This document records the current trust boundaries, verified controls, and unresolved risks for the Capri runtime foundation.
 
 ## Scope and assets
 
@@ -79,7 +79,7 @@ The current task quarantine state intentionally has no automatic reconciliation/
 
 ## Required abuse-case tests before enabling real-world model-driven actions
 
-Use harmless fixtures and instrumented fake adapters/tools. Do not use real destructive actions or protected evaluation material.
+Use harmless fixtures and instrumented fake adapters/tools. Do not use real destructive actions or private, credential-bearing, customer-confidential, or otherwise restricted data.
 
 - Session ID guessing/reuse cannot cross user or tenant boundaries.
 - User-supplied or retrieved instructions cannot change tool authorization.
@@ -98,9 +98,9 @@ The quality workflow uses minimal `contents: read` permissions and immutable act
 
 ## Release position
 
-The runtime is not approved for production or multi-tenant deployment. The tool executor is not a sandbox. The in-memory audit sink/default approval store are development foundations; `SQLiteSecurityStore` supplies durable local audit/replay metadata but is not encrypted and still requires host-managed backup, retention, monitoring, and private filesystem ownership. Production or multi-tenant deployment requires host-level identity and authorization, tenant isolation, explicit retention/deletion behavior, operational budgets, live provider reliability/budget/timeout validation and credential lifecycle controls, audit-store backup/retention/restore, cryptographically authenticated approval issuance, handler isolation/timeouts, end-to-end/adversarial tests, observability, backup and rollback capability, and a documented Capri internal release review. External independent review is not a prerequisite for ordinary internal engineering; retain it only when a specific contract, regulation, customer commitment, or protected evaluation explicitly requires it. This document is Capri's internal review, not a security certification.
+The runtime is not approved for production or multi-tenant deployment. The tool executor is not a sandbox. The in-memory audit sink/default approval store are development foundations; `SQLiteSecurityStore` supplies durable local audit/replay metadata but is not encrypted and still requires host-managed backup, retention, monitoring, and private filesystem ownership. Production or multi-tenant deployment requires host-level identity and authorization, tenant isolation, explicit retention/deletion behavior, operational budgets, live provider reliability/budget/timeout validation and credential lifecycle controls, audit-store backup/retention/restore, cryptographically authenticated approval issuance, handler isolation/timeouts, end-to-end/adversarial tests, observability, backup and rollback capability, and a documented Capri internal release review. External independent review is not a prerequisite for ordinary internal engineering; retain it only when a specific contract, regulation, customer commitment, or a formal external obligation explicitly requires it. This document is Capri's internal review, not a security certification.
 
-No X5 instructions, rubrics, expected answers, hidden criteria, scoring keys, or evidence are part of this document or the implementation.
+Evaluation scenarios and criteria are ordinary project data; protect only information that is genuinely private, confidential, credential-bearing, or restricted by law or license.
 
 
 ## Historical verification notes

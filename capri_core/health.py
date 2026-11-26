@@ -19,14 +19,14 @@ _COMPONENTS: tuple[dict[str, Any], ...] = (
     {"id": "ci_workflow", "name": "CI workflow", "check": "ci_workflow_readable", "depends_on": ("repository_structure",)},
     {"id": "ci_actions", "name": "CI action integrity", "check": "ci_actions_pinned", "depends_on": ("ci_workflow",)},
     {"id": "ci_permissions", "name": "CI permissions", "check": "ci_permissions", "depends_on": ("ci_workflow",)},
-    {"id": "recovery_ci", "name": "Recovery CI coverage", "check": "recovery_ci_coverage", "depends_on": ("ci_workflow",)},
+    {"id": "pull_request_ci", "name": "Pull-request CI coverage", "check": "pull_request_ci_coverage", "depends_on": ("ci_workflow",)},
     {
         "id": "developer_baseline",
         "name": "Developer baseline",
         "check": None,
         "depends_on": (
             "python_environment", "repository_structure", "ci_workflow",
-            "ci_actions", "ci_permissions", "recovery_ci",
+            "ci_actions", "ci_permissions", "pull_request_ci",
         ),
     },
 )
