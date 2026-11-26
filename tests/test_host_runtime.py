@@ -1802,12 +1802,13 @@ class CapriHostRuntimeTests(unittest.TestCase):
 
     def test_sqlite_policy_cleanup_audits_operation_local_expiry(self):
         now = {"value": 15_000_000_000}
+        wall = {"value": 1_800_000_000_000_000_000}
         registry = SQLiteWorkerRegistry(
             self.task_store,
             heartbeat_ttl_ms=5_000,
             reservation_ttl_ms=1_000,
             clock_ns=lambda: now["value"],
-            clock_wall_ns=lambda: 1_800_000_000_000_000_000,
+            clock_wall_ns=lambda: wall["value"],
         )
         audit = SQLiteSecurityStore(os.path.join(self.temp.name, "policy-cleanup-expiry-audit.sqlite3"))
         host = self.make_worker_host(
@@ -1829,6 +1830,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
 
         def fail_policy_after_ttl(principal_id, task_id, capability):
             now["value"] = pending.reservation.expires_at_ns + 2
+            wall["value"] += 1_000_000_001
             raise HostRuntimeError("simulated policy lookup failure")
 
         host._worker_policy_allowlist = fail_policy_after_ttl
