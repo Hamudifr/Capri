@@ -417,7 +417,7 @@ class DurableWorkerRestartTests(unittest.TestCase):
             audit_after_second_restart.worker_lifecycle_reconciliation_required()
         )
         self.assertIsNone(
-            SQLiteWorkerRegistry(tasks_after_second_restart).get_reservation(
+            registry_for(tasks_after_second_restart).get_reservation(
                 pending.reservation.token
             )
         )
