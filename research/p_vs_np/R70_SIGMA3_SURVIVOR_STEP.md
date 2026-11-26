@@ -82,14 +82,14 @@ The natural bounded-arithmetic route is:
 1. Relativize Jeřábek's counting toolbox to Sigma-b-2 sets, using PV_3 and T^2_2+sWPHP(PV_3).
 2. Use Theorem 3.17 for the positive Sigma-b-3 successor statement. Its proof uses BB-Sigma-b-3(alpha); after the Sigma-b-1 substitution this becomes BB-Sigma-b-4.
 3. Encode the history of selected formulas and each stage's approximate-size/hash certificate in one polynomial-length string.
-4. Use S^3_2+sWPHP(PV_3), which supports Sigma-b-3 length induction and BB-Sigma-b-4, to iterate the successor step for O(log M_0) rounds.
+4. Use S^3_2+BB-Sigma-b-4+sWPHP(PV_3) to iterate the successor step for O(log M_0) rounds.
 5. Check whether the resulting universal closure is within the exact forall-Sigma-b-3 conservation scope of Theorem 2.1, yielding a statement in T^2_2+rWPHP(PV_3).
 
 At parameter 0, Definition 3.1 explicitly stipulates S_T <=_delta 0 iff S_T is empty; it is not a hash-matrix certificate. This does not raise the final formula beyond Sigma-b-3: S_T(C) is Sigma-b-1(alpha), so emptiness forall C not-in-S_T(C) is Pi-b-1(alpha). The stage hash-isolation verifications are also Pi-b-1(alpha). Pack the history and all stage hash matrices into one leading existential string, then combine the universal verifications and terminal emptiness into one Pi-b-1(alpha) block. The resulting history-existence statement is Sigma-b-2(alpha), hence Sigma-b-3 after alpha is instantiated by SAT. This is the correct terminal encoding; do not describe S_T <=_delta 0 as a positive hash certificate.
 
 ### Conservation-formula check
 
-Let Hard(n,s) be the assertion that every size-s^3 decision circuit has an n-bit counterexample. Since Err(C,x) is Delta-b-2, Hard is Pi-b-3; its negation is Sigma-b-3. If the packed history certificate Cert(n,s,H) is Sigma-b-3 as above, then Hard -> exists H Cert is equivalent to not-Hard OR exists H Cert, also Sigma-b-3. Its universal closure over n,s is therefore a candidate forall-Sigma-b-3 statement. Jeřábek Theorem 2.1 with i=1, followed by substituting the SAT Sigma-b-1 predicate for alpha, gives exactly the conservation route S^3_2+sWPHP(PV_3)+BBΣᵇ₄ to T^2_2+rWPHP(PV_3). This matches the target class; the remaining task is to prove that the fully packed history certificate really has the stated Sigma-b-3 form and that S^3_2 proves it.
+Let Hard(n,s) be the assertion that every size-s^3 decision circuit has an n-bit counterexample. Since Err(C,x) is Delta-b-2, Hard is Pi-b-3; its negation is Sigma-b-3. If the packed history certificate Cert(n,s,H) is Sigma-b-3 as above, then Hard -> exists H Cert is equivalent to not-Hard OR exists H Cert, also Sigma-b-3. Its universal closure over n,s is therefore a candidate forall-Sigma-b-3 statement. Jeřábek Theorem 2.1 with i=1, followed by substituting the SAT Sigma-b-1 predicate for alpha, gives exactly the conservation route from S^3_2+BB-Sigma-b-4+sWPHP(PV_3) to T^2_2+rWPHP(PV_3). This matches the target class; the remaining task is to prove that the fully packed history certificate really has the stated Sigma-b-3 form and that S^3_2 proves it.
 
 The initial circuit universe has at most 2^(O(s log(n+s))) descriptions, so log M_0=O(s log(n+s)). Each round adds one n-bit formula and polynomially many hash-matrix bits; the total history remains polynomial length.
 
@@ -113,7 +113,7 @@ In particular, the anti-checker is conditional on the same circuit-hardness prem
 2. Verify the PV_3 partition bijection S <-> F_x dotcup G_x and its use in Corollary 3.11, including the exact M_sharp ceiling.
 3. Prove the large-branch A/M inequality with all ceilings, and verify the small-branch enumeration/deduplication circuit bound.
 4. Write the exact Sigma-b-3 history invariant, including the stage hash certificates and Theorem 3.21 parameter maps.
-5. Verify the S^3_2+sWPHP(PV_3) induction and BB-Sigma-b-4 collection step.
+5. Verify the S^3_2+BB-Sigma-b-4+sWPHP(PV_3) induction and collection step.
 6. Complete the packed history certificate and verify its universal closure is genuinely forall-Sigma-b-3; then apply Theorem 2.1's i=1 conservation theorem after substituting SAT for alpha.
 7. Investigate PV_1/S^1_2 descent and the KPS/EF bridge separately.
 
