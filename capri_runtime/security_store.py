@@ -677,63 +677,6 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
             finally:
                 connection.close()
 
-nstance(event.error_code, str) or len(event.error_code) > 128
-            or contains_surrogate(event.error_code)
-        ):
-            raise ToolValidationError("audit event error code is invalid")
-        optional_fields = (
-            (event.resource_type, 64), (event.resource_id, 256), (event.task_id, 128),
-        )
-        if any(
-            value is not None and (
-                not isinstance(value, str) or not value or len(value) > limit
-                or contains_surrogate(value)
-            )
-            for value, limit in optional_fields
-        ):
-            raise ToolValidationError("audit event resource metadata is invalid")
-        if event.metadata_json is None:
-            if any(value is not None for value, _ in optional_fields):
-                raise ToolValidationError("audit resource fields require canonical metadata JSON")
-        else:
-            if (
-                not isinstance(event.metadata_json, str)
-                or len(event.metadata_json.encode("utf-8")) > 16_384
-                or contains_surrogate(event.metadata_json)
-                or event.resource_type is None or event.resource_id is None
-            ):
-                raise ToolValidationError("audit event metadata JSON is invalid")
-            try:
-                metadata = json.loads(event.metadata_json)
-                canonical_metadata = json.dumps(
-                    metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
-                )
-            except (TypeError, ValueError, json.JSONDecodeError):
-                raise ToolValidationError("audit event metadata JSON is invalid") from None
-            if (
-                not isinstance(metadata, dict)
-                or canonical_metadata != event.metadata_json
-                or hashlib.sha256(event.metadata_json.encode("utf-8")).hexdigest()
-                    != event.argument_digest
-            ):
-                raise ToolValidationError("audit event metadata digest or canonical form is invalid")
-        with self._lock:
-            connection = self._connect()
-            try:
-                connection.execute("BEGIN IMMEDIATE")
-                _append_audit_event(connection, (
-                    event.event_id, event.timestamp, event.principal_id,
-                    event.tool_name, event.argument_digest, event.status,
-                    event.error_code, event.resource_type, event.resource_id,
-                    event.task_id, event.metadata_json,
-                ))
-                connection.commit()
-            except Exception:
-                connection.rollback()
-                raise
-            finally:
-                connection.close()
-
     def consume(self, grant: ApprovalGrant, now: datetime) -> bool:
         if not isinstance(grant, ApprovalGrant):
             return False
