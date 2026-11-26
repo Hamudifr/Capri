@@ -5,6 +5,7 @@ owns authentication callbacks, process supervision, credentials, and lifecycle.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 import hashlib
 import json
@@ -796,6 +797,42 @@ class CapriHostRuntime:
                     "worker reservation state changed outside the trusted host gateway; reconciliation is required"
                 )
 
+    @contextmanager
+    def _capture_worker_registry_expirations(self):
+        """Audit expirations performed inside a host-managed SQLite operation."""
+        registry = self._worker_registry
+        if not isinstance(registry, SQLiteWorkerRegistry):
+            yield
+            return
+        with registry.capture_expired_reservations() as expired:
+            try:
+                yield
+            finally:
+                for reservation in expired:
+                    context = self._worker_reservation_contexts.pop(reservation.token, None)
+                    if context is not None and (
+                        context.principal_id != reservation.principal_id
+                        or context.task_id != reservation.task_id
+                        or context.reservation.worker_id != reservation.worker_id
+                    ):
+                        self._worker_audit_healthy = False
+                        raise HostRuntimeError(
+                            "expired worker reservation context changed; reconciliation is required"
+                        )
+                    self._record_worker_lifecycle_event(
+                        "worker.reservation.expired",
+                        reservation.worker_id,
+                        principal_id=reservation.principal_id or "host",
+                        task_id=reservation.task_id,
+                        capability=reservation.capability,
+                        protocol_version=reservation.protocol_version,
+                        descriptor_revision=reservation.descriptor_revision,
+                        reservation_token=reservation.token,
+                        expires_at_ns=reservation.expires_at_ns,
+                        status="expired",
+                        error_code="reservation_ttl_elapsed",
+                    )
+
     def get_worker_candidates(
         self, credential: Any, task_id: str, capability: str, protocol_version: int,
     ) -> tuple[WorkerSnapshot, ...]:
@@ -813,14 +850,22 @@ class CapriHostRuntime:
         allowed = self._worker_policy_allowlist(context.principal_id, task_id, capability)
         with self._worker_reservation_lock:
             self._purge_worker_reservation_contexts()
+            self._begin_worker_audit_operation()
             try:
-                return self._worker_registry.eligible(
-                    capability,
-                    protocol_version=protocol_version,
-                    authorized_worker_ids=allowed,
-                )
+                with self._capture_worker_registry_expirations():
+                    candidates = self._worker_registry.eligible(
+                        capability,
+                        protocol_version=protocol_version,
+                        authorized_worker_ids=allowed,
+                    )
             except WorkerRegistryError:
+                self._finish_worker_audit_operation()
                 raise HostRuntimeError("host worker candidate lookup was rejected") from None
+            except Exception:
+                self._worker_audit_healthy = False
+                raise HostRuntimeError("host worker candidate lookup failed; reconciliation is required") from None
+            self._finish_worker_audit_operation()
+            return candidates
 
     def get_worker_reservation_for_task(
         self, credential: Any, task_id: str,
@@ -836,12 +881,16 @@ class CapriHostRuntime:
             raise HostRuntimeError("task is unavailable to the authenticated principal") from None
         with self._worker_reservation_lock:
             self._purge_worker_reservation_contexts()
+            self._begin_worker_audit_operation()
             try:
-                reservation = self._worker_registry.get_reservation_for_task(
-                    context.principal_id, task_id,
-                )
+                with self._capture_worker_registry_expirations():
+                    reservation = self._worker_registry.get_reservation_for_task(
+                        context.principal_id, task_id,
+                    )
             except Exception:
-                raise HostRuntimeError("durable worker reservation recovery failed") from None
+                self._worker_audit_healthy = False
+                raise HostRuntimeError("durable worker reservation recovery failed; reconciliation is required") from None
+            self._finish_worker_audit_operation()
             if reservation is None:
                 return None
             if (
