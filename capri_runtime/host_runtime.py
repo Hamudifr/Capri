@@ -1192,6 +1192,7 @@ class CapriHostRuntime:
             if stored.reservation.committed:
                 observed_in_flight = self._worker_in_flight(worker_id)
             self._begin_worker_audit_operation()
+            expired_during_release = False
             try:
                 if stored.reservation.committed:
                     if isinstance(self._worker_registry, SQLiteWorkerRegistry):
@@ -1202,6 +1203,9 @@ class CapriHostRuntime:
                             include_expired=True,
                         )
                         self._record_expired_worker_reservations(expired)
+                        expired_during_release = any(
+                            item.token == stored.reservation.token for item in expired
+                        )
                     else:
                         released = self._worker_registry.release_reservation(
                             stored.reservation,
@@ -1215,6 +1219,9 @@ class CapriHostRuntime:
                             include_expired=True,
                         )
                         self._record_expired_worker_reservations(expired)
+                        expired_during_release = any(
+                            item.token == stored.reservation.token for item in expired
+                        )
                     else:
                         released = self._worker_registry.release_reservation(
                             stored.reservation, authenticated_worker_id=worker_id,
@@ -1225,6 +1232,11 @@ class CapriHostRuntime:
             except Exception:
                 self._worker_audit_healthy = False
                 raise HostRuntimeError("worker reservation release failed; reconciliation is required") from None
+            if not released and expired_during_release:
+                # The registry transaction already emitted the authoritative expiry
+                # event. Do not misclassify that operation as a release.
+                self._finish_worker_audit_operation()
+                return False
             self._worker_reservation_contexts.pop(stored.reservation.token, None)
             self._record_worker_lifecycle_event(
                 "worker.reservation.released",
