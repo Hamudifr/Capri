@@ -16,7 +16,7 @@ Fix a current survivor set S of size-s decision circuits and a formula x. Partit
 
 Both predicates are Sigma-b-2 when the SAT decision predicate is represented by a Sigma-b-1 oracle alpha. The decision-error predicate is Delta-b-2, so the partition map C -> (C, Err(C,x)) is PV_3(alpha).
 
-Run Theorem 3.21 with enumeration precision epsilon_0 = delta = 1/(1000r). In the large branch, s_0 >= 100r, its ceiling gives M/s_0 <= 1 + delta + 1/s_0 <= 1 + kappa, where kappa = 1/(50r). Thus S <=_delta M is available at the same precision used by the incidence argument.
+Run Theorem 3.21 with enumeration precision epsilon_0 = delta = 1/(1000r). In the large branch, s_0 >= 100r, its ceiling gives M/s_0 <= 1 + delta + 1/s_0 <= 1 + kappa, where kappa = 1/(50r). The PV_3 surjection [M] -> S supplied by Theorem 3.21 gives S <=_delta M directly by Corollary 3.5, at the same precision used by the incidence argument.
 
 The partition map is a PV_3 bijection between S and the tagged disjoint union F_x dotcup G_x. Corollary 3.11 transfers the approximate upper bound through this bijection. Use
 M_sharp = ceil(M(1+delta))
