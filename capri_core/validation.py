@@ -1,4 +1,4 @@
-"""Fail-closed validation for non-protected evaluation metadata."""
+"""Fail-closed validation for project evaluation metadata."""
 from datetime import datetime
 from .models import EvaluationRecord, EvidenceStage, EvaluatorType, Status
 
