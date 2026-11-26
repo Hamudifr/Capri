@@ -1593,5 +1593,117 @@ class CapriHostRuntimeTests(unittest.TestCase):
                 registry, {"worker-token": "worker-1"}, lambda *args: {"worker-1"},
             )
 
+
+    def test_sqlite_registry_operation_expiry_is_audited_after_pre_sweep(self):
+        now = {"value": 10_000_000_000, "sequence": None}
+
+        def clock_ns():
+            sequence = now["sequence"]
+            if sequence is not None:
+                return sequence.pop(0)
+            return now["value"]
+
+        audit = SQLiteSecurityStore(os.path.join(self.temp.name, "expiry-audit.sqlite3"))
+        registry = SQLiteWorkerRegistry(
+            self.task_store, reservation_ttl_ms=1_000, clock_ns=clock_ns,
+        )
+        identities = {"worker-token": "worker-1"}
+        host = self.make_worker_host(
+            registry, identities, lambda *args: {"worker-1"}, audit_sink=audit,
+        )
+        host.register_worker(
+            "worker-token", WorkerDescriptor("worker-1", (1,), ("math.factorial",)),
+        )
+        host.heartbeat_worker("monitor-token", "worker-1")
+        task = self.task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {"scope": "expiry-race-read"}}],
+        )
+        pending = host.reserve_worker_candidate(
+            "alice-token", task.task_id, "math.factorial", 1,
+        )
+        self.assertIsNotNone(pending)
+
+        # The host pre-sweep sees the reservation just before expiry. The
+        # subsequent eligible() transaction crosses the TTL and must return
+        # the rows it expires to the host audit path.
+        expiry = pending.reservation.expires_at_ns
+        now["sequence"] = [expiry - 1, expiry]
+        candidates = host.get_worker_candidates(
+            "alice-token", task.task_id, "math.factorial", 1,
+        )
+        self.assertEqual(len(candidates), 1)
+        events = [
+            event for event in audit.events()
+            if event.tool_name == "worker.reservation.expired"
+        ]
+        self.assertEqual(len(events), 1)
+        self.assertNotIn(pending.reservation.token, host._worker_reservation_contexts)
+        self.assertFalse(any(
+            event.tool_name == "worker.reservation.context_missing"
+            for event in audit.events()
+        ))
+        self.assertFalse(audit.worker_lifecycle_reconciliation_required())
+        self.assertEqual(registry.integrity_check(), "ok")
+
+    def test_restarted_host_audits_expiry_from_mutating_registry_operation(self):
+        now = {"value": 20_000_000_000, "sequence": None}
+
+        def clock_ns():
+            sequence = now["sequence"]
+            if sequence is not None:
+                return sequence.pop(0)
+            return now["value"]
+
+        audit = SQLiteSecurityStore(os.path.join(self.temp.name, "restart-expiry-audit.sqlite3"))
+        registry = SQLiteWorkerRegistry(
+            self.task_store, reservation_ttl_ms=1_000, clock_ns=clock_ns,
+        )
+        identities = {"worker-token": "worker-1"}
+        original = self.make_worker_host(
+            registry, identities, lambda *args: {"worker-1"}, audit_sink=audit,
+        )
+        original.register_worker(
+            "worker-token", WorkerDescriptor("worker-1", (1,), ("math.factorial",)),
+        )
+        original.heartbeat_worker("monitor-token", "worker-1")
+        expired_task = self.task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {"scope": "restart-expiry"}}],
+        )
+        expired = original.reserve_worker_candidate(
+            "alice-token", expired_task.task_id, "math.factorial", 1,
+        )
+        self.assertIsNotNone(expired)
+
+        # Simulate a fresh HostRuntime with no process-local wrapper for the
+        # durable reservation. The expiry occurs inside reserve_eligible(),
+        # after its host pre-sweep has observed the reservation as active.
+        restarted = self.make_worker_host(
+            registry, identities, lambda *args: {"worker-1"}, audit_sink=audit,
+        )
+        next_task = self.task_store.create_for_principal(
+            "alice", [{"tool": "collect", "input": {"scope": "restart-next-reservation"}}],
+        )
+        expiry = expired.reservation.expires_at_ns
+        now["sequence"] = [expiry - 1, expiry]
+        replacement = restarted.reserve_worker_candidate(
+            "alice-token", next_task.task_id, "math.factorial", 1,
+        )
+        self.assertIsNotNone(replacement)
+        expiry_events = [
+            event for event in audit.events()
+            if event.tool_name == "worker.reservation.expired"
+        ]
+        self.assertEqual(len(expiry_events), 1)
+        self.assertNotIn(expired.reservation.token, restarted._worker_reservation_contexts)
+        self.assertIn(replacement.reservation.token, restarted._worker_reservation_contexts)
+        self.assertFalse(any(
+            event.tool_name == "worker.reservation.context_missing"
+            for event in audit.events()
+        ))
+        self.assertTrue(audit.worker_lifecycle_reconciliation_required())
+        self.assertTrue(restarted.release_worker_reservation("monitor-token", replacement))
+        self.assertFalse(audit.worker_lifecycle_reconciliation_required())
+        self.assertEqual(registry.integrity_check(), "ok")
+
 if __name__ == "__main__":
     unittest.main()
