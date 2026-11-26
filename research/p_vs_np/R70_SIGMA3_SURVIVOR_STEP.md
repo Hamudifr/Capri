@@ -62,10 +62,7 @@ To propagate the upper parameter without assuming a minimality property, use The
 
 ### Small branch
 
-If s_0 < 100r, Theorem 3.21 gives M <= 100r+2 and a PV_3 enumeration of S with at most M entries. Deduplicate to obtain the distinct survivor circuits. If no x had G_x <=_delta floor(M/2), then |G_x|>M/2>=|S|/2 for every x. The majority of the distinct S circuits would decide SAT. Its size is O(Ms)=O(rs)<=s^3, contradicting circuit hardness. Therefore some x has:
-G_x <=_delta floor(M/2).
-
-In this branch the filtered, deduplicated enumeration gives an exact list of the next survivors. Its next upper parameter can be taken to be |G_x|<=floor(M/2), avoiding a rounding stall when M is very small.
+If s_0 < 100r, Theorem 3.21 gives M <= 100r+2 and a PV_3 enumeration of S with at most M entries. Deduplicate to obtain the exact distinct survivor list and let N=|S|<=M. If N=0, terminate. If no x had |G_x|<=floor(N/2), then |G_x|>N/2 for every x. The majority of the N distinct S circuits would decide SAT. Its size is O(Ns)=O(rs)<=s^3, contradicting circuit hardness. Therefore some x has |G_x|<=floor(N/2), hence G_x<=_delta floor(N/2) by its explicit enumeration. Filtering and deduplicating the list gives an exact next survivor list with N_next=|G_x|<=floor(N/2). This avoids a rounding stall when N is very small and guarantees strict shrink.
 
 Thus every nonterminal round shrinks the upper survivor parameter by at least a factor 0.64. The process terminates after O(log M_0) rounds.
 
