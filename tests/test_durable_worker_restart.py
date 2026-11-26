@@ -395,7 +395,11 @@ class DurableWorkerRestartTests(unittest.TestCase):
         with self.assertRaisesRegex(
             HostRuntimeError, "pending operations or reservations"
         ):
-            self._host(tasks_after_second_restart, audit_after_second_restart)
+            self._host(
+                tasks_after_second_restart,
+                audit_after_second_restart,
+                registry=registry_for(tasks_after_second_restart),
+            )
 
         self.assertTrue(
             audit_after_second_restart.acknowledge_worker_lifecycle_reconciliation(
