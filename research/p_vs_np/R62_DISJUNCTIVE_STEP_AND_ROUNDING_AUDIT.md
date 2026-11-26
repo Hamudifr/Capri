@@ -147,7 +147,7 @@ This avoids the fragile finite threshold-20 integer table in R59 and reuses the 
 Let N_s bound the number of size-s circuit descriptions, with log N_s=O(s log(n+s)). Let rho=0.4. Define P(k) to assert that there is a length-k history H whose survivor set S(H) has approximate size at most N_s rho^k, with a fixed sufficiently small relative error.
 
 - Base: the empty history has S(H) contained in the full circuit-description universe N_s.
-- Step: if D holds, I(k+1) is immediate. Otherwise P(k) supplies H. If S(H) is empty, pad H with a fixed satisfiable pair. If it is nonempty, the local disjunction gives either D or a shrink pair. Theorem 3.21's minimality/binary-search construction and the section/retraction maps must show that the next upper parameter is at most 0.35 times the previous invariant bound, after all rounding and approximation errors.
+- Step: if D holds, I(k+1) is immediate. Otherwise P(k) supplies H. If S(H) is empty, pad H with a fixed satisfiable pair. If it is nonempty, the local disjunction gives either D or a shrink pair. Theorem 3.21's threshold predicate incurs another relative-error factor: if the new set has approximate upper bound B=0.31a(H), then a(Hx)≤ceil(B(1+eta)) and b(Hx)≤ceil(a(Hx)(1+eta)). For a(H)≥100r≥600 and eta=1/(1000r), this is conservatively b(Hx)≤0.32a(H). The current invariant must separately give a(H)≤ceil(B_k(1+eta)); the resulting product still lies below 0.35B_k with the chosen small error budget.
 - Since 0.35<0.4, the invariant propagates.
 - After K=O(log N_s)=O(s log(n+s)) stages, the upper bound is below 1, forcing S(H)=empty. The final disjunction is D(n,s) OR a polynomial-size nonuniform search anti-checker.
 
