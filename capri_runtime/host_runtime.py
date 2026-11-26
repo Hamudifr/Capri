@@ -953,9 +953,10 @@ class CapriHostRuntime:
             )
             if reservation.token in self._worker_reservation_contexts:
                 try:
-                    self._worker_registry.release_reservation(
-                        reservation, authenticated_worker_id=reservation.worker_id,
-                    )
+                    with self._capture_worker_registry_expirations():
+                        self._worker_registry.release_reservation(
+                            reservation, authenticated_worker_id=reservation.worker_id,
+                        )
                 except WorkerRegistryError:
                     self._worker_audit_healthy = False
                     raise HostRuntimeError("worker reservation collision cleanup failed") from None
@@ -1041,9 +1042,10 @@ class CapriHostRuntime:
             except HostRuntimeError:
                 self._begin_worker_audit_operation()
                 try:
-                    self._worker_registry.release_reservation(
-                        stored.reservation, authenticated_worker_id=worker_id,
-                    )
+                    with self._capture_worker_registry_expirations():
+                        self._worker_registry.release_reservation(
+                            stored.reservation, authenticated_worker_id=worker_id,
+                        )
                 except WorkerRegistryError:
                     self._worker_audit_healthy = False
                     raise HostRuntimeError("worker reservation policy cleanup failed") from None
