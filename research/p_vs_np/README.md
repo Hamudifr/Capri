@@ -106,3 +106,12 @@ See [R47 APC2 semantic witnessing audit](R47_APC2_SEMANTIC_WITNESSING_AUDIT.md).
 CKKO21 distinguishes ordinary KPT from the semantic randomized witnessing needed for dWPHP-extended theories. Its VAPC2 boundary confirms a randomized NP-oracle / LEARN-uniform character, but does not itself give the exact S_K selector. The possible collapse under P=NP remains conditional on checking formula class, rounds, success verification, and the semantic Skolem-function assignments.
 
 R45's APC2 conditional P != NP route is therefore marked **not closed**. R40 (PV1) and R43 (APC1) remain separate conditional implications. No unconditional P-vs-NP proof is claimed.
+
+
+# R51: search-circuit survivor anti-checker
+
+See [R51 search-circuit survivor anti-checker](R51_SEARCH_SURVIVOR_ANTICHECKER.md).
+
+A separate greedy construction for search circuits: if every satisfiable formula is solved by more than half of the current survivor set, (n+1) independent samples contain a solver for every satisfiable (n)-bit formula with positive probability. A first-valid-output selector then yields a SAT decision circuit, contradicting the chosen circuit-hardness premise. Thus a satisfiable formula defeats at least half the survivors; retaining only circuits that solve each selected formula halves the set at every step.
+
+This gives a polynomial-size **nonuniform search anti-checker** with explicit satisfying witnesses. Its survivor and failure predicates are PV, avoiding the coNP-valid-label issue of arbitrary decision labels. The APC₁ relative-counting formalization, uniform generator, exact bridge to KPS's decision anti-checker, and EF transfer certificates remain open. No P-vs-NP proof is claimed.
