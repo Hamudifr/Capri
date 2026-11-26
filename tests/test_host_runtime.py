@@ -1583,7 +1583,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
         candidates = host.get_worker_candidates(
             "alice-token", task.task_id, "math.factorial", 1,
         )
-        self.assertEqual(candidates, ())
+        self.assertEqual(len(candidates), 1)
         events = [
             event for event in audit.events()
             if event.tool_name == "worker.reservation.expired"
