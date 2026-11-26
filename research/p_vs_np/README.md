@@ -133,3 +133,10 @@ See [R53 APC2 empty-fibre route](R53_APC2_EMPTY_FIBRE.md).
 R53 applies Jeřábek's Theorem 3.20 to the R52 bad-pair incidence relation, with candidate search-circuit tuples as the first coordinate and satisfying formula/witness pairs as the second. Together with Theorems 3.19 and 3.21, the constant 1/4 incidence gap appears to force an empty fibre, giving the APC2 single-step survivor lemma. Theorem 4.2 supplies a close template for the greedy iteration, but its adaptation is not complete.
 
 The search-to-decision bridge remains open because SAT self-reduction is adaptive and its full query tree can be exponential. No deterministic generator, KPS EF transfer certificate, or P-vs-NP proof is claimed.
+
+
+# R54: one-element APC2 fibre repair
+
+See [R54 one-element APC2 fibre repair](R54_ONE_ELEMENT_APC2_REPAIR.md).
+
+R54 corrects R53: Jeřábek Theorem 3.20 with t=1 gives a fibre of size at most one, not necessarily zero. A finite combinatorial repair appends one additional surviving search circuit that solves the sole remaining formula, yielding a tuple of at most 2n+3 circuits covering every satisfiable formula. The APC2 derivation is not complete: the key missing step is deriving per-fibre approximate size bounds from the formalized contrary hypothesis. The tournament principle is only an induction template, not a direct application. No P-vs-NP proof is claimed.
