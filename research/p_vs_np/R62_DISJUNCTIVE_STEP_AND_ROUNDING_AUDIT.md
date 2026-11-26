@@ -98,17 +98,17 @@ which is at most s^3 for s≥K n with sufficiently large fixed K.
 
 Use r=6n and set eta=epsilon=1/(1000r). Theorem 3.21 gives integer parameters a≤b≤ceil(a(1+eta)), hence b≤a(1+eta)+1.
 
-The R59 incidence estimate is
+The R59 incidence estimate must retain the ceiling in Theorem 3.21. Since b≤ceil(a(1+eta))≤a(1+eta)+1 and a≥100r, we have b/a≤1+eta+1/a≤1+0.011/r. Thus the corrected bound is
 
-E/a^r ≤ (729/1024)^n (1+eta)^r (1+epsilon)^(r+1) (1+4epsilon).
+E/a^r ≤ (729/1024)^n (1+0.011/r)^r (1+epsilon)^(r+1) (1+4epsilon).
 
-With eta=epsilon=1/(6000n), use 1+x≤exp(x):
+With r=6n and epsilon=1/(1000r), use 1+x≤exp(x):
 
-(1+eta)^r(1+epsilon)^(r+1)(1+4epsilon)
-≤ exp((12n+1)/(6000n)+4/(6000n))
-≤ exp(0.002834).
+(1+0.011/r)^r (1+epsilon)^(r+1) (1+4epsilon)
+≤ exp(0.011+(r+1)/(1000r)+4/(1000r))
+≤ exp(0.012834).
 
-Since 729/1024=0.7119140625, the product is below 0.714 for every n≥1. Retain the outer integer ceiling as an additive +1. For a≥100r, this remains strictly below s0=floor(0.74a^r).
+Since 729/1024=0.7119140625, the corrected product is below 0.722 for every n≥1. Retain the outer integer ceiling as an additive +1; for a≥100r≥600, this remains below 0.723a^r, still strictly below s0=floor(0.74a^r).
 
 For the survivor split, take
 
