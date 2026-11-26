@@ -58,11 +58,12 @@ Only after all relevant workers and reservations have been inspected:
 
 - Reconfirm the old writer is fenced and the current supervisor still holds the external lease.
 - Re-run integrity and projection checks.
-- Call `acknowledge_worker_lifecycle_reconciliation(note)` on the **same durable security store** used by the prior runtime. The note should identify the recovery record and summarize the reconciliation outcome without containing secrets.
-- Read back the lifecycle state and verify that no pending operation remains. Acknowledgement records a reconciliation boundary; it does not delete or silently release active reservations.
-- Construct the replacement `CapriHostRuntime` over the same task and security stores.
-- Recover task-bound reservations by authenticated principal and task ID. Re-check current task ownership, worker identity, worker policy, descriptor revision, health, and capacity before any later commit/release operation.
-- Resume admission only after all checks pass and the supervisor lease remains held.
+- **Do not acknowledge while active reservations remain.** `worker_lifecycle_reconciliation_required()` returns true for either pending operation markers or outstanding reservations. `acknowledge_worker_lifecycle_reconciliation(note)` records an audit boundary and clears the pending-operation count, but it does not remove reservations; therefore the startup gate remains closed while any reservation remains.
+- Resolve every active reservation against the external task system. A committed reservation may be released only after the external outcome and current unreserved load are established. An unknown outcome remains a hard stop.
+- **Current implementation blocker:** `CapriHostRuntime` checks `worker_lifecycle_reconciliation_required()` during construction and rejects outstanding reservations, but the repository does not yet expose a separate host-audited supervisor API that can resolve/release those reservations before constructing the replacement runtime. The normal host release API requires a constructed runtime, creating a recovery deadlock for this case.
+- Do not work around this gap with direct SQL, a fresh in-memory audit sink, or an un-audited direct registry mutation. Keep admission stopped until a dedicated supervisor reconciliation API is implemented and tested.
+- Once that API has resolved all reservations and persisted the corresponding registry and host lifecycle events, call `acknowledge_worker_lifecycle_reconciliation(note)` on the **same durable security store** used by the prior runtime. The note should identify the recovery record and summarize the reconciliation outcome without containing secrets.
+- Read back the lifecycle state and verify that no pending operation or outstanding reservation remains. Then construct the replacement `CapriHostRuntime` over the same task and security stores, re-authenticate workers, re-check policy and capacity, and resume admission only while the external supervisor lease remains held.
 
 If acknowledgement or runtime construction fails, keep admission stopped. Do not switch to a fresh in-memory audit store to bypass the durable gate.
 
@@ -80,6 +81,10 @@ If acknowledgement or runtime construction fails, keep admission stopped. Do not
 | Audit marker or chain is invalid | Preserve database and backup; stop writes and investigate |
 | Supervisor acknowledgement is interrupted | Reopen under the same durable store; inspect pending state and repeat reconciliation, not direct SQL repair |
 | Two supervisors contend | External lease must select one; SQLite transaction locking is not a substitute |
+
+## Current implementation blocker
+
+The current startup gate and acknowledgement API do not yet provide a complete restart path when outstanding reservations exist. The gate rejects outstanding reservations, while the acknowledgement method clears only pending-operation markers and deliberately leaves reservation rows intact. Because the normal host release path is unavailable until a runtime has been constructed, there is no verified out-of-band route to complete this reconciliation cycle. This is a concrete implementation gap, not an operator procedure that can safely be completed manually. Issue #246 must add a narrowly scoped, authenticated, host-audited supervisor reconciliation API before this runbook can be treated as executable.
 
 ## Adversarial validation still required
 
