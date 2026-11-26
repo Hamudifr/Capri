@@ -25,7 +25,7 @@ Fix input length n, target circuit size s, r=n+1, and outer approximation error 
 3. Assume for contradiction that every satisfiable x has G_x not <=_epsilon A. Then every satisfying formula/witness pair has F_x <=_epsilon B.
 4. Let Q={(x,w):R(x,w)=1}, |Q|<=2^(2n), U=S^r. First define E⊆Q×U by (q,u)∈E iff all circuits in u fail verification on q's formula. Each E-fibre over q is F_x^r. Corollary 3.18(ii) and Theorem 3.19, with Q as the first coordinate, give the incidence upper bound
    Z <=_epsilon ceil(2^(2n)(1+epsilon)^(r+1)B^r(1+4epsilon)).
-5. Theorem 3.21's section [a]->S gives a section [a^r]->U. For a>=100r, the refined numerical estimate below shows the incidence bound is <0.28a^r, while s0=floor(a^r/2). Thus Z <=_epsilon s0.
+5. Theorem 3.21's section [a]->S gives a section [a^r]->U. For a>=100r, the refined numerical estimate below shows the incidence bound is <0.29a^r, while s0=floor(a^r/2). Thus E <=_epsilon s0.
 6. For Theorem 3.20, use the transpose E^op⊆U×Q, defined by (u,q)∈E^op iff (q,u)∈E. Its total approximate size is the same as E's. Distinguish Theorem 3.20's internal precision delta from the outer approximation epsilon. Its proof chooses delta with (1+delta)^(6N)<=1+epsilon/2, where U⊆[0,2^N). Establish U not <=_delta s0-1: if it were, Theorem 3.8 would give a PV2 surjection [d]^c -> U^c with d=ceil((s0-1)(1+delta)); composing with the r-fold retraction U-> [a]^r gives a surjection [d]^c -> [a^(r)]^c. Since d<a^r, exact interval counting contradicts this. Therefore Theorem 3.20 applies with X=U, Y=Q, t=1.
 7. Apply Theorem 3.20 to E^op with X=U and Y=Q. It gives u∈U whose bad Q-fibre is approximately bounded by ceil(1(1+2epsilon))=2. Since 2<=epsilon^-1, Corollary 3.10 turns this into an actual list of at most two exceptional pairs.
 8. For each distinct exceptional formula x, choose C_x∈G_x and append it. The resulting at-most-(n+3)-tuple yields the SAT decision circuit described above, contradicting SAT_n notin SIZE(s^3).
@@ -54,7 +54,7 @@ Retaining both ceiling errors gives B <= b/4(1+2epsilon)+3, hence
 
 Consequently,
 
-Z/a^r <= (1/4)(1+epsilon)^(r+1)(1+4epsilon)(4B/a)^r
+E/a^r <= (1/4)(1+epsilon)^(r+1)(1+4epsilon)(4B/a)^r
       < (1/4) exp(0.0015+0.002+0.134)
       < 0.287.
 
