@@ -97,3 +97,12 @@ See [R46 dWPHP label-shift and APC2 MinMax audit](R46_DWPHP_LABEL_SHIFT_AND_APC2
 CKKOT ITCS 2025 Theorem 9 proves arbitrary succinct hard labelled samples in APC1 by dWPHP, but does not force the labels to be true SAT labels or provide satisfying witnesses. A proposed XOR-shift conversion fails because an arbitrary m-bit mask may require an ordinary circuit description of length Ω(m), so the dWPHP output length cannot exceed the transformed input description length. This is a failed route, not a general impossibility theorem.
 
 R45's full-SAT validity-constrained game remains combinatorially sound. The remaining proof obligation is a polynomial-precision, succinct mixed-MinMax/strategy-existence theorem in APC2, followed by the exact Pich–Santhanam S_K translation and proof-system certification. No P-vs-NP proof is claimed.
+
+
+# R47: APC2 semantic witnessing audit
+
+See [R47 APC2 semantic witnessing audit](R47_APC2_SEMANTIC_WITNESSING_AUDIT.md).
+
+CKKO21 distinguishes ordinary KPT from the semantic randomized witnessing needed for dWPHP-extended theories. Its VAPC2 boundary confirms a randomized NP-oracle / LEARN-uniform character, but does not itself give the exact S_K selector. The possible collapse under P=NP remains conditional on checking formula class, rounds, success verification, and the semantic Skolem-function assignments.
+
+R45's APC2 conditional P != NP route is therefore marked **not closed**. R40 (PV1) and R43 (APC1) remain separate conditional implications. No unconditional P-vs-NP proof is claimed.
