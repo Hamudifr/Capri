@@ -114,3 +114,12 @@ A successful repair must explicitly provide:
 ## Status
 
 R58 is a source-checked correction and research-direction update. It is not a proof of a bounded-arithmetic anti-checker, a decision anti-checker, an EF lower bound, or P ≠ NP.
+
+
+## R62 correction and supersession
+
+The claim above that the exponentially many fibre certificates cannot be packed is true as a literal storage observation, but it is **not a necessary step in the R56 proof**. Theorem 3.19 can be invoked as an internal theorem on the universally defined fibre family; no explicit list of all fibre certificates is needed. Its not being a direct forall-Sigma^b_2 statement does not prevent its use as an internal lemma in S^2_2(alpha)+sWPHP(PV_2(alpha)). The actual target is to prove the final disjunctive one-step lemma in Sigma^b_2 and transfer its universal closure.
+
+R62 also corrects the t=1 rounding: Theorem 3.20 gives at most ceil(1+2delta)=2 exceptional pairs, not one. The global search-circuit alternative D is Sigma^b_2, not Sigma^b_1, because its universal quantifiers range over all n-bit formulas and witnesses. These corrections and a conservative parameter split are developed in R62: [R62_DISJUNCTIVE_STEP_AND_ROUNDING_AUDIT.md](R62_DISJUNCTIVE_STEP_AND_ROUNDING_AUDIT.md).
+
+**Status:** the original diagnosis that certificate packing is a necessary barrier is retracted. The remaining proof obligations are the exact local disjunction, parameter propagation, error schedule, and conservativity transfer. No bounded-arithmetic anti-checker or P != NP proof is claimed.
