@@ -150,12 +150,18 @@ def _paired_bootstrap_interval(
     seed_material = f"{_POLICY_VERSION}:{cohort_index}:{metric}:paired-stratified".encode("utf-8")
     seed = int.from_bytes(hashlib.sha256(seed_material).digest()[:8], "big")
     rng = random.Random(seed)
+    # Preserve the exact RNG draw order (resample → sorted scenario → len(values)
+    # draws) while avoiding per-draw generator frames: the inner comprehension is
+    # materialized once per scenario instead of resumed value-by-value.
+    randrange = rng.randrange
+    scenario_values = [grouped[name] for name in scenario_names]
     estimates: list[float] = []
+    sample: list[float] = []
     for _ in range(_BOOTSTRAP_RESAMPLES):
-        sample: list[float] = []
-        for scenario in scenario_names:
-            values = grouped[scenario]
-            sample.extend(values[rng.randrange(len(values))] for _ in range(len(values)))
+        sample.clear()
+        for values in scenario_values:
+            count = len(values)
+            sample.extend([values[randrange(count)] for _ in range(count)])
         estimates.append(fmean(sample))
     estimates.sort()
     alpha = 1.0 - _CONFIDENCE_LEVEL
