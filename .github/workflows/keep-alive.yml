@@ -63,6 +63,9 @@ jobs:
           # database or storage crosses 80% of the Supabase free cap
           # (and whenever the metrics are missing - fail closed).
           printf '%s' "$resp" | python3 scripts/check_probe.py --true ok,under_limit
+          # Backticks below are literal markdown (inline code in the step
+          # summary); nothing should expand inside the single quotes.
+          # shellcheck disable=SC2016
           printf '### Supabase keep-alive\n\n`%s`\n\n' "$resp" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Supabase liveness probe (capri-ping)
@@ -115,4 +118,6 @@ jobs:
           # (grace: cron_stale stays false until a first fire exists).
           printf '%s' "$resp" | python3 scripts/check_probe.py \
             --true ok,under_limit,cron_active --false cron_stale
+          # Literal markdown backticks; see the note in step 1.
+          # shellcheck disable=SC2016
           printf '### pg_cron watchdog\n\n`%s`\n\n' "$resp" >> "$GITHUB_STEP_SUMMARY"
