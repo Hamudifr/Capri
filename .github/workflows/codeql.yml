@@ -1,11 +1,13 @@
 name: CodeQL
 
 # Free for public repositories. Analyzes the Python runtime/WSGI app,
-# the TypeScript edge functions (supabase/functions), and the C session
-# store (c/) with zero build steps - build-mode none means analysis
-# never needs a toolchain and cannot flake on compilation. Rust (rust/)
-# is deferred until CodeQL's Rust support is confirmed stable for this
-# action version.
+# the TypeScript edge functions (supabase/functions), the C session
+# store (c/), and the experimental Rust implementation (rust/) with no
+# manual build steps. build-mode none is confirmed for the interpreted
+# languages and C; the rust row is validated by this workflow's own
+# PR checks (rust is a BuiltInLanguage in the pinned codeql-action -
+# src/languages/index.ts - but per-language build-mode availability is
+# decided by the CodeQL CLI, which the Analyze (rust) job proves).
 
 on:
   push:
@@ -45,6 +47,8 @@ jobs:
           - language: javascript-typescript
             build-mode: none
           - language: c-cpp
+            build-mode: none
+          - language: rust
             build-mode: none
     steps:
       - name: Checkout repository
