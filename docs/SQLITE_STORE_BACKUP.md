@@ -64,7 +64,9 @@ For session stores, see [SQLITE_SESSION_BACKUP.md](SQLITE_SESSION_BACKUP.md) for
 ## Off-site replication (Supabase)
 
 The Supabase project (`znpvstwmzyphmvkhigqp`) hosts the off-site backup
-registry created by migration `create_capri_backup_push_and_prune`:
+registry created by migrations `create_capri_backup_registry` and
+`create_capri_backup_push_and_prune`, plus the project health RPC added by
+`add_capri_project_status_rpc`:
 
 | Object | Purpose |
 |---|---|
@@ -72,6 +74,7 @@ registry created by migration `create_capri_backup_push_and_prune`:
 | `public.capri_backup_payloads` | The backup bytes (`bytea`), keyed 1:1 to the registry row and cascade-deleted with it. Same RLS posture. |
 | `capri_push_backup(...)` RPC | Atomically inserts the registry row and payload. Parameters use hex text (no bytea-over-JSON ambiguity), verify payload length against `p_size_bytes`, and enforce a 10 MB cap. Granted to `service_role` only; revoked from `public`, `anon`, and `authenticated`. |
 | `capri_prune_backups(store, keep_last)` RPC | Deletes all but the newest `keep_last` backups for a store; rejects `keep_last < 1`. Granted to `service_role` only. |
+| `capri_project_status()` RPC | One-call project health: migration count and latest version, backup table row counts, public-table RLS flags, and extension versions. Read-only (`STABLE`, `security invoker`); execute granted to `service_role` only (migration `capri_project_status_grants` revokes it from `public`, `anon`, `authenticated`). Use it instead of a multi-query health battery. |
 
 Procedure (`scripts/backup_offsite.py`):
 
@@ -94,9 +97,10 @@ rest by Supabase (provider-managed disk encryption). Client-side pre-upload
 encryption is deliberately deferred until a key-management decision is made
 (see gaps below).
 
-Verification status: schema and both RPCs are verified live against the
-project (push, readback, prune, and the `keep_last >= 1` guard exercised;
-test rows deleted afterwards). The HTTP path of the script is unit-tested
+Verification status: schema, both backup RPCs, and `capri_project_status()`
+are verified live against the project (push, readback, prune, the
+`keep_last >= 1` guard, and privilege readback exercised; test rows deleted
+afterwards; 4 migrations applied as of 2026-11-27). The HTTP path of the script is unit-tested
 offline with a mocked transport because CI and the agent sandbox have no
 network access to Supabase and no service-role credentials.
 
