@@ -116,6 +116,7 @@ The capability roadmap separates implemented foundations from work still require
 - [Notion memory adapter](docs/NOTION_MEMORY_ADAPTER.md)
 - [OpenAI Responses adapter](docs/OPENAI_RESPONSES_ADAPTER.md)
 - [Backup and recovery operations](docs/LEDGER_OPERATIONS.md)
+- [Free-plan operations (Vercel + Supabase)](docs/FREE_PLAN_OPTIMIZATION.md)
 - [Contributing and development workflow](CONTRIBUTING.md)
 - [Security reporting policy](SECURITY.md)
 
