@@ -87,3 +87,24 @@ jobs:
             sleep 10
           done
           printf '%s' "$body" | grep -q 'Deployed commit'
+
+      - name: pg_cron layer-1 watchdog (job armed, scheduler fresh)
+        run: |
+          set -euo pipefail
+          url="https://znpvstwmzyphmvkhigqp.supabase.co/functions/v1/capri-keepalive"
+          resp=""
+          for attempt in 1 2 3 4 5; do
+            resp="$(curl -sS --max-time 30 "$url" || true)"
+            if printf '%s' "$resp" | grep -q '"cron_active":true'; then
+              break
+            fi
+            echo "attempt $attempt: cron fields missing or job unarmed: $resp"
+            sleep 10
+          done
+          echo "$resp"
+          # Job armed: fails if the pg_cron job was unscheduled or deleted.
+          printf '%s' "$resp" | grep -q '"cron_active":true'
+          # Scheduler fresh: fails when a fire is more than 26h late
+          # (grace: cron_stale stays false until a first fire exists).
+          printf '%s' "$resp" | grep -q '"cron_stale":false'
+          printf '### pg_cron watchdog\n\n`%s`\n\n' "$resp" >> "$GITHUB_STEP_SUMMARY"
