@@ -63,7 +63,7 @@ The provider reads `NOTION_API_TOKEN` from the host environment by default. The 
 - Graph text, tags, titles, sources, and relationship rationales are untrusted data.
 - Escaped delimiters are a serialization convention, not a cryptographic prompt-injection defense or provider-enforced isolation.
 - The adapter never executes tools. Model tool calls remain proposals checked by the host's existing ToolExecutionBridge and trusted ExecutionContext.
-- The host must not allow graph content to supply principal identity, policy, permissions, approvals, tool definitions, or resolver configuration.
+- The host must not allow graph content to supply principal identity, policy, permissions, tool definitions, or resolver configuration.
 - The current lexical scorer is deterministic and dependency-free. It is not semantic search. Embeddings remain deferred until a benchmark shows a measurable retrieval gap.
 - The Notion provider loads a bounded snapshot and caches it in-process for 15 seconds by default, avoiding repeated paginated reads on every turn. Set `cache_ttl_seconds=0` to disable caching, or call `invalidate_cache()` after a known edit. The cache is process-local and does not make the two data-source reads atomic; choose the TTL against the host's freshness requirements.
 - No live OpenAI request is made by offline tests. Live API usage may incur cost and requires explicit owner authorization.

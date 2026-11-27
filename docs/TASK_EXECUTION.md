@@ -75,7 +75,7 @@ Cancellation is cooperative. Queued/retry-wait tasks cancel immediately. A runni
 - The database stores task inputs and results in plaintext SQLite. Do not put credentials, secrets, or sensitive personal data in task plans/results. Encryption and key management are not implemented.
 - Handler names must exist in the host's injected allowlist. This module never imports code dynamically or runs shell/network/filesystem commands.
 - Injected handlers are trusted host code and run with the process's privileges; this module is not a sandbox.
-- Model-proposed actions must still pass through `ToolExecutor`, host authentication/authorization, and any required user approval. Do not register a raw unrestricted handler merely because a task plan names it.
+- Model-proposed actions must still pass through `ToolExecutor` and host authentication/authorization. Do not register a raw unrestricted handler merely because a task plan names it.
 - The store protects local file paths and permissions, but does not provide remote multi-tenant isolation, encrypted storage, backup/restore automation, retention/compaction, or authenticated event signatures.
 
 ## Validation

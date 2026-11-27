@@ -2,7 +2,7 @@
 
 ## Status
 
-The offline evaluator is implemented in `capri_core.strategy`. This module adds a durable, principal-scoped registry and host API for immutable strategy versions, evaluation summaries, approval-gated activation, append-only transition history, and rollback.
+The offline evaluator is implemented in `capri_core.strategy`. This module adds a durable, principal-scoped registry and host API for immutable strategy versions, evaluation summaries, Capri-decided activation, append-only transition history, and rollback.
 
 It is a control-plane capability only. The task engine and model orchestration do not automatically read or apply the active strategy. No strategy code is stored or executed.
 
@@ -27,19 +27,17 @@ The store persists only the evaluation summary and fingerprint, not raw observat
 
 ## Activation and rollback
 
-Activation and rollback are denied by default unless the store is constructed with a trusted host-owned `approval_verifier`. There is no caller-supplied `approved=True` switch and the model never receives the verifier.
+Activation and rollback are decided by Capri under the host's standing authority (owner directive 2026-11-27). There is no approval verifier, grant, or per-transition permission gate; the model never receives host authority objects.
 
-A host-issued `StrategyActivationGrant` binds the exact strategy version measured in the cohort. Each observation carries a version; mixed versions within a strategy cohort are rejected; the registry requires the candidate and registered baseline versions to match the evaluated versions. The grant binds:
+A typed `StrategyActivationRequest` binds the exact strategy version measured in the cohort. Each observation carries a version; mixed versions within a strategy cohort are rejected; the registry requires the candidate and registered baseline versions to match the evaluated versions. The request binds:
 - principal;
 - strategy class, ID and version;
 - evaluation fingerprint (or null for a baseline);
 - exact configuration SHA-256;
 - action (activate or rollback);
-- expected active generation;
-- issue/expiry timestamps (maximum 15-minute lifetime);
-- one-use grant ID and approver identity.
+- expected active generation.
 
-The host verifier must authenticate the grant's signature/authorization. The store independently checks the fields, expiry, principal, config/evaluation fingerprints, grant replay, and generation compare-and-swap inside an atomic SQLite write transaction. The store persists an immutable `evidence_verified` flag for each evaluation. Existing rows are migrated with `evidence_verified=0` and cannot be activated; preserve them as history and register a new cohort through the trusted verifier. `get_active_for_principal` also refuses to return an already-active legacy candidate with an unverified flag; a host must explicitly restore a verified baseline before enabling any selector. The host grant issuer must still independently re-verify the candidate's authenticated evidence manifest and task-family classification before signing.
+The store independently checks the fields, principal, config/evaluation fingerprints, and generation compare-and-swap inside an atomic SQLite write transaction, and records each transition with a fresh decision ID attributed to `capri` in the append-only event chain. The store persists an immutable `evidence_verified` flag for each evaluation. Existing rows are migrated with `evidence_verified=0` and cannot be activated; preserve them as history and register a new cohort through the trusted verifier. `get_active_for_principal` also refuses to return an already-active legacy candidate with an unverified flag; a host must explicitly restore a verified baseline before enabling any selector. The host grant issuer must still independently re-verify the candidate's authenticated evidence manifest and task-family classification before signing.
 
 Rollback is not deletion or time travel. It appends a new `rollback` event pointing to a version that was previously active. The former state remains in history.
 
@@ -49,8 +47,8 @@ When a trusted host supplies the exact task store and configured strategy store,
 - register a baseline;
 - register a recomputed candidate;
 - read the active strategy;
-- activate with a host-authenticated grant;
-- roll back with a host-authenticated grant;
+- activate with a typed activation request;
+- roll back with a typed activation request;
 - read the verified activation history.
 
 The host must keep the approval verifier and grant issuance outside model-visible tools. A deployment should bind it to its existing authentication/approval service. The included test verifier is only a test fixture.
@@ -60,13 +58,12 @@ The host must keep the approval verifier and grant issuance outside model-visibl
 - No automatic strategy selection or shadow execution in the task engine yet.
 - No execution of configuration strings, scripts, tool names, or code.
 - No change to model weights, provider calls, tool permissions, allowlists, budgets, spend limits, or safety policy.
-- No secret manager, signature key, or approval UI is created by this library.
+- No secret manager, signing-key custody, or external service is created by this library.
 - No encryption-at-rest guarantee beyond the existing private SQLite storage controls.
 - No claim that a candidate generalizes beyond its evaluated cohort.
 
 ## Next integration gates
 
-1. Connect the host approval verifier to the existing signed approval service, with a reviewed operation binding.
-2. Add shadow-mode runtime instrumentation that records recommendations without changing execution.
-3. Evaluate strategy versions across representative scenario classes and measure uncertainty, safety regressions, and operational cost.
-4. Only then consider host-controlled live selection. Preserve explicit approval and a tested rollback path.
+1. Add shadow-mode runtime instrumentation that records recommendations without changing execution.
+2. Evaluate strategy versions across representative scenario classes and measure uncertainty, safety regressions, and operational cost.
+3. Only then consider host-controlled live selection. Preserve Capri's decision authority and a tested rollback path.

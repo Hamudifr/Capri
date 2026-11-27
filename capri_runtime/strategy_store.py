@@ -1,8 +1,9 @@
-"""Principal-scoped, approval-gated strategy registry with reversible history.
+"""Principal-scoped strategy registry with reversible history.
 
 The registry stores data-only strategy configurations and evaluation summaries.
 It never executes strategy code or changes tool permissions, safety policy, or
-spend limits. Activation requires a trusted host-supplied approval verifier.
+spend limits. Activation and rollback are decided by Capri under the host's
+standing authority; no per-transition approval gate exists.
 """
 from __future__ import annotations
 
@@ -31,7 +32,6 @@ _RESERVED_CONFIG_KEYS = frozenset({
     "credential", "code", "script", "command",
 })
 _MAX_CONFIG_BYTES = 8192
-_MAX_APPROVAL_TTL = 900
 
 
 class StrategyStoreError(ValueError):
@@ -39,11 +39,11 @@ class StrategyStoreError(ValueError):
 
 
 class StrategyAuthorizationError(StrategyStoreError):
-    """Activation or rollback lacks a valid host-authenticated approval."""
+    """Activation or rollback violates an authorization or integrity invariant."""
 
 
 class StrategyConflictError(StrategyStoreError):
-    """A strategy version, approval, or active generation conflicts."""
+    """A strategy version, activation, or active generation conflicts."""
 
 
 class StrategyNotFoundError(StrategyStoreError):
@@ -55,10 +55,9 @@ class StrategyIntegrityError(StrategyStoreError):
 
 
 @dataclass(frozen=True, slots=True)
-class StrategyActivationGrant:
-    """Host-authenticated, one-use approval bound to one exact state transition."""
+class StrategyActivationRequest:
+    """Exact state transition decided by Capri's standing host authority."""
 
-    grant_id: str
     principal_id: str
     strategy_class: str
     strategy_id: str
@@ -67,10 +66,6 @@ class StrategyActivationGrant:
     config_sha256: str
     expected_generation: int
     action: str
-    issued_at: str
-    expires_at: str
-    approver_id: str
-    signature: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,18 +152,6 @@ def _version(value: object) -> str:
     return result
 
 
-def _timestamp(value: object, field: str) -> datetime:
-    if type(value) is not str or not value or len(value) > 64:
-        raise StrategyStoreError(f"{field} must be a timezone-aware ISO timestamp")
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        raise StrategyStoreError(f"{field} must be a timezone-aware ISO timestamp") from None
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise StrategyStoreError(f"{field} must include a timezone")
-    return parsed.astimezone(timezone.utc)
-
-
 def _config_value(value: object, *, depth: int = 0) -> object:
     if depth > 4:
         raise StrategyStoreError("strategy config nesting exceeds the supported depth")
@@ -227,58 +210,48 @@ def _decode_config(encoded: str, expected_hash: str) -> dict[str, Any]:
     return value
 
 
-def _grant_payload(grant: StrategyActivationGrant) -> None:
-    if type(grant) is not StrategyActivationGrant:
-        raise StrategyAuthorizationError("a host-issued StrategyActivationGrant is required")
-    _text(grant.grant_id, "grant_id", 128)
-    _text(grant.principal_id, "principal_id", 256)
-    _identifier(grant.strategy_class, "strategy_class")
-    _identifier(grant.strategy_id, "strategy_id")
-    _version(grant.version)
-    if grant.evaluation_sha256 is not None and (
-        type(grant.evaluation_sha256) is not str
-        or not _SHA256.fullmatch(grant.evaluation_sha256)
+def _request_payload(request: StrategyActivationRequest) -> None:
+    if type(request) is not StrategyActivationRequest:
+        raise StrategyAuthorizationError("a typed StrategyActivationRequest is required")
+    _text(request.principal_id, "principal_id", 256)
+    _identifier(request.strategy_class, "strategy_class")
+    _identifier(request.strategy_id, "strategy_id")
+    _version(request.version)
+    if request.evaluation_sha256 is not None and (
+        type(request.evaluation_sha256) is not str
+        or not _SHA256.fullmatch(request.evaluation_sha256)
     ):
         raise StrategyAuthorizationError("evaluation fingerprint is invalid")
-    if type(grant.expected_generation) is not int or not 0 <= grant.expected_generation < 2**63 - 1:
+    if type(request.expected_generation) is not int or not 0 <= request.expected_generation < 2**63 - 1:
         raise StrategyAuthorizationError("expected_generation is invalid")
-    if type(grant.action) is not str or grant.action not in {"activate", "rollback"}:
-        raise StrategyAuthorizationError("grant action must be activate or rollback")
-    if type(grant.config_sha256) is not str or not _SHA256.fullmatch(grant.config_sha256):
+    if type(request.action) is not str or request.action not in {"activate", "rollback"}:
+        raise StrategyAuthorizationError("request action must be activate or rollback")
+    if type(request.config_sha256) is not str or not _SHA256.fullmatch(request.config_sha256):
         raise StrategyAuthorizationError("strategy config fingerprint is invalid")
-    issued = _timestamp(grant.issued_at, "issued_at")
-    expires = _timestamp(grant.expires_at, "expires_at")
-    if expires <= issued or (expires - issued).total_seconds() > _MAX_APPROVAL_TTL:
-        raise StrategyAuthorizationError("approval grant lifetime is invalid")
-    _text(grant.approver_id, "approver_id", 128)
-    _text(grant.signature, "signature", 2048)
 
 
 class SQLiteStrategyStore:
     """Append-only strategy registry sharing the task store's private SQLite DB.
 
-    A trusted host must inject an approval verifier. Missing, false, or failing
-    verifiers deny activation and rollback. The model never receives the verifier.
+    Activation and rollback proceed under Capri's standing host authority; the
+    registry enforces generation CAS, fingerprint checks, and the append-only
+    event chain for every transition.
     """
 
     def __init__(
         self,
         task_store: SQLiteTaskStore,
         *,
-        approval_verifier: Callable[[StrategyActivationGrant], bool] | None = None,
         evidence_verifier: Callable[[StrategyEvidenceContext], bool] | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         if type(task_store) is not SQLiteTaskStore:
             raise StrategyStoreError("SQLiteStrategyStore requires the exact trusted SQLiteTaskStore")
-        if approval_verifier is not None and not callable(approval_verifier):
-            raise StrategyStoreError("approval_verifier must be callable")
         if evidence_verifier is not None and not callable(evidence_verifier):
             raise StrategyStoreError("evidence_verifier must be callable")
         if clock is not None and not callable(clock):
             raise StrategyStoreError("clock must be callable")
         self._task_store = task_store
-        self._approval_verifier = approval_verifier
         self._evidence_verifier = evidence_verifier
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = task_store._lock
@@ -636,47 +609,28 @@ class SQLiteStrategyStore:
         return last
 
     def _transition(
-        self, principal_id: str, grant: StrategyActivationGrant, *,
-        required_action: str, now: datetime | None = None,
+        self, principal_id: str, request: StrategyActivationRequest, *,
+        required_action: str,
     ) -> ActiveStrategyRecord:
         principal = _text(principal_id, "principal_id", 256)
-        _grant_payload(grant)
-        if grant.principal_id != principal or grant.action != required_action:
-            raise StrategyAuthorizationError("approval grant is not bound to this principal and action")
-        current_time = now.astimezone(timezone.utc) if now is not None else self._now()
-        if not isinstance(current_time, datetime) or current_time.tzinfo is None or current_time.utcoffset() is None:
-            raise StrategyAuthorizationError("current time must be timezone-aware")
-        current_time = current_time.astimezone(timezone.utc)
-        issued = _timestamp(grant.issued_at, "issued_at")
-        expires = _timestamp(grant.expires_at, "expires_at")
-        if issued > current_time or expires <= current_time:
-            raise StrategyAuthorizationError("approval grant is not currently valid")
-        if self._approval_verifier is None:
-            raise StrategyAuthorizationError("strategy activation is disabled without a host approval verifier")
-        try:
-            verified = self._approval_verifier(grant)
-        except Exception:
-            raise StrategyAuthorizationError("host approval verification failed") from None
-        if verified is not True:
-            raise StrategyAuthorizationError("host approval verification rejected the grant")
+        _request_payload(request)
+        if request.principal_id != principal or request.action != required_action:
+            raise StrategyAuthorizationError("activation request is not bound to this principal and action")
 
         with self._lock:
             connection = self._connect()
             try:
                 connection.execute("BEGIN IMMEDIATE")
-                current_time = self._now()
-                if issued > current_time or expires <= current_time:
-                    raise StrategyAuthorizationError("approval grant expired before the transition")
-                last_event = self._verify_chain(connection, principal, grant.strategy_class)
+                last_event = self._verify_chain(connection, principal, request.strategy_class)
                 active = connection.execute(
                     """SELECT strategy_id,version,generation FROM strategy_active
                     WHERE principal_id=? AND strategy_class=?""",
-                    (principal, grant.strategy_class),
+                    (principal, request.strategy_class),
                 ).fetchone()
                 generation = active[2] if active is not None else 0
-                if generation != grant.expected_generation:
+                if generation != request.expected_generation:
                     raise StrategyConflictError("active strategy generation changed; refresh before retrying")
-                if active is not None and active[:2] == (grant.strategy_id, grant.version):
+                if active is not None and active[:2] == (request.strategy_id, request.version):
                     raise StrategyConflictError("strategy is already active")
 
                 target = connection.execute(
@@ -686,20 +640,20 @@ class SQLiteStrategyStore:
                     ON e.evaluation_id=v.evaluation_id
                     WHERE v.principal_id=? AND v.strategy_class=?
                     AND v.strategy_id=? AND v.version=?""",
-                    (principal, grant.strategy_class, grant.strategy_id, grant.version),
+                    (principal, request.strategy_class, request.strategy_id, request.version),
                 ).fetchone()
                 if target is None:
                     raise StrategyNotFoundError("target strategy version is not registered for this principal")
                 config_json, config_hash, is_baseline, evaluation_id, cohort_hash, eligible, evidence_verified = target
                 expected_hash = None if is_baseline else cohort_hash
-                if grant.config_sha256 != config_hash:
-                    raise StrategyAuthorizationError("approval grant config fingerprint does not match target version")
+                if request.config_sha256 != config_hash:
+                    raise StrategyAuthorizationError("activation request config fingerprint does not match target version")
                 if is_baseline:
-                    if grant.evaluation_sha256 is not None:
+                    if request.evaluation_sha256 is not None:
                         raise StrategyAuthorizationError("baseline activation must not claim a candidate evaluation")
                 elif (
                     eligible != 1 or evidence_verified != 1
-                    or cohort_hash != grant.evaluation_sha256 or evaluation_id is None
+                    or cohort_hash != request.evaluation_sha256 or evaluation_id is None
                 ):
                     raise StrategyAuthorizationError("candidate is not bound to an eligible, evidence-verified evaluation fingerprint")
 
@@ -707,35 +661,28 @@ class SQLiteStrategyStore:
                     previous_activation = connection.execute(
                         """SELECT 1 FROM strategy_events WHERE principal_id=? AND strategy_class=?
                         AND to_strategy_id=? AND to_version=? LIMIT 1""",
-                        (principal, grant.strategy_class, grant.strategy_id, grant.version),
+                        (principal, request.strategy_class, request.strategy_id, request.version),
                     ).fetchone()
                     if previous_activation is None:
                         raise StrategyConflictError("rollback target was never active in this strategy history")
-                elif grant.evaluation_sha256 != expected_hash:
-                    raise StrategyAuthorizationError("approval grant evaluation fingerprint does not match target")
+                elif request.evaluation_sha256 != expected_hash:
+                    raise StrategyAuthorizationError("activation request evaluation fingerprint does not match target")
 
-                if connection.execute(
-                    "SELECT 1 FROM strategy_events WHERE approval_id=?", (grant.grant_id,)
-                ).fetchone() is not None:
-                    raise StrategyConflictError("approval grant has already been consumed")
-
-                write_time = self._now()
-                if issued > write_time or expires <= write_time:
-                    raise StrategyAuthorizationError("approval grant expired before event publication")
                 from_id, from_version = active[:2] if active is not None else (None, None)
                 next_generation = generation + 1
                 event_id = uuid4().hex
-                created = write_time.isoformat()
+                decision_id = uuid4().hex
+                created = self._now().isoformat()
                 previous_hash = last_event[15] if last_event is not None else ""
                 payload = {
                     "event_id": event_id, "principal_id": principal,
-                    "strategy_class": grant.strategy_class,
+                    "strategy_class": request.strategy_class,
                     "generation": next_generation, "action": required_action,
                     "from_strategy_id": from_id, "from_version": from_version,
-                    "to_strategy_id": grant.strategy_id, "to_version": grant.version,
+                    "to_strategy_id": request.strategy_id, "to_version": request.version,
                     "to_config_sha256": config_hash,
-                    "evaluation_id": evaluation_id, "approval_id": grant.grant_id,
-                    "approver_id": grant.approver_id, "created_at": created,
+                    "evaluation_id": evaluation_id, "approval_id": decision_id,
+                    "approver_id": "capri", "created_at": created,
                     "previous_hash": previous_hash,
                 }
                 event_hash = hashlib.sha256(json.dumps(
@@ -747,10 +694,10 @@ class SQLiteStrategyStore:
                      from_strategy_id,from_version,to_strategy_id,to_version,to_config_sha256,
                      evaluation_id,approval_id,approver_id,created_at,previous_hash,event_hash)
                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    (event_id, principal, grant.strategy_class, next_generation,
-                     required_action, from_id, from_version, grant.strategy_id,
-                     grant.version, config_hash, evaluation_id, grant.grant_id,
-                     grant.approver_id, created, previous_hash, event_hash),
+                    (event_id, principal, request.strategy_class, next_generation,
+                     required_action, from_id, from_version, request.strategy_id,
+                     request.version, config_hash, evaluation_id, decision_id,
+                     "capri", created, previous_hash, event_hash),
                 )
                 connection.execute(
                     """INSERT INTO strategy_active
@@ -759,12 +706,9 @@ class SQLiteStrategyStore:
                     ON CONFLICT(principal_id,strategy_class) DO UPDATE SET
                     strategy_id=excluded.strategy_id,version=excluded.version,
                     generation=excluded.generation,event_id=excluded.event_id""",
-                    (principal, grant.strategy_class, grant.strategy_id, grant.version,
+                    (principal, request.strategy_class, request.strategy_id, request.version,
                      next_generation, event_id),
                 )
-                commit_check_time = self._now()
-                if issued > commit_check_time or expires <= commit_check_time:
-                    raise StrategyAuthorizationError("approval grant expired before commit")
                 connection.execute("COMMIT")
             except Exception:
                 if connection.in_transaction:
@@ -773,22 +717,20 @@ class SQLiteStrategyStore:
             finally:
                 connection.close()
         return ActiveStrategyRecord(
-            principal, grant.strategy_class, grant.strategy_id, grant.version,
+            principal, request.strategy_class, request.strategy_id, request.version,
             next_generation, _decode_config(config_json, config_hash), config_hash,
             created, event_id,
         )
 
     def activate_for_principal(
-        self, principal_id: str, grant: StrategyActivationGrant, *,
-        now: datetime | None = None,
+        self, principal_id: str, request: StrategyActivationRequest,
     ) -> ActiveStrategyRecord:
-        return self._transition(principal_id, grant, required_action="activate", now=now)
+        return self._transition(principal_id, request, required_action="activate")
 
     def rollback_for_principal(
-        self, principal_id: str, grant: StrategyActivationGrant, *,
-        now: datetime | None = None,
+        self, principal_id: str, request: StrategyActivationRequest,
     ) -> ActiveStrategyRecord:
-        return self._transition(principal_id, grant, required_action="rollback", now=now)
+        return self._transition(principal_id, request, required_action="rollback")
 
     def get_active_for_principal(
         self, principal_id: str, strategy_class: str,

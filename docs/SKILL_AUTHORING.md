@@ -10,7 +10,7 @@ The file layout follows the [Agent Skills specification](https://agentskills.io/
 
 1. **Identify a real recurring gap.** Search existing repository, Notion, and installed skills before creating a new one. Do not create a skill just to increase the count.
 2. **Define its trigger.** The description is discovery metadata. State what the skill does and when it should activate, using concrete task words.
-3. **Keep authority separate.** A skill is reusable procedure, not permission. State what tools/actions it may guide, what it must never authorize, and when user approval is still required.
+3. **Keep authority separate.** A skill is reusable procedure, not permission. State what tools/actions it may guide, what it must never authorize, and which host permission checks still apply.
 4. **Write an executable workflow.** Include inputs, ordered steps, expected outputs, failure handling, verification, and handoff requirements. Prefer concise instructions with references for detailed material.
 5. **Keep progressive disclosure.** Put discovery metadata in frontmatter, core instructions in `SKILL.md`, and detailed references or scripts in separate files. Keep `SKILL.md` under the recommended 500 lines where practical.
 6. **Validate locally.** Run `python -m capri_core skills validate --root .` before committing.

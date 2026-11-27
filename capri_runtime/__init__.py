@@ -30,13 +30,8 @@ from .runtime import (
     ValidationError,
 )
 from .tools import (
-    ApprovalGrant,
     ApprovalMacProvider,
-    ApprovalRequiredError,
-    ApprovalStore,
-    HmacApprovalAuthority,
     HmacApprovalKeyRing,
-    InMemoryApprovalStore,
     AuditError,
     AuditEvent,
     AuditSink,
@@ -96,7 +91,6 @@ from .notion_knowledge_graph import (
     NotionKnowledgeGraphProvider,
     create_notion_knowledge_graph_provider_from_environment,
 )
-from .approval import ApprovalChallenge, HostApprovalService, SQLiteApprovalChallengeStore
 from .learning_consent import HostLearningConsentAuthority, LearningConsentAuthorityError
 from .sqlite_sessions import SQLiteSessionStore
 from .security_store import SQLiteSecurityStore
@@ -118,16 +112,11 @@ from .execution_evidence import (
 )
 from .strategy_evidence_store import SQLiteStrategyEvidenceManifestStore
 from .strategy_evidence import HostStrategyEvidenceAuthority
-from .strategy_approval import (
-    HostStrategyApprovalAuthority,
-    StrategyApprovalIdentity,
-    StrategyApprovalRequest,
-)
 from .strategy_store import (
     ActiveStrategyRecord,
     SQLiteStrategyStore,
     StrategyActivationEvent,
-    StrategyActivationGrant,
+    StrategyActivationRequest,
     StrategyEvidenceContext,
     StrategyAuthorizationError,
     StrategyConflictError,
@@ -222,12 +211,7 @@ __all__ = [
     "NotionKnowledgeGraphProvider",
     "create_notion_knowledge_graph_provider_from_environment",
     "ToolOrchestrator",
-    "ApprovalChallenge",
-    "ApprovalGrant",
     "ApprovalMacProvider",
-    "ApprovalRequiredError",
-    "ApprovalStore",
-    "HmacApprovalAuthority",
     "HmacApprovalKeyRing",
     "AuditError",
     "AuditEvent",
@@ -235,7 +219,6 @@ __all__ = [
     "ExecutionContext",
     "HostAuthorityError",
     "HostAuthorityResolver",
-    "HostApprovalService",
     "HostLearningConsentAuthority",
     "LearningConsentAuthorityError",
     "HostToolGateway",
@@ -248,7 +231,6 @@ __all__ = [
     "HostServiceState",
     "RuntimeHealthState",
     "InMemoryAuditSink",
-    "InMemoryApprovalStore",
     "MemoryErrorBase",
     "MemoryNotFoundError",
     "MemoryProvider",
@@ -277,7 +259,6 @@ __all__ = [
     "SessionNotFoundError",
     "SessionLimitError",
     "SessionStore",
-    "SQLiteApprovalChallengeStore",
     "SQLiteSecurityStore",
     "SQLiteSessionStore",
     "SQLiteExecutionEvidenceJournal",
@@ -286,13 +267,10 @@ __all__ = [
     "VerifiedExecutionResult",
     "SQLiteStrategyEvidenceManifestStore",
     "HostStrategyEvidenceAuthority",
-    "HostStrategyApprovalAuthority",
-    "StrategyApprovalIdentity",
-    "StrategyApprovalRequest",
     "ActiveStrategyRecord",
     "SQLiteStrategyStore",
     "StrategyActivationEvent",
-    "StrategyActivationGrant",
+    "StrategyActivationRequest",
     "StrategyEvidenceContext",
     "StrategyAuthorizationError",
     "StrategyConflictError",

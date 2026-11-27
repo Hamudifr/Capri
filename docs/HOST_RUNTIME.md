@@ -37,11 +37,11 @@ At construction, CapriHostRuntime rejects a journal that differs from the engine
 - The host-only execution-evidence credential resolver is separate from the user's session credential. It must not be exposed as a model tool or copied into task inputs.
 - A task result and its execution event are committed atomically. A pending standalone event is not eligible for a strategy evidence cohort until the task, exact attempt, and persisted result digest all verify.
 
-When both `HostStrategyApprovalAuthority` and `HostStrategyEvidenceAuthority` are supplied, CapriHostRuntime composes a `SQLiteStrategyStore` over the same task store. If a strategy store is supplied instead, its approval and evidence verifier callbacks must be bound to those exact authority instances. A partial authority pair is rejected. The strategy registry, approval authority, evidence authority, manifest store, task store and host identity resolver all enforce the same 256-character principal-ID bound.
+When `HostStrategyEvidenceAuthority` is supplied, CapriHostRuntime composes a `SQLiteStrategyStore` over the same task store. If a strategy store is supplied instead, its evidence verifier callback must be bound to that exact authority instance. The strategy registry, evidence authority, manifest store, task store and host identity resolver all enforce the same 256-character principal-ID bound.
 
-The embedding host should construct `SQLiteStrategyEvidenceManifestStore` with the execution journal's `classify_task_family` and `validate_source_events` callbacks, then bind its `attest_manifest` and `verify_manifest` methods into `HostStrategyEvidenceAuthority`. The strategy store is therefore wired to a host-verified manifest and a host-signed approval verifier rather than model-supplied assertions.
+The embedding host should construct `SQLiteStrategyEvidenceManifestStore` with the execution journal's `classify_task_family` and `validate_source_events` callbacks, then bind its `attest_manifest` and `verify_manifest` methods into `HostStrategyEvidenceAuthority`. The strategy store is therefore wired to a host-verified manifest and a host-signed evidence verifier rather than model-supplied assertions.
 
-`issue_strategy_activation_grant()` is a trusted host API. It re-authenticates the approver through `HostStrategyApprovalAuthority`, checks that the request belongs to the authenticated principal, and delegates to host approval policy. Do not register this method as a model-visible tool. Actual activation still requires an explicit one-use grant and remains separate from task execution and evidence collection.
+Activation and rollback are decided by Capri under the host's standing authority (owner directive 2026-11-27): `activate_strategy()` and `rollback_strategy()` take a typed `StrategyActivationRequest` bound to the authenticated principal, and the registry enforces generation CAS, fingerprint checks and the append-only event chain for every transition. Strategy activation remains separate from task execution and evidence collection.
 
 The runtime does not generate, persist, or provision production HMAC keys or collector credentials. The embedding host must supply non-exportable host-held MAC providers and authentication, classification, strategy-resolution, and result-verification callbacks. Tests may use ephemeral in-memory keys; that is not production key management.
 
@@ -101,9 +101,9 @@ result = host.run_turn(request_credential, session.session_id, "Hello")
 
 The OpenAI adapter reads `OPENAI_API_KEY` and `CAPRI_OPENAI_MODEL` only when explicitly constructed from the environment. Its first model call can incur separate API charges. This documentation and test suite make no provider request and do not provision credentials.
 
-## Approval and worker boundaries
+## Execution and worker boundaries
 
-`CapriHostRuntime` returns the committed `OrchestrationResult`, including any `approval_required` outcomes. The embedding host remains responsible for presenting an approval request and connecting the existing `HostToolGateway` / `HostApprovalService` challenge workflow to its user interface. Do not treat a model-generated tool call as approval.
+`CapriHostRuntime` returns the committed `OrchestrationResult`. Per the owner's 2026-11-27 directive there is no approval workflow anywhere in the runtime: Capri is the sole decision-maker and executes under the host's trusted permission checks. Do not treat a model-generated tool call as host authority.
 
 The optional task worker is not automatically started. `run_task_worker(stop_event)` blocks in the current process until the host sets the stop event. Use a real process supervisor for restart policy, shutdown, logs, and health checks. Task handlers must remain idempotent and enforce their own authorization.
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-Implemented as an offline, deterministic comparison primitive, with a principal-scoped registry and host approval-gated activation/rollback API described in [STRATEGY_REGISTRY.md](STRATEGY_REGISTRY.md). The registry independently recomputes candidate evaluations from supplied observations, binds exact strategy versions and configuration hashes, and keeps an append-only activation history. The active strategy is not automatically consumed by task execution. No model weights, permissions, tool capabilities, budgets, or safety policies are modified.
+Implemented as an offline, deterministic comparison primitive, with a principal-scoped registry and host Capri-decided activation/rollback API described in [STRATEGY_REGISTRY.md](STRATEGY_REGISTRY.md). The registry independently recomputes candidate evaluations from supplied observations, binds exact strategy versions and configuration hashes, and keeps an append-only activation history. The active strategy is not automatically consumed by task execution. No model weights, permissions, tool capabilities, budgets, or safety policies are modified.
 
 ## Why this slice exists
 
@@ -67,7 +67,7 @@ Before wiring this into a runtime selector:
 4. Add a shadow evaluator that records what it would choose without changing execution.
 5. Evaluate across multiple representative cohorts and include uncertainty estimates and safety-specific scenarios.
 6. Follow the owner-delegated staged autonomy policy in Capri — Capability Growth & Benchmarking: automatic canary/promotion is permitted only after trusted evidence collection, paired uncertainty estimates, non-authority-changing strategy configs, hard gates, monitoring and tested automatic rollback are implemented end to end.
-7. Keep authorization, tool allowlists, approvals, spend limits, and safety policy outside the adaptation mechanism and immutable to it.
+7. Keep authorization, tool allowlists, spend limits, and safety policy outside the adaptation mechanism and immutable to it.
 
 ## Tests
 

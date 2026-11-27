@@ -39,7 +39,7 @@ This is an application-level ownership boundary, not proof of complete tenant is
 
 `OpenAIResponsesAdapter` is the concrete bounded Responses API adapter. It preserves provider continuation items and converts model function calls into proposals for `ToolOrchestrator`; the model does not directly receive host permission or approval authority. The adapter reads `OPENAI_API_KEY` and `CAPRI_OPENAI_MODEL` only when explicitly constructed from the environment. A live provider request can incur separate API charges; no live request or credential provisioning is implied by this repository.
 
-The permissioned tool boundary uses an explicit registry, strict bounded schemas, host permission checks, action-bound one-use approvals, and redacted durable audit/replay metadata. Handlers are trusted host code executed with the process's privileges. This is not a sandbox. See [OPENAI_RESPONSES_ADAPTER.md](OPENAI_RESPONSES_ADAPTER.md) and [TOOL_EXECUTION.md](TOOL_EXECUTION.md).
+The permissioned tool boundary uses an explicit registry, strict bounded schemas, host permission checks, and redacted durable audit metadata. Handlers are trusted host code executed with the process's privileges. This is not a sandbox. See [OPENAI_RESPONSES_ADAPTER.md](OPENAI_RESPONSES_ADAPTER.md) and [TOOL_EXECUTION.md](TOOL_EXECUTION.md).
 
 ### Memory
 
@@ -61,7 +61,7 @@ The worker is explicitly host-managed. It starts no thread during construction, 
 - Task plans and individual JSON payloads are bounded, but there is no hosted scheduler or global spend control.
 - No per-principal request/token budgets, hard provider spend cap, or automatic rate limiter is implemented.
 - Backup methods exist for all four local SQLite stores, but there is no backup scheduler, off-site policy, encrypted backup format, retention/compaction policy, or tested automated restore drill.
-- Durable local audit and approval replay protection exist, but the store is not encrypted and approval records are not cryptographically authenticated.
+- Durable local audit storage exists, but the store is not encrypted.
 - Host authentication is injected; a production identity provider and complete remote tenant isolation are not implemented.
 - Tool handlers run with process privileges; no general sandbox or privilege-separated execution service is implemented.
 

@@ -16,8 +16,6 @@ from capri_runtime.runtime import Message, SessionClosedError, SessionStore
 from capri_runtime.memory import UntrustedMemoryContext, SQLiteMemoryStore, build_untrusted_memory_context
 from capri_runtime.tool_bridge import ToolCallRequest, ToolExecutionBridge
 from capri_runtime.tools import (
-    ApprovalGrant,
-    ApprovalRequiredError,
     AuditError,
     ExecutionContext,
     InMemoryAuditSink,
@@ -139,75 +137,6 @@ class ToolExecutionTests(unittest.TestCase):
         spec = ToolSpec("immutable", "tools:immutable", schema)
         schema["properties"]["x"]["type"] = "integer"
         self.assertEqual(spec.schema()["properties"]["x"]["type"], "string")
-
-    def test_approval_is_bound_to_principal_tool_and_exact_arguments(self):
-        spec = ToolSpec("delete_item", "tools:delete", SCHEMA, requires_approval=True)
-        calls = []
-        registry = ToolRegistry()
-        registry.register(spec, lambda args: calls.append(args) or {"deleted": True})
-        executor = ToolExecutor(registry, InMemoryAuditSink(), clock=lambda: self.now)
-        args = {"query": "item-1"}
-        grant = ApprovalGrant(
-            "grant-1", "host-user-1", "delete_item", digest(args),
-            (self.now + timedelta(minutes=2)).isoformat(),
-            operation_id="session-1:delete-1",
-        )
-        context = ExecutionContext(
-            "host-user-1", frozenset({"tools:delete"}), (grant,),
-            operation_id="session-1:delete-1",
-        )
-        self.assertEqual(executor.execute("delete_item", args, context), {"deleted": True})
-        self.assertEqual(len(calls), 1)
-        with self.assertRaises(ApprovalRequiredError):
-            executor.execute("delete_item", args, context)
-        self.assertEqual(len(calls), 1)
-
-    def test_unbound_approval_context_fails_closed(self):
-        spec = ToolSpec("delete_item", "tools:delete", SCHEMA, requires_approval=True)
-        calls = []
-        registry = ToolRegistry()
-        registry.register(spec, lambda args: calls.append(args))
-        executor = ToolExecutor(registry, InMemoryAuditSink(), clock=lambda: self.now)
-        args = {"query": "item-1"}
-        grant = ApprovalGrant(
-            "legacy-unbound", "host-user-1", "delete_item", digest(args),
-            (self.now + timedelta(minutes=2)).isoformat(),
-        )
-        context = ExecutionContext("host-user-1", frozenset({"tools:delete"}), (grant,))
-        with self.assertRaises(ApprovalRequiredError):
-            executor.execute("delete_item", args, context)
-        self.assertEqual(calls, [])
-
-    def test_expired_mismatched_and_cross_principal_approvals_fail_closed(self):
-        spec = ToolSpec("delete_item", "tools:delete", SCHEMA, requires_approval=True)
-        calls = []
-        registry = ToolRegistry()
-        registry.register(spec, lambda args: calls.append(args))
-        executor = ToolExecutor(registry, InMemoryAuditSink(), clock=lambda: self.now)
-        args = {"query": "item-1"}
-        grants = (
-            ApprovalGrant("expired", "host-user-1", "delete_item", digest(args),
-                          (self.now - timedelta(seconds=1)).isoformat(),
-                          operation_id="session-1:delete-1"),
-            ApprovalGrant("wrong-digest", "host-user-1", "delete_item", digest({"query": "other"}),
-                          (self.now + timedelta(minutes=1)).isoformat(),
-                          operation_id="session-1:delete-1"),
-            ApprovalGrant("wrong-user", "someone-else", "delete_item", digest(args),
-                          (self.now + timedelta(minutes=1)).isoformat(),
-                          operation_id="session-1:delete-1"),
-            ApprovalGrant("wrong-operation", "host-user-1", "delete_item", digest(args),
-                          (self.now + timedelta(minutes=1)).isoformat(),
-                          operation_id="session-1:delete-2"),
-        )
-        for grant in grants:
-            with self.subTest(grant=grant.grant_id):
-                context = ExecutionContext(
-                    "host-user-1", frozenset({"tools:delete"}), (grant,),
-                    operation_id="session-1:delete-1",
-                )
-                with self.assertRaises(ApprovalRequiredError):
-                    executor.execute("delete_item", args, context)
-        self.assertEqual(calls, [])
 
     def test_audit_start_failure_prevents_handler_invocation(self):
         registry = ToolRegistry()

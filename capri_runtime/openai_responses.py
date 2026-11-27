@@ -165,11 +165,7 @@ class OpenAIResponsesAdapter:
         for tool in tools:
             if type(tool) is not ToolDefinition:
                 raise OpenAIResponsesAdapterError("tool definitions contain an invalid record")
-            if (
-                not _valid_text(tool.name, maximum=64)
-                or tool.name in seen
-                or type(tool.requires_approval) is not bool
-            ):
+            if not _valid_text(tool.name, maximum=64) or tool.name in seen:
                 raise OpenAIResponsesAdapterError("tool definitions contain invalid metadata")
             try:
                 parameters = _loads_json(tool.parameters_json)
@@ -182,8 +178,7 @@ class OpenAIResponsesAdapter:
                 "name": tool.name,
                 "description": (
                     "Host-registered Capri tool. The host independently enforces permissions; "
-                    + ("explicit approval is required before execution." if tool.requires_approval
-                       else "host policy may still deny execution.")
+                    "host policy may still deny execution."
                 ),
                 "parameters": parameters,
                 "strict": False,

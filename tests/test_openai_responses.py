@@ -128,7 +128,6 @@ class OpenAIResponsesAdapterTests(unittest.TestCase):
             "project_search",
             '{"type":"object","properties":{"query":{"type":"string"}},'
             '"required":["query"],"additionalProperties":false}',
-            False,
         )
         result = adapter.complete_with_tools(
             "session-2", (Message("user", "Search"),), (tool,)
@@ -231,7 +230,6 @@ class OpenAIResponsesAdapterTests(unittest.TestCase):
             "project_search",
             '{"type":"object","properties":{"query":{"type":"string"}},'
             '"required":["query"],"additionalProperties":false}',
-            False,
         )
         result = adapter.complete_with_tools(
             "session-reasoning", (Message("user", "Search"),), (tool,)
@@ -269,7 +267,6 @@ class OpenAIResponsesAdapterTests(unittest.TestCase):
         tool = ToolDefinition(
             "project_search",
             '{"type":"object","properties":{},"required":[],"additionalProperties":false}',
-            False,
         )
         history = (
             Message("user", "Earlier request."),

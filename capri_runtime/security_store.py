@@ -1,8 +1,7 @@
-"""Private SQLite-backed audit, approval replay, and challenge storage.
+"""Private SQLite-backed audit and security-state storage.
 
-Approval challenge records contain bounded identity/operation metadata and signed
-grant material. Raw tool arguments, results, prompts, credentials, and transcripts
-are not stored. The database is private but not encrypted at rest.
+Raw tool arguments, results, prompts, credentials, and transcripts are not
+stored. The database is private but not encrypted at rest.
 """
 from __future__ import annotations
 
@@ -21,11 +20,10 @@ from typing import Any
 from capri_core.validation import contains_surrogate
 
 from .atomic_publish import publish_no_replace
-from .tools import ApprovalGrant, ApprovalStore, AuditEvent, AuditSink, ToolValidationError
+from .tools import AuditEvent, AuditSink, ToolValidationError
 
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
-_OPERATION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 
 
 def _valid_text(value: object, limit: int) -> bool:
@@ -399,126 +397,11 @@ def _validate_backup_semantics(connection: sqlite3.Connection) -> None:
 
     _validate_audit_chain(connection)
 
-    approval_rows = connection.execute(
-        """SELECT grant_id, principal_id, tool_name, argument_digest,
-        expires_at, consumed_at FROM consumed_approvals"""
-    ).fetchall()
-    for grant_id, principal_id, tool_name, digest, expires_at, consumed_at in approval_rows:
-        expiry = _aware_timestamp(expires_at)
-        consumed = _aware_timestamp(consumed_at)
-        if not all((
-            _valid_text(grant_id, 128), _valid_text(principal_id, 256),
-            _valid_text(tool_name, 64) and _NAME_RE.fullmatch(tool_name),
-            isinstance(digest, str) and _DIGEST_RE.fullmatch(digest),
-            expiry is not None, consumed is not None,
-            expiry is not None and consumed is not None and expiry > consumed,
-        )):
-            raise ToolValidationError("security backup contains an invalid approval replay record")
-    _validate_approval_challenges(connection)
+    _validate_worker_audit_state(connection)
 
 
-def _validate_approval_challenges(connection: sqlite3.Connection) -> None:
-    """Validate optional challenge state included in the shared security database."""
-    object_row = connection.execute(
-        "SELECT type FROM sqlite_master WHERE name='approval_challenges'"
-    ).fetchone()
-    if object_row is None:
-        return
-    if object_row[0] != "table":
-        raise ToolValidationError(
-            "security backup contains an invalid approval challenge object"
-        )
-    try:
-        rows = connection.execute(
-            """SELECT challenge_id, operation_id, principal_id, tool_name,
-            argument_digest, created_at, expires_at, status, approver_id, grant_json
-            FROM approval_challenges"""
-        )
-    except sqlite3.Error:
-        raise ToolValidationError(
-            "security backup contains an invalid approval challenge table"
-        ) from None
-
-    challenge_ids: set[str] = set()
-    operation_ids: set[str] = set()
-    grant_ids: set[str] = set()
-    allowed_grant_keys = {
-        "grant_id", "principal_id", "tool_name", "argument_digest",
-        "expires_at", "signature", "key_id", "operation_id",
-    }
-    required_grant_keys = allowed_grant_keys - {"operation_id"}
-
-    for (challenge_id, operation_id, principal_id, tool_name, digest,
-         created_at, expires_at, status, approver_id, grant_json) in rows:
-        created = _aware_timestamp(created_at)
-        expiry = _aware_timestamp(expires_at)
-        if not all((
-            _valid_text(challenge_id, 64),
-            _valid_text(operation_id, 128) and _OPERATION_RE.fullmatch(operation_id),
-            _valid_text(principal_id, 256) and principal_id.strip(),
-            _valid_text(tool_name, 64) and _NAME_RE.fullmatch(tool_name),
-            isinstance(digest, str) and _DIGEST_RE.fullmatch(digest),
-            created is not None, expiry is not None,
-            created is not None and expiry is not None and expiry > created,
-            status in {"pending", "approved", "rejected", "expired"},
-            approver_id is None or (
-                _valid_text(approver_id, 256) and approver_id.strip()
-            ),
-            challenge_id not in challenge_ids,
-            operation_id not in operation_ids,
-        )):
-            raise ToolValidationError(
-                "security backup contains an invalid approval challenge"
-            )
-        challenge_ids.add(challenge_id)
-        operation_ids.add(operation_id)
-
-        if status != "approved":
-            if grant_json is not None:
-                raise ToolValidationError(
-                    "security backup contains a grant on a non-approved challenge"
-                )
-            continue
-
-        if not (_valid_text(approver_id, 256) and approver_id.strip()
-                and _valid_text(grant_json, 2048)):
-            raise ToolValidationError(
-                "security backup contains an incomplete approved challenge"
-            )
-        try:
-            grant = json.loads(grant_json)
-        except (TypeError, ValueError, json.JSONDecodeError):
-            raise ToolValidationError(
-                "security backup contains invalid approval grant JSON"
-            ) from None
-        if not isinstance(grant, dict) or not required_grant_keys.issubset(grant) or set(grant) - allowed_grant_keys:
-            raise ToolValidationError(
-                "security backup contains an invalid approval grant shape"
-            )
-        grant_expiry = _aware_timestamp(grant.get("expires_at"))
-        grant_id = grant.get("grant_id")
-        key_id = grant.get("key_id")
-        if not all((
-            _valid_text(grant_id, 128),
-            grant_id not in grant_ids,
-            grant.get("principal_id") == principal_id,
-            grant.get("tool_name") == tool_name,
-            grant.get("argument_digest") == digest,
-            grant_expiry is not None,
-            created is not None and grant_expiry is not None and grant_expiry > created,
-            isinstance(grant.get("signature"), str)
-                and _DIGEST_RE.fullmatch(grant["signature"]),
-            key_id is None or _valid_text(key_id, 128),
-            "operation_id" not in grant or (
-                _valid_text(grant["operation_id"], 128)
-                and grant["operation_id"] == operation_id
-            ),
-        )):
-            raise ToolValidationError(
-                "security backup contains a mismatched approval grant"
-            )
-        grant_ids.add(grant_id)
-
+def _validate_worker_audit_state(connection: sqlite3.Connection) -> None:
+    """Validate the singleton worker audit state included in the shared security database."""
     worker_state_rows = connection.execute(
         "SELECT singleton_id, pending_operations FROM worker_audit_state"
     ).fetchall()
@@ -592,8 +475,8 @@ def _outstanding_worker_reservations(connection: sqlite3.Connection) -> int:
     return sum(state in {"pending", "committed"} for state in states.values())
 
 
-class SQLiteSecurityStore(AuditSink, ApprovalStore):
-    """Durable, cross-process audit sink and one-use approval replay store.
+class SQLiteSecurityStore(AuditSink):
+    """Durable, cross-process audit sink and security-state store.
 
     The database must live in an existing private directory. On POSIX the directory
     must be owned by the current user and have no group/other permission bits; the
@@ -720,16 +603,6 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
                     BEFORE DELETE ON audit_events
                     BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END"""
                 )
-                connection.execute(
-                    """CREATE TABLE IF NOT EXISTS consumed_approvals (
-                        grant_id TEXT PRIMARY KEY,
-                        principal_id TEXT NOT NULL,
-                        tool_name TEXT NOT NULL,
-                        argument_digest TEXT NOT NULL,
-                        expires_at TEXT NOT NULL,
-                        consumed_at TEXT NOT NULL
-                    )"""
-                )
                 connection.commit()
             except Exception:
                 connection.rollback()
@@ -766,54 +639,6 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
                 connection.commit()
             except Exception:
                 connection.rollback()
-                raise
-            finally:
-                connection.close()
-
-    def consume(self, grant: ApprovalGrant, now: datetime) -> bool:
-        if not isinstance(grant, ApprovalGrant):
-            return False
-        if (not isinstance(grant.grant_id, str) or not grant.grant_id or len(grant.grant_id) > 128
-                or not isinstance(grant.principal_id, str) or not grant.principal_id or len(grant.principal_id) > 256
-                or not isinstance(grant.tool_name, str) or not _NAME_RE.fullmatch(grant.tool_name)
-                or not isinstance(grant.argument_digest, str) or not _DIGEST_RE.fullmatch(grant.argument_digest)
-                or not isinstance(grant.expires_at, str) or len(grant.expires_at) > 64
-                or any(contains_surrogate(value) for value in (grant.grant_id, grant.principal_id, grant.tool_name, grant.argument_digest, grant.expires_at))):
-            return False
-        if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
-            raise ToolValidationError("approval consumption requires a timezone-aware time")
-        try:
-            expiry = datetime.fromisoformat(grant.expires_at.replace("Z", "+00:00"))
-        except (AttributeError, TypeError, ValueError):
-            return False
-        if expiry.tzinfo is None or expiry.utcoffset() is None or expiry <= now:
-            return False
-        if not isinstance(grant.grant_id, str) or not grant.grant_id:
-            return False
-        with self._lock:
-            connection = self._connect()
-            try:
-                connection.execute("BEGIN IMMEDIATE")
-                cursor = connection.execute(
-                    """INSERT OR IGNORE INTO consumed_approvals
-                    (grant_id, principal_id, tool_name, argument_digest, expires_at, consumed_at)
-                    VALUES (?, ?, ?, ?, ?, ?)""",
-                    (
-                        grant.grant_id,
-                        grant.principal_id,
-                        grant.tool_name,
-                        grant.argument_digest,
-                        expiry.isoformat(),
-                        now.isoformat(),
-                    ),
-                )
-                connection.execute("COMMIT")
-                return cursor.rowcount == 1
-            except Exception:
-                try:
-                    connection.execute("ROLLBACK")
-                except sqlite3.Error:
-                    pass
                 raise
             finally:
                 connection.close()

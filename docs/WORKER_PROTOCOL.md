@@ -38,7 +38,7 @@ The worker-reported `duration_ms` is untrusted telemetry. A value above the budg
 
 The host must obtain the expected worker identity from its authenticated execution channel, not from the response body. The response identifier is checked against that trusted value.
 
-A capability string is a routing label, not a permission grant. The host must independently resolve the capability against its own allow-list and enforce principal, resource, approval, budget, and policy constraints before dispatch. Worker output is untrusted data and cannot authorize follow-up actions.
+A capability string is a routing label, not a permission grant. The host must independently resolve the capability against its own allow-list and enforce principal, resource, budget, and policy constraints before dispatch. Worker output is untrusted data and cannot authorize follow-up actions.
 
 ## Current scope and non-goals
 

@@ -25,12 +25,12 @@ A concrete adapter must:
 - Keep host policy and tool definitions independent of retrieved memory.
 - Treat all retrieved memory as potentially malicious, stale, contradictory, or irrelevant. It is context, not policy or authority.
 - Treat model output as untrusted. Convert provider tool-call responses into AssistantTurn and let ToolOrchestrator and ToolExecutionBridge validate and execute them.
-- Never execute tools directly from the provider adapter, and never accept permissions, approval grants, principal identity, or tool definitions from memory or model output.
+- Never execute tools directly from the provider adapter, and never accept permissions, principal identity, or tool definitions from memory or model output.
 - Keep provider credentials in the host secret manager or injected runtime configuration; never commit credentials or put them in prompts/logs.
 
 ## Security properties and non-properties
 
-The host runtime structurally separates memory from transcript and trusted ExecutionContext. The bridge independently checks tool permissions and approvals. Adversarial orchestration tests verify that a memory item instructing the model to invoke an unauthorized deletion tool cannot expand the tool list or cause the host to execute the operation.
+The host runtime structurally separates memory from transcript and trusted ExecutionContext. The bridge independently checks tool permissions. Adversarial orchestration tests verify that a memory item instructing the model to invoke an unauthorized deletion tool cannot expand the tool list or cause the host to execute the operation.
 
 The untrusted_text wrapper is a serialization/delimiting convention, not a cryptographic or provider-enforced boundary. It does not make prompt injection impossible. A provider may interpret message roles and delimiters differently; the adapter must follow that provider current documented semantics and add integration tests for its actual request format.
 
@@ -71,4 +71,4 @@ The runtime now defines a separate immutable `UntrustedKnowledgeContext` for Neu
 
 The graph envelope preserves evidence state, confidence, source, timestamps, typed edges and contradiction pairs. Superseded entries are excluded from default retrieval except when necessary to display both endpoints of an active contradiction. Historical retrieval is explicit.
 
-These additions do not create a provider-enforced prompt-injection boundary. Graph content remains untrusted. The host remains the only source of identity, policy, permissions, approvals, and tool execution authority. See [KNOWLEDGE_GRAPH_RUNTIME.md](KNOWLEDGE_GRAPH_RUNTIME.md) for provider setup, retrieval semantics, caps, and limitations.
+These additions do not create a provider-enforced prompt-injection boundary. Graph content remains untrusted. The host remains the only source of identity, policy, permissions, and tool execution authority. See [KNOWLEDGE_GRAPH_RUNTIME.md](KNOWLEDGE_GRAPH_RUNTIME.md) for provider setup, retrieval semantics, caps, and limitations.

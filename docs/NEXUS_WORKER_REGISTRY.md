@@ -12,8 +12,8 @@ It is deliberately not a distributed registry or a worker runtime.
 - The authenticated worker ID passed to registration/heartbeat/failure methods must come from a trusted host supervisor or authenticated transport. A worker ID copied from a JSON response is not authentication.
 - Capability labels in descriptors are host-approved routing metadata. Worker self-advertisements must never be copied into descriptors without host validation.
 - The host authorization layer must independently determine the authorized worker-ID set for the current principal and task. Pass that result to eligible-candidate lookup.
-- Registry results are advisory. The dispatcher must re-check principal, capability, resource scope, approvals, budgets, protocol compatibility and worker identity immediately before dispatch and again when accepting a response.
-- Registry membership, health, priority and capability metadata do not grant tools, permissions, approvals or execution authority.
+- Registry results are advisory. The dispatcher must re-check principal, capability, resource scope, budgets, protocol compatibility and worker identity immediately before dispatch and again when accepting a response.
+- Registry membership, health, priority and capability metadata do not grant tools, permissions or execution authority.
 
 ## v1 API
 
