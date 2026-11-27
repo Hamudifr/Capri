@@ -49,6 +49,9 @@ def app(environ, start_response):
             # cache on each new production deploy; worst case the displayed
             # commit sha lags by five minutes.
             ("Cache-Control", "public, max-age=60, s-maxage=300"),
+            ("X-Content-Type-Options", "nosniff"),
+            ("Referrer-Policy", "no-referrer"),
+            ("Strict-Transport-Security", "max-age=63072000"),
             ("Content-Length", str(len(body))),
         ],
     )

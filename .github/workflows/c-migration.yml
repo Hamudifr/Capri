@@ -3,6 +3,9 @@ name: Native C migration checks
 on:
   push:
     branches: ["main", "migration/gnu11-posix-runtime-2026-11-25"]
+    paths:
+      - "c/**"
+      - ".github/workflows/c-migration.yml"
   pull_request:
     branches: ["main"]
     paths:

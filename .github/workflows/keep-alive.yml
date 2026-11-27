@@ -32,6 +32,10 @@ jobs:
           resp="$(curl -sS --max-time 30 https://znpvstwmzyphmvkhigqp.supabase.co/functions/v1/capri-keepalive)"
           echo "$resp"
           printf '%s' "$resp" | grep -q '"ok":true'
+          # Budget watchdog: fails the run (and emails actors) once the
+          # database or storage crosses 80% of the Supabase free cap.
+          printf '%s' "$resp" | grep -q '"under_limit":true'
+          printf '### Supabase keep-alive\n\n`%s`\n\n' "$resp" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Supabase liveness probe (capri-ping)
         run: |
