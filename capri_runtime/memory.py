@@ -14,8 +14,10 @@ import stat
 import threading
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from typing import Protocol, Sequence
+from typing import Protocol, Sequence, TypeVar
 from uuid import uuid4
+
+_T = TypeVar("_T")
 
 from capri_core.validation import contains_surrogate
 
@@ -89,70 +91,138 @@ _GROUP_BY_TERM: dict[str, frozenset[str]] = {
 }
 
 
-def _rank_memory_records(records: Sequence[MemoryRecord], query: str) -> tuple[MemoryRecord, ...]:
-    """Rank all-term matches by field relevance, then freshness.
+# Bounded memoization for parsed timestamps: they repeat across queries over
+# the same corpus. Entries are pure-function results; the cache self-compacts
+# by clearing at the limit. (Field casefold is deliberately NOT cached: raw
+# str.casefold is a C call and beats a Python-level cache for short fields.)
+_TIMESTAMP_CACHE: dict[str, float] = {}
+_CACHE_LIMIT = 65536
 
-    A query term is satisfied literally or through a bounded synonym group
-    (common paraphrases such as signin/login or failure/problem), so retrieval
-    handles semantic rewording without becoming a loose OR search: every query
-    term must still be satisfied by each returned record. Title and tag matches
-    outweigh body mentions, literal matches outweigh synonym matches, and
-    inverse document frequency is calculated over the complete filtered corpus.
+
+def _timestamp_cached(value: str) -> float:
+    cached = _TIMESTAMP_CACHE.get(value)
+    if cached is not None:
+        return cached
+    if len(_TIMESTAMP_CACHE) >= _CACHE_LIMIT:
+        _TIMESTAMP_CACHE.clear()
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    _TIMESTAMP_CACHE[value] = parsed
+    return parsed
+
+
+def _rank_documents(
+    documents: Sequence[tuple[str, str, str, str, str, str, _T]],
+    query: str,
+) -> tuple[_T, ...]:
+    """Rank pre-extracted documents by field relevance, then freshness.
+
+    Each document is ``(key, title, content, scope, tags, updated_at, payload)``
+    with raw text fields. This is the shared hot path: callers extract fields
+    once (from rows or records), rank cheaply, and materialize full records
+    only for the returned page. A query term is satisfied literally or through
+    a bounded synonym group, so retrieval handles semantic rewording without
+    becoming a loose OR search: every query term must still be satisfied.
+    Title and tag matches outweigh body mentions, literal matches outweigh
+    synonym matches, and inverse document frequency is calculated over the
+    complete corpus, not only matching documents.
     """
     terms = tuple(dict.fromkeys(part.casefold() for part in query.split() if part))
     if not terms:
         return ()
-    documents: list[tuple[MemoryRecord, str, str, str, str, str]] = []
-    for record in records:
-        title = record.title.casefold()
-        content = record.content.casefold()
-        scope = record.scope.casefold()
-        tags = " ".join(record.tags).casefold()
-        combined = "\n".join((title, content, scope, tags))
-        documents.append((record, title, content, scope, tags, combined))
     if not documents:
         return ()
     document_count = len(documents)
-
-    def satisfied(term: str, combined: str) -> bool:
-        if term in combined:
-            return True
-        group = _GROUP_BY_TERM.get(term)
-        return any(member in combined for member in group) if group else False
-
-    document_frequency = {
-        term: sum(satisfied(term, combined) for _, _, _, _, _, combined in documents)
-        for term in terms
-    }
-    ranked: list[tuple[float, float, str, MemoryRecord]] = []
-    for record, title, content, scope, tags, combined in documents:
-        if not all(satisfied(term, combined) for term in terms):
-            continue
+    term_groups = [_GROUP_BY_TERM.get(term) for term in terms]
+    document_frequency = [0] * len(terms)
+    # Single fused pass: casefold, satisfy every term (for document frequency,
+    # over the complete corpus), and keep only documents that satisfy all of
+    # them for scoring.
+    prepared: list[tuple[str, str, str, tuple[str, str, str, str], _T]] = []
+    for key, title, content, scope, tags, updated_at, payload in documents:
+        title_cf = title.casefold()
+        fields = (title_cf, tags.casefold(), scope.casefold(), content.casefold())
+        satisfied_all = True
+        for term_index, term in enumerate(terms):
+            group = term_groups[term_index]
+            present = False
+            for field in fields:
+                if term in field:
+                    present = True
+                    break
+            if not present and group:
+                for member in group:
+                    if member != term:
+                        for field in fields:
+                            if member in field:
+                                present = True
+                                break
+                        if present:
+                            break
+            if present:
+                document_frequency[term_index] += 1
+            else:
+                satisfied_all = False
+        if satisfied_all:
+            prepared.append((key, title_cf, updated_at, fields, payload))
+    if not prepared:
+        return ()
+    inverse_frequencies = [
+        1.0 + math.log(1.0 + (document_count - frequency + 0.5) / (frequency + 0.5))
+        for frequency in document_frequency
+    ]
+    weights = (4.0, 3.0, 1.5, 1.0)
+    phrase = query.casefold().strip()
+    ranked: list[tuple[float, float, str, _T]] = []
+    for key, title_cf, updated_at, fields, payload in prepared:
         score = 0.0
-        for term in terms:
-            frequency = document_frequency[term]
-            inverse_frequency = 1.0 + math.log(
-                1.0 + (document_count - frequency + 0.5) / (frequency + 0.5)
-            )
-            group = _GROUP_BY_TERM.get(term)
+        for term_index, term in enumerate(terms):
+            group = term_groups[term_index]
             exact_total = 0.0
             group_total = 0.0
-            for field, weight in ((title, 4.0), (tags, 3.0), (scope, 1.5), (content, 1.0)):
+            for field_index, field in enumerate(fields):
+                weight = weights[field_index]
                 exact_hits = field.count(term)
                 if exact_hits:
-                    exact_total += weight * min(exact_hits, 3)
-                    continue
-                if group:
-                    group_hits = sum(field.count(member) for member in group if member != term)
+                    if exact_hits > 3:
+                        exact_hits = 3
+                    exact_total += weight * exact_hits
+                elif group:
+                    group_hits = 0
+                    for member in group:
+                        if member != term:
+                            hits = field.count(member)
+                            if hits:
+                                group_hits += hits
+                                if group_hits >= 3:
+                                    break
                     if group_hits:
-                        group_total += weight * min(group_hits, 3)
-            score += inverse_frequency * (exact_total + 0.6 * group_total)
-        if query.casefold().strip() in title:
+                        if group_hits > 3:
+                            group_hits = 3
+                        group_total += weight * group_hits
+            score += inverse_frequencies[term_index] * (exact_total + 0.6 * group_total)
+        if phrase in title_cf:
             score += 6.0
-        updated = datetime.fromisoformat(record.updated_at.replace("Z", "+00:00")).timestamp()
-        ranked.append((score, updated, record.memory_id, record))
+        updated = _timestamp_cached(updated_at)
+        ranked.append((score, updated, key, payload))
     ranked.sort(key=lambda item: (-item[0], -item[1], item[2]))
     return tuple(item[3] for item in ranked)
+
+
+def _rank_memory_records(records: Sequence[MemoryRecord], query: str) -> tuple[MemoryRecord, ...]:
+    """Rank materialized memory records (adapter-facing wrapper)."""
+    documents = [
+        (
+            record.memory_id,
+            record.title,
+            record.content,
+            record.scope,
+            " ".join(record.tags),
+            record.updated_at,
+            record,
+        )
+        for record in records
+    ]
+    return _rank_documents(documents, query)
 
 @dataclass(frozen=True, slots=True)
 class UntrustedMemoryContext:
@@ -613,16 +683,21 @@ class SQLiteMemoryStore:
                          AND (? IS NULL OR scope = ?)""",
                     (now, scope, scope),
                 ).fetchall()
-                eligible = []
+                # Rank raw rows first and materialize MemoryRecords only for
+                # the returned page: full record construction (tag JSON decode
+                # + validation) is the dominant per-query cost on large stores.
+                documents = []
                 for row in rows:
-                    record = self._record(row)
                     if cutoff is not None:
-                        updated = _validate_expiry(record.updated_at)
+                        updated = _validate_expiry(row["updated_at"])
                         if updated is None or updated < cutoff:
                             continue
-                    eligible.append(record)
-                ranked = _rank_memory_records(eligible, query)
-                return ranked[offset:offset + limit]
+                    documents.append((
+                        row["memory_id"], row["title"], row["content"],
+                        row["scope"], row["tags"], row["updated_at"], row,
+                    ))
+                ranked_rows = _rank_documents(documents, query)
+                return tuple(self._record(row) for row in ranked_rows[offset:offset + limit])
             finally:
                 db.close()
 
