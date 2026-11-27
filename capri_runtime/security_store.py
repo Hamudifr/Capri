@@ -47,6 +47,308 @@ def _aware_timestamp(value: object) -> datetime | None:
     return parsed
 
 
+
+_AUDIT_CHAIN_DOMAIN = b"capri:security-store:lifecycle-audit:v1\0"
+_AUDIT_CHAIN_ZERO = "0" * 64
+_AUDIT_CHAIN_COLUMNS = {"sequence", "previous_hash", "event_hash"}
+
+
+def _validate_audit_event(event: AuditEvent) -> None:
+    if not isinstance(event, AuditEvent):
+        raise ToolValidationError("audit sink accepts AuditEvent records only")
+    text_fields = (
+        (event.event_id, 64), (event.timestamp, 64), (event.principal_id, 256),
+        (event.tool_name, 64), (event.status, 64),
+    )
+    if any(not isinstance(value, str) or not value or len(value) > limit
+           or contains_surrogate(value)
+           for value, limit in text_fields):
+        raise ToolValidationError("audit event contains invalid or oversized metadata")
+    if not isinstance(event.argument_digest, str) or not _DIGEST_RE.fullmatch(event.argument_digest):
+        raise ToolValidationError("audit event argument digest must be SHA-256 hex")
+    if event.error_code is not None and (
+        not isinstance(event.error_code, str) or len(event.error_code) > 128
+        or contains_surrogate(event.error_code)
+    ):
+        raise ToolValidationError("audit event error code is invalid")
+    optional_fields = (
+        (event.resource_type, 64), (event.resource_id, 256), (event.task_id, 128),
+    )
+    if any(
+        value is not None and (
+            not isinstance(value, str) or not value or len(value) > limit
+            or contains_surrogate(value)
+        )
+        for value, limit in optional_fields
+    ):
+        raise ToolValidationError("audit event resource metadata is invalid")
+    if event.metadata_json is None:
+        if any(value is not None for value, _ in optional_fields):
+            raise ToolValidationError("audit resource fields require canonical metadata JSON")
+    else:
+        if (
+            not isinstance(event.metadata_json, str)
+            or len(event.metadata_json.encode("utf-8")) > 16_384
+            or contains_surrogate(event.metadata_json)
+            or event.resource_type is None or event.resource_id is None
+        ):
+            raise ToolValidationError("audit event metadata JSON is invalid")
+        try:
+            metadata = json.loads(event.metadata_json)
+            canonical_metadata = json.dumps(
+                metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
+            )
+        except (TypeError, ValueError, json.JSONDecodeError):
+            raise ToolValidationError("audit event metadata JSON is invalid") from None
+        if (
+            not isinstance(metadata, dict)
+            or canonical_metadata != event.metadata_json
+            or hashlib.sha256(event.metadata_json.encode("utf-8")).hexdigest()
+                != event.argument_digest
+        ):
+            raise ToolValidationError("audit event metadata digest or canonical form is invalid")
+
+
+def _audit_chain_payload(sequence: int, fields: tuple[Any, ...]) -> str:
+    (
+        event_id, timestamp, principal_id, tool_name, argument_digest, status,
+        error_code, resource_type, resource_id, task_id, metadata_json,
+    ) = fields
+    try:
+        metadata_digest = (
+            hashlib.sha256(metadata_json.encode("utf-8")).hexdigest()
+            if isinstance(metadata_json, str) else None
+        )
+        payload = {
+            "sequence": sequence,
+            "event_id": event_id,
+            "timestamp": timestamp,
+            "principal_id": principal_id,
+            "event_type": tool_name,
+            "argument_digest": argument_digest,
+            "status": status,
+            "error_code": error_code,
+            "resource_type": resource_type,
+            "resource_id": resource_id,
+            "task_id": task_id,
+            "metadata_sha256": metadata_digest,
+        }
+        return json.dumps(
+            payload, sort_keys=True, separators=(",", ":"),
+            ensure_ascii=False, allow_nan=False,
+        )
+    except (TypeError, ValueError, UnicodeError):
+        raise ToolValidationError("audit event cannot be encoded for lifecycle chaining") from None
+
+
+def _audit_chain_hash(previous_hash: str, payload_json: str) -> str:
+    if not isinstance(previous_hash, str) or not _DIGEST_RE.fullmatch(previous_hash):
+        raise ToolValidationError("lifecycle audit chain predecessor is invalid")
+    return hashlib.sha256(
+        _AUDIT_CHAIN_DOMAIN
+        + bytes.fromhex(previous_hash)
+        + payload_json.encode("utf-8")
+    ).hexdigest()
+
+
+def _append_audit_event(connection: sqlite3.Connection, fields: tuple[Any, ...]) -> None:
+    """Append the audit row and its chain position inside the caller's transaction."""
+    state = connection.execute(
+        """SELECT schema_version, last_sequence, head_hash
+        FROM audit_chain_state WHERE singleton_id = 1"""
+    ).fetchone()
+    if (
+        state is None or state[0] != 1 or type(state[1]) is not int
+        or state[1] < 0 or not isinstance(state[2], str)
+        or not _DIGEST_RE.fullmatch(state[2])
+    ):
+        raise ToolValidationError("lifecycle audit chain state is invalid")
+    sequence = state[1] + 1
+    previous_hash = state[2]
+    payload_json = _audit_chain_payload(sequence, fields)
+    event_hash = _audit_chain_hash(previous_hash, payload_json)
+    connection.execute(
+        """INSERT INTO audit_events
+        (event_id, timestamp, principal_id, tool_name, argument_digest, status,
+         error_code, resource_type, resource_id, task_id, metadata_json,
+         sequence, previous_hash, event_hash)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (*fields, sequence, previous_hash, event_hash),
+    )
+    cursor = connection.execute(
+        """UPDATE audit_chain_state
+        SET last_sequence = ?, head_hash = ?
+        WHERE singleton_id = 1 AND schema_version = 1 AND last_sequence = ?
+          AND head_hash = ?""",
+        (sequence, event_hash, state[1], previous_hash),
+    )
+    if cursor.rowcount != 1:
+        raise ToolValidationError("lifecycle audit chain head changed during append")
+
+
+def _validate_audit_chain(connection: sqlite3.Connection) -> None:
+    """Verify one-to-one event coverage, sequence continuity, and the rolling digest."""
+    objects = {
+        row[0]: (row[1], row[2]) for row in connection.execute(
+            "SELECT name, type, sql FROM sqlite_master WHERE name IN "
+            "('audit_chain_state', 'audit_events_sequence_unique', "
+            "'audit_events_immutable_update', 'audit_events_immutable_delete')"
+        )
+    }
+    if objects.get("audit_chain_state", (None, None))[0] != "table":
+        raise ToolValidationError("security store is missing lifecycle audit chain state")
+    if objects.get("audit_events_sequence_unique", (None, None))[0] != "index":
+        raise ToolValidationError("security store is missing the lifecycle audit sequence index")
+    for trigger_name, operation in (
+        ("audit_events_immutable_update", "update"),
+        ("audit_events_immutable_delete", "delete"),
+    ):
+        trigger = objects.get(trigger_name)
+        if trigger is None or trigger[0] != "trigger":
+            raise ToolValidationError("security store is missing immutable audit event triggers")
+        trigger_sql = " ".join((trigger[1] or "").lower().split())
+        if (
+            f"before {operation} on audit_events" not in trigger_sql
+            or "raise(abort, 'audit events are append-only')" not in trigger_sql
+        ):
+            raise ToolValidationError("security store immutable audit event trigger definition is invalid")
+    index_rows = {
+        row[1]: row for row in connection.execute("PRAGMA index_list(audit_events)")
+    }
+    sequence_index = index_rows.get("audit_events_sequence_unique")
+    if (
+        sequence_index is None or sequence_index[2] != 1
+        or (len(sequence_index) > 4 and sequence_index[4] != 0)
+    ):
+        raise ToolValidationError("security store lifecycle audit sequence index is not unique")
+    indexed_columns = [
+        row[2] for row in connection.execute(
+            "PRAGMA index_info(audit_events_sequence_unique)"
+        )
+    ]
+    if indexed_columns != ["sequence"]:
+        raise ToolValidationError("security store lifecycle audit sequence index is malformed")
+    table_info = {
+        row[1]: row[2].upper() for row in connection.execute("PRAGMA table_info(audit_events)")
+    }
+    if (
+        not _AUDIT_CHAIN_COLUMNS.issubset(table_info)
+        or table_info.get("sequence") != "INTEGER"
+        or table_info.get("previous_hash") != "TEXT"
+        or table_info.get("event_hash") != "TEXT"
+    ):
+        raise ToolValidationError("security store is missing lifecycle audit chain columns")
+    state_columns = [
+        row[1] for row in connection.execute("PRAGMA table_info(audit_chain_state)")
+    ]
+    if state_columns != ["singleton_id", "schema_version", "last_sequence", "head_hash"]:
+        raise ToolValidationError("security store lifecycle audit state schema is malformed")
+    state_rows = connection.execute(
+        """SELECT singleton_id, schema_version, last_sequence, head_hash
+        FROM audit_chain_state ORDER BY singleton_id"""
+    ).fetchall()
+    if (
+        len(state_rows) != 1 or state_rows[0][0] != 1 or state_rows[0][1] != 1
+        or type(state_rows[0][2]) is not int or state_rows[0][2] < 0
+        or not isinstance(state_rows[0][3], str)
+        or not _DIGEST_RE.fullmatch(state_rows[0][3])
+    ):
+        raise ToolValidationError("security store lifecycle audit chain state is malformed")
+    expected_sequence = 0
+    previous_hash = _AUDIT_CHAIN_ZERO
+    rows = connection.execute(
+        """SELECT event_id, timestamp, principal_id, tool_name, argument_digest,
+        status, error_code, resource_type, resource_id, task_id, metadata_json,
+        sequence, previous_hash, event_hash
+        FROM audit_events ORDER BY sequence"""
+    )
+    for row in rows:
+        fields = tuple(row[:11])
+        sequence, stored_previous, stored_hash = row[11:]
+        expected_sequence += 1
+        if (
+            type(sequence) is not int or sequence != expected_sequence
+            or stored_previous != previous_hash
+            or not isinstance(stored_hash, str) or not _DIGEST_RE.fullmatch(stored_hash)
+        ):
+            raise ToolValidationError("security store lifecycle audit sequence is discontinuous")
+        payload_json = _audit_chain_payload(sequence, fields)
+        calculated = _audit_chain_hash(previous_hash, payload_json)
+        if calculated != stored_hash:
+            raise ToolValidationError("security store lifecycle audit chain digest mismatch")
+        previous_hash = stored_hash
+    state = state_rows[0]
+    if state[2] != expected_sequence or state[3] != previous_hash:
+        raise ToolValidationError("security store lifecycle audit chain head does not match its events")
+
+
+def _migrate_lifecycle_audit_chain(connection: sqlite3.Connection) -> None:
+    """One-time local consistency-chain bootstrap for pre-chain audit databases."""
+    state_object = connection.execute(
+        "SELECT type FROM sqlite_master WHERE name='audit_chain_state'"
+    ).fetchone()
+    if state_object is not None and state_object[0] != "table":
+        raise ToolValidationError("security store lifecycle audit state object is invalid")
+    columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(audit_events)")
+    }
+    present = columns & _AUDIT_CHAIN_COLUMNS
+    if state_object is not None:
+        if present != _AUDIT_CHAIN_COLUMNS:
+            raise ToolValidationError("security store lifecycle audit chain schema is incomplete")
+        return
+    if present:
+        raise ToolValidationError("security store lifecycle audit chain state is missing")
+    connection.execute("ALTER TABLE audit_events ADD COLUMN sequence INTEGER")
+    connection.execute("ALTER TABLE audit_events ADD COLUMN previous_hash TEXT")
+    connection.execute("ALTER TABLE audit_events ADD COLUMN event_hash TEXT")
+    connection.execute(
+        """CREATE TABLE audit_chain_state (
+            singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+            schema_version INTEGER NOT NULL CHECK(schema_version = 1),
+            last_sequence INTEGER NOT NULL CHECK(last_sequence >= 0),
+            head_hash TEXT NOT NULL
+        )"""
+    )
+    connection.execute(
+        """INSERT INTO audit_chain_state
+        (singleton_id, schema_version, last_sequence, head_hash)
+        VALUES (1, 1, 0, ?)""",
+        (_AUDIT_CHAIN_ZERO,),
+    )
+    # Existing stores already protect audit_events with an UPDATE trigger.
+    # Temporarily remove it only inside this exclusive migration transaction;
+    # _initialize recreates it before committing the schema upgrade.
+    connection.execute("DROP TRIGGER IF EXISTS audit_events_immutable_update")
+    sequence = 0
+    previous_hash = _AUDIT_CHAIN_ZERO
+    rows = connection.execute(
+        """SELECT rowid, event_id, timestamp, principal_id, tool_name,
+        argument_digest, status, error_code, resource_type, resource_id,
+        task_id, metadata_json FROM audit_events ORDER BY rowid"""
+    ).fetchall()
+    for row in rows:
+        sequence += 1
+        fields = tuple(row[1:])
+        payload_json = _audit_chain_payload(sequence, fields)
+        event_hash = _audit_chain_hash(previous_hash, payload_json)
+        connection.execute(
+            """UPDATE audit_events
+            SET sequence = ?, previous_hash = ?, event_hash = ?
+            WHERE rowid = ?""",
+            (sequence, previous_hash, event_hash, row[0]),
+        )
+        previous_hash = event_hash
+    connection.execute(
+        """UPDATE audit_chain_state SET last_sequence = ?, head_hash = ?
+        WHERE singleton_id = 1""",
+        (sequence, previous_hash),
+    )
+    connection.execute(
+        "CREATE UNIQUE INDEX audit_events_sequence_unique ON audit_events(sequence)"
+    )
+
+
 def _validate_backup_semantics(connection: sqlite3.Connection) -> None:
     """Reject logically malformed security rows even when SQLite is structurally sound."""
     audit_rows = connection.execute(
@@ -94,6 +396,8 @@ def _validate_backup_semantics(connection: sqlite3.Connection) -> None:
                 or hashlib.sha256(metadata_json.encode("utf-8")).hexdigest() != digest
             ):
                 raise ToolValidationError("security backup contains an invalid audit metadata digest")
+
+    _validate_audit_chain(connection)
 
     approval_rows = connection.execute(
         """SELECT grant_id, principal_id, tool_name, argument_digest,
@@ -374,6 +678,7 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
             connection = self._connect()
             try:
                 connection.execute("PRAGMA journal_mode=WAL")
+                connection.execute("BEGIN IMMEDIATE")
                 connection.execute(
                     """CREATE TABLE IF NOT EXISTS audit_events (
                         event_id TEXT PRIMARY KEY,
@@ -395,6 +700,7 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
                 for column in ("resource_type", "resource_id", "task_id", "metadata_json"):
                     if column not in existing_audit_columns:
                         connection.execute(f"ALTER TABLE audit_events ADD COLUMN {column} TEXT")
+                _migrate_lifecycle_audit_chain(connection)
                 connection.execute(
                     """CREATE TABLE IF NOT EXISTS worker_audit_state (
                         singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
@@ -424,85 +730,43 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
                         consumed_at TEXT NOT NULL
                     )"""
                 )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
             finally:
                 connection.close()
-
-    def write(self, event: AuditEvent) -> None:
-        if not isinstance(event, AuditEvent):
-            raise ToolValidationError("audit sink accepts AuditEvent records only")
-        text_fields = (
-            (event.event_id, 64), (event.timestamp, 64), (event.principal_id, 256),
-            (event.tool_name, 64), (event.status, 64),
-        )
-        if any(not isinstance(value, str) or not value or len(value) > limit
-               or contains_surrogate(value)
-               for value, limit in text_fields):
-            raise ToolValidationError("audit event contains invalid or oversized metadata")
-        if not isinstance(event.argument_digest, str) or not _DIGEST_RE.fullmatch(event.argument_digest):
-            raise ToolValidationError("audit event argument digest must be SHA-256 hex")
-        if event.error_code is not None and (
-            not isinstance(event.error_code, str) or len(event.error_code) > 128
-            or contains_surrogate(event.error_code)
-        ):
-            raise ToolValidationError("audit event error code is invalid")
-        optional_fields = (
-            (event.resource_type, 64), (event.resource_id, 256), (event.task_id, 128),
-        )
-        if any(
-            value is not None and (
-                not isinstance(value, str) or not value or len(value) > limit
-                or contains_surrogate(value)
-            )
-            for value, limit in optional_fields
-        ):
-            raise ToolValidationError("audit event resource metadata is invalid")
-        if event.metadata_json is None:
-            if any(value is not None for value, _ in optional_fields):
-                raise ToolValidationError("audit resource fields require canonical metadata JSON")
-        else:
-            if (
-                not isinstance(event.metadata_json, str)
-                or len(event.metadata_json.encode("utf-8")) > 16_384
-                or contains_surrogate(event.metadata_json)
-                or event.resource_type is None or event.resource_id is None
-            ):
-                raise ToolValidationError("audit event metadata JSON is invalid")
-            try:
-                metadata = json.loads(event.metadata_json)
-                canonical_metadata = json.dumps(
-                    metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
-                )
-            except (TypeError, ValueError, json.JSONDecodeError):
-                raise ToolValidationError("audit event metadata JSON is invalid") from None
-            if (
-                not isinstance(metadata, dict)
-                or canonical_metadata != event.metadata_json
-                or hashlib.sha256(event.metadata_json.encode("utf-8")).hexdigest()
-                    != event.argument_digest
-            ):
-                raise ToolValidationError("audit event metadata digest or canonical form is invalid")
         with self._lock:
             connection = self._connect()
             try:
-                connection.execute(
-                    """INSERT INTO audit_events
-                    (event_id, timestamp, principal_id, tool_name, argument_digest, status,
-                     error_code, resource_type, resource_id, task_id, metadata_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        event.event_id,
-                        event.timestamp,
-                        event.principal_id,
-                        event.tool_name,
-                        event.argument_digest,
-                        event.status,
-                        event.error_code,
-                        event.resource_type,
-                        event.resource_id,
-                        event.task_id,
-                        event.metadata_json,
-                    ),
-                )
+                _validate_audit_chain(connection)
+            finally:
+                connection.close()
+
+    def append_event_in_transaction(
+        self, connection: sqlite3.Connection, event: AuditEvent,
+    ) -> None:
+        """Append one event and its chain link inside the caller's active transaction."""
+        if not isinstance(connection, sqlite3.Connection) or not connection.in_transaction:
+            raise ToolValidationError("audit event append requires an active SQLite transaction")
+        _validate_audit_event(event)
+        _append_audit_event(connection, (
+            event.event_id, event.timestamp, event.principal_id, event.tool_name,
+            event.argument_digest, event.status, event.error_code, event.resource_type,
+            event.resource_id, event.task_id, event.metadata_json,
+        ))
+
+    def write(self, event: AuditEvent) -> None:
+        _validate_audit_event(event)
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                self.append_event_in_transaction(connection, event)
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
             finally:
                 connection.close()
 
@@ -636,17 +900,11 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
                     sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
                 )
                 digest = hashlib.sha256(metadata_json.encode("utf-8")).hexdigest()
-                connection.execute(
-                    """INSERT INTO audit_events
-                    (event_id, timestamp, principal_id, tool_name, argument_digest, status,
-                     error_code, resource_type, resource_id, task_id, metadata_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        event_id, timestamp, "host", "worker.reconciliation.acknowledged",
-                        digest, "success", None, "worker_registry", "registry", None,
-                        metadata_json,
-                    ),
-                )
+                _append_audit_event(connection, (
+                    event_id, timestamp, "host", "worker.reconciliation.acknowledged",
+                    digest, "success", None, "worker_registry", "registry", None,
+                    metadata_json,
+                ))
                 connection.execute(
                     """UPDATE worker_audit_state SET pending_operations = 0
                     WHERE singleton_id = 1"""
@@ -781,6 +1039,9 @@ class SQLiteSecurityStore(AuditSink, ApprovalStore):
             connection = self._connect()
             try:
                 row = connection.execute("PRAGMA integrity_check").fetchone()
-                return str(row[0]) if row else "no result"
+                if not row or row[0] != "ok":
+                    return str(row[0]) if row else "no result"
+                _validate_backup_semantics(connection)
+                return "ok"
             finally:
                 connection.close()
