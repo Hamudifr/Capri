@@ -39,7 +39,7 @@ The supplied `InMemoryAuditSink` is a process-local, non-durable development imp
 
 Not implemented: a concrete identity provider/session validator, handler sandboxing, handler timeouts, per-tool rate limits, per-principal quotas, tenant identity provider, tool discovery, model-provider integration, or automatic retries. HMAC MAC signing for evidence and audit attestation is provided by `ApprovalMacProvider`/`HmacApprovalKeyRing`, but production key custody and host identity wiring remain host responsibilities. Cooperative cancellation plumbing exists for opted-in handlers, but handlers must implement and poll it. Durable local audit metadata is implemented by `SQLiteSecurityStore`; encryption, backup/restore automation, retention/compaction, and monitoring are not.
 
-Before exposing consequential handlers to an actual model, connect a real host identity provider to the resolver, protect MAC key custody for evidence attestation, add idempotency keys for side effects, rate/resource budgets, enforce handler timeout/process isolation where needed, audit-store backup/restore and retention controls, and adversarial integration tests. Keep dangerous capabilities absent by default.
+Before exposing consequential handlers to an actual model, connect a real host identity provider to the resolver, protect MAC key custody for evidence attestation, add rate/resource budgets, enforce handler timeout/process isolation where needed, audit-store backup/restore and retention controls, and adversarial integration tests. Keep dangerous capabilities absent by default.
 
 ## Durable store verification
 
@@ -126,3 +126,46 @@ specific post-handler failure to `outcome_uncertain` with
 `handler_result_rejected`, preserving the argument digest. It must never be
 reported as `invalid_arguments` or blindly retried: the handler may already
 have changed an external resource. The audit trail records `result_rejected`.
+
+
+## Tool-call idempotency (at-most-once with safe retry)
+
+`capri_runtime.idempotency` provides optional, opt-in tool-call idempotency so
+a retried call (network retransmission, provider replay of the same function
+call, host crash recovery) cannot duplicate a side effect.
+
+**Contract.** The host passes an `idempotency_key` to
+`ToolExecutor.execute(...)` (or sets it on `ToolCallRequest`; the OpenAI
+adapter reuses the provider `call_id` automatically). Keys are scoped per
+principal: the same key under two principals are independent records. A
+completed record is keyed by `(principal_id, key)` and carries a fingerprint of
+`tool_name:sha256(canonical_arguments)`.
+
+**Semantics, evaluated before any side effect** (before budget reservation,
+resource authorization, and handler dispatch):
+
+- First use with a given fingerprint: the key is reserved, the handler runs,
+  and the outcome (succeeded, handler-failed, or result-rejected) is memoized.
+- Retry with the same key and same fingerprint: the handler does not run
+  again; `IdempotencyReplay` returns the byte-identical memoized result
+  (failures replay as failures too). The bridge reports `replayed=True`.
+- Same key, different tool or arguments: `IdempotencyConflictError`, mapped by
+  the bridge to `idempotency_conflict`/`idempotency_key_reused`.
+- Key still in flight in another thread: `IdempotencyInProgressError`, mapped
+  to `in_progress`/`idempotency_in_progress`.
+- Pre-handler denials (permission, budget, invalid arguments) are not
+  memoized: they have no side effect, so a retry re-derives them idempotently.
+- Records expire after a TTL (default 24h) and are then reclaimed for reuse.
+
+**Stores.** `InMemoryIdempotencyStore` (process-local, development) and
+`SQLiteIdempotencyStore` (durable, WAL, `BEGIN IMMEDIATE`, atomic
+reserve-then-complete) both satisfy the `IdempotencyStore` protocol. The store
+is independent of the audit store; hosts choose persistence explicitly by
+passing `idempotency_store=` to the executor. Without a store, behavior is
+unchanged and keys are ignored.
+
+**Guarantee.** At most one handler execution per `(principal, key, fingerprint)`
+under concurrency; a completed outcome replays byte-identically. This is not a
+substitute for host-side authorization or resource-level fencing, and an
+`outcome_uncertain` result after a crash must still not be blindly retried by
+the model loop—the bridge and orchestrator never auto-retry uncertain calls.

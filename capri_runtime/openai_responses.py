@@ -367,7 +367,7 @@ class OpenAIResponsesAdapter:
                     raise OpenAIResponsesAdapterError("provider function arguments are invalid JSON") from None
                 if type(decoded_arguments) is not dict:
                     raise OpenAIResponsesAdapterError("provider function arguments must be an object")
-                calls.append(ToolCallRequest(call_id, name, decoded_arguments))
+                calls.append(ToolCallRequest(call_id, name, decoded_arguments, idempotency_key=call_id))
                 seen_call_ids.add(call_id)
             else:
                 raise OpenAIResponsesAdapterError("provider returned an unsupported output item")
