@@ -1,6 +1,6 @@
 # Nexus Independently Protected Audit Checkpoints
 
-**Status:** architecture proposal; local lifecycle-chain phase 1 is implemented in Draft PR #269; external signing/checkpoint trust is not implemented and this is not production authorization  
+**Status:** phases 1-3 implemented (local lifecycle chain in PR #269; typed contracts, composite envelope, verifier-first binding and compare-and-swap store semantics in this repository); checkpoint writer cadence, host fencing integration, key rotation and restore validation (phases 4-6) are not implemented and this is not production authorization
 **Scope:** independent authenticity and rollback detection for both durable Nexus registry events and host lifecycle audit events  
 **Tracker:** [issue #246](https://github.com/Hamudifr/Capri/issues/246)  
 **Related:** [worker registry design](superpowers/specs/2026-11-25-sqlite-worker-registry.md), [supervisor recovery contract](WORKER_SUPERVISOR_RECOVERY.md), [security review](SECURITY_REVIEW.md)
@@ -276,6 +276,8 @@ Use deterministic fake signer and checkpoint-store adapters in offline CI. Test 
 7. **Operational evidence:** document checkpoint lag, external store retention, backup drills, alerting and outage procedures. Run exact-head quality tests and a separate security review.
 
 Do not implement all phases in one patch. Each phase needs its own reviewable interface, failure tests and compatibility decision.
+
+**Implementation progress (2026-11-27):** phases 2 and 3 are implemented in `capri_runtime/audit_checkpoints.py`. The module provides the typed `CheckpointSigner`/`CheckpointVerifier`/`CheckpointStore` protocols, the immutable `CompositeCheckpoint` envelope with a fixed-order domain-separated canonical encoding (`capri:nexus:audit-checkpoint:v1\0`), strict `from_dict` field validation, the HMAC-SHA-256 signer/verifier profile (host-supplied ≥32-byte key, never stored), `previous_checkpoint_sha256` history chaining, `verify_composite_checkpoint` (signature plus both-stream binding with rollback, anchor-head and unanchored-tail detection), `verify_checkpoint_history`, and `verify_latest_checkpoint` (external-store freshness authority with replay rejection). `InMemoryCheckpointStore` is the process-local reference implementation of generation compare-and-swap, fencing-epoch monotonicity and immutable retention; it is explicitly not an independent trust root. `SQLiteSecurityStore.lifecycle_chain_state()` and `SQLiteWorkerRegistry.audit_chain_state()` read structurally validated local chain state (fail closed on any break) plus the event hash at a checkpoint anchor. `tests/test_audit_checkpoints.py` covers the phase 2-3 acceptance items from section 9 (items 1-9, 15, 17, 18 and 22 store-side) with deterministic offline adapters. Database installation identities are supplied by the host binding position (enrolment inside each store is part of phase 5); no keys, secrets or paid services were added.
 
 ## 11. Release boundary
 
