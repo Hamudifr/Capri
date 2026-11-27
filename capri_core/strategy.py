@@ -100,10 +100,10 @@ def _validate_observation(item: object) -> StrategyObservation:
         raise StrategyEvaluationError("outcome must be verified_success, verified_failure, or unverified")
     if type(item.safety_violation) is not bool:
         raise StrategyEvaluationError("safety_violation must be a boolean")
-    for field in ("tool_calls", "context_tokens", "estimated_cost_units", "latency_ms"):
-        value = getattr(item, field)
+    for name in ("tool_calls", "context_tokens", "estimated_cost_units", "latency_ms"):
+        value = getattr(item, name)
         if type(value) is not int or value < 0 or value > 10**12:
-            raise StrategyEvaluationError(f"{field} must be a non-negative bounded integer")
+            raise StrategyEvaluationError(f"{name} must be a non-negative bounded integer")
     return item
 
 
@@ -235,13 +235,13 @@ def evaluate_strategies(
             pairwise_improvements.add("safety_violations")
         if candidate_record.outcome == "verified_success" and baseline_record.outcome != "verified_success":
             pairwise_improvements.add("verified_success_rate")
-        for field in resource_fields:
-            baseline_value = getattr(baseline_record, field)
-            candidate_value = getattr(candidate_record, field)
+        for name in resource_fields:
+            baseline_value = getattr(baseline_record, name)
+            candidate_value = getattr(candidate_record, name)
             if candidate_value > baseline_value:
-                blocked.append(f"{field}_regression")
+                blocked.append(f"{name}_regression")
             elif candidate_value < baseline_value:
-                pairwise_improvements.add(field)
+                pairwise_improvements.add(name)
 
     improved.extend(name for name in resource_fields if name in pairwise_improvements)
     if "safety_violations" in pairwise_improvements:

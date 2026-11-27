@@ -5,7 +5,6 @@ No test page is created unless CAPRI_NOTION_LIVE_TESTS=true.
 from __future__ import annotations
 
 import os
-import sys
 from uuid import uuid4
 
 from .memory import MemoryNotFoundError

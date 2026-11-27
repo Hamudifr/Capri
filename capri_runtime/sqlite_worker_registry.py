@@ -15,7 +15,6 @@ from .worker_registry import (
     WorkerConflictError,
     WorkerDescriptor,
     WorkerHealth,
-    WorkerNotFoundError,
     WorkerRegistryError,
     WorkerReservation,
     WorkerSnapshot,

@@ -8,7 +8,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 from .memory import MemoryErrorBase, MemoryNotFoundError, MemoryValidationError, _validate_text
-from .notion_memory import NotionMemoryAdapter, NotionMemoryTransport
+from .notion_memory import NotionMemoryAdapter
 
 NOTION_API_VERSION = "2026-03-11"
 NOTION_API_BASE = "https://api.notion.com/v1"

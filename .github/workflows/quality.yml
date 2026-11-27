@@ -37,6 +37,10 @@ jobs:
           capri skills validate --root . --json
       - name: Compile source and tests
         run: python -m compileall -q capri_core capri_runtime tests
+      - name: Static lint (pyflakes, production code)
+        run: |
+          python -m pip install pyflakes
+          python -m pyflakes capri_core capri_runtime scripts benchmarks
       - name: Run Capri Doctor
         run: python -m capri_core doctor
       - name: Run contract and runtime tests

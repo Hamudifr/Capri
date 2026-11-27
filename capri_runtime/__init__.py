@@ -11,7 +11,7 @@ from .worker_protocol import (
     WorkerProtocolError, WorkerRequest, WorkerResponse,
 )
 from .worker_registry import (
-    InMemoryWorkerRegistry, WorkerRegistry, WorkerConflictError, WorkerDescriptor,
+    InMemoryWorkerRegistry, WorkerConflictError, WorkerDescriptor,
     WorkerHealth, WorkerNotFoundError, WorkerRegistryError, WorkerReservation, WorkerSnapshot,
 )
 from .sqlite_worker_registry import SQLiteWorkerRegistry
@@ -161,6 +161,7 @@ __all__ = [
     "WorkerRequest",
     "WorkerResponse",
     "InMemoryWorkerRegistry",
+    "SQLiteWorkerRegistry",
     "WorkerConflictError",
     "WorkerDescriptor",
     "WorkerHealth",
