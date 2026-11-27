@@ -48,7 +48,13 @@ independent layers prevent that and alert when anything breaks:
 1. **Internal**: `pg_cron` job `capri_keepalive` (installed via
    migration `install_pg_cron_keepalive`) runs
    `SELECT count(*) FROM public.capri_backup_registry` daily at 03:43 UTC
-   — a real query inside Postgres.
+   — a real query inside Postgres. Since #299 this layer is also
+   **asserted, not hoped for**: `capri_project_status()` exposes
+   `cron_active` / `cron_schedule` / `cron_last_run` / `cron_stale`
+   (stale = armed but the last fire is >26h old; NULL-safe so a freshly
+   armed job passes), the edge function forwards the two booleans, and
+   keep-alive step 4 fails red if the job is unarmed or stale — a dead
+   scheduler can no longer hide behind a green workflow.
 2. **External**: `.github/workflows/keep-alive.yml` runs daily at
    04:17 UTC (plus on every push to `main` and on manual dispatch):
    - `GET /functions/v1/capri-keepalive` — keyless edge function that
@@ -59,7 +65,10 @@ independent layers prevent that and alert when anything breaks:
      status page renders `Deployed commit` (guards against redirect or
      protection regressions; the `*-git-main-*` and unique `*-capri-9b07`
      aliases are behind Vercel Deployment Protection and must not be
-     used for monitoring).
+     used for monitoring);
+   - a second `GET capri-keepalive` as the **pg_cron watchdog**:
+     requires `cron_active:true` and `cron_stale:false` in addition to
+     the budget booleans.
 3. **Alerting**: any failed endpoint fails the workflow, which emails
    the repository actors. A paused Supabase project therefore surfaces
    within a day instead of silently.
@@ -67,7 +76,17 @@ independent layers prevent that and alert when anything breaks:
 Design notes:
 
 - `capri-keepalive` is `verify_jwt: false` and returns only
-  `{ok, db_checked, time}` — no secrets, no telemetry leak.
+  `{ok, under_limit, cron_active, cron_stale, time}` — booleans only,
+  no secrets, no numeric telemetry. Budget metrics are validated
+  **fail-closed** (#301): if the RPC omits or nulls any number, the
+  function answers `502 {ok:false, under_limit:false}` instead of
+  coercing absent data into a healthy verdict (`Number(null) is 0`
+  was exactly the false-green this replaced).
+- Probe responses are validated by `scripts/check_probe.py` (strict
+  JSON + boolean-identity checks, unit-tested in
+  `tests/test_check_probe.py` via the quality gate) rather than inline
+  shell greps, so contract regressions fail CI before they fail a
+  scheduled run.
 - `capri_project_status()` is `SECURITY DEFINER` with a pinned
   `search_path` because `service_role` has no access to the
   `supabase_migrations` schema; an invoker function returns HTTP 403
