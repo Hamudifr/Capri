@@ -5,7 +5,8 @@ name: Free-plan keep-alive
 # availability (see docs/FREE_PLAN_OPTIMIZATION.md):
 #   1. pg_cron job inside Postgres (03:43 UTC daily, runs a real query)
 #   2. this workflow (04:17 UTC daily): edge function with a DB query,
-#      the capri-ping liveness probe, and the Vercel production page
+#      the capri-ping liveness probe, the Vercel production page, and
+#      the pg_cron armed/fresh assertion (step 4)
 #   3. failure alerting: any dead endpoint fails this workflow, which
 #      emails the repository actors
 # The public repo makes scheduled runs free; all endpoints are keyless.
@@ -37,6 +38,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
+      # scripts/check_probe.py validates probe JSON with unit-tested
+      # logic (tests/test_check_probe.py) instead of inline greps.
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
       - name: Supabase keep-alive (edge function with database query)
         run: |
           set -euo pipefail
@@ -44,18 +50,17 @@ jobs:
           resp=""
           for attempt in 1 2 3 4 5; do
             resp="$(curl -sS --max-time 30 "$url" || true)"
-            if printf '%s' "$resp" | grep -q '"ok":true' \
-              && printf '%s' "$resp" | grep -q '"under_limit":true'; then
+            if printf '%s' "$resp" | python3 scripts/check_probe.py --true ok,under_limit; then
               break
             fi
             echo "attempt $attempt: unexpected response: $resp"
             sleep 10
           done
           echo "$resp"
-          printf '%s' "$resp" | grep -q '"ok":true'
           # Budget watchdog: fails the run (and emails actors) once the
-          # database or storage crosses 80% of the Supabase free cap.
-          printf '%s' "$resp" | grep -q '"under_limit":true'
+          # database or storage crosses 80% of the Supabase free cap
+          # (and whenever the metrics are missing - fail closed).
+          printf '%s' "$resp" | python3 scripts/check_probe.py --true ok,under_limit
           printf '### Supabase keep-alive\n\n`%s`\n\n' "$resp" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Supabase liveness probe (capri-ping)
@@ -65,14 +70,14 @@ jobs:
           resp=""
           for attempt in 1 2 3 4 5; do
             resp="$(curl -sS --max-time 30 "$url" || true)"
-            if printf '%s' "$resp" | grep -q '"ok":true'; then
+            if printf '%s' "$resp" | python3 scripts/check_probe.py --true ok; then
               break
             fi
             echo "attempt $attempt: unexpected response: $resp"
             sleep 10
           done
           echo "$resp"
-          printf '%s' "$resp" | grep -q '"ok":true'
+          printf '%s' "$resp" | python3 scripts/check_probe.py --true ok
 
       - name: Vercel production status page
         run: |
@@ -95,16 +100,17 @@ jobs:
           resp=""
           for attempt in 1 2 3 4 5; do
             resp="$(curl -sS --max-time 30 "$url" || true)"
-            if printf '%s' "$resp" | grep -q '"cron_active":true'; then
+            if printf '%s' "$resp" | python3 scripts/check_probe.py \
+                --true ok,under_limit,cron_active --false cron_stale; then
               break
             fi
-            echo "attempt $attempt: cron fields missing or job unarmed: $resp"
+            echo "attempt $attempt: cron contract unmet: $resp"
             sleep 10
           done
           echo "$resp"
           # Job armed: fails if the pg_cron job was unscheduled or deleted.
-          printf '%s' "$resp" | grep -q '"cron_active":true'
           # Scheduler fresh: fails when a fire is more than 26h late
           # (grace: cron_stale stays false until a first fire exists).
-          printf '%s' "$resp" | grep -q '"cron_stale":false'
+          printf '%s' "$resp" | python3 scripts/check_probe.py \
+            --true ok,under_limit,cron_active --false cron_stale
           printf '### pg_cron watchdog\n\n`%s`\n\n' "$resp" >> "$GITHUB_STEP_SUMMARY"
