@@ -114,12 +114,22 @@ A/B proof with byte-identical source:
 
 Recovery procedure: re-deploy both functions through the connector API
 (any content change forces a new version), then re-run the keep-alive
-workflow. Function sources are mirrored in
-`supabase/functions/<slug>/index.ts` with `verify_jwt = false` pinned in
-`supabase/config.toml`, so an integration that deploys from the
-repository pushes exactly this reviewed content. The keep-alive probes
+workflow.
+
+**Resolved 2026-11-27 (PR #287):** the root cause was an empty
+`entrypoint_path` — with no `supabase/functions/` directory in the
+repository the integration produced artifacts that had no entrypoint.
+After #287 added the source mirrors, the integration's own re-deploy on
+merge switched `entrypoint_path` to
+`file:///app/supabase/functions/<slug>/index.ts` and invocations stayed
+green (verified: keepalive v8 answers `{ok:true, under_limit:true}` and
+the push-triggered keep-alive run passed). The repository is now the
+source of truth: `supabase/functions/<slug>/index.ts` with
+`verify_jwt = false` pinned in `supabase/config.toml`, and every push
+re-deploys exactly this reviewed content. The keep-alive probes still
 retry five times to ride out brief deploy windows; a run that stays red
-after a merge means the integration broke the functions again.
+after a merge means a new regression of this class — re-deploy via the
+connector and re-check `entrypoint_path`.
 
 ## Owner checklist (dashboard-only, not reachable from the repo)
 
