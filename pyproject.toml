@@ -28,3 +28,6 @@ capri = "capri_core.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["capri_core", "capri_runtime"]
+
+[tool.vercel]
+entrypoint = "app.py"
