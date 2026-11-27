@@ -32,17 +32,36 @@ Deno.serve(async () => {
       return fail({ rpc_status: res.status }, 502);
     }
     const status = (await res.json()) as {
-      database_bytes?: number;
-      storage_bytes?: number;
-      free_plan_limits?: { database_bytes?: number; storage_bytes?: number };
+      database_bytes?: unknown;
+      storage_bytes?: unknown;
+      free_plan_limits?: { database_bytes?: unknown; storage_bytes?: unknown };
       cron_active?: boolean;
       cron_stale?: boolean;
     };
     const limits = status.free_plan_limits ?? {};
-    const db = Number(status.database_bytes ?? 0);
-    const storage = Number(status.storage_bytes ?? 0);
-    const dbLimit = Number(limits.database_bytes ?? 524288000);
-    const storageLimit = Number(limits.storage_bytes ?? 1073741824);
+    // Fail closed: a metric counts only if the RPC returned an actual
+    // finite number. Missing, null, string, or NaN values must never
+    // coerce into a passing verdict - Number(null) is 0 and Number("") is
+    // 0, so the old `?? 0` defaults turned absent metrics into a healthy
+    // under_limit=true (the exact false-green this replaces).
+    const metric = (value: unknown): number =>
+      typeof value === "number" && Number.isFinite(value)
+        ? value
+        : Number.NaN;
+    const db = metric(status.database_bytes);
+    const storage = metric(status.storage_bytes);
+    const dbLimit = metric(limits.database_bytes);
+    const storageLimit = metric(limits.storage_bytes);
+    if (
+      !Number.isFinite(db) ||
+      !Number.isFinite(storage) ||
+      !Number.isFinite(dbLimit) ||
+      !Number.isFinite(storageLimit) ||
+      dbLimit <= 0 ||
+      storageLimit <= 0
+    ) {
+      return fail({ error: "metrics missing or invalid" }, 502);
+    }
     const underLimit = db < dbLimit * 0.8 && storage < storageLimit * 0.8;
     return json({
       ok: true,
