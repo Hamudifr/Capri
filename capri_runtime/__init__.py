@@ -71,6 +71,7 @@ from .orchestration import (
     ToolOrchestrator,
 )
 from .host import HostToolGateway
+from .supervisor_lock import PosixSupervisorLock
 from .host_runtime import CapriHostRuntime, HostRuntimeError, HostWorkerReservation
 from .service import (
     CapriHostService, HostServiceError, HostServiceHealth,
@@ -226,6 +227,7 @@ __all__ = [
     "CapriHostRuntime",
     "HostRuntimeError",
     "HostWorkerReservation",
+    "PosixSupervisorLock",
     "CapriHostService",
     "HostServiceError",
     "HostServiceHealth",

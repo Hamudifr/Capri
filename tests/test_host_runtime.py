@@ -21,6 +21,7 @@ from capri_runtime import (
     HostAuthorityResolver,
     InMemoryAuditSink,
     InMemoryWorkerRegistry,
+    PosixSupervisorLock,
     SQLiteWorkerRegistry,
     WorkerDescriptor,
     SessionClosedError,
@@ -126,6 +127,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
 
     def make_worker_host(
         self, registry, identities, policy, audit_sink=None, load_resolver=None,
+        supervisor_lock=None,
     ):
         known_ids = frozenset(identities.values())
         options = {
@@ -139,9 +141,75 @@ class CapriHostRuntimeTests(unittest.TestCase):
             "worker_unreserved_in_flight_resolver": load_resolver or (lambda worker_id: 0),
             "worker_policy_resolver": policy,
         }
+        if supervisor_lock is not None:
+            options["worker_supervisor_lock"] = supervisor_lock
         if audit_sink is not None:
             options["worker_lifecycle_audit_sink"] = audit_sink
         return self.make_host(**options)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX flock is required")
+    def test_worker_supervisor_lock_serializes_gateway_across_runtime_instances(self):
+        with tempfile.TemporaryDirectory() as lock_dir:
+            lock_path = os.path.join(lock_dir, "supervisor.lock")
+            lock_a = PosixSupervisorLock(lock_path, timeout_seconds=1.0)
+            lock_b = PosixSupervisorLock(lock_path, timeout_seconds=0.05)
+            registry = InMemoryWorkerRegistry()
+            audit = InMemoryAuditSink()
+            identities = {"worker-token": "worker-1"}
+            policy = lambda *args: {"worker-1"}
+            host_a = self.make_worker_host(
+                registry, identities, policy, audit_sink=audit, supervisor_lock=lock_a,
+            )
+            host_b = self.make_worker_host(
+                registry, identities, policy, audit_sink=audit, supervisor_lock=lock_b,
+            )
+            results = []
+            errors = []
+            thread = None
+
+            def register():
+                try:
+                    results.append(host_b.register_worker(
+                        "worker-token",
+                        WorkerDescriptor("worker-1", (1,), ("math.factorial",)),
+                    ))
+                except Exception as exc:
+                    errors.append(exc)
+
+            try:
+                with host_a._worker_mutation_guard():
+                    thread = threading.Thread(target=register)
+                    thread.start()
+                    thread.join(timeout=1)
+                    self.assertFalse(thread.is_alive())
+                    self.assertEqual(results, [])
+                    self.assertEqual(len(errors), 1)
+                    self.assertIsInstance(errors[0], TimeoutError)
+
+                errors.clear()
+                snapshot = host_b.register_worker(
+                    "worker-token",
+                    WorkerDescriptor("worker-1", (1,), ("math.factorial",)),
+                )
+                self.assertEqual(snapshot.descriptor.worker_id, "worker-1")
+                self.assertEqual(errors, [])
+            finally:
+                if thread is not None:
+                    thread.join(timeout=2)
+                lock_a.close()
+                lock_b.close()
+
+    @unittest.skipUnless(os.name == "posix", "POSIX flock is required")
+    def test_worker_supervisor_lock_requires_a_worker_registry(self):
+        with tempfile.TemporaryDirectory() as lock_dir:
+            lock = PosixSupervisorLock(
+                os.path.join(lock_dir, "supervisor.lock"),
+            )
+            try:
+                with self.assertRaisesRegex(HostRuntimeError, "requires a configured worker_registry"):
+                    self.make_host(worker_supervisor_lock=lock)
+            finally:
+                lock.close()
 
     def test_concurrent_worker_heartbeats_serialize_host_load_sampling(self):
         registry = InMemoryWorkerRegistry()

@@ -5,6 +5,7 @@ owns authentication callbacks, process supervision, credentials, and lifecycle.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 import hashlib
 import json
@@ -44,6 +45,7 @@ from .worker_registry import (
     WorkerRegistry, WorkerDescriptor, WorkerRegistryError, WorkerReservation, WorkerSnapshot,
 )
 from .sqlite_worker_registry import SQLiteWorkerRegistry
+from .supervisor_lock import PosixSupervisorLock
 
 
 class HostRuntimeError(Exception):
@@ -197,6 +199,7 @@ class CapriHostRuntime:
         worker_in_flight_resolver: Callable[[str], int] | None = None,
         worker_policy_resolver: Callable[[str, str, str], set[str] | frozenset[str]] | None = None,
         worker_lifecycle_audit_sink: AuditSink | None = None,
+        worker_supervisor_lock: PosixSupervisorLock | None = None,
     ) -> None:
         if not isinstance(authority, HostAuthorityResolver):
             raise HostRuntimeError("a trusted HostAuthorityResolver is required")
@@ -246,6 +249,10 @@ class CapriHostRuntime:
             raise HostRuntimeError("strategy_evidence_authority must be a HostStrategyEvidenceAuthority")
         if worker_registry is not None and not isinstance(worker_registry, WorkerRegistry):
             raise HostRuntimeError("worker_registry must implement the trusted WorkerRegistry contract")
+        if worker_supervisor_lock is not None and not isinstance(worker_supervisor_lock, PosixSupervisorLock):
+            raise HostRuntimeError("worker_supervisor_lock must be a PosixSupervisorLock")
+        if worker_supervisor_lock is not None and worker_registry is None:
+            raise HostRuntimeError("worker_supervisor_lock requires a configured worker_registry")
         if worker_identity_resolver is not None and not callable(worker_identity_resolver):
             raise HostRuntimeError("worker_identity_resolver must be callable")
         if worker_descriptor_resolver is not None and not callable(worker_descriptor_resolver):
@@ -393,6 +400,7 @@ class CapriHostRuntime:
         self._worker_lifecycle_audit_sink = worker_lifecycle_audit_sink
         self._worker_audit_healthy = True
         self._worker_reservation_lock = threading.RLock()
+        self._worker_supervisor_lock = worker_supervisor_lock
         self._worker_reservation_contexts: dict[str, HostWorkerReservation] = {}
         self._goal_store = goal_store
         configured_budgets = [
@@ -434,6 +442,16 @@ class CapriHostRuntime:
             raise HostRuntimeError(
                 "worker registry is disabled because lifecycle audit persistence is unavailable"
             )
+
+    @contextmanager
+    def _worker_mutation_guard(self):
+        """Hold the local gateway lock and the optional cross-process host lock."""
+        with self._worker_reservation_lock:
+            if self._worker_supervisor_lock is None:
+                yield
+            else:
+                with self._worker_supervisor_lock:
+                    yield
 
     def _begin_worker_audit_operation(self) -> None:
         self._require_worker_audit_healthy()
@@ -529,7 +547,7 @@ class CapriHostRuntime:
             raise HostRuntimeError("host worker descriptor approval failed") from None
         if type(approved) is not WorkerDescriptor or approved.worker_id != identity:
             raise HostRuntimeError("host worker descriptor approval returned an invalid identity")
-        with self._worker_reservation_lock:
+        with self._worker_mutation_guard():
             self._purge_worker_reservation_contexts()
             self._begin_worker_audit_operation()
             try:
@@ -586,7 +604,7 @@ class CapriHostRuntime:
     ) -> WorkerSnapshot:
         """Record liveness only from a trusted supervisor and host-derived load."""
         self._authorize_worker_observer(observer_credential, worker_id)
-        with self._worker_reservation_lock:
+        with self._worker_mutation_guard():
             self._purge_worker_reservation_contexts()
             self._begin_worker_audit_operation()
             try:
@@ -634,7 +652,7 @@ class CapriHostRuntime:
     ) -> WorkerSnapshot:
         """Record failure only from a trusted host supervisor/monitor."""
         self._authorize_worker_observer(observer_credential, worker_id)
-        with self._worker_reservation_lock:
+        with self._worker_mutation_guard():
             self._purge_worker_reservation_contexts()
             pending_contexts = tuple(
                 context for context in self._worker_reservation_contexts.values()
@@ -839,7 +857,7 @@ class CapriHostRuntime:
         except Exception:
             raise HostRuntimeError("task is unavailable to the authenticated principal") from None
         allowed = self._worker_policy_allowlist(context.principal_id, task_id, capability)
-        with self._worker_reservation_lock:
+        with self._worker_mutation_guard():
             self._purge_worker_reservation_contexts()
             try:
                 if isinstance(self._worker_registry, SQLiteWorkerRegistry):
@@ -883,7 +901,7 @@ class CapriHostRuntime:
             self._task_store.get_for_principal(task_id, context.principal_id)
         except Exception:
             raise HostRuntimeError("task is unavailable to the authenticated principal") from None
-        with self._worker_reservation_lock:
+        with self._worker_mutation_guard():
             self._purge_worker_reservation_contexts()
             try:
                 if isinstance(self._worker_registry, SQLiteWorkerRegistry):
@@ -933,7 +951,7 @@ class CapriHostRuntime:
         except Exception:
             raise HostRuntimeError("task is unavailable to the authenticated principal") from None
         allowed = self._worker_policy_allowlist(context.principal_id, task_id, capability)
-        with self._worker_reservation_lock:
+        with self._worker_mutation_guard():
             self._purge_worker_reservation_contexts()
             self._begin_worker_audit_operation()
             try:
@@ -1035,7 +1053,7 @@ class CapriHostRuntime:
             raise HostRuntimeError("task is unavailable to the authenticated principal") from None
         worker_id = reservation.reservation.worker_id
         self._authorize_worker_observer(observer_credential, worker_id)
-        with self._worker_reservation_lock:
+        with self._worker_mutation_guard():
             self._purge_worker_reservation_contexts()
             stored = self._worker_reservation_contexts.get(reservation.reservation.token)
             if stored is None:
@@ -1192,7 +1210,7 @@ class CapriHostRuntime:
         self._authorize_worker_observer(observer_credential, worker_id)
         if self._worker_registry is None:
             raise HostRuntimeError("no host worker registry is configured")
-        with self._worker_reservation_lock:
+        with self._worker_mutation_guard():
             self._purge_worker_reservation_contexts()
             stored = self._worker_reservation_contexts.get(reservation.reservation.token)
             if stored is None:
