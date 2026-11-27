@@ -8,6 +8,7 @@ Capri currently supports **CPython 3.15.x only**.
 - Repository quality CI runs the complete test suite once, on Python 3.15. There is no multi-version matrix.
 - Runtime, SQLite, Rust-reference, and four-language benchmark workflows use Python 3.15.
 - Capri Doctor checks that the interpreter is Python 3.15.x.
+- Capri Doctor probes the interpreter's SQLite build and fails closed unless JSON CHECK constraints are enforceable under `trusted_schema=OFF` (SQLite 3.41+).
 
 ## Upgrade rule
 

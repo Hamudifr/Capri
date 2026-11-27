@@ -22,6 +22,9 @@ data/
 *.sqlite3
 *.db
 
+# Local bootstrap toolchains (SQLite/CPython builds)
+.toolchain/
+
 # OS/editor noise
 .DS_Store
 Thumbs.db

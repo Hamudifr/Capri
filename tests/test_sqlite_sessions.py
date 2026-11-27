@@ -896,6 +896,21 @@ class SQLiteSessionStoreTests(unittest.TestCase):
         if os.name == "posix":
             self.assertEqual(stat.S_IMODE(os.stat(self.path).st_mode), 0o600)
 
+    def test_incapable_sqlite_fails_fast_with_actionable_validation_error(self):
+        path = os.path.join(self.temp.name, "incapable.sqlite3")
+        with patch(
+            "capri_runtime.sqlite_sessions.sqlite_json_capability",
+            return_value=(
+                False,
+                "SQLite 3.40.1 cannot enforce json CHECK constraints under "
+                "trusted_schema=OFF (unsafe use of json_valid()); Capri requires "
+                "SQLite 3.41 or newer",
+            ),
+        ):
+            with self.assertRaisesRegex(ValidationError, "3.41"):
+                SQLiteSessionStore(path)
+        self.assertFalse(os.path.exists(path))
+
 
 if __name__ == "__main__":
     unittest.main()

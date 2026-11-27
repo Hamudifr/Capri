@@ -36,7 +36,8 @@ typedef enum {
 /* The parent directory must already exist and be private (0700 or stricter).
  * On POSIX, the database is owned by the effective user and mode 0600.
  * Transcript JSON is plaintext; callers own encryption, retention and backups.
- * Requires SQLite 3.38+ with built-in JSON support.
+ * Requires SQLite 3.41+ with built-in JSON support; json CHECK constraints
+ * are evaluated under trusted_schema=OFF.
  */
 CapriSessionStore *capri_session_store_open(
     const char *path,

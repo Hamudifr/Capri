@@ -15,6 +15,7 @@ class HealthState(str, Enum):
 
 _COMPONENTS: tuple[dict[str, Any], ...] = (
     {"id": "python_environment", "name": "Python environment", "check": "python_version", "depends_on": ()},
+    {"id": "sqlite_environment", "name": "SQLite environment", "check": "sqlite_session_schema", "depends_on": ()},
     {"id": "repository_structure", "name": "Repository structure", "check": "repository_structure", "depends_on": ()},
     {"id": "ci_workflow", "name": "CI workflow", "check": "ci_workflow_readable", "depends_on": ("repository_structure",)},
     {"id": "ci_actions", "name": "CI action integrity", "check": "ci_actions_pinned", "depends_on": ("ci_workflow",)},
@@ -25,8 +26,8 @@ _COMPONENTS: tuple[dict[str, Any], ...] = (
         "name": "Developer baseline",
         "check": None,
         "depends_on": (
-            "python_environment", "repository_structure", "ci_workflow",
-            "ci_actions", "ci_permissions", "pull_request_ci",
+            "python_environment", "sqlite_environment", "repository_structure",
+            "ci_workflow", "ci_actions", "ci_permissions", "pull_request_ci",
         ),
     },
 )

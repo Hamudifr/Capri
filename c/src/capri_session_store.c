@@ -224,7 +224,9 @@ static bool schema(sqlite3 *db) {
 }
 CapriSessionStore *capri_session_store_open(const char *path,size_t max_messages,size_t max_input,size_t max_output,size_t max_tool,CapriSessionError *error) {
     if(error) *error=CAPRI_SESSION_INVALID;
-    if(max_messages<2u || max_messages>100000u || max_input==0u || max_input>1048576u || max_output==0u || max_output>1048576u || max_tool==0u || max_tool>1048576u || sqlite3_libversion_number()<3038000) return NULL;
+    /* json CHECK constraints are evaluated under trusted_schema=OFF, which
+       SQLite builds before 3.41.0 reject with "unsafe use of json_valid()". */
+    if(max_messages<2u || max_messages>100000u || max_input==0u || max_input>1048576u || max_output==0u || max_output>1048576u || max_tool==0u || max_tool>1048576u || sqlite3_libversion_number()<3041000) return NULL;
     char *absolute=NULL; if(!safe_path(path,&absolute)) return NULL;
     int flags=O_RDWR|O_CREAT;
 #ifdef O_NOFOLLOW

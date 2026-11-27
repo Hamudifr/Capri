@@ -18,6 +18,8 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
+from capri_core.capability import sqlite_json_capability
+
 from .atomic_publish import publish_no_replace
 from .runtime import (
     Message,
@@ -75,6 +77,10 @@ class SQLiteSessionStore(SessionStore):
                 existing.st_uid != os.geteuid() or existing.st_nlink != 1
             ):
                 raise ValidationError("database file ownership or link count is unsafe")
+
+        capable, capability_detail = sqlite_json_capability()
+        if not capable:
+            raise ValidationError(f"session store unavailable: {capability_detail}")
 
         flags = os.O_RDWR | os.O_CREAT
         if hasattr(os, "O_NOFOLLOW"):
