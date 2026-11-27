@@ -1,0 +1,9 @@
+# Supabase project configuration mirrored for the repository.
+# Both edge functions are intentionally keyless liveness probes.
+project_id = "capri"
+
+[functions.capri-ping]
+verify_jwt = false
+
+[functions.capri-keepalive]
+verify_jwt = false
