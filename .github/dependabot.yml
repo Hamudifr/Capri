@@ -1,0 +1,21 @@
+version: 2
+updates:
+  # The only ecosystem with anything to update: workflows pin actions to
+  # full commit SHAs. requirements.txt and pyproject.toml intentionally
+  # carry zero third-party dependencies, so there is nothing for a pypi
+  # ecosystem to manage. Grouping minor/patch bumps into one PR keeps the
+  # always-on quality workflow (and CodeQL) from running per-dependency -
+  # free-plan Actions minutes stay lean.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:11"
+      timezone: UTC
+    open-pull-requests-limit: 5
+    groups:
+      actions-minor-patch:
+        update-types:
+          - minor
+          - patch

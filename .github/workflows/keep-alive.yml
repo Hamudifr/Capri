@@ -25,6 +25,13 @@ on:
 permissions:
   contents: read
 
+# A push to main and the daily schedule can overlap; one run always
+# re-verifies every endpoint from scratch, so the newer run supersedes
+# the older instead of both burning free-plan minutes in parallel.
+concurrency:
+  group: keep-alive-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   keep-alive:
     runs-on: ubuntu-latest
