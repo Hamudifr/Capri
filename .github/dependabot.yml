@@ -15,7 +15,21 @@ updates:
       timezone: UTC
     open-pull-requests-limit: 5
     groups:
+      # codeql-action must be bumped as a unit: init + analyze + upload
+      # (all github/codeql-action/* steps) have to run the same version or
+      # the workflow fails with a mixed-version error. This group has no
+      # update-type filter on purpose so major jumps (v3 -> v4) are also
+      # delivered as ONE PR instead of two unmergeable halves.
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
+      # The actions/* ecosystem (checkout, setup-python, ...) groups only
+      # minor/patch; majors stay individual so a breaking runner change
+      # gets its own self-validating PR. Patterns are disjoint from the
+      # group above, so every dependency belongs to exactly one group.
       actions-minor-patch:
+        patterns:
+          - "actions/*"
         update-types:
           - minor
           - patch
