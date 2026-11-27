@@ -99,6 +99,28 @@ because pruned rows return their space after vacuum.
 - Deploy volume (~5/day) is far below the 100/day cap; builds finish in
   well under a minute against the 45-minute ceiling.
 
+## Edge functions and the Supabase GitHub integration (incident note)
+
+Observed 2026-11-27: every push to `main` makes the linked Supabase
+GitHub integration re-upload both edge functions with a **broken build
+artifact** — the function reports `ACTIVE` but every invocation fails
+(HTTP 5xx), which failed the keep-alive workflow three runs in a row.
+A/B proof with byte-identical source:
+
+| Deployed by | capri-ping result |
+| --- | --- |
+| integration re-upload (v2, after the #285 merge) | invocations fail |
+| connector API (v3, identical body) | invocations succeed |
+
+Recovery procedure: re-deploy both functions through the connector API
+(any content change forces a new version), then re-run the keep-alive
+workflow. Function sources are mirrored in
+`supabase/functions/<slug>/index.ts` with `verify_jwt = false` pinned in
+`supabase/config.toml`, so an integration that deploys from the
+repository pushes exactly this reviewed content. The keep-alive probes
+retry five times to ride out brief deploy windows; a run that stays red
+after a merge means the integration broke the functions again.
+
 ## Owner checklist (dashboard-only, not reachable from the repo)
 
 1. **Vercel → Settings → Git → Ignored Build Step**: skip docs-only

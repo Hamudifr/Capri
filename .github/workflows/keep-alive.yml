@@ -9,6 +9,10 @@ name: Free-plan keep-alive
 #   3. failure alerting: any dead endpoint fails this workflow, which
 #      emails the repository actors
 # The public repo makes scheduled runs free; all endpoints are keyless.
+# Each probe retries to ride out edge-function deploy windows; a
+# persistently failing run after a merge means the Supabase GitHub
+# integration re-deployed a broken artifact (see the doc's incident
+# note - re-deploy the functions via the connector to recover).
 
 on:
   schedule:
@@ -24,12 +28,22 @@ permissions:
 jobs:
   keep-alive:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 8
     steps:
       - name: Supabase keep-alive (edge function with database query)
         run: |
           set -euo pipefail
-          resp="$(curl -sS --max-time 30 https://znpvstwmzyphmvkhigqp.supabase.co/functions/v1/capri-keepalive)"
+          url="https://znpvstwmzyphmvkhigqp.supabase.co/functions/v1/capri-keepalive"
+          resp=""
+          for attempt in 1 2 3 4 5; do
+            resp="$(curl -sS --max-time 30 "$url" || true)"
+            if printf '%s' "$resp" | grep -q '"ok":true' \
+              && printf '%s' "$resp" | grep -q '"under_limit":true'; then
+              break
+            fi
+            echo "attempt $attempt: unexpected response: $resp"
+            sleep 10
+          done
           echo "$resp"
           printf '%s' "$resp" | grep -q '"ok":true'
           # Budget watchdog: fails the run (and emails actors) once the
@@ -40,12 +54,29 @@ jobs:
       - name: Supabase liveness probe (capri-ping)
         run: |
           set -euo pipefail
-          resp="$(curl -sS --max-time 30 https://znpvstwmzyphmvkhigqp.supabase.co/functions/v1/capri-ping)"
+          url="https://znpvstwmzyphmvkhigqp.supabase.co/functions/v1/capri-ping"
+          resp=""
+          for attempt in 1 2 3 4 5; do
+            resp="$(curl -sS --max-time 30 "$url" || true)"
+            if printf '%s' "$resp" | grep -q '"ok":true'; then
+              break
+            fi
+            echo "attempt $attempt: unexpected response: $resp"
+            sleep 10
+          done
           echo "$resp"
           printf '%s' "$resp" | grep -q '"ok":true'
 
       - name: Vercel production status page
         run: |
           set -euo pipefail
-          body="$(curl -sSL --max-time 30 https://capri-orcin.vercel.app/)"
+          body=""
+          for attempt in 1 2 3; do
+            body="$(curl -sSL --max-time 30 https://capri-orcin.vercel.app/ || true)"
+            if printf '%s' "$body" | grep -q 'Deployed commit'; then
+              break
+            fi
+            echo "attempt $attempt: status page did not render"
+            sleep 10
+          done
           printf '%s' "$body" | grep -q 'Deployed commit'
