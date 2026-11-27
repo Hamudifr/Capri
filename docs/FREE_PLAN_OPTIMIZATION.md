@@ -165,7 +165,7 @@ the entries below are not about a metered budget - they remove
 duplicate and queued work, keep feedback fast, and stay correct if the
 repository ever goes private.
 
-- **Trigger audit (all 8 registered workflows):** only `quality`
+- **Trigger audit (all 9 registered workflows):** only `quality`
   (always-on contract) and `keep-alive` (must verify every main push)
   run on every push; everything else is path-scoped (`c/**`, `rust/**`,
   `benchmarks/...`) with `cancel-in-progress` concurrency groups.
@@ -173,11 +173,10 @@ repository ever goes private.
   each run re-verifies all three endpoints from scratch, so the newer
   run supersedes the older instead of both running in parallel.
 - **CodeQL (advanced setup, free for public repositories):** `python`,
-  `javascript-typescript`, and `c-cpp`, all `build-mode: none` so no
-  toolchain can flake; `github/codeql-action` SHA-pinned; runs on every
-  push/PR plus a weekly Sunday 05:11 UTC sweep (offset from keep-alive
-  04:17 and pg_cron 03:43 so nothing stacks). Rust is deferred until
-  its CodeQL support is confirmed stable for the pinned action version.
+  `javascript-typescript`, `c-cpp`, and `rust`, all `build-mode: none`
+  so no toolchain can flake; `github/codeql-action` SHA-pinned; runs on
+  every push/PR plus a weekly Sunday 05:11 UTC sweep (offset from
+  keep-alive 04:17 and pg_cron 03:43 so nothing stacks).
 - **Dependabot (`github-actions`, weekly Monday 05:11 UTC):** two
   pattern-disjoint groups - `github/codeql-action*` with **no**
   update-type filter (init/analyze must move in lockstep: split PRs
