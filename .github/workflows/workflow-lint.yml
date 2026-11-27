@@ -42,7 +42,7 @@ jobs:
           version="1.7.12"
           archive="actionlint_${version}_linux_amd64.tar.gz"
           expected="8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
-          curl -sSFL --max-time 60 \
+          curl -sSfL --max-time 60 \
             "https://github.com/rhysd/actionlint/releases/download/v${version}/${archive}" \
             -o "$archive"
           echo "${expected}  ${archive}" | sha256sum -c -
