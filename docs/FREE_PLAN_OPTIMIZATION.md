@@ -131,6 +131,35 @@ retry five times to ride out brief deploy windows; a run that stays red
 after a merge means a new regression of this class — re-deploy via the
 connector and re-check `entrypoint_path`.
 
+## CI layer (GitHub Actions, CodeQL, Dependabot)
+
+Public repositories use GitHub Actions for free (no minutes quota), so
+the entries below are not about a metered budget - they remove
+duplicate and queued work, keep feedback fast, and stay correct if the
+repository ever goes private.
+
+- **Trigger audit (all 8 registered workflows):** only `quality`
+  (always-on contract) and `keep-alive` (must verify every main push)
+  run on every push; everything else is path-scoped (`c/**`, `rust/**`,
+  `benchmarks/...`) with `cancel-in-progress` concurrency groups.
+- **keep-alive concurrency:** push and schedule runs share one group;
+  each run re-verifies all three endpoints from scratch, so the newer
+  run supersedes the older instead of both running in parallel.
+- **CodeQL (advanced setup, free for public repositories):** `python`,
+  `javascript-typescript`, and `c-cpp`, all `build-mode: none` so no
+  toolchain can flake; `github/codeql-action` SHA-pinned; runs on every
+  push/PR plus a weekly Sunday 05:11 UTC sweep (offset from keep-alive
+  04:17 and pg_cron 03:43 so nothing stacks). Rust is deferred until
+  its CodeQL support is confirmed stable for the pinned action version.
+- **Dependabot (`github-actions`, weekly Monday 05:11 UTC):** two
+  pattern-disjoint groups - `github/codeql-action*` with **no**
+  update-type filter (init/analyze must move in lockstep: split PRs
+  leave mixed versions and CodeQL rejects the workflow outright, which
+  the first Dependabot run proved) and `actions/*` limited to
+  minor/patch (majors stay individual, self-validating PRs). The `pypi`
+  ecosystem is intentionally absent: `requirements.txt` and
+  `pyproject.toml` carry zero third-party dependencies.
+
 ## Owner checklist (dashboard-only, not reachable from the repo)
 
 1. **Vercel → Settings → Git → Ignored Build Step**: skip docs-only
