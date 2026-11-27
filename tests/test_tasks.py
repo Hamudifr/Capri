@@ -1880,6 +1880,38 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             )
         self.assertEqual(self.store.get(task.task_id).state, "running")
 
+    def test_same_executor_stale_finish_rejected_after_attempt_supersede(self):
+        task = self.store.create(
+            [{"tool": "prepare", "input": {}, "max_attempts": 2}], now=NOW
+        )
+        stale = self.store.claim_next("worker", now=NOW)
+        self.assertEqual(stale.attempt, 1)
+        self.store.fail_step(stale, now=NOW, retryable=True)
+        current = self.store.claim_next("worker", now=NOW + timedelta(seconds=5))
+        self.assertEqual(current.attempt, 2)
+        # The superseded claim of the SAME executor must not commit or fail
+        # the later attempt (the stale-takeover completion scenario).
+        with self.assertRaises(TaskConflictError):
+            self.store.finish_step(stale, {"ok": True}, now=NOW + timedelta(seconds=6))
+        with self.assertRaises(TaskConflictError):
+            self.store.fail_step(stale, now=NOW + timedelta(seconds=6), retryable=True)
+        row = self.store.get(task.task_id)
+        self.assertEqual(row.state, "running")
+        self.assertEqual(row.attempts, 2)
+
+    def test_same_executor_cannot_reclaim_expired_running_lease(self):
+        task = self.store.create(PLAN, now=NOW)
+        old = self.store.claim_next("worker", lease_seconds=5, now=NOW)
+        # The executor that let its own lease lapse must not silently re-take
+        # over the same running step: the task is quarantined instead.
+        self.assertIsNone(
+            self.store.claim_next("worker", lease_seconds=5, now=NOW + timedelta(seconds=6))
+        )
+        self.assertEqual(self.store.get(task.task_id).state, "reconciliation_required")
+        with self.assertRaises(TaskConflictError):
+            self.store.finish_step(old, {"ok": True}, now=NOW + timedelta(seconds=7))
+        self.assertEqual(self.store.get(task.task_id).state, "reconciliation_required")
+
     def test_uncertain_handler_exception_is_quarantined_and_never_replayed(self):
         calls = []
         def broken(_data, _key):
