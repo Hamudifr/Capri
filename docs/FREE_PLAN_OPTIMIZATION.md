@@ -141,8 +141,12 @@ repository the integration produced artifacts that had no entrypoint.
 After #287 added the source mirrors, the integration's own re-deploy on
 merge switched `entrypoint_path` to
 `file:///app/supabase/functions/<slug>/index.ts` and invocations stayed
-green (verified: keepalive v8 answers `{ok:true, under_limit:true}` and
-the push-triggered keep-alive run passed). The repository is now the
+green (verified at that moment: keepalive v8 answered
+`{ok:true, under_limit:true}` and the push-triggered keep-alive run
+passed; the function has since grown to v11 with the extended
+`{ok, under_limit, cron_active, cron_stale, time}` contract and
+fail-closed metric validation - see the design notes above). The
+repository is now the
 source of truth: `supabase/functions/<slug>/index.ts` with
 `verify_jwt = false` pinned in `supabase/config.toml`, and every push
 re-deploys exactly this reviewed content. The keep-alive probes still
