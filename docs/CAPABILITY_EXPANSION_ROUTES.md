@@ -87,7 +87,7 @@ These add actual executable capabilities without a vendor account, but they requ
 - https://github.com/Moreti2002/polymath-mcp
 - MIT-licensed Python MCP server; README advertises 17 public research/data sources without API keys.
 - Tools include paper search/deduplication, paper resolution, code search, model/dataset search, trend search, standards search and component datasheets.
-- Requires Python 3.11+. Optional email improves Unpaywall/Crossref access; core sources remain keyless.
+- Requires Python 3.15 (`>=3.15,<3.16`). Optional email improves Unpaywall/Crossref access; core sources remain keyless.
 - Repository currently has very low adoption and was created recently. Treat as experimental; inspect source, test provider failures and verify license before installing.
 
 ### Unified academic search

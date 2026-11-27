@@ -80,7 +80,7 @@ python -m unittest discover -s tests -v
 python -m compileall -q capri_core capri_runtime tests
 ```
 
-CI runs the regression suite on Python 3.11, 3.12, and 3.13. The exact test count and commit-specific results are recorded in the current GitHub Actions run and recovery PR, rather than hard-coded here. This session slice is suitable for further integration work, not production deployment. A separate permissioned tool-execution gate is now implemented and CI-verified, but it is not connected to a model provider and is not a sandbox. Durable memory, host authentication/authorization, tenant isolation, provider integration, deployment, and operational policies remain explicit design gates.
+CI runs the regression suite on Python 3.15 (the sole supported runtime; see pyproject.toml requires-python). The exact test count and commit-specific results are recorded in the current GitHub Actions run and recovery PR, rather than hard-coded here. This session slice is suitable for further integration work, not production deployment. A separate permissioned tool-execution gate is now implemented and CI-verified, but it is not connected to a model provider and is not a sandbox. Durable memory, host authentication/authorization, tenant isolation, provider integration, deployment, and operational policies remain explicit design gates.
 
 
 
@@ -172,7 +172,7 @@ No raw prompts, assistant transcripts, credentials, provider responses, or perso
 - Host authentication and authorization are mandatory before exposing sessions to more than one user; session IDs are not access tokens.
 - No claim of encryption at rest or in transit from this library; host infrastructure must provide it if/when network or durable storage is introduced.
 - No user transcript is persisted by the current runtime. The ledger is single-writer-process and stores metadata, not conversations.
-- Python 3.11+; CI matrix on 3.11/3.12/3.13.
+- Python 3.15 only (`>=3.15,<3.16`); CI runs the Repository contract job on Python 3.15.
 - No new runtime dependency unless separately justified, reviewed, and approved.
 - No paid provider, hosting, storage, or CI service is assumed. Zero-cost local development is the baseline.
 - Deployment target: none in this proposal. A service deployment is out of scope until authentication, authorization, tenant isolation, persistence, observability, backup, incident response, and rollback are designed and tested.

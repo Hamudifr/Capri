@@ -20,7 +20,7 @@ Capri will use a **pragmatic hybrid architecture**, not a repository-wide langua
 
 At the decision revision:
 
-- The installable product is a dependency-free Python package (`capri_core` and `capri_runtime`) requiring Python 3.11 or newer.
+- The installable product is a dependency-free Python package (`capri_core` and `capri_runtime`) requiring Python 3.11 or newer at decision time; the current support policy supersedes this with `>=3.15,<3.16`.
 - The runtime includes orchestration, permissioned tool execution, durable SQLite stores, task execution, memory, Notion adapters, and provider integration.
 - The repository contains a separate experimental Rust crate at `rust/ccel-core`; it is not the main Python runtime.
 - No C source tree or C build target is present in the repository root. A separate C learning/benchmark lab exists in project records, but it is not the production runtime.
