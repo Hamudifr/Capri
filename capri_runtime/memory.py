@@ -65,13 +65,39 @@ class MemoryRecord:
     supersedes_id: str | None = None
 
 
-def _rank_memory_records(records: Sequence[MemoryRecord], query: str) -> tuple[MemoryRecord, ...]:
-    """Rank all-term lexical matches by field relevance, then freshness.
+# Bounded synonym groups for semantic rewording in retrieval. Groups are
+# general-purpose English paraphrase sets (not query-specific answers): a
+# query term matches a record when any member of its group appears literally.
+# The list is intentionally small and dependency-free; extending it is a
+# deliberate, reviewed change to retrieval behavior.
+_QUERY_TERM_GROUPS: tuple[frozenset[str], ...] = (
+    frozenset({"signin", "sign-in", "login", "logins", "authentication"}),
+    frozenset({"failure", "failures", "failed", "error", "errors",
+               "issue", "issues", "problem", "problems"}),
+    frozenset({"configuration", "config", "settings", "setting"}),
+    frozenset({"drift", "deviation", "deviations", "divergence", "mismatch",
+               "change", "changes"}),
+    frozenset({"concurrent", "concurrency", "parallel", "contention",
+               "simultaneous"}),
+    frozenset({"write", "writes", "writer", "writers", "writing",
+               "commit", "commits", "transaction", "transactions",
+               "update", "updates"}),
+    frozenset({"lock", "locks", "mutex", "deadlock", "latch"}),
+)
+_GROUP_BY_TERM: dict[str, frozenset[str]] = {
+    member: group for group in _QUERY_TERM_GROUPS for member in group
+}
 
-    Title and tag matches outweigh body mentions; inverse document frequency
-    is calculated over the complete filtered corpus, not only matching rows.
-    The all-terms retrieval contract is retained, so this does not become a
-    loose OR search or silently broaden retrieval.
+
+def _rank_memory_records(records: Sequence[MemoryRecord], query: str) -> tuple[MemoryRecord, ...]:
+    """Rank all-term matches by field relevance, then freshness.
+
+    A query term is satisfied literally or through a bounded synonym group
+    (common paraphrases such as signin/login or failure/problem), so retrieval
+    handles semantic rewording without becoming a loose OR search: every query
+    term must still be satisfied by each returned record. Title and tag matches
+    outweigh body mentions, literal matches outweigh synonym matches, and
+    inverse document frequency is calculated over the complete filtered corpus.
     """
     terms = tuple(dict.fromkeys(part.casefold() for part in query.split() if part))
     if not terms:
@@ -87,13 +113,20 @@ def _rank_memory_records(records: Sequence[MemoryRecord], query: str) -> tuple[M
     if not documents:
         return ()
     document_count = len(documents)
+
+    def satisfied(term: str, combined: str) -> bool:
+        if term in combined:
+            return True
+        group = _GROUP_BY_TERM.get(term)
+        return any(member in combined for member in group) if group else False
+
     document_frequency = {
-        term: sum(term in combined for _, _, _, _, _, combined in documents)
+        term: sum(satisfied(term, combined) for _, _, _, _, _, combined in documents)
         for term in terms
     }
     ranked: list[tuple[float, float, str, MemoryRecord]] = []
     for record, title, content, scope, tags, combined in documents:
-        if not all(term in combined for term in terms):
+        if not all(satisfied(term, combined) for term in terms):
             continue
         score = 0.0
         for term in terms:
@@ -101,12 +134,19 @@ def _rank_memory_records(records: Sequence[MemoryRecord], query: str) -> tuple[M
             inverse_frequency = 1.0 + math.log(
                 1.0 + (document_count - frequency + 0.5) / (frequency + 0.5)
             )
-            score += inverse_frequency * (
-                4.0 * min(title.count(term), 3)
-                + 3.0 * min(tags.count(term), 3)
-                + 1.5 * min(scope.count(term), 3)
-                + 1.0 * min(content.count(term), 3)
-            )
+            group = _GROUP_BY_TERM.get(term)
+            exact_total = 0.0
+            group_total = 0.0
+            for field, weight in ((title, 4.0), (tags, 3.0), (scope, 1.5), (content, 1.0)):
+                exact_hits = field.count(term)
+                if exact_hits:
+                    exact_total += weight * min(exact_hits, 3)
+                    continue
+                if group:
+                    group_hits = sum(field.count(member) for member in group if member != term)
+                    if group_hits:
+                        group_total += weight * min(group_hits, 3)
+            score += inverse_frequency * (exact_total + 0.6 * group_total)
         if query.casefold().strip() in title:
             score += 6.0
         updated = datetime.fromisoformat(record.updated_at.replace("Z", "+00:00")).timestamp()

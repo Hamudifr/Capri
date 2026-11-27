@@ -596,6 +596,96 @@
         "autonomy",
         "delivery"
       ]
+    },
+    {
+      "id": "auth-login-recovery",
+      "title": "Login handling recovery procedure",
+      "content": "Steps for resolving failed account sign-in attempts and repeated credential problems after access denials.",
+      "scope": "Security Engineering",
+      "tags": [
+        "security",
+        "delivery"
+      ]
+    },
+    {
+      "id": "auth-session-audit",
+      "title": "Sign-in problem audit notes",
+      "content": "Audit trail of account access problems and session lockouts recorded for the identity gateway.",
+      "scope": "Security Engineering",
+      "tags": [
+        "security",
+        "architecture"
+      ]
+    },
+    {
+      "id": "auth-hard-negative",
+      "title": "Layout defect catalogue",
+      "content": "Broken images and login failures on the marketing pages are tracked here.",
+      "scope": "Engineering Practices",
+      "tags": [
+        "tooling",
+        "architecture"
+      ]
+    },
+    {
+      "id": "config-settings-audit",
+      "title": "Settings change audit",
+      "content": "Tracks service setting edits across environments and flags unintended changes for review.",
+      "scope": "Runtime Operations",
+      "tags": [
+        "tooling",
+        "delivery"
+      ]
+    },
+    {
+      "id": "config-baseline-register",
+      "title": "Settings baseline register",
+      "content": "Approved service settings per environment; unintended deviations are flagged before deployment.",
+      "scope": "Runtime Operations",
+      "tags": [
+        "tooling",
+        "architecture"
+      ]
+    },
+    {
+      "id": "config-hard-negative",
+      "title": "Change review checklist",
+      "content": "Reviews configuration changes and release notes before every production rollout.",
+      "scope": "Engineering Practices",
+      "tags": [
+        "tooling",
+        "delivery"
+      ]
+    },
+    {
+      "id": "concurrency-serialization",
+      "title": "Write serialization protocol",
+      "content": "Serializes parallel commits under an exclusive mutex to prevent interleaved updates.",
+      "scope": "Data Architecture",
+      "tags": [
+        "architecture",
+        "tooling"
+      ]
+    },
+    {
+      "id": "concurrency-contention",
+      "title": "Transaction contention guide",
+      "content": "Explains lock ordering that prevents deadlock when transactions compete for rows.",
+      "scope": "Data Architecture",
+      "tags": [
+        "architecture",
+        "tooling"
+      ]
+    },
+    {
+      "id": "concurrency-hard-negative",
+      "title": "Shared cache coordination",
+      "content": "Parallel writers coordinate through lock files when writing shared caches.",
+      "scope": "Engineering Practices",
+      "tags": [
+        "tooling",
+        "architecture"
+      ]
     }
   ],
   "queries": [
@@ -604,69 +694,103 @@
       "relevant": [
         "goal-contract",
         "goal-coordinator"
-      ]
+      ],
+      "family": "lexical"
     },
     {
       "query": "memory retrieval",
       "relevant": [
         "memory-ranking-policy",
         "memory-context-builder"
-      ]
+      ],
+      "family": "lexical"
     },
     {
       "query": "notion correction",
       "relevant": [
         "notion-recovery",
         "notion-correction-contract"
-      ]
+      ],
+      "family": "lexical"
     },
     {
       "query": "lease heartbeat",
       "relevant": [
         "lease-heartbeat-contract",
         "lease-heartbeat-recovery"
-      ]
+      ],
+      "family": "lexical"
     },
     {
       "query": "approval replay",
       "relevant": [
         "approval-replay-contract",
         "approval-replay-audit"
-      ]
+      ],
+      "family": "lexical"
     },
     {
       "query": "backup validation",
       "relevant": [
         "backup-validation-contract",
         "backup-validation-recovery"
-      ]
+      ],
+      "family": "lexical"
     },
     {
       "query": "tool routing",
       "relevant": [
         "tool-routing-policy",
         "tool-routing-verification"
-      ]
+      ],
+      "family": "lexical"
     },
     {
       "query": "event provenance",
       "relevant": [
         "event-provenance-contract",
         "event-provenance-audit"
-      ]
+      ],
+      "family": "lexical"
     },
     {
       "query": "strategy evaluation",
       "relevant": [
         "strategy-evaluation-contract",
         "strategy-evaluation-gates"
-      ]
+      ],
+      "family": "lexical"
+    },
+    {
+      "query": "signin failures",
+      "relevant": [
+        "auth-login-recovery",
+        "auth-session-audit"
+      ],
+      "family": "semantic"
+    },
+    {
+      "query": "configuration drift",
+      "relevant": [
+        "config-settings-audit",
+        "config-baseline-register"
+      ],
+      "family": "semantic"
+    },
+    {
+      "query": "concurrent write lock",
+      "relevant": [
+        "concurrency-serialization",
+        "concurrency-contention"
+      ],
+      "family": "semantic"
     }
   ],
   "regression_thresholds": {
     "ndcg_at_5": 0.95,
     "mrr_at_5": 0.95,
     "recall_at_5": 1,
-    "minimum_ndcg_gain_over_previous": 0.25
+    "minimum_ndcg_gain_over_previous": 0.25,
+    "semantic_ndcg_at_5": 0.95
   }
 }

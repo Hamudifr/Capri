@@ -108,6 +108,7 @@ def evaluate() -> dict[str, Any]:
             previous = [item[3] for item in previous_candidates]
             per_query.append({
                 "query": query,
+                "family": query_case.get("family", "lexical"),
                 "relevant_count": len(relevant),
                 "previous": _metrics(previous, relevant, k=5),
                 "ranked": _metrics(current, relevant, k=5),
@@ -116,13 +117,21 @@ def evaluate() -> dict[str, Any]:
             })
 
         metric_names = ("ndcg_at_5", "mrr_at_5", "recall_at_5")
-        aggregate = {
-            name: round(sum(item["ranked"][name] for item in per_query) / len(per_query), 6)
-            for name in metric_names
-        }
+
+        def _aggregate(items: list[dict[str, Any]]) -> dict[str, float]:
+            return {
+                name: round(sum(item["ranked"][name] for item in items) / len(items), 6)
+                for name in metric_names
+            }
+
+        aggregate = _aggregate(per_query)
         previous_aggregate = {
             name: round(sum(item["previous"][name] for item in per_query) / len(per_query), 6)
             for name in metric_names
+        }
+        families = {
+            family: _aggregate([item for item in per_query if item["family"] == family])
+            for family in sorted({item["family"] for item in per_query})
         }
         thresholds = dataset["regression_thresholds"]
         gains = {
@@ -134,6 +143,8 @@ def evaluate() -> dict[str, Any]:
             and aggregate["mrr_at_5"] >= thresholds["mrr_at_5"]
             and aggregate["recall_at_5"] >= thresholds["recall_at_5"]
             and gains["ndcg_at_5"] >= thresholds["minimum_ndcg_gain_over_previous"]
+            and families.get("lexical", {}).get("ndcg_at_5", 0.0) >= thresholds["ndcg_at_5"]
+            and families.get("semantic", {}).get("ndcg_at_5", 0.0) >= thresholds["semantic_ndcg_at_5"]
         )
         return {
             "dataset_sha256": hashlib.sha256(dataset_bytes).hexdigest(),
@@ -141,6 +152,7 @@ def evaluate() -> dict[str, Any]:
             "query_count": len(per_query),
             "previous_baseline": previous_aggregate,
             "ranked": aggregate,
+            "families": families,
             "gain_over_previous": gains,
             "thresholds": thresholds,
             "passed": passed,
