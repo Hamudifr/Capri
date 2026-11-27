@@ -61,10 +61,49 @@ These backup files are standalone SQLite databases. A controlled restore is manu
 
 For session stores, see [SQLITE_SESSION_BACKUP.md](SQLITE_SESSION_BACKUP.md) for transcript-limit and ownership-specific details.
 
+## Off-site replication (Supabase)
+
+The Supabase project (`znpvstwmzyphmvkhigqp`) hosts the off-site backup
+registry created by migration `create_capri_backup_push_and_prune`:
+
+| Object | Purpose |
+|---|---|
+| `public.capri_backup_registry` | One row per backup: store, backup id, sha256, size, source host, validation metadata, notes. RLS enabled with zero policies (service-role only). |
+| `public.capri_backup_payloads` | The backup bytes (`bytea`), keyed 1:1 to the registry row and cascade-deleted with it. Same RLS posture. |
+| `capri_push_backup(...)` RPC | Atomically inserts the registry row and payload. Parameters use hex text (no bytea-over-JSON ambiguity), verify payload length against `p_size_bytes`, and enforce a 10 MB cap. Granted to `service_role` only; revoked from `public`, `anon`, and `authenticated`. |
+| `capri_prune_backups(store, keep_last)` RPC | Deletes all but the newest `keep_last` backups for a store; rejects `keep_last < 1`. Granted to `service_role` only. |
+
+Procedure (`scripts/backup_offsite.py`):
+
+```bash
+export SUPABASE_URL=https://<ref>.supabase.co
+export SUPABASE_SERVICE_ROLE_KEY=<service-role key>   # never committed
+python3 scripts/backup_offsite.py \
+  --store memory --db /private/capri/memory.sqlite3 \
+  --dest /private/capri/backups \
+  --upload --prune-keep 7
+```
+
+Without `--upload` the script only creates the local snapshot, verifies
+`PRAGMA integrity_check` on it, and prints a JSON manifest; it never touches
+the network. `--prune-keep` requires `--upload` and must be set explicitly
+per run; cadence and default retention counts remain host policy.
+
+Encryption stance (v1): payloads leave the host over TLS and are encrypted at
+rest by Supabase (provider-managed disk encryption). Client-side pre-upload
+encryption is deliberately deferred until a key-management decision is made
+(see gaps below).
+
+Verification status: schema and both RPCs are verified live against the
+project (push, readback, prune, and the `keep_last >= 1` guard exercised;
+test rows deleted afterwards). The HTTP path of the script is unit-tested
+offline with a mocked transport because CI and the agent sandbox have no
+network access to Supabase and no service-role credentials.
+
 ## Security and operational gaps
 
 - All current backup files are plaintext SQLite. Protect the destination directory, filesystem, and backup transport. Use encrypted volumes or an approved encryption layer when backups leave the protected host.
-- No backup scheduler, retention/rotation policy, off-site replication, encryption key management, or automated restore workflow is included.
+- No backup scheduler, encryption key management, or automated restore workflow is included. Off-site replication primitives now exist (Supabase registry plus `scripts/backup_offsite.py`); pushing and pruning still require explicit operator action, and retention counts are not yet codified as policy.
 - No disaster-recovery exercise or restore-time objective has been verified.
 - No live user database was copied during implementation; CI tests use isolated temporary databases.
 
