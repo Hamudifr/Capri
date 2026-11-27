@@ -1,0 +1,55 @@
+name: Workflow lint
+
+# Lints the workflow files themselves. js-yaml (used ad hoc) only checks
+# YAML syntax; actionlint validates workflow structure, runner/event
+# expressions, and action inputs, and shells out to shellcheck for
+# every run: block (ubuntu-latest ships shellcheck). Path-scoped: it
+# only runs when a workflow changes, and every such PR self-validates.
+# The binary is pinned by version AND sha256 (digest from the GitHub
+# release API asset record).
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workflow-lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install actionlint 1.7.12 (sha256-pinned)
+        run: |
+          set -euo pipefail
+          version="1.7.12"
+          archive="actionlint_${version}_linux_amd64.tar.gz"
+          expected="8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+          curl -sSfL --max-time 60 \
+            "https://github.com/rhysd/actionlint/releases/download/v${version}/${archive}" \
+            -o "$archive"
+          echo "${expected}  ${archive}" | sha256sum -c -
+          tar -xzf "$archive" actionlint
+          ./actionlint -version
+
+      - name: Lint all workflows (actionlint + shellcheck)
+        run: |
+          set -euo pipefail
+          ./actionlint -color
