@@ -26,6 +26,11 @@ from .tools import (
     _NAME_RE,
     _assert_json_object_keys,
 )
+from .idempotency import (
+    IdempotencyConflictError,
+    IdempotencyInProgressError,
+    IdempotencyReplay,
+)
 
 _CALL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$")
 
@@ -41,6 +46,7 @@ class ToolCallRequest:
     call_id: str
     name: str
     arguments: Mapping[str, Any]
+    idempotency_key: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +59,7 @@ class ToolCallOutcome:
     result: Any = None
     error_code: str | None = None
     argument_digest: str | None = None
+    replayed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,13 +138,19 @@ class ToolExecutionBridge:
         if not requests or len(requests) > self.max_calls:
             raise ToolBridgeValidationError("batch call count is outside configured limits")
 
-        prepared: list[tuple[str, str, dict[str, Any], str, int]] = []
+        prepared: list[tuple[str, str, dict[str, Any], str, str, int]] = []
         seen: set[str] = set()
         total_bytes = 2
         for request in requests:
             if not isinstance(request, ToolCallRequest):
                 raise ToolBridgeValidationError("each request must be a ToolCallRequest")
-            call_id, name, arguments = request.call_id, request.name, request.arguments
+            call_id, name, arguments, idempotency_key = (
+                request.call_id, request.name, request.arguments, request.idempotency_key,
+            )
+            if idempotency_key is not None and (
+                not isinstance(idempotency_key, str) or not idempotency_key or len(idempotency_key) > 256
+            ):
+                raise ToolBridgeValidationError("idempotency_key must be non-empty text of at most 256 chars")
             if (
                 not isinstance(call_id, str)
                 or len(call_id) > self.max_call_id_chars
@@ -167,23 +180,41 @@ class ToolExecutionBridge:
             if total_bytes > self.max_batch_bytes:
                 raise ToolBridgeValidationError("batch exceeds the configured byte limit")
             seen.add(call_id)
-            prepared.append((call_id, name, normalized, digest, request_bytes))
+            prepared.append((call_id, name, normalized, digest, idempotency_key, request_bytes))
 
         outcomes = []
-        for call_id, name, arguments, digest, _ in prepared:
+        for call_id, name, arguments, digest, idempotency_key, _ in prepared:
             if cancellation_event is not None and cancellation_event.is_set():
                 outcomes.extend(
                     ToolCallOutcome(
                         pending_id, pending_name, "cancelled", error_code="cancelled",
                         argument_digest=pending_digest,
                     )
-                    for pending_id, pending_name, _, pending_digest, _ in prepared[len(outcomes):]
+                    for pending_id, pending_name, _, pending_digest, _, _ in prepared[len(outcomes):]
                 )
                 break
             try:
                 result = self.executor.execute(
-                    name, arguments, context, cancellation_event=cancellation_event
+                    name, arguments, context,
+                    cancellation_event=cancellation_event,
+                    idempotency_key=idempotency_key,
                 )
+            except IdempotencyReplay as exc:
+                outcomes.append(ToolCallOutcome(
+                    call_id, name, exc.status,
+                    result=exc.result, error_code=exc.error_code,
+                    argument_digest=digest, replayed=True,
+                ))
+            except IdempotencyConflictError:
+                outcomes.append(ToolCallOutcome(
+                    call_id, name, "idempotency_conflict", error_code="idempotency_key_reused",
+                    argument_digest=digest,
+                ))
+            except IdempotencyInProgressError:
+                outcomes.append(ToolCallOutcome(
+                    call_id, name, "in_progress", error_code="idempotency_in_progress",
+                    argument_digest=digest,
+                ))
             except ToolCancelledError as exc:
                 if exc.outcome_uncertain:
                     outcomes.append(ToolCallOutcome(

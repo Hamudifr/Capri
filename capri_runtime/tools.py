@@ -10,6 +10,7 @@ import hmac
 import json
 import re
 import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from itertools import islice
@@ -20,6 +21,12 @@ from uuid import uuid4
 from capri_core.validation import contains_surrogate as _contains_surrogate
 
 from .budgets import BudgetExceededError, SQLiteBudgetStore
+from .idempotency import (
+    IdempotencyConflictError,
+    IdempotencyInProgressError,
+    IdempotencyReplay,
+    IdempotencyStore,
+)
 
 
 class ToolBoundaryError(Exception):
@@ -597,11 +604,17 @@ class ToolExecutor:
         max_result_bytes: int = 65_536,
         clock: Callable[[], datetime] | None = None,
         budget_store: SQLiteBudgetStore | None = None,
+        idempotency_store: IdempotencyStore | None = None,
+        idempotency_ttl_seconds: int = 86_400,
     ) -> None:
         if not isinstance(registry, ToolRegistry) or not callable(getattr(audit_sink, "write", None)):
             raise ToolValidationError("registry and audit sink are required")
         if budget_store is not None and not isinstance(budget_store, SQLiteBudgetStore):
             raise ToolValidationError("budget_store must be a SQLiteBudgetStore")
+        if idempotency_store is not None and not isinstance(idempotency_store, IdempotencyStore):
+            raise ToolValidationError("idempotency_store must implement IdempotencyStore")
+        if isinstance(idempotency_ttl_seconds, bool) or not isinstance(idempotency_ttl_seconds, int) or idempotency_ttl_seconds < 1:
+            raise ToolValidationError("idempotency_ttl_seconds must be a positive integer")
         for name, value in (("max_argument_bytes", max_argument_bytes), ("max_result_bytes", max_result_bytes)):
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ToolValidationError(f"{name} must be a positive integer")
@@ -611,6 +624,8 @@ class ToolExecutor:
         self.max_result_bytes = max_result_bytes
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self.budget_store = budget_store
+        self.idempotency_store = idempotency_store
+        self.idempotency_ttl_seconds = idempotency_ttl_seconds
 
     def set_budget_store(self, budget_store: SQLiteBudgetStore) -> None:
         if not isinstance(budget_store, SQLiteBudgetStore):
@@ -640,6 +655,57 @@ class ToolExecutor:
         except Exception:
             raise AuditError("audit persistence failed; execution was blocked or outcome is uncertain") from None
 
+    def _replay_or_reserve(
+        self, principal_id: str, name: str, digest: str, idempotency_key: str
+    ) -> None:
+        """Replay a completed record or reserve the key; raise on conflict/in-flight.
+
+        Must run before any side effect. Raises ``IdempotencyReplay`` to hand a
+        memoized outcome back through ``execute`` (caught by the bridge), or
+        ``IdempotencyConflictError`` / ``IdempotencyInProgressError`` on misuse.
+        """
+        assert self.idempotency_store is not None
+        fingerprint = f"{name}:{digest}"
+        try:
+            record = self.idempotency_store.check_or_reserve(
+                principal_id, idempotency_key, fingerprint, time.time(), self.idempotency_ttl_seconds
+            )
+        except IdempotencyInProgressError:
+            raise
+        except Exception as exc:  # defensive: a broken store must not mask real calls
+            raise AuditError(f"idempotency store unavailable: {exc}") from exc
+        if record is None:
+            return
+        if record.fingerprint != fingerprint:
+            raise IdempotencyConflictError(
+                "idempotency key reused for a different tool/argument fingerprint"
+            )
+        self._audit(principal_id, name, digest, "replayed")
+        if record.status == "succeeded":
+            raise IdempotencyReplay(result=json.loads(record.result_json), status="succeeded")
+        raise IdempotencyReplay(result=None, status=record.status, error_code=record.error_code)
+
+    def _record_idempotency(
+        self,
+        principal_id: str,
+        idempotency_key: str | None,
+        digest: str,
+        spec: ToolSpec,
+        status: str,
+        result_json: str | None,
+    ) -> None:
+        if idempotency_key is None or self.idempotency_store is None:
+            return
+        try:
+            self.idempotency_store.complete(
+                principal_id, idempotency_key, status, result_json or "", None,
+                time.time(),
+            )
+        except Exception:
+            # The outcome is already audited; a memoization miss only affects
+            # future replays, not correctness of this execution.
+            pass
+
     def execute(
         self,
         name: str,
@@ -647,6 +713,7 @@ class ToolExecutor:
         context: ExecutionContext,
         *,
         cancellation_event: threading.Event | None = None,
+        idempotency_key: str | None = None,
     ) -> Any:
         if cancellation_event is not None and not callable(getattr(cancellation_event, "is_set", None)):
             raise ToolValidationError("cancellation_event must expose is_set()")
@@ -667,6 +734,8 @@ class ToolExecutor:
             not isinstance(context.operation_id, str) or not _OPERATION_RE.fullmatch(context.operation_id)
         ):
             raise ToolValidationError("host operation_id must be a bounded trusted identifier")
+        if idempotency_key is not None and not isinstance(idempotency_key, str):
+            raise ToolValidationError("idempotency_key must be a string when provided")
         spec, handler = self.registry.resolve(name)
         if spec.permission not in context.permissions:
             raise PermissionDeniedError("host context lacks the required tool permission")
@@ -676,6 +745,12 @@ class ToolExecutor:
         _assert_json_object_keys(arguments)
         _validate_value(json.loads(encoded), spec.schema())
         digest = hashlib.sha256(raw).hexdigest()
+        # Idempotency must be evaluated before any side effect: budget reservation,
+        # resource authorization, and the handler itself. A live completed record
+        # replays the original outcome without invoking the handler; a live
+        # in-progress record blocks this caller; a conflicting fingerprint rejects.
+        if idempotency_key is not None and self.idempotency_store is not None:
+            self._replay_or_reserve(context.principal_id, name, digest, idempotency_key)
         if spec.resource_authorizer is not None:
             authorization_failed = False
             try:
@@ -727,6 +802,7 @@ class ToolExecutor:
             self._audit(context.principal_id, spec.name, digest, "outcome_uncertain", "handler_cancelled_after_start")
             raise ToolCancelledError(outcome_uncertain=True) from None
         if handler_failed:
+            self._record_idempotency(context.principal_id, idempotency_key, digest, spec, "handler_failed", None)
             self._audit(context.principal_id, spec.name, digest, "handler_failed", "handler_error")
             raise ToolExecutionError("tool handler failed; details suppressed")
         try:
@@ -736,7 +812,9 @@ class ToolExecutor:
             )
             _assert_json_object_keys(json.loads(result_json))
         except ToolValidationError:
+            self._record_idempotency(context.principal_id, idempotency_key, digest, spec, "result_rejected", None)
             self._audit(context.principal_id, spec.name, digest, "result_rejected", "invalid_or_oversized_result")
             raise ToolResultValidationError("tool handler result was rejected") from None
+        self._record_idempotency(context.principal_id, idempotency_key, digest, spec, "succeeded", result_json)
         self._audit(context.principal_id, spec.name, digest, "succeeded")
         return json.loads(result_json)

@@ -133,8 +133,11 @@ class OpenAIResponsesAdapterTests(unittest.TestCase):
             "session-2", (Message("user", "Search"),), (tool,)
         )
         self.assertEqual(len(result.tool_calls), 1)
+        # The provider call_id doubles as the idempotency key so a retried
+        # function call replays the original outcome instead of re-executing.
         self.assertEqual(result.tool_calls[0], ToolCallRequest(
-            "call_123", "project_search", {"query": "runtime"}
+            "call_123", "project_search", {"query": "runtime"},
+            idempotency_key="call_123",
         ))
         body = json.loads(opener.request.data.decode("utf-8"))
         self.assertEqual(body["tools"][0]["name"], "project_search")
