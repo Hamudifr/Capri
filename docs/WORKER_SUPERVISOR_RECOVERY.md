@@ -20,7 +20,9 @@ This runbook describes the host/supervisor boundary. It does not launch workers,
 ### 1. Fence and preserve
 
 - Stop new work admission and prevent new reservations.
-- Acquire the host's external single-supervisor lease.
+- Acquire the host's external single-supervisor lease. For a strictly single-host deployment, `PosixSupervisorLock` is an available kernel-enforced alternative: every supervisor process must open the same owner-private lock-file path after process creation and hold it across the complete worker lifecycle operation. The host runtime's per-instance `RLock` alone is not sufficient.
+- The POSIX lock requires an owner-private parent directory (mode 0700 or stricter) and a mode-0600 regular lock file with no symlink or hard-link alias. Acquisition is bounded and fails closed on timeout. Do not inherit an open lock descriptor across `fork`; each process must open the same path independently. Use a local filesystem, not a network-mounted lock path.
+- A POSIX file lock is not a distributed lease or monotonic fencing token. If supervisors can run on different hosts, use a real external coordinator and resource-enforced fencing contract instead. A process paused while holding the lock blocks takeover until it releases or terminates; do not bypass the lock on timeout.
 - Quiesce the old host and all registry writers. Confirm no old process can resume writes.
 - Preserve the task/security database and take a consistent private backup using the store's supported backup method. Verify the backup before any recovery mutation.
 - Record the database identity, backup location, timestamp, software version, and operator/supervisor identity in the host's protected operational record. Do not copy secrets or raw reservation tokens into the record.
