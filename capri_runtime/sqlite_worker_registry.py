@@ -10,6 +10,7 @@ import uuid
 from contextlib import contextmanager
 from typing import Any, Callable, Iterator
 
+from .audit_checkpoints import LocalChainState
 from .worker_registry import (
     InMemoryWorkerRegistry,
     WorkerConflictError,
@@ -1311,5 +1312,46 @@ class SQLiteWorkerRegistry:
                 return "ok"
             except Exception:
                 return "worker registry validation failed"
+            finally:
+                connection.close()
+
+    def audit_chain_state(self, *, anchor_sequence: int | None = None) -> LocalChainState:
+        """Read the validated registry audit chain for composite checkpoint binding.
+
+        The full snapshot (schema, projections, reservation invariants and the
+        event chain) is validated first so a structurally broken chain fails
+        closed. When ``anchor_sequence`` is given, the stored event hash at
+        that sequence is returned as ``head_at_anchor`` for anchored-prefix
+        tamper detection on chains that have advanced past the anchor.
+        """
+        if anchor_sequence is not None and (type(anchor_sequence) is not int or anchor_sequence < 0):
+            raise WorkerRegistryError("anchor_sequence must be a non-negative integer")
+        with self._tasks._lock:
+            connection = self._tasks._connect()
+            connection.row_factory = sqlite3.Row
+            try:
+                validate_worker_registry_snapshot(connection)
+                meta = connection.execute(
+                    "SELECT schema_version, last_sequence, head_sha256 "
+                    "FROM worker_registry_meta WHERE singleton=1"
+                ).fetchone()
+                if meta is None:
+                    raise WorkerRegistryError("worker registry audit chain state is missing")
+                anchor: str | None = None
+                if anchor_sequence is not None:
+                    if anchor_sequence == 0:
+                        anchor = _ZERO_HASH
+                    else:
+                        event = connection.execute(
+                            "SELECT event_sha256 FROM worker_registry_events WHERE sequence=?",
+                            (anchor_sequence,),
+                        ).fetchone()
+                        anchor = event[0] if event is not None else None
+                return LocalChainState(
+                    schema_version=meta["schema_version"],
+                    sequence=meta["last_sequence"],
+                    head_sha256=meta["head_sha256"],
+                    head_at_anchor=anchor,
+                )
             finally:
                 connection.close()

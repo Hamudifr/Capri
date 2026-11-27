@@ -20,6 +20,7 @@ from typing import Any
 from capri_core.validation import contains_surrogate
 
 from .atomic_publish import publish_no_replace
+from .audit_checkpoints import LocalChainState
 from .tools import AuditEvent, AuditSink, ToolValidationError
 
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -855,5 +856,45 @@ class SQLiteSecurityStore(AuditSink):
                     return str(row[0]) if row else "no result"
                 _validate_backup_semantics(connection)
                 return "ok"
+            finally:
+                connection.close()
+
+    def lifecycle_chain_state(self, *, anchor_sequence: int | None = None) -> LocalChainState:
+        """Read the validated local lifecycle chain for composite checkpoint binding.
+
+        The full local chain is validated first (fail closed on any structural
+        break), then the singleton head is returned. When ``anchor_sequence``
+        is given, the stored event hash at that sequence is returned as
+        ``head_at_anchor`` so a verifier can detect tampering inside the
+        anchored prefix of a chain that has advanced past the anchor.
+        """
+        if anchor_sequence is not None and (type(anchor_sequence) is not int or anchor_sequence < 0):
+            raise ToolValidationError("anchor_sequence must be a non-negative integer")
+        with self._lock:
+            connection = self._connect()
+            try:
+                _validate_audit_chain(connection)
+                row = connection.execute(
+                    "SELECT schema_version, last_sequence, head_hash "
+                    "FROM audit_chain_state WHERE singleton_id = 1"
+                ).fetchone()
+                if row is None:
+                    raise ToolValidationError("security store lifecycle audit chain state is missing")
+                anchor: str | None = None
+                if anchor_sequence is not None:
+                    if anchor_sequence == 0:
+                        anchor = _AUDIT_CHAIN_ZERO
+                    else:
+                        event = connection.execute(
+                            "SELECT event_hash FROM audit_events WHERE sequence = ?",
+                            (anchor_sequence,),
+                        ).fetchone()
+                        anchor = event[0] if event is not None else None
+                return LocalChainState(
+                    schema_version=row[0],
+                    sequence=row[1],
+                    head_sha256=row[2],
+                    head_at_anchor=anchor,
+                )
             finally:
                 connection.close()
