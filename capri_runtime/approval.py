@@ -19,6 +19,7 @@ from .security_store import SQLiteSecurityStore
 from .tool_bridge import ToolCallOutcome
 from .tools import (
     ApprovalGrant,
+    AuditEvent,
     ExecutionContext,
     HmacApprovalAuthority,
     HostAuthorityError,
@@ -144,12 +145,10 @@ class SQLiteApprovalChallengeStore:
                     (challenge_id, operation_id, principal_id, tool_name, digest,
                      created.isoformat(), expiry.isoformat()),
                 )
-                connection.execute(
-                    """INSERT INTO audit_events
-                    (event_id,timestamp,principal_id,tool_name,argument_digest,status,error_code)
-                    VALUES (?,?,?,?,?,'approval_requested',NULL)""",
-                    (str(uuid4()), created.isoformat(), principal_id, tool_name, digest),
-                )
+                self._store.append_event_in_transaction(connection, AuditEvent(
+                    str(uuid4()), created.isoformat(), principal_id, tool_name,
+                    digest, "approval_requested", None,
+                ))
                 connection.execute("COMMIT")
                 return ApprovalChallenge(
                     challenge_id, operation_id, principal_id, tool_name, digest,
@@ -185,12 +184,10 @@ class SQLiteApprovalChallengeStore:
                         "UPDATE approval_challenges SET status='expired' WHERE challenge_id=? AND status='pending'",
                         (challenge_id,),
                     )
-                    connection.execute(
-                        """INSERT INTO audit_events
-                        (event_id,timestamp,principal_id,tool_name,argument_digest,status,error_code)
-                        VALUES (?,?,?,?,?,'approval_expired',NULL)""",
-                        (str(uuid4()), current.isoformat(), row[2], row[3], row[4]),
-                    )
+                    self._store.append_event_in_transaction(connection, AuditEvent(
+                        str(uuid4()), current.isoformat(), row[2], row[3], row[4],
+                        "approval_expired", None,
+                    ))
                     row = (*row[:7], "expired", row[8], row[9])
                 connection.execute("COMMIT")
                 return self._from_row(row)
@@ -248,13 +245,10 @@ class SQLiteApprovalChallengeStore:
                         "UPDATE approval_challenges SET status='expired' WHERE challenge_id=? AND status='pending'",
                         (challenge_id,),
                     )
-                    connection.execute(
-                        """INSERT INTO audit_events
-                        (event_id,timestamp,principal_id,tool_name,argument_digest,status,error_code)
-                        VALUES (?,?,?,?,?,'approval_expired',NULL)""",
-                        (str(uuid4()), current.isoformat(), record.principal_id,
-                         record.tool_name, record.argument_digest),
-                    )
+                    self._store.append_event_in_transaction(connection, AuditEvent(
+                        str(uuid4()), current.isoformat(), record.principal_id,
+                        record.tool_name, record.argument_digest, "approval_expired", None,
+                    ))
                     connection.execute("COMMIT")
                     raise ToolValidationError("approval challenge has expired")
                 grant = None
@@ -283,13 +277,10 @@ class SQLiteApprovalChallengeStore:
                     WHERE challenge_id=? AND status='pending'""",
                     (status, approver_id, grant_json, challenge_id),
                 )
-                connection.execute(
-                    """INSERT INTO audit_events
-                    (event_id,timestamp,principal_id,tool_name,argument_digest,status,error_code)
-                    VALUES (?,?,?,?,?,?,NULL)""",
-                    (str(uuid4()), current.isoformat(), record.principal_id,
-                     record.tool_name, record.argument_digest, "approval_" + status),
-                )
+                self._store.append_event_in_transaction(connection, AuditEvent(
+                    str(uuid4()), current.isoformat(), record.principal_id,
+                    record.tool_name, record.argument_digest, "approval_" + status, None,
+                ))
                 connection.execute("COMMIT")
                 return ApprovalChallenge(
                     record.challenge_id, record.operation_id, record.principal_id,
