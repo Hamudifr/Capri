@@ -1,0 +1,4 @@
+# No third-party runtime dependencies (see pyproject.toml [project.dependencies]).
+# This file exists so Vercel's Python builder installs nothing instead of
+# pip-installing the project itself, whose requires-python (>=3.15,<3.16)
+# does not match Vercel's build Python.
