@@ -1,0 +1,47 @@
+name: Free-plan keep-alive
+
+# Keeps the Supabase free project from its 7-day inactivity pause and
+# verifies both platform endpoints. Three independent layers protect
+# availability (see docs/FREE_PLAN_OPTIMIZATION.md):
+#   1. pg_cron job inside Postgres (03:43 UTC daily, runs a real query)
+#   2. this workflow (04:17 UTC daily): edge function with a DB query,
+#      the capri-ping liveness probe, and the Vercel production page
+#   3. failure alerting: any dead endpoint fails this workflow, which
+#      emails the repository actors
+# The public repo makes scheduled runs free; all endpoints are keyless.
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Supabase keep-alive (edge function with database query)
+        run: |
+          set -euo pipefail
+          resp="$(curl -sS --max-time 30 https://znpvstwmzyphmvkhigqp.supabase.co/functions/v1/capri-keepalive)"
+          echo "$resp"
+          printf '%s' "$resp" | grep -q '"ok":true'
+
+      - name: Supabase liveness probe (capri-ping)
+        run: |
+          set -euo pipefail
+          resp="$(curl -sS --max-time 30 https://znpvstwmzyphmvkhigqp.supabase.co/functions/v1/capri-ping)"
+          echo "$resp"
+          printf '%s' "$resp" | grep -q '"ok":true'
+
+      - name: Vercel production status page
+        run: |
+          set -euo pipefail
+          body="$(curl -sSL --max-time 30 https://capri-orcin.vercel.app/)"
+          printf '%s' "$body" | grep -q 'Deployed commit'

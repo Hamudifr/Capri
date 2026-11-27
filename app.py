@@ -39,6 +39,12 @@ def app(environ, start_response):
         "200 OK",
         [
             ("Content-Type", "text/html; charset=utf-8"),
+            # Edge-cache the status page so repeat visits are served from
+            # Vercel's CDN instead of invoking the function: keeps function
+            # invocations near zero on the Hobby free plan. Vercel purges the
+            # cache on each new production deploy; worst case the displayed
+            # commit sha lags by five minutes.
+            ("Cache-Control", "public, max-age=60, s-maxage=300"),
             ("Content-Length", str(len(body))),
         ],
     )
