@@ -13,7 +13,7 @@ This roadmap defines capability outcomes, not marketing labels. A milestone is c
 Already present in the repository:
 - Provider-neutral model/tool orchestration with bounded rounds and transcript budgets.
 - Permission-filtered tool discovery and execution through a trusted host boundary.
-- Action-bound approvals, redacted audit events, and durable local approval replay protection.
+- Redacted audit events and durable local audit storage.
 - Durable sessions and tasks with principal ownership, request-scoped host composition, immutable owner records, and principal-specific handler allowlists.
 - Persistent task plans, worker leases, checkpoints, explicit pre-side-effect retries, cancellation, and `reconciliation_required` quarantine for uncertain outcomes; expired running work is never blindly replayed.
 - Bounded local project memory, a Notion memory adapter, and separate untrusted-memory delivery.
@@ -51,7 +51,6 @@ This is a strong component foundation, not yet a complete autonomous agent. The 
    - Enforce per-principal limits for tool calls, runtime, context, and provider usage.
    - Fail closed when a budget cannot be evaluated.
    - Keep paid provider use disabled unless the owner explicitly configures credentials and approves spending.
-   - Route actions requiring approval to a host-controlled approval experience.
 
 5. **Supervised host lifecycle**
    - **Implemented in PR #169:** `CapriHostService` provides explicit start/stop, cooperative worker-thread supervision, bounded shutdown waits, redacted health snapshots, and integrity checks for configured durable stores.
@@ -66,7 +65,7 @@ This is a strong component foundation, not yet a complete autonomous agent. The 
 ### X7 acceptance metrics
 
 - 100% of executed actions pass the host permission boundary.
-- 100% of consequential actions have the required valid approval before invocation.
+- 100% of consequential actions pass host permission checks and are recorded in the audit trail.
 - 100% of task plans satisfy configured bounds before persistence.
 - No automatic retry of an uncertain non-idempotent side effect.
 - Every completed goal has machine-readable acceptance checks and read-back evidence.
@@ -141,8 +140,8 @@ This is a strong component foundation, not yet a complete autonomous agent. The 
 - Preserve the user's no-paid-spend constraint. Use fake/offline adapters for development.
 - Do not claim autonomous background operation until a supervised host or enabled automation actually runs it.
 - Do not claim learning or self-improvement unless a measured, reproducible feedback loop changes future behavior.
-- Keep privacy, least privilege, approval, idempotency, and evidence requirements intact.
+- Keep privacy, least privilege, idempotency, and evidence requirements intact.
 
 ## Immediate next engineering action
 
-X7.2–X7.7 and X8.1–X8.3 are merged and validated. X8.2's labelled retrieval benchmark achieved NDCG@5/MRR@5/Recall@5 of 1.000/1.000/1.000 against the prior 0.570642/0.333333/1.000 baseline. X8.3 PR #175 added repository-local Agent Skills discovery/validation, the `capri skills validate` CLI, authoring guidance, 22 validator tests, and five-version CI; both current skill packages pass with zero warnings. The validator uses a documented dependency-free YAML subset, fails closed on unsupported constructs, never executes skill content, and does not mutate Notion/plugin registries. X8.4 includes the offline evaluator, principal-scoped registry/approval/rollback control plane, signed execution-evidence journal, and trusted host composition (PR #213 and #230). The host now validates exact shared task/evidence components, exposes owner-scoped evidence references and binds strategy verifiers to host approval/evidence authorities. Nexus worker registry host integration and committed capacity reservations are merged (PR #220, #224, #231); exact-head CI #45675940962 passed 955 tests, Doctor 6/6 and operational health 7/7. The current branch adds principal/task-bound reservation lifecycle APIs to the host gateway; exact-head CI is pending. The host still does not dispatch or launch workers, and durable worker lifecycle audit is not implemented. No production MAC key or collector credential is provisioned, and active strategies are not consumed by task execution. Next: complete exact-head validation and merge the durable worker lifecycle audit integration. Then add supervisor APIs and durable audit transitions for quarantine, recovery and retirement. Only after those boundaries are verified add bounded shadow-mode instrumentation and uncertainty estimates, gather representative evidence, and evaluate controlled live selection. The current repository support policy targets Python 3.15.x only; historical multi-version CI results are not the current matrix. No paid provider calls or new runtime dependencies were added.
+X7.2–X7.7 and X8.1–X8.3 are merged and validated. X8.2's labelled retrieval benchmark achieved NDCG@5/MRR@5/Recall@5 of 1.000/1.000/1.000 against the prior 0.570642/0.333333/1.000 baseline. X8.3 PR #175 added repository-local Agent Skills discovery/validation, the `capri skills validate` CLI, authoring guidance, 22 validator tests, and five-version CI; both current skill packages pass with zero warnings. The validator uses a documented dependency-free YAML subset, fails closed on unsupported constructs, never executes skill content, and does not mutate Notion/plugin registries. X8.4 includes the offline evaluator, principal-scoped registry/activation control plane, signed execution-evidence journal, and trusted host composition (PR #213 and #230). The host now validates exact shared task/evidence components, exposes owner-scoped evidence references and binds strategy verifiers to the host evidence authority. Nexus worker registry host integration and committed capacity reservations are merged (PR #220, #224, #231); exact-head CI #45675940962 passed 955 tests, Doctor 6/6 and operational health 7/7. The current branch adds principal/task-bound reservation lifecycle APIs to the host gateway; exact-head CI is pending. The host still does not dispatch or launch workers, and durable worker lifecycle audit is not implemented. No production MAC key or collector credential is provisioned, and active strategies are not consumed by task execution. Next: complete exact-head validation and merge the durable worker lifecycle audit integration. Then add supervisor APIs and durable audit transitions for quarantine, recovery and retirement. Only after those boundaries are verified add bounded shadow-mode instrumentation and uncertainty estimates, gather representative evidence, and evaluate controlled live selection. The current repository support policy targets Python 3.15.x only; historical multi-version CI results are not the current matrix. No paid provider calls or new runtime dependencies were added.

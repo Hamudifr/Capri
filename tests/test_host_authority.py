@@ -1,9 +1,7 @@
 import itertools
 import unittest
-from datetime import datetime, timedelta, timezone
 
 from capri_runtime.tools import (
-    ApprovalGrant,
     ExecutionContext,
     HostAuthorityError,
     HostAuthorityResolver,
@@ -61,47 +59,22 @@ class HostAuthorityResolverTests(unittest.TestCase):
         with self.assertRaises(HostAuthorityError):
             resolver.resolve("invalid")
 
-    def test_approval_grants_are_host_resolved_and_principal_scoped(self):
-        now = datetime.now(timezone.utc)
-        grant = ApprovalGrant(
-            "grant-1", "alice", "delete_record", "a" * 64,
-            (now + timedelta(minutes=1)).isoformat(),
-            operation_id="op-1",
-        )
+    def test_operation_binding_is_host_scoped(self):
         resolver = HostAuthorityResolver(
             lambda credential: "alice",
             lambda principal: ("records:delete",),
-            lambda principal, operation_id: (grant,) if operation_id == "op-1" else (),
         )
         context = resolver.resolve("opaque-host-credential", operation_id="op-1")
-        self.assertEqual(context.approvals, (grant,))
         self.assertEqual(context.operation_id, "op-1")
+        self.assertEqual(context.principal_id, "alice")
 
-        bad_resolver = HostAuthorityResolver(
-            lambda credential: "alice",
-            lambda principal: ("records:delete",),
-            lambda principal, operation_id: (ApprovalGrant(
-                "grant-2", "bob", "delete_record", "a" * 64,
-                (now + timedelta(minutes=1)).isoformat(),
-                operation_id="op-1",
-            ),),
-        )
         with self.assertRaises(HostAuthorityError):
-            bad_resolver.resolve("opaque-host-credential", operation_id="op-1")
+            resolver.for_operation(
+                ExecutionContext("alice", frozenset({"records:delete"}), operation_id="op-2"),
+                "op-1",
+            )
 
-        wrong_operation = ApprovalGrant(
-            "grant-3", "alice", "delete_record", "a" * 64,
-            (now + timedelta(minutes=1)).isoformat(), operation_id="op-other",
-        )
-        wrong_operation_resolver = HostAuthorityResolver(
-            lambda credential: "alice",
-            lambda principal: ("records:delete",),
-            lambda principal, operation_id: (wrong_operation,),
-        )
-        with self.assertRaises(HostAuthorityError):
-            wrong_operation_resolver.resolve("opaque-host-credential", operation_id="op-1")
-
-    def test_unbounded_permission_and_approval_iterables_are_consumed_only_to_limit(self):
+    def test_unbounded_permission_iterables_are_consumed_only_to_limit(self):
         resolver = HostAuthorityResolver(
             lambda credential: "alice",
             lambda principal: itertools.repeat("records:read"),
@@ -109,23 +82,11 @@ class HostAuthorityResolverTests(unittest.TestCase):
         with self.assertRaises(HostAuthorityError):
             resolver.resolve("opaque")
 
-        grant = ApprovalGrant(
-            "grant-1", "alice", "delete_record", "a" * 64,
-            "2099-01-01T00:00:00+00:00", operation_id="op-1",
-        )
-        resolver = HostAuthorityResolver(
-            lambda credential: "alice",
-            lambda principal: ("records:delete",),
-            lambda principal, operation_id: __import__("itertools").repeat(grant),
-        )
-        with self.assertRaises(HostAuthorityError):
-            resolver.resolve("opaque", operation_id="op-1")
-
     def test_callback_construction_is_trusted_host_configuration(self):
         with self.assertRaises(HostAuthorityError):
             HostAuthorityResolver("authenticate", lambda principal: ())
         with self.assertRaises(HostAuthorityError):
-            HostAuthorityResolver(lambda credential: "alice", lambda principal: (), approvals_for="grants")
+            HostAuthorityResolver(lambda credential: "alice", "permissions")
 
 
 if __name__ == "__main__":

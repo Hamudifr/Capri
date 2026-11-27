@@ -1,7 +1,7 @@
 import hashlib
 import json
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from capri_runtime.tool_bridge import (
     ToolBridgeValidationError,
@@ -9,7 +9,6 @@ from capri_runtime.tool_bridge import (
     ToolExecutionBridge,
 )
 from capri_runtime.tools import (
-    ApprovalGrant,
     AuditError,
     ExecutionContext,
     InMemoryAuditSink,
@@ -65,7 +64,7 @@ class ToolExecutionBridgeTests(unittest.TestCase):
 
     def test_available_tools_exposes_only_host_permitted_schemas(self):
         self.registry.register(
-            ToolSpec("delete_item", "tools:delete", SCHEMA, requires_approval=True),
+            ToolSpec("delete_item", "tools:delete", SCHEMA),
             lambda args: {"deleted": True},
         )
         definitions = self.bridge.available_tools(self.context)
@@ -80,7 +79,7 @@ class ToolExecutionBridgeTests(unittest.TestCase):
         self.assertEqual(denied[0].status, "permission_denied")
         self.assertEqual(self.calls, [])
 
-    def test_model_request_cannot_forge_execution_context_or_approval(self):
+    def test_model_request_cannot_forge_execution_context(self):
         with self.assertRaises(ToolBridgeValidationError):
             self.bridge.execute_batch(
                 [ToolCallRequest("c1", "search", {"query": "x"})],
@@ -140,35 +139,13 @@ class ToolExecutionBridgeTests(unittest.TestCase):
         self.assertTrue(all(x.result is None for x in outcomes))
         self.assertEqual(self.calls, [])
 
-    def test_approval_required_returns_digest_without_auto_approval(self):
+    def test_permitted_consequential_action_executes_directly(self):
         self.registry.register(
-            ToolSpec("delete_item", "tools:delete", SCHEMA, requires_approval=True),
+            ToolSpec("delete_item", "tools:delete", SCHEMA),
             lambda args: self.calls.append(args) or {"deleted": True},
         )
         context = ExecutionContext("host-user", frozenset({"tools:delete"}))
         args = {"query": "item-7"}
-        outcome = self.bridge.execute_batch(
-            [ToolCallRequest("delete", "delete_item", args)], context
-        )[0]
-        self.assertEqual(outcome.status, "approval_required")
-        self.assertEqual(outcome.argument_digest, digest(args))
-        self.assertEqual(self.calls, [])
-
-    def test_exact_host_approval_allows_action(self):
-        self.registry.register(
-            ToolSpec("delete_item", "tools:delete", SCHEMA, requires_approval=True),
-            lambda args: self.calls.append(args) or {"deleted": True},
-        )
-        args = {"query": "item-7"}
-        grant = ApprovalGrant(
-            "grant-1", "host-user", "delete_item", digest(args),
-            (self.now + timedelta(minutes=2)).isoformat(),
-            operation_id="session-1:delete",
-        )
-        context = ExecutionContext(
-            "host-user", frozenset({"tools:delete"}), (grant,),
-            operation_id="session-1:delete",
-        )
         outcome = self.bridge.execute_batch(
             [ToolCallRequest("delete", "delete_item", args)], context
         )[0]

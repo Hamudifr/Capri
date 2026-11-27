@@ -9,13 +9,10 @@ from dataclasses import replace
 from capri_core.strategy import StrategyObservation
 from capri_runtime import (
     HmacApprovalKeyRing,
-    HostStrategyApprovalAuthority,
     HostStrategyEvidenceAuthority,
     SQLiteExecutionEvidenceJournal,
     SQLiteStrategyEvidenceManifestStore,
     SQLiteStrategyStore,
-    StrategyApprovalIdentity,
-    StrategyApprovalRequest,
     StrategyBinding,
     TaskClassification,
     VerifiedExecutionResult,
@@ -1260,7 +1257,7 @@ class CapriHostRuntimeTests(unittest.TestCase):
         self.assertEqual(final.owner_acceptance_status, "accepted")
 
 
-    def test_trusted_host_composes_execution_evidence_and_signed_strategy_authorities(self):
+    def test_trusted_host_composes_execution_evidence_authorities(self):
         principal_id = "p" * 256
         authority = HostAuthorityResolver(
             authenticate=lambda credential: (
@@ -1321,20 +1318,6 @@ class CapriHostRuntimeTests(unittest.TestCase):
             attest_manifest=manifest_store.attest_manifest,
             verify_manifest=manifest_store.verify_manifest,
         )
-        approval_authority = HostStrategyApprovalAuthority(
-            HmacApprovalKeyRing(
-                {"approval-v1": b"a" * 32}, active_key_id="approval-v1",
-            ),
-            authenticate_approver=lambda credential: (
-                StrategyApprovalIdentity(principal_id, "host-admin")
-                if credential == "host-token" else None
-            ),
-            authorize_approver=lambda identity, request: (
-                identity.principal_id == principal_id
-                and identity.approver_id == "host-admin"
-                and request.principal_id == principal_id
-            ),
-        )
         class SpoofedBoundVerifier:
             def __init__(self, authority):
                 self.__self__ = authority
@@ -1345,7 +1328,6 @@ class CapriHostRuntimeTests(unittest.TestCase):
 
         untrusted_store = SQLiteStrategyStore(
             self.task_store,
-            approval_verifier=SpoofedBoundVerifier(approval_authority),
             evidence_verifier=SpoofedBoundVerifier(evidence_authority),
         )
         with self.assertRaises(HostRuntimeError):
@@ -1355,7 +1337,6 @@ class CapriHostRuntimeTests(unittest.TestCase):
                 self.orchestrator,
                 task_store=self.task_store,
                 strategy_store=untrusted_store,
-                strategy_approval_authority=approval_authority,
                 strategy_evidence_authority=evidence_authority,
             )
 
@@ -1366,7 +1347,6 @@ class CapriHostRuntimeTests(unittest.TestCase):
             task_worker=worker,
             task_store=self.task_store,
             execution_evidence_journal=journal,
-            strategy_approval_authority=approval_authority,
             strategy_evidence_authority=evidence_authority,
         )
 
@@ -1421,18 +1401,6 @@ class CapriHostRuntimeTests(unittest.TestCase):
             "host-token", "reasoning", "baseline", "1.0", {"mode": "safe"},
         )
         self.assertEqual(baseline.principal_id, principal_id)
-        request = StrategyApprovalRequest(
-            principal_id=principal_id,
-            strategy_class="reasoning",
-            strategy_id="candidate",
-            version="2.0",
-            evaluation_sha256="b" * 64,
-            config_sha256="c" * 64,
-            expected_generation=0,
-            action="activate",
-        )
-        grant = host.issue_strategy_activation_grant("host-token", request)
-        self.assertTrue(host._strategy_store._approval_verifier(grant))
 
         with self.assertRaises(HostRuntimeError):
             self.make_host(task_store=self.task_store, task_worker=worker)

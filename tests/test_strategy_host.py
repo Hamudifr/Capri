@@ -1,14 +1,13 @@
 import os
 import tempfile
 import unittest
-from datetime import datetime, timedelta, timezone
 
 from capri_runtime import (
     AssistantTurn, HostAuthorityResolver, InMemoryAuditSink, SQLiteSessionStore,
     SQLiteTaskStore, ToolExecutionBridge, ToolExecutor, ToolOrchestrator, ToolRegistry,
 )
 from capri_runtime.host_runtime import CapriHostRuntime, HostRuntimeError
-from capri_runtime.strategy_store import SQLiteStrategyStore, StrategyActivationGrant, StrategyAuthorizationError
+from capri_runtime.strategy_store import SQLiteStrategyStore, StrategyActivationRequest, StrategyAuthorizationError
 
 
 class Adapter:
@@ -39,28 +38,24 @@ class StrategyHostTests(unittest.TestCase):
             task_store=tasks or self.tasks, strategy_store=store,
         )
 
-    def test_authenticated_principal_and_approval_are_required(self):
-        store = SQLiteStrategyStore(self.tasks, approval_verifier=lambda grant: grant.signature == "valid")
+    def test_authenticated_principal_is_required(self):
+        store = SQLiteStrategyStore(self.tasks)
         host = self.make_host(store)
         baseline = host.register_strategy_baseline("alice-token", "reasoning", "baseline", "1.0", {"mode": "standard"})
         self.assertIsNone(host.get_active_strategy("bob-token", "reasoning"))
-        now = datetime.now(timezone.utc)
-        grant = StrategyActivationGrant(
-            grant_id="host-test-001", principal_id="alice", strategy_class="reasoning",
+        request = StrategyActivationRequest(
+            principal_id="alice", strategy_class="reasoning",
             strategy_id="baseline", version="1.0", evaluation_sha256=None,
             config_sha256=baseline.config_sha256, expected_generation=0, action="activate",
-            issued_at=(now-timedelta(seconds=1)).isoformat(),
-            expires_at=(now+timedelta(minutes=5)).isoformat(),
-            approver_id="owner", signature="valid",
         )
         with self.assertRaises(StrategyAuthorizationError):
-            host.activate_strategy("bob-token", grant)
-        self.assertEqual(host.activate_strategy("alice-token", grant).strategy_id, "baseline")
+            host.activate_strategy("bob-token", request)
+        self.assertEqual(host.activate_strategy("alice-token", request).strategy_id, "baseline")
         self.assertEqual(len(host.get_strategy_events("alice-token", "reasoning")), 1)
         self.assertEqual(host.get_strategy_events("bob-token", "reasoning"), ())
 
     def test_registry_must_share_exact_task_store(self):
-        store = SQLiteStrategyStore(self.tasks, approval_verifier=lambda grant: True)
+        store = SQLiteStrategyStore(self.tasks)
         other = SQLiteTaskStore(os.path.join(self.temp.name, "other.sqlite3"))
         with self.assertRaises(HostRuntimeError):
             self.make_host(store, tasks=other)

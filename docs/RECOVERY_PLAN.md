@@ -25,7 +25,7 @@ This is a timestamped snapshot of the repository state observed before this docu
 - Main at this snapshot: `31e20985eac2a6999e2339555744f97fae436ff2`.
 - Last verified code baseline: `1190623d6006aea308d9d983ae841ce927febd52`. Push run [42382504366](https://github.com/Hamudifr/Capri/actions/runs/42382504366) completed successfully: package/CLI checks, compilation, Capri Doctor, and 425 tests on Python 3.11, 3.12, and 3.13. The optional live Notion job was skipped.
 - Current main is eight documentation-only commits ahead of that verified code baseline. No combined status was returned for the current main SHA; do not describe the current head as exact-head CI-verified.
-- Main includes the runtime foundation recovery foundation, permissioned tool boundary, durable audit/approval storage, principal-owned SQLite sessions, OpenAI Responses adapter, request-scoped host composition, durable task engine/worker, SQLite/Notion memory providers, Notion REST transport hardening, expiring-memory invariants, and private consistent backups for all four local SQLite stores.
+- Main includes the runtime foundation recovery foundation, permissioned tool boundary, durable audit storage, principal-owned SQLite sessions, OpenAI Responses adapter, request-scoped host composition, durable task engine/worker, SQLite/Notion memory providers, Notion REST transport hardening, expiring-memory invariants, and private consistent backups for all four local SQLite stores.
 - Three active Draft PRs target current main. They are cleanly mergeable and 0 commits behind; original PR diffs are retained:
   - [#121](https://github.com/Hamudifr/Capri/pull/121), head `86d09cf312daba44f8747d7162633e73c32798eb`, 4 ahead, 3-file memory-ordering diff.
   - [#122](https://github.com/Hamudifr/Capri/pull/122), this recovery-plan/runtime-documentation reconciliation; 2-file documentation-only diff. Track its exact head in GitHub PR metadata rather than duplicating a self-referential SHA here.
@@ -38,7 +38,7 @@ This is a timestamped snapshot of the repository state observed before this docu
 
 ### Model and host runtime
 
-- `OpenAIResponsesAdapter` implements the memory-aware model adapter using the standard library and the official Responses API. Function calls remain proposals and pass through ToolOrchestrator, ToolExecutionBridge, host permissions, approval controls, and audit.
+- `OpenAIResponsesAdapter` implements the memory-aware model adapter using the standard library and the official Responses API. Function calls remain proposals and pass through ToolOrchestrator, ToolExecutionBridge, host permissions, and audit.
 - Full provider output continuation items, including reasoning items returned alongside function calls, are retained in the bounded private session transcript and replayed with tool outputs.
 - Retrieved memory is sent separately from trusted host instructions. Main currently appends that user input item after the conversation transcript; draft PR #121 proposes prepending it and explicitly labeling it as reference data, not a new request. PR #121 has no exact-head CI and remains Draft.
 - `CapriHostRuntime` composes a trusted HostAuthorityResolver, principal-owned SQLite sessions, ToolOrchestrator, optional principal-scoped memory resolver, and optional host-managed TaskWorker. It is request-scoped, not an HTTP server or daemon.
@@ -57,9 +57,9 @@ This is a timestamped snapshot of the repository state observed before this docu
 ### Remaining work, ordered
 
 1. Integrate a real authentication provider and test memory-provider ACLs; session ownership is implemented but does not by itself prove complete tenant isolation.
-2. Build a supervised host process / API service with explicit lifecycle, approval UX, scheduling, health probes, and graceful shutdown.
+2. Build a supervised host process / API service with explicit lifecycle, scheduling, health probes, and graceful shutdown.
 3. Add per-principal request/token budgets and hard spend controls before any paid provider is enabled.
-4. Add end-to-end adversarial tests for hostile memory, retrieved documents, forged tool calls, approval replay, and tool-result prompt injection.
+4. Add end-to-end adversarial tests for hostile memory, retrieved documents, forged tool calls, and tool-result prompt injection.
 5. Add redacted structured observability, live-dependency health probes, alerting hooks, and incident/recovery runbooks.
 6. Add encrypted backup storage, scheduled/off-site copies, retention/compaction, and tested restore drills. Backup methods exist, but no backup policy or disaster-recovery exercise is implemented.
 7. Add deployment packaging and process supervision; keep deployment internal/private until controls are verified.
@@ -124,7 +124,7 @@ The recovery foundation and first tool-execution gate are integrated and CI-veri
 
 ## Phase 0 — Preserve boundaries
 
-- [x] Inspect the current five-skill Notion registry; owner authorizes new or improved skills when a concrete capability gap and validation path justify them.
+- [x] Inspect the current five-skill Notion registry; Capri authorizes new or improved skills when a concrete capability gap and validation path justify them (sole decision-maker directive, 2026-11-27).
 - [x] Document transparent continuity-evaluation practices.
 - [x] Create an isolated recovery branch.
 - [ ] Maintain transparent evaluation evidence with ordinary privacy and confidentiality safeguards.

@@ -19,7 +19,7 @@ A trusted host can set a principal-specific `BudgetPolicy` with `set_policy_for_
 ## Enforcement behavior
 
 - **Provider:** reserve one provider call and the serialized transcript/tool-schema/memory/knowledge input-byte measure before every adapter invocation, including each tool-loop round. A denied reservation prevents the adapter call.
-- **Tools:** reserve one tool call after permission/approval checks and before handler dispatch. A denied reservation prevents the handler from running.
+- **Tools:** reserve one tool call after permission checks and before handler dispatch. A denied reservation prevents the handler from running.
 - **Tasks:** reserve one task step and its JSON input bytes before invoking a principal handler. If the current window is exhausted, the claim moves to `budget_wait` until the next window. It does not consume a task attempt. An unbudgeted worker cannot claim `budget_wait` tasks. If one input alone exceeds the policy maximum, the task fails closed without invoking the handler.
 - Reservations are atomic across all requested dimensions, append-only, and charged before execution. Failed or interrupted calls are not refunded, preventing retries from manufacturing free quota.
 - The budget database is private SQLite state. Connections re-check parent/file ownership and permissions, enable SQLite full synchronous durability, disable trusted schema, and enable recursive trigger enforcement. Reservations are append-only; integrity checks reconcile usage totals against the reservation ledger. Backups are validated and never overwrite an existing destination.

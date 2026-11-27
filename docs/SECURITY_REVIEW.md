@@ -13,7 +13,7 @@ Assets requiring protection as the runtime grows:
 - session/task identifiers and immutable principal ownership mappings;
 - memory and knowledge-graph records, evidence metadata, and Notion API credentials;
 - model-provider credentials held by host adapters;
-- approval grants, audit metadata, backups, and provider outputs;
+- audit metadata, backups, and provider outputs;
 - repository credentials and CI supply-chain integrity.
 
 ## Trust boundaries
@@ -21,7 +21,7 @@ Assets requiring protection as the runtime grows:
 1. **Host application → runtime:** `HostAuthorityResolver` maps an opaque credential to a principal using host-supplied authentication and permission callbacks. The host still owns the identity provider and resource-level ACLs; a session/task UUID is never an authorization token.
 2. **Runtime → model adapter:** adapter code is host-supplied and may call an external provider. The runtime treats adapter exceptions and outputs as untrusted; provider budgets and credential custody remain host responsibilities.
 3. **Model output → downstream application:** output is plain text and must not be treated as safe HTML, SQL, shell input, policy, or authorization evidence.
-4. **Retrieved memory/graph → model:** retrieved records are explicitly untrusted context. They cannot grant identity, policy, permission, approval, or tool authority; host resolvers must enforce principal-specific scope.
+4. **Retrieved memory/graph → model:** retrieved records are explicitly untrusted context. They cannot grant identity, policy, permission, or tool authority; host resolvers must enforce principal-specific scope.
 5. **Runtime → trusted handlers:** registered handlers execute with process privileges. They must re-check current resource authorization and idempotency at the external side-effect boundary; Capri is not a sandbox.
 6. **Repository → CI actions:** workflow dependencies execute code in the CI environment and must be pinned and granted minimum permissions.
 
@@ -37,10 +37,10 @@ Assets requiring protection as the runtime grows:
 - A session closed while a model call is in progress cannot accept the late response.
 - Adapter exception details are suppressed from the public runtime exception.
 - Tool execution uses an explicit allowlist, immutable tool contracts, strict bounded JSON schema validation, and exact host permission checks.
-- Consequential tool specs require a one-use approval bound to principal, tool, canonical argument digest, and expiry.
+- Consequential tool specs use the same host permission checks as every other tool; per the owner's 2026-11-27 directive no per-action approval gate exists, and every execution is recorded in the redacted audit trail.
 - Tool arguments/results are byte-bounded and checked for strict JSON/Unicode; handler exception details are suppressed.
 - Redacted audit-start persistence must succeed before a handler is invoked; a post-handler audit failure is surfaced as an uncertain outcome.
-- `SQLiteSecurityStore` persists redacted audit events and consumed approval IDs using SQLite transactions, a unique grant-ID constraint, and `BEGIN IMMEDIATE` for atomic cross-executor/process replay prevention.
+- `SQLiteSecurityStore` persists redacted audit events using SQLite transactions, append-only triggers, and `BEGIN IMMEDIATE` for atomic cross-process writes.
 - On POSIX, the SQLite store requires a current-user-owned private parent directory, rejects symlink/non-regular and hard-linked database paths, and enforces database mode 0600; it rechecks parent/file permissions before each connection.
 - SQLite backup publication uses an atomic no-replace primitive: Python hard-link publication where supported, with Linux `renameat2(RENAME_NOREPLACE)` fallback when the filesystem or platform does not support hard links. Unsupported hosts fail closed rather than risk overwriting an existing backup destination.
 - The runtime does not log transcript content or provider credentials.
@@ -61,7 +61,7 @@ These controls reduce accidental resource abuse and concurrency defects; they do
 | Backup confidentiality/recovery | Atomic private no-replace backups implemented; backups remain plaintext | Add host-managed encryption, retention, off-site copies, restore drills, and recovery objectives |
 | Token/cost budget | Character limits only | Define provider-aware token, spend, and request budgets |
 | Rate limiting | Not implemented | Define per-user/tenant/IP quotas at host boundary |
-| Tool execution | Permissioned gate is integrated through the orchestrator; SQLite audit/approval persistence exists; handlers remain trusted and unsandboxed | Add per-resource authorization inside handlers, timeouts/isolation, budgets, backup/retention, and stronger same-host tamper controls |
+| Tool execution | Permissioned gate is integrated through the orchestrator; SQLite audit persistence exists; handlers remain trusted and unsandboxed | Add per-resource authorization inside handlers, timeouts/isolation, budgets, backup/retention, and stronger same-host tamper controls |
 | Retrieval/prompt injection | Optional memory and read-only graph retrieval are implemented as untrusted context; no provider-enforced isolation | Test direct and indirect injection at every action boundary and enforce scope in host resolvers |
 | Observability | Minimal | Define redacted structured metadata, retention, alerting, and incident response |
 
@@ -85,7 +85,7 @@ Use harmless fixtures and instrumented fake adapters/tools. Do not use real dest
 - User-supplied or retrieved instructions cannot change tool authorization.
 - Untrusted content cannot trigger an unauthorized tool call.
 - Tool arguments are validated against strict schemas and caller permissions. Covered in `tests/test_tools.py`; add integration tests when a real host/model adapter is connected.
-- Consumed approval IDs persist across executor/store instances and concurrent consumers have one winner. Covered in `tests/test_security_store.py`.
+- The append-only audit chain and writer serialization hold across store instances. Covered in `tests/test_security_store.py`.
 - Memory poisoning and cross-session transcript leakage are rejected.
 - Model output cannot reach HTML, SQL, shell, or filesystem sinks without destination-specific validation.
 - Repeated retries, recursive tool calls, and expensive outputs hit bounded budgets.

@@ -10,7 +10,7 @@ from capri_core.strategy import StrategyObservation, evaluate_strategies
 from capri_runtime.tasks import SQLiteTaskStore
 from capri_runtime.strategy_store import (
     SQLiteStrategyStore,
-    StrategyActivationGrant,
+    StrategyActivationRequest,
     StrategyAuthorizationError,
     StrategyConflictError,
     StrategyIntegrityError,
@@ -51,7 +51,6 @@ class SQLiteStrategyStoreTests(unittest.TestCase):
         self.task_store = SQLiteTaskStore(os.path.join(self.temp.name, "tasks.sqlite3"))
         self.store = SQLiteStrategyStore(
             self.task_store,
-            approval_verifier=lambda grant: grant.signature == "valid",
             evidence_verifier=lambda context: True,
         )
         self.observations = make_observations()
@@ -70,15 +69,13 @@ class SQLiteStrategyStoreTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def grant(
+    def request(
         self, *, principal="alice", strategy_id="baseline", version="1.0",
         evaluation_sha256=None, config_sha256=None, generation=0,
-        action="activate", signature="valid", grant_id=None, now=None,
+        action="activate",
     ):
-        now = now or datetime.now(timezone.utc)
         record = self.baseline if strategy_id == "baseline" else self.candidate
-        return StrategyActivationGrant(
-            grant_id=grant_id or uuid4().hex,
+        return StrategyActivationRequest(
             principal_id=principal,
             strategy_class="reasoning",
             strategy_id=strategy_id,
@@ -87,15 +84,11 @@ class SQLiteStrategyStoreTests(unittest.TestCase):
             config_sha256=config_sha256 or record.config_sha256,
             expected_generation=generation,
             action=action,
-            issued_at=(now - timedelta(seconds=1)).isoformat(),
-            expires_at=(now + timedelta(minutes=5)).isoformat(),
-            approver_id="owner",
-            signature=signature,
         )
 
     def activate_baseline(self):
         return self.store.activate_for_principal(
-            "alice", self.grant(),
+            "alice", self.request(),
         )
 
     def test_candidate_registration_is_not_activation_and_activation_is_reversible(self):
@@ -105,7 +98,7 @@ class SQLiteStrategyStoreTests(unittest.TestCase):
 
         candidate = self.store.activate_for_principal(
             "alice",
-            self.grant(
+            self.request(
                 strategy_id="candidate",
                 evaluation_sha256=self.evaluation.cohort_sha256,
                 generation=1,
@@ -115,7 +108,7 @@ class SQLiteStrategyStoreTests(unittest.TestCase):
         self.assertEqual(candidate.config, {"mode": "efficient", "temperature": 0.1})
 
         rollback = self.store.rollback_for_principal(
-            "alice", self.grant(strategy_id="baseline", generation=2, action="rollback"),
+            "alice", self.request(strategy_id="baseline", generation=2, action="rollback"),
         )
         self.assertEqual((rollback.strategy_id, rollback.generation), ("baseline", 3))
         events = self.store.events_for_principal("alice", "reasoning")
@@ -125,88 +118,18 @@ class SQLiteStrategyStoreTests(unittest.TestCase):
         self.assertEqual(events[1].previous_hash, events[0].event_hash)
         self.assertEqual(events[2].previous_hash, events[1].event_hash)
 
-    def test_default_missing_verifier_denies_activation(self):
-        store = SQLiteStrategyStore(self.task_store)
-        grant = self.grant()
-        with self.assertRaises(StrategyAuthorizationError):
-            store.activate_for_principal("alice", grant)
-
-    def test_false_or_failing_verifier_denies_activation(self):
-        for verifier in (lambda grant: False, lambda grant: (_ for _ in ()).throw(RuntimeError())):
-            store = SQLiteStrategyStore(self.task_store, approval_verifier=verifier)
-            with self.subTest(verifier=verifier), self.assertRaises(StrategyAuthorizationError):
-                store.activate_for_principal("alice", self.grant())
-
-    def test_grant_expiring_before_event_publication_never_commits(self):
-        now = datetime.now(timezone.utc)
-        clock_values = [now, now, now + timedelta(seconds=2)]
-
-        def clock():
-            return clock_values.pop(0)
-
-        store = SQLiteStrategyStore(
-            self.task_store,
-            approval_verifier=lambda grant: True,
-            clock=clock,
-        )
-        grant = replace(
-            self.grant(now=now),
-            expires_at=(now + timedelta(seconds=1)).isoformat(),
-        )
-        with self.assertRaises(StrategyAuthorizationError):
-            store.activate_for_principal("alice", grant)
-        self.assertIsNone(store.get_active_for_principal("alice", "reasoning"))
-        self.assertEqual(store.events_for_principal("alice", "reasoning"), ())
-
-    def test_expired_and_future_approval_grants_are_rejected(self):
-        now = datetime.now(timezone.utc)
-        expired = replace(
-            self.grant(now=now - timedelta(hours=1)),
-            issued_at=(now - timedelta(hours=2)).isoformat(),
-            expires_at=(now - timedelta(hours=1)).isoformat(),
-        )
-        future = replace(
-            self.grant(now=now + timedelta(hours=1)),
-            issued_at=(now + timedelta(hours=1)).isoformat(),
-            expires_at=(now + timedelta(hours=2)).isoformat(),
-        )
-        for grant in (expired, future):
-            with self.subTest(grant=grant), self.assertRaises(StrategyAuthorizationError):
-                self.store.activate_for_principal("alice", grant)
-
-    def test_approval_expiring_during_host_verification_is_rejected(self):
-        now = datetime(2026, 1, 1, tzinfo=timezone.utc)
-        clock_state = {"now": now}
-
-        def verifier(grant):
-            clock_state["now"] = now + timedelta(minutes=6)
-            return True
-
-        store = SQLiteStrategyStore(
-            self.task_store,
-            approval_verifier=verifier,
-            clock=lambda: clock_state["now"],
-        )
-        grant = self.grant(now=now)
-        with self.assertRaisesRegex(
-            StrategyAuthorizationError, "expired before the transition"
-        ):
-            store.activate_for_principal("alice", grant)
-        self.assertEqual(store.events_for_principal("alice", "reasoning"), ())
-
-    def test_wrong_principal_action_or_signature_is_rejected(self):
+    def test_wrong_principal_or_action_is_rejected(self):
         cases = (
-            (self.grant(principal="bob"), "alice", "principal"),
-            (self.grant(action="rollback"), "alice", "action"),
-            (self.grant(signature="forged"), "alice", "signature"),
+            (self.request(principal="bob"), "alice", "principal"),
+            (self.request(action="rollback"), "alice", "action"),
         )
-        for grant, principal, label in cases:
+        for request, principal, label in cases:
             with self.subTest(label=label), self.assertRaises(StrategyAuthorizationError):
-                self.store.activate_for_principal(principal, grant)
+                self.store.activate_for_principal(principal, request)
 
-    def test_config_and_evaluation_fingerprints_are_bound_to_approval(self):
-        wrong_config = self.grant(config_sha256="0" * 64)
-        wrong_evaluation = self.grant(
+    def test_config_and_evaluation_fingerprints_are_bound_to_request(self):
+        wrong_config = self.request(config_sha256="0" * 64)
+        wrong_evaluation = self.request(
             strategy_id="candidate",
             evaluation_sha256="0" * 64,
             generation=0,
@@ -215,24 +138,15 @@ class SQLiteStrategyStoreTests(unittest.TestCase):
             with self.subTest(grant=grant), self.assertRaises(StrategyAuthorizationError):
                 self.store.activate_for_principal("alice", grant)
 
-    def test_stale_generation_and_replayed_grant_are_rejected(self):
-        grant = self.grant()
-        self.store.activate_for_principal("alice", grant)
+    def test_stale_generation_is_rejected(self):
+        request = self.request()
+        self.store.activate_for_principal("alice", request)
         with self.assertRaises(StrategyConflictError):
-            self.store.activate_for_principal("alice", grant)
-
-        replay = self.grant(
-            strategy_id="candidate",
-            evaluation_sha256=self.evaluation.cohort_sha256,
-            generation=1,
-            grant_id=grant.grant_id,
-        )
-        with self.assertRaises(StrategyConflictError):
-            self.store.activate_for_principal("alice", replay)
+            self.store.activate_for_principal("alice", request)
 
     def test_rollback_target_must_have_been_active_before(self):
         self.activate_baseline()
-        grant = self.grant(
+        grant = self.request(
             strategy_id="candidate",
             evaluation_sha256=self.evaluation.cohort_sha256,
             generation=1,
@@ -276,7 +190,6 @@ class SQLiteStrategyStoreTests(unittest.TestCase):
     def test_baseline_must_be_registered_before_candidate(self):
         store = SQLiteStrategyStore(
             self.task_store,
-            approval_verifier=lambda grant: True,
             evidence_verifier=lambda context: True,
         )
         with self.assertRaises(StrategyNotFoundError):
@@ -290,7 +203,7 @@ class SQLiteStrategyStoreTests(unittest.TestCase):
         self.activate_baseline()
         self.assertIsNone(self.store.get_active_for_principal("bob", "reasoning"))
         with self.assertRaises(StrategyAuthorizationError):
-            self.store.activate_for_principal("bob", self.grant(principal="alice", generation=1))
+            self.store.activate_for_principal("bob", self.request(principal="alice", generation=1))
         self.assertEqual(
             len(self.store.events_for_principal("bob", "reasoning")), 0,
         )
@@ -326,16 +239,6 @@ class SQLiteStrategyStoreTests(unittest.TestCase):
                 )
         finally:
             connection.close()
-
-    def test_approval_grant_lifetime_cannot_exceed_fifteen_minutes(self):
-        now = datetime.now(timezone.utc)
-        grant = replace(
-            self.grant(now=now),
-            issued_at=(now - timedelta(seconds=1)).isoformat(),
-            expires_at=(now + timedelta(minutes=16)).isoformat(),
-        )
-        with self.assertRaises(StrategyAuthorizationError):
-            self.store.activate_for_principal("alice", grant)
 
     def test_registry_rejects_unversioned_and_unmatched_baseline_versions(self):
         with self.assertRaises(StrategyStoreError):
@@ -505,10 +408,7 @@ class SQLiteStrategyStoreTests(unittest.TestCase):
         self.assertEqual(row, (0,))
 
     def test_legacy_unverified_candidate_cannot_be_activated(self):
-        store = SQLiteStrategyStore(
-            self.task_store,
-            approval_verifier=lambda grant: grant.signature == "valid",
-        )
+        store = SQLiteStrategyStore(self.task_store)
         store.register_baseline_for_principal(
             "legacy", "reasoning", "baseline", "1.0", {"mode": "standard"},
         )
@@ -544,9 +444,7 @@ class SQLiteStrategyStoreTests(unittest.TestCase):
             )
         finally:
             connection.close()
-        now = datetime.now(timezone.utc)
-        grant = StrategyActivationGrant(
-            grant_id="legacy-evidence-activation",
+        request = StrategyActivationRequest(
             principal_id="legacy",
             strategy_class="reasoning",
             strategy_id="candidate",
@@ -555,23 +453,16 @@ class SQLiteStrategyStoreTests(unittest.TestCase):
             config_sha256=config_hash,
             expected_generation=0,
             action="activate",
-            issued_at=(now - timedelta(seconds=1)).isoformat(),
-            expires_at=(now + timedelta(minutes=5)).isoformat(),
-            approver_id="owner",
-            signature="valid",
         )
         with self.assertRaisesRegex(StrategyAuthorizationError, "evidence"):
-            store.activate_for_principal("legacy", grant)
+            store.activate_for_principal("legacy", request)
         self.assertEqual(store.events_for_principal("legacy", "reasoning"), ())
 
 
     def test_legacy_active_unverified_candidate_is_not_served_and_baseline_can_be_restored(self):
         import hashlib
         import json
-        store = SQLiteStrategyStore(
-            self.task_store,
-            approval_verifier=lambda grant: grant.signature == "valid",
-        )
+        store = SQLiteStrategyStore(self.task_store)
         baseline = store.register_baseline_for_principal(
             "legacy-active", "reasoning", "baseline", "1.0", {"mode": "standard"},
         )
@@ -646,9 +537,7 @@ class SQLiteStrategyStoreTests(unittest.TestCase):
             connection.close()
         with self.assertRaisesRegex(StrategyAuthorizationError, "evidence is unverified"):
             store.get_active_for_principal("legacy-active", "reasoning")
-        now = datetime.now(timezone.utc)
-        restore = StrategyActivationGrant(
-            grant_id="legacy-active-baseline-restore",
+        restore = StrategyActivationRequest(
             principal_id="legacy-active",
             strategy_class="reasoning",
             strategy_id="baseline",
@@ -657,10 +546,6 @@ class SQLiteStrategyStoreTests(unittest.TestCase):
             config_sha256=baseline.config_sha256,
             expected_generation=1,
             action="activate",
-            issued_at=(now - timedelta(seconds=1)).isoformat(),
-            expires_at=(now + timedelta(minutes=5)).isoformat(),
-            approver_id="owner",
-            signature="valid",
         )
         store.activate_for_principal("legacy-active", restore)
         active = store.get_active_for_principal("legacy-active", "reasoning")

@@ -7,7 +7,7 @@ The local Capri SQLite stores expose consistent backup operations:
 | Store | Method | Snapshot validation |
 |---|---|---|
 | Sessions and transcripts | `SQLiteSessionStore.backup_to()` | SQLite integrity, foreign keys, every transcript, principal ownership, and durable turn leases |
-| Security, approvals and audit state | `SQLiteSecurityStore.backup_to()` | SQLite integrity and store-specific validation |
+| Security and audit state | `SQLiteSecurityStore.backup_to()` | SQLite integrity and store-specific validation |
 | Tasks and execution history | `SQLiteTaskStore.backup_to()` | SQLite integrity, foreign keys, task plans, results, progress, events and timestamps |
 | Local memory | `SQLiteMemoryStore.backup_to()` | SQLite integrity, foreign keys, record metadata, retention, timestamps, tags and events |
 

@@ -4,7 +4,6 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 from capri_runtime.tools import (
-    ApprovalGrant,
     ExecutionContext,
     InMemoryAuditSink,
     PermissionDeniedError,
@@ -29,7 +28,7 @@ def digest(arguments):
 
 
 class ResourceAuthorizationTests(unittest.TestCase):
-    def test_resource_denial_happens_before_approval_consumption(self):
+    def test_resource_denial_happens_before_execution(self):
         now = datetime.now(timezone.utc)
         allowed = {"resource-1"}
         calls = []
@@ -38,7 +37,6 @@ class ResourceAuthorizationTests(unittest.TestCase):
             "update_resource",
             "resources:update",
             SCHEMA,
-            requires_approval=True,
             resource_authorizer=lambda arguments, context: (
                 context.principal_id == "user-1" and arguments["resource_id"] in allowed
             ),
@@ -47,18 +45,7 @@ class ResourceAuthorizationTests(unittest.TestCase):
         audit = InMemoryAuditSink()
         executor = ToolExecutor(registry, audit, clock=lambda: now)
         authorized_arguments = {"resource_id": "resource-1"}
-        grant = ApprovalGrant(
-            "grant-1",
-            "user-1",
-            "update_resource",
-            digest(authorized_arguments),
-            (now + timedelta(minutes=2)).isoformat(),
-            operation_id="session-1:resource-update-1",
-        )
-        context = ExecutionContext(
-            "user-1", frozenset({"resources:update"}), (grant,),
-            operation_id="session-1:resource-update-1",
-        )
+        context = ExecutionContext("user-1", frozenset({"resources:update"}))
 
         with self.assertRaises(PermissionDeniedError):
             executor.execute("update_resource", {"resource_id": "resource-2"}, context)

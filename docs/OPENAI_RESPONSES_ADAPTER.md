@@ -38,13 +38,13 @@ This does not make a network request. API calls can incur separate API charges; 
 - Provider output is parsed strictly. Duplicate JSON keys, malformed arguments, duplicate call IDs, unknown output item types, incomplete responses, and malformed stored tool-call history are rejected.
 - Prior Capri tool-call transcript envelopes are reconstructed as Responses API `function_call` and `function_call_output` items. When a response includes reasoning/continuation items alongside tool calls, the complete provider output sequence is retained in the private Capri session transcript and replayed with tool outputs, as required by the Responses API. This state is bounded by the existing transcript limits; protect the local SQLite database and backups.
 - Retrieved memory and knowledge-graph context are serialized separately from trusted host instructions and sent as separate user input items before conversation history, keeping the current user request last. The fixed adapter policy treats both as untrusted reference data. This is a prompt-construction safeguard, not provider-enforced isolation or proof that prompt injection is impossible.
-- The provider receives only the tool definitions already filtered by the trusted host context. The returned calls still pass through Capri's permission checks, approval handling, audit persistence, and executor.
+- The provider receives only the tool definitions already filtered by the trusted host context. The returned calls still pass through Capri's permission checks, audit persistence, and executor.
 
 ## Validation
 
 `tests/test_openai_responses.py` uses fake HTTP responses only. It covers text and function-call parsing, transcript reconstruction, memory separation, duplicate IDs, invalid arguments, incomplete responses, request bounds, and credential/error suppression. It does not call OpenAI or incur charges.
 
-A live provider smoke test remains unperformed. Before any live use, the host must also supply identity/authentication, session ownership, per-user/provider budgets, operational observability, and an approval UX. This adapter has no streaming, provider failover, cancellation during an in-flight HTTP request, token-usage accounting, or hard currency spend cap. Do not describe it as a complete production host.
+A live provider smoke test remains unperformed. Before any live use, the host must also supply identity/authentication, session ownership, per-user/provider budgets, and operational observability. This adapter has no streaming, provider failover, cancellation during an in-flight HTTP request, token-usage accounting, or hard currency spend cap. Do not describe it as a complete production host.
 
 ## Official API references
 
