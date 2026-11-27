@@ -14,7 +14,6 @@ from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from types import MappingProxyType
 from typing import Any, Callable, Mapping
-from uuid import uuid4
 
 from capri_core.strategy import (
     StrategyEvaluationError,

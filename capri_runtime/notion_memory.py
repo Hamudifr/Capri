@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import threading
 import weakref
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import asdict
 from datetime import date, datetime, time, timezone
 from typing import Protocol

@@ -12,7 +12,6 @@ import json
 import math
 import re
 import sqlite3
-import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Iterable

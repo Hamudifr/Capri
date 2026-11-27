@@ -33,19 +33,6 @@ def _valid_text(value: object, limit: int) -> bool:
     )
 
 
-def _aware_timestamp(value: object) -> datetime | None:
-    if not _valid_text(value, 64):
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except (AttributeError, TypeError, ValueError):
-        return None
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        return None
-    return parsed
-
-
-
 _AUDIT_CHAIN_DOMAIN = b"capri:security-store:lifecycle-audit:v1\0"
 _AUDIT_CHAIN_ZERO = "0" * 64
 _AUDIT_CHAIN_COLUMNS = {"sequence", "previous_hash", "event_hash"}

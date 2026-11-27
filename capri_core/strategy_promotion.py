@@ -12,7 +12,7 @@ import random
 from collections import Counter
 from dataclasses import dataclass
 from statistics import fmean
-from typing import Iterable, Literal
+from typing import Iterable
 
 from .strategy import StrategyEvaluationError, StrategyObservation, evaluate_strategies
 
@@ -150,18 +150,26 @@ def _paired_bootstrap_interval(
     seed_material = f"{_POLICY_VERSION}:{cohort_index}:{metric}:paired-stratified".encode("utf-8")
     seed = int.from_bytes(hashlib.sha256(seed_material).digest()[:8], "big")
     rng = random.Random(seed)
-    # Preserve the exact RNG draw order (resample → sorted scenario → len(values)
-    # draws) while avoiding per-draw generator frames: the inner comprehension is
-    # materialized once per scenario instead of resumed value-by-value.
-    randrange = rng.randrange
+    # randrange(n) is exactly _randbelow_with_getrandbits(n): draw k = n.bit_length()
+    # bits until the value is < n. Inlining that loop removes two Python frames
+    # (randrange + _randbelow) per draw while preserving the exact RNG draw
+    # order — resample → sorted scenario → per-pair draw — so interval outputs
+    # stay byte-identical to the previous implementation.
+    getrandbits = rng.getrandbits
     scenario_values = [grouped[name] for name in scenario_names]
     estimates: list[float] = []
     sample: list[float] = []
+    append = sample.append
     for _ in range(_BOOTSTRAP_RESAMPLES):
         sample.clear()
         for values in scenario_values:
             count = len(values)
-            sample.extend([values[randrange(count)] for _ in range(count)])
+            k = count.bit_length()
+            for _ in range(count):
+                r = getrandbits(k)
+                while r >= count:
+                    r = getrandbits(k)
+                append(values[r])
         estimates.append(fmean(sample))
     estimates.sort()
     alpha = 1.0 - _CONFIDENCE_LEVEL

@@ -41,7 +41,7 @@ from .execution_evidence import SQLiteExecutionEvidenceJournal
 from .strategy_evidence import HostStrategyEvidenceAuthority
 from .tools import AuditEvent, AuditSink, ExecutionContext, HostAuthorityResolver
 from .worker_registry import (
-    InMemoryWorkerRegistry, WorkerRegistry, WorkerDescriptor, WorkerRegistryError, WorkerReservation, WorkerSnapshot,
+    WorkerRegistry, WorkerDescriptor, WorkerRegistryError, WorkerReservation, WorkerSnapshot,
 )
 from .sqlite_worker_registry import SQLiteWorkerRegistry
 

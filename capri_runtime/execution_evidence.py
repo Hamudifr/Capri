@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Mapping
@@ -211,7 +212,7 @@ class SQLiteExecutionEvidenceJournal:
         if type(value) is not TaskClassification:
             raise StrategyAuthorizationError("trusted task classifier returned an invalid record")
         family = _text(value.task_family, "task_family", 64)
-        scenario = _text(value.scenario, "scenario", 128)
+        _text(value.scenario, "scenario", 128)
         if family not in _ALLOWED_FAMILIES:
             raise StrategyAuthorizationError("trusted task classifier returned an unsupported family")
         return value

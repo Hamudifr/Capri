@@ -10,7 +10,7 @@ import json
 import re
 import threading
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping
+from typing import Any, Mapping
 
 from .tools import (
     AuditError,
