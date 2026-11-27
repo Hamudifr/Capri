@@ -51,10 +51,14 @@ independent layers prevent that and alert when anything breaks:
    — a real query inside Postgres. Since #299 this layer is also
    **asserted, not hoped for**: `capri_project_status()` exposes
    `cron_active` / `cron_schedule` / `cron_last_run` / `cron_stale`
-   (stale = armed but the last fire is >26h old; NULL-safe so a freshly
-   armed job passes), the edge function forwards the two booleans, and
-   keep-alive step 4 fails red if the job is unarmed or stale — a dead
-   scheduler can no longer hide behind a green workflow.
+   (stale = armed but the keepalive's **own** last fire is >26h old —
+   scoped to the `capri_keepalive` jobid (migration
+   `20261127224846`) so another pg_cron job's runs, e.g. the hourly
+   source collector, cannot mask a dead keepalive; NULL-safe so a
+   freshly armed job passes), the edge function forwards the two
+   booleans, and keep-alive step 4 fails red if the job is unarmed or
+   stale — a dead scheduler can no longer hide behind a green
+   workflow.
 2. **External**: `.github/workflows/keep-alive.yml` runs daily at
    04:17 UTC (plus on every push to `main` and on manual dispatch):
    - `GET /functions/v1/capri-keepalive` — keyless edge function that
