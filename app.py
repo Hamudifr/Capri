@@ -51,6 +51,12 @@ def app(environ, start_response):
             ("Cache-Control", "public, max-age=60, s-maxage=300"),
             ("X-Content-Type-Options", "nosniff"),
             ("Referrer-Policy", "no-referrer"),
+            # Static page: never renderable in a frame (clickjacking) and
+            # no privileged browser features. CSP deliberately omitted:
+            # the page loads Vercel Speed Insights scripts and a CSP
+            # cannot be browser-verified from the repo sandbox.
+            ("X-Frame-Options", "DENY"),
+            ("Permissions-Policy", "camera=(), microphone=(), geolocation=()"),
             ("Strict-Transport-Security", "max-age=63072000"),
             ("Content-Length", str(len(body))),
         ],
