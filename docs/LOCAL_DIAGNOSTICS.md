@@ -1,5 +1,11 @@
 # Local repository diagnostics
 
+Prerequisites: Python 3.15.x with SQLite >= 3.41 (the support policy is
+`requires-python = ">=3.15,<3.16"`). If the system Python or SQLite is
+older, build the pinned local toolchain first — `scripts/bootstrap_toolchain.sh`
+compiles CPython 3.15, SQLite, zlib, and libffi under `.toolchain/` from
+allowlisted sources and verifies the result; re-running it is safe.
+
 Run the read-only Capri Doctor from the repository root:
 
 ```bash

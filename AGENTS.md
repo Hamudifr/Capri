@@ -63,7 +63,7 @@ Apply this compact check to substantive claims, recommendations, research, and i
 - GitHub repository discovery, branches, commits, tests, PRs and release evidence: [skills/capri-github/SKILL.md](skills/capri-github/SKILL.md).
 - Identity and namesake translation: [docs/CAPRI_CHARACTER_DERIVED_IDENTITY.md](docs/CAPRI_CHARACTER_DERIVED_IDENTITY.md).
 
-Skills are reusable instructions, not permissions. The live enabled-skill registry is authoritative for Notion runtime availability.
+Skills are reusable instructions, not permissions. The live enabled-skill registry is authoritative for Notion runtime availability. If the current runtime does not expose an enabled-skills tool or registry, record that limitation explicitly instead of inferring enablement from a page's existence.
 
 
 ## Tool selection and polyglot execution
