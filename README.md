@@ -8,6 +8,7 @@ Capri is an experimental, provider-neutral Python runtime with durable state, bo
 
 [![Python quality](https://github.com/Hamudifr/Capri/actions/workflows/quality.yml/badge.svg)](https://github.com/Hamudifr/Capri/actions/workflows/quality.yml)
 [![Rust quality](https://github.com/Hamudifr/Capri/actions/workflows/rust.yml/badge.svg)](https://github.com/Hamudifr/Capri/actions/workflows/rust.yml)
+[![CodeQL](https://github.com/Hamudifr/Capri/actions/workflows/codeql.yml/badge.svg)](https://github.com/Hamudifr/Capri/actions/workflows/codeql.yml)
 
 ---
 
