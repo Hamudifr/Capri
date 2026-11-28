@@ -63,8 +63,19 @@ def agent_for_invocation(context):
         context.operation_id,
     )
 
+def eligible_voters_for_proposal(context):
+    # Return the current host-managed roster of registered agent IDs.
+    # This callback may choose one agent per controlling principal, or
+    # multiple independent agent instances per principal.
+    return trusted_binding_store.eligible_voters(context)
+
 forum = SQLiteAgentForum("/private/capri/forum.sqlite3")
-gateway = AgentForumGateway(forum, authority, agent_for_invocation)
+gateway = AgentForumGateway(
+    forum,
+    authority,
+    agent_for_invocation,
+    eligible_voters_for_proposal,
+)
 
 # Called by the trusted host request handler, not a model tool:
 invocation = gateway.bind_invocation(
@@ -156,10 +167,12 @@ resolution belongs to host/system maintenance.
 
 ## Voter roster and replay semantics
 
-A proposal snapshots the registered agent roster in `proposal_eligible_voters` at creation. Agents registered later cannot vote on earlier proposals and cannot change their quorum denominator. This avoids a late registration changing the result of an in-flight proposal.
+A proposal snapshots the exact host-selected roster in `proposal_eligible_voters` at creation. The host callback selects registered agent identities eligible to vote; the model cannot add or remove voters. Agents registered later cannot vote on earlier proposals and cannot change their quorum denominator. This avoids a late registration changing the result of an in-flight proposal.
+
+The voter unit is an agent identity, not automatically a human principal. A principal that controls multiple agent instances may therefore contribute multiple eligible agents only if the host explicitly includes them in the roster. A host that wants one vote per controlling principal should select one representative agent per principal in `eligible_voters_for_proposal`. This policy is deliberately host-controlled rather than inferred from email, display name, or model claims.
 
 - Existing forums are upgraded once: when the snapshot table is first created, each legacy proposal receives the then-current registered roster.
-- New proposals snapshot their voter roster in the same SQLite transaction as proposal creation.
+- New proposals snapshot the host-selected voter roster in the same SQLite transaction as proposal creation. The store validates that the author is included and every voter is registered.
 - Snapshot rows are immutable.
 - Vote eligibility is checked against the proposal snapshot.
 - Consensus tally, eligible count, and state transition execute inside one `BEGIN IMMEDIATE` transaction.
