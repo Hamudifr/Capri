@@ -27,7 +27,7 @@ November 2026; usage figures were measured live on 2026-11-27.
 | Supabase auth users (MAU) | 0 | 50,000 | 100% |
 | Supabase backup rows / bytes | 0 / 0 B | see sizing below | — |
 | Supabase services | 8/8 ACTIVE_HEALTHY | — | — |
-| Vercel status page | ~600 B response, <1 s build | 100 GB / 45 min | ~100% |
+| Vercel status page | small WSGI page; live probe cached at edge for 5 min | 100 GB / 45 min | low usage |
 | GitHub Actions (this repo is public) | 1 scheduled run/day, seconds each | unlimited on public repos | 100% |
 
 One call shows all of it plus the embedded plan limits:
@@ -113,12 +113,18 @@ because pruned rows return their space after vacuum.
 
 ## Vercel-side optimizations
 
-- `app.py` sends `Cache-Control: public, max-age=60, s-maxage=300`, so
-  repeat visits are served by the CDN instead of invoking the function;
-  function invocations stay near zero. Vercel purges the cache on each
-  production deploy (worst case: the displayed commit sha lags 5 min).
-- The page is a dependency-free WSGI function (~1.5 KB source,
-  `requirements.txt` empty) — build install step is a no-op.
+- `app.py` reads the public, keyless `capri-keepalive` Edge Function
+  on a cache miss, with a 2-second timeout and a 4 KiB response bound.
+  It validates the Supabase project host against `SUPABASE_PROJECT_REF`,
+  accepts only strict boolean health fields, and displays only database
+  liveness, the budget-threshold verdict, and keep-alive scheduler status.
+  It never reads or sends a service-role key and never displays raw metrics.
+- Failed, malformed, oversized, or misdirected probes render as **unverified**,
+  never as healthy. The response keeps
+  `Cache-Control: public, max-age=60, s-maxage=300`, so the health signal
+  can be up to five minutes old and repeat visits are served by the CDN.
+- The page remains a dependency-free WSGI function
+  (`requirements.txt` empty); the build install step is a no-op.
 - Deploy volume (~5/day) is far below the 100/day cap; builds finish in
   well under a minute against the 45-minute ceiling.
 
