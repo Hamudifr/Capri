@@ -8,6 +8,7 @@ validation. No network, no live providers.
 from __future__ import annotations
 
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -155,6 +156,81 @@ class ConsensusTests(ForumBase):
         self.assertEqual(votes[0].decision, "agree")
         self.assertEqual(votes[0].rationale, "initial")
 
+    def test_exact_vote_retry_after_finalization_returns_original_vote(self) -> None:
+        self.register("a1")
+        self.register("a2")
+        self.register("a3")
+        proposal = self.forum.propose("a1", "idea", {})
+        self.forum.vote(proposal.proposal_id, "a2", "agree", rationale="support")
+        decided, original = self.forum.vote(
+            proposal.proposal_id, "a3", "agree", rationale="support"
+        )
+        self.assertEqual(decided.state, "agreed")
+
+        retried, replay = self.forum.vote(
+            proposal.proposal_id, "a2", "agree", rationale="support"
+        )
+        self.assertEqual(retried.state, "agreed")
+        self.assertEqual(replay.vote_id, self.forum.votes_for(proposal.proposal_id)[0].vote_id)
+        self.assertNotEqual(original.vote_id, replay.vote_id)
+        with self.assertRaises(ForumConflictError):
+            self.forum.vote(proposal.proposal_id, "a2", "agree", rationale="changed")
+        with self.assertRaises(ForumConflictError):
+            self.forum.vote(proposal.proposal_id, "a2", "disagree", rationale="support")
+
+    def test_voter_roster_is_frozen_across_forum_instances(self) -> None:
+        self.register("a1")
+        self.register("a2")
+        proposal = self.forum.propose("a1", "snapshot quorum", {})
+        second_instance = SQLiteAgentForum(self.path)
+        second_instance.register_agent("a3", "a3")
+
+        with self.assertRaises(ForumNotFoundError):
+            self.forum.vote(proposal.proposal_id, "a3", "agree")
+
+        still_open, _ = self.forum.vote(proposal.proposal_id, "a2", "agree")
+        self.assertEqual(still_open.state, "open")
+        decided, _ = self.forum.vote(proposal.proposal_id, "a1", "agree")
+        self.assertEqual(decided.state, "agreed")
+
+    def test_concurrent_registration_cannot_change_existing_proposal_quorum(self) -> None:
+        self.register("a1")
+        self.register("a2")
+        proposal = self.forum.propose("a1", "concurrent snapshot quorum", {})
+        self.forum.vote(proposal.proposal_id, "a2", "agree")
+        second_instance = SQLiteAgentForum(self.path)
+        barrier = threading.Barrier(2)
+        errors: list[BaseException] = []
+        resolved = []
+
+        def register_late_agent() -> None:
+            try:
+                barrier.wait(timeout=5)
+                second_instance.register_agent("a3", "a3")
+            except BaseException as exc:
+                errors.append(exc)
+
+        def resolve_existing_proposal() -> None:
+            try:
+                barrier.wait(timeout=5)
+                resolved.append(self.forum.resolve_consensus(proposal.proposal_id))
+            except BaseException as exc:
+                errors.append(exc)
+
+        threads = [
+            threading.Thread(target=register_late_agent),
+            threading.Thread(target=resolve_existing_proposal),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+
+        self.assertFalse(any(thread.is_alive() for thread in threads))
+        self.assertEqual(errors, [])
+        self.assertEqual(len(resolved), 1)
+        self.assertEqual(resolved[0].state, "open")
+
     def test_custom_consensus_policy(self) -> None:
         # Any single agree decides, regardless of eligible count.
         class AnyAgree(MajorityConsensus):
@@ -265,15 +341,18 @@ class IntegrityTests(ForumBase):
         self.forum.record_work("a1", "work")
         self.forum.record_skill("a1", "math", confidence=0.5)
         p = self.forum.propose("a1", "idea", {})
-        # One agree among two eligible agents is not a majority -> stays open,
-        # which the backup must preserve exactly.
+        # The proposal's voter roster is frozen before a3 is registered.
+        self.register("a3")
+        # One agree among two snapshotted eligible agents is not a majority.
         self.forum.vote(p.proposal_id, "a2", "agree")
         backup = self.forum.backup_to(str(Path(self._tmp.name) / "backup.sqlite"))
         self.assertTrue(Path(backup).exists())
         restored = SQLiteAgentForum(backup)
-        self.assertEqual(len(restored.list_agents()), 2)
+        self.assertEqual(len(restored.list_agents()), 3)
         self.assertEqual(restored.get_proposal(p.proposal_id).state, "open")
         self.assertEqual(restored.latest_skill_confidence("a1", "math"), 0.5)
+        with self.assertRaises(ForumNotFoundError):
+            restored.vote(p.proposal_id, "a3", "agree")
 
 
 if __name__ == "__main__":
