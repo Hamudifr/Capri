@@ -8,6 +8,7 @@ validation. No network, no live providers.
 from __future__ import annotations
 
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -191,6 +192,44 @@ class ConsensusTests(ForumBase):
         self.assertEqual(still_open.state, "open")
         decided, _ = self.forum.vote(proposal.proposal_id, "a1", "agree")
         self.assertEqual(decided.state, "agreed")
+
+    def test_concurrent_registration_cannot_change_existing_proposal_quorum(self) -> None:
+        self.register("a1")
+        self.register("a2")
+        proposal = self.forum.propose("a1", "concurrent snapshot quorum", {})
+        self.forum.vote(proposal.proposal_id, "a2", "agree")
+        second_instance = SQLiteAgentForum(self.path)
+        barrier = threading.Barrier(2)
+        errors: list[BaseException] = []
+        resolved = []
+
+        def register_late_agent() -> None:
+            try:
+                barrier.wait(timeout=5)
+                second_instance.register_agent("a3", "a3")
+            except BaseException as exc:
+                errors.append(exc)
+
+        def resolve_existing_proposal() -> None:
+            try:
+                barrier.wait(timeout=5)
+                resolved.append(self.forum.resolve_consensus(proposal.proposal_id))
+            except BaseException as exc:
+                errors.append(exc)
+
+        threads = [
+            threading.Thread(target=register_late_agent),
+            threading.Thread(target=resolve_existing_proposal),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+
+        self.assertFalse(any(thread.is_alive() for thread in threads))
+        self.assertEqual(errors, [])
+        self.assertEqual(len(resolved), 1)
+        self.assertEqual(resolved[0].state, "open")
 
     def test_custom_consensus_policy(self) -> None:
         # Any single agree decides, regardless of eligible count.
