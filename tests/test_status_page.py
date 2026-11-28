@@ -1,4 +1,4 @@
-""""WSGI tests for the Vercel status page (app.py).
+"""WSGI tests for the Vercel status page (app.py).
 
 Covers the page contract plus the credential-free Supabase health probe.
 """
