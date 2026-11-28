@@ -546,10 +546,12 @@ class SQLiteAgentForum:
                 if not self._agent_exists(connection, agent_id):
                     raise ForumNotFoundError("voting agent does not exist")
                 existing = connection.execute(
-                    "SELECT vote_id FROM proposal_votes WHERE proposal_id=? AND agent_id=?",
+                    "SELECT vote_id,decision,rationale FROM proposal_votes WHERE proposal_id=? AND agent_id=?",
                     (proposal_id, agent_id),
                 ).fetchone()
                 if existing is not None:
+                    if existing[1] != decision or existing[2] != rationale:
+                        raise ForumConflictError("agent has already cast a different vote")
                     connection.execute("COMMIT")
                     return self.get_proposal(proposal_id), self.get_vote(existing[0])
                 cursor = connection.execute(
