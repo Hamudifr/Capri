@@ -474,8 +474,6 @@ class SQLiteAgentForum:
             )
             if len(eligible) > 1024 or len(set(eligible)) != len(eligible):
                 raise ForumValidationError("eligible voter roster is too large or contains duplicates")
-            if author_id not in eligible:
-                raise ForumValidationError("proposal author must be included in the eligible voter roster")
         else:
             eligible = None
         stamp = _stamp(now)
@@ -920,11 +918,9 @@ class SQLiteAgentForum:
                     "proposal voter snapshot references an unknown proposal or agent"
                 )
             eligible_by_proposal.setdefault(proposal_id, set()).add(agent_id)
-        for proposal_id, author_id, *_ in proposals:
-            if author_id not in eligible_by_proposal.get(proposal_id, set()):
-                raise ForumValidationError(
-                    "proposal voter snapshot omits its author or is empty"
-                )
+        for proposal_id, *_ in proposals:
+            if not eligible_by_proposal.get(proposal_id):
+                raise ForumValidationError("proposal voter snapshot is empty")
         votes = connection.execute(
             "SELECT proposal_id,agent_id FROM proposal_votes"
         ).fetchall()
