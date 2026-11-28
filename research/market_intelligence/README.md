@@ -7,7 +7,7 @@ This module is isolated under `research/` and is not part of Capri's production 
 ## What exists
 
 - Immutable, versioned `MarketEvent` records.
-- Separate source publication, version-availability and collector-observation timestamps.
+- Separate underlying event occurrence, source publication, version-availability and collector-observation timestamps.
 - UTC normalization and rejection of timezone-naive timestamps.
 - Point-in-time selection of the latest event version known at a decision timestamp.
 - Raw and direction-adjusted numeric surprise calculations.
@@ -58,7 +58,7 @@ The example is illustrative; it is not a real announcement.
 - Probabilistic forecasting, model training, calibration or walk-forward evaluation.
 - Dashboards, alerts, background scheduling or broker connections.
 
-Do not describe the current module as an AI prediction engine. It is an initial foundation for preserving evidence and calculating a few transparent quantities; CI validation is still pending.
+Do not describe the current module as an AI prediction engine. It is an initial foundation for preserving evidence and calculating a few transparent quantities.
 
 ## Research sequence
 
