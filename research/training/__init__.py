@@ -75,6 +75,37 @@ from research.training.crypto.numbers import (
     diffie_hellman_shared, fnv1a_32, fnv1a_64,
     sha256_hex, sha256_int,
 )
+from research.training.signals.processing import (
+    dft, idft, fft, ifft, next_power_of_two,
+    fft_magnitude, convolve, convolve_fft,
+    circular_convolve, moving_average_filter, fir_filter,
+    cross_correlation, auto_correlation,
+    freq_bins, dominant_frequency,
+)
+from research.training.graph.algorithms import (
+    UnionFind, kruskal, kruskal_total_weight,
+    prim, prim_total_weight,
+    bellman_ford, bellman_ford_path,
+    floyd_warshall, floyd_warshall_has_negative_cycle,
+    edmonds_karp, min_cut_edges,
+    kosaraju_scc, greedy_graph_coloring, chromatic_number,
+    is_bipartite,
+)
+from research.training.lambd.calculus import (
+    var as lc_var, abs as lc_abs, app as lc_app,
+    is_var as lc_is_var, is_abs as lc_is_abs, is_app as lc_is_app,
+    free_vars, alpha_convert, beta_reduce,
+    beta_normal_form, beta_reduce_all, eta_reduce,
+    beta_eta_normal_form,
+    church_true, church_false, church_if,
+    church_and, church_or, church_not,
+    church_zero, church_one, church_succ,
+    church_add, church_multiply, church_pred,
+    church_to_int, int_to_church,
+    base_type, arrow_type, type_equals, type_pretty,
+    t_var, t_abs, t_app, infer_type, check_type,
+    type_of,
+)
 
 __all__ = [
     # logic
@@ -139,4 +170,31 @@ __all__ = [
     "tonelli_shanks", "RSA", "baby_step_giant_step",
     "diffie_hellman_shared", "fnv1a_32", "fnv1a_64",
     "sha256_hex", "sha256_int",
+    # signals
+    "dft", "idft", "fft", "ifft", "next_power_of_two",
+    "fft_magnitude", "convolve", "convolve_fft",
+    "circular_convolve", "moving_average_filter", "fir_filter",
+    "cross_correlation", "auto_correlation",
+    "freq_bins", "dominant_frequency",
+    # graph
+    "UnionFind", "kruskal", "kruskal_total_weight",
+    "prim", "prim_total_weight",
+    "bellman_ford", "bellman_ford_path",
+    "floyd_warshall", "floyd_warshall_has_negative_cycle",
+    "edmonds_karp", "min_cut_edges",
+    "kosaraju_scc", "greedy_graph_coloring", "chromatic_number",
+    "is_bipartite",
+    # lambda
+    "lc_var", "lc_abs", "lc_app", "lc_is_var", "lc_is_abs", "lc_is_app",
+    "free_vars", "alpha_convert", "beta_reduce",
+    "beta_normal_form", "beta_reduce_all", "eta_reduce",
+    "beta_eta_normal_form",
+    "church_true", "church_false", "church_if",
+    "church_and", "church_or", "church_not",
+    "church_zero", "church_one", "church_succ",
+    "church_add", "church_multiply", "church_pred",
+    "church_to_int", "int_to_church",
+    "base_type", "arrow_type", "type_equals", "type_pretty",
+    "t_var", "t_abs", "t_app", "infer_type", "check_type",
+    "type_of",
 ]

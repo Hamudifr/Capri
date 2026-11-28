@@ -38,9 +38,18 @@ research/training/
 ├── retrieval/
 │   ├── __init__.py
 │   └── core.py                ← TF-IDF, cosine similarity, inverted index, BM25
-└── crypto/
+├── crypto/
+│   ├── __init__.py
+│   └── numbers.py             ← modular arithmetic, primality, RSA, Diffie-Hellman
+├── signals/
+│   ├── __init__.py
+│   └── processing.py          ← DFT/FFT, convolution, filters, correlation
+├── graph/
+│   ├── __init__.py
+│   └── algorithms.py          ← UnionFind, MST, Bellman-Ford, max-flow, SCC
+└── lambd/
     ├── __init__.py
-    └── numbers.py             ← modular arithmetic, primality, RSA, Diffie-Hellman
+    └── calculus.py            ← lambda terms, alpha/beta/eta, Church encoding, STLC
 ```
 
 ## Modules
@@ -211,13 +220,81 @@ The math behind modern cryptography.
 - **Hashing**: `fnv1a_32`, `fnv1a_64` (FNV-1a), `sha256_hex`,
   `sha256_int`.
 
+### Signal Processing (`signals/processing.py`)
+
+The mathematics of signals: transforms, filtering, and convolution.
+
+- **DFT**: `dft` — the discrete Fourier transform, computed directly
+  from the definition. `idft` inverts it back.
+- **FFT**: `fft` — the radix-2 Cooley-Tukey FFT with bit-reversal
+  permutation (zero-pads to the next power of two). `ifft` inverts.
+- **Spectral analysis**: `fft_magnitude` (magnitude spectrum),
+  `freq_bins` (frequency axis for FFT output), `dominant_frequency`
+  (peak non-DC bin).
+- **Convolution**: `convolution` — linear convolution of two
+  sequences (the operation behind filtering and neural layers).
+- **Filters**: `moving_average` (FIR low-pass), `fir_filter`
+  (arbitrary FIR filter), both as pure Python.
+- **Correlation**: `cross_correlation` — measures similarity between
+  two signals at all lag offsets.
+
+### Graph Algorithms (`graph/algorithms.py`)
+
+Graph theory: the structures and algorithms behind networks,
+scheduling, and flow.
+
+- **Union-Find**: `UnionFind` — disjoint-set with path compression
+  and union by rank.
+- **Minimum spanning tree**: `kruskal_mst` (edge-sort based),
+  `prim_mst` (priority-queue based).
+- **Shortest paths**: `bellman_ford` (handles negative weights,
+  detects negative cycles), `floyd_warshall` (all-pairs, adjacency
+  matrix).
+- **Max flow**: `edmonds_karp` — BFS-based augmenting path algorithm
+  (Edmonds-Karp), with `min_cut_edges` for the residual min-cut.
+- **Strongly connected components**: `kosaraju_scc` — two-pass
+  DFS-based SCC decomposition.
+- **Graph coloring**: `graph_color` (greedy), `is_bipartite`
+  (2-color check via BFS).
+
+### Lambda Calculus & Type Theory (`lambd/calculus.py`)
+
+The untyped lambda calculus and simply typed lambda calculus — the
+foundation of functional programming and type systems.
+
+- **Terms**: `var`, `abs`, `app` — the three term constructors.
+  Term representation as nested tuples `('var', name)`,
+  `('abs', param, body)`, `('app', func, arg)`.
+- **Predicates**: `is_var`, `is_abs`, `is_app`.
+- **Free variables**: `free_vars` — computes the free variables of
+  a term.
+- **Alpha conversion**: `alpha_convert` — rename bound variables.
+- **Beta reduction**: `beta_reduce` (one-step), `beta_reduce_all`
+  (until normal form), `beta_normal_form` (normalize to NF).
+- **Eta reduction**: `eta_reduce`, `beta_eta_normal_form` —
+  full normalization with eta conversion.
+- **Church encoding**: `church_true`, `church_false`, `church_if`
+  (booleans as selectors); `church_zero`, `church_one`,
+  `church_succ`, `church_add`, `church_multiply`, `church_pred`
+  (numerals as iteration); `church_and`, `church_or`, `church_not`
+  (boolean logic as pure lambda terms); `church_to_int` (decode a
+  Church numeral back to an integer).
+- **Int conversion**: `int_to_church` — build a Church numeral from
+  a Python integer.
+- **Simply typed lambda calculus**: `base_type`, `arrow_type`,
+  `type_equals`, `type_pretty` (types); `t_var`, `t_abs`, `t_app`
+  (typed terms); `infer_type` (Hindley-Milner-style inference),
+  `check_type` (bidirectional type checking), `unify` (unification
+  for type inference), `STLC` (the simply typed lambda calculus
+  evaluator).
+
 ## Running the Tests
 
 ```bash
 python3 -m unittest discover -s tests -p "test_training_*.py" -v
 ```
 
-The test suite (241 tests) covers every function and class above,
+The test suite (335 tests) covers every function and class above,
 verifying correctness against known mathematical results.
 
 ## Design Constraints
@@ -241,9 +318,4 @@ The natural next areas to study and implement:
   Markov decision processes.
 - **Computational geometry**: convex hull, Voronoi diagrams,
   k-d trees.
-- **Signal processing**: DFT, FFT, convolution, filtering.
-- **Graph theory deep dive**: minimum spanning tree (Kruskal/Prim),
-  maximum flow, shortest paths with negative weights (Bellman-Ford).
 - **Advanced SAT**: CDCL solver, 2-SAT in linear time.
-- **Type theory & lambda calculus**: Church encoding, beta/eta
-  reduction, simply typed lambda calculus.
