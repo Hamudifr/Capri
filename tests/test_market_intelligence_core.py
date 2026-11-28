@@ -32,6 +32,7 @@ def event(
     observed_at: str = "2026-11-28T10:01:00Z",
     headline: str = "Quarterly results released",
     source_updated_at: str | None = None,
+    event_at: str | None = None,
 ) -> MarketEvent:
     return MarketEvent(
         event_id=event_id,
@@ -45,6 +46,7 @@ def event(
         published_at=stamp("2026-11-28T10:00:00Z"),
         available_at=stamp(available_at),
         observed_at=stamp(observed_at),
+        event_at=stamp(event_at) if event_at is not None else None,
         source_updated_at=(
             stamp(source_updated_at) if source_updated_at is not None else None
         ),
@@ -60,6 +62,10 @@ class TimestampTests(unittest.TestCase):
     def test_rejects_naive_timestamp(self):
         with self.assertRaises(ValueError):
             parse_utc_timestamp("2026-11-28T10:00:00")
+
+    def test_event_occurrence_time_is_normalized_separately(self):
+        item = event("v1", event_at="2026-11-28T12:00:00+02:00")
+        self.assertEqual(item.event_at, stamp("2026-11-28T10:00:00Z"))
 
 
 class MarketEventTests(unittest.TestCase):
@@ -130,6 +136,10 @@ class QuantitativeTests(unittest.TestCase):
     def test_surprise_rejects_zero_historical_dispersion(self):
         with self.assertRaises(ValueError):
             compute_surprise(3.4, 3.2, 0.0)
+
+    def test_surprise_rejects_boolean_direction(self):
+        with self.assertRaises(TypeError):
+            compute_surprise(3.4, 3.2, 0.1, favorable_direction=True)
 
     def test_expected_return_is_probability_weighted(self):
         self.assertAlmostEqual(
