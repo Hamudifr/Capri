@@ -58,7 +58,7 @@ The example is illustrative; it is not a real announcement.
 - Probabilistic forecasting, model training, calibration or walk-forward evaluation.
 - Dashboards, alerts, background scheduling or broker connections.
 
-Do not describe the current module as an AI prediction engine. It is a tested foundation for preserving evidence and calculating a few transparent quantities.
+Do not describe the current module as an AI prediction engine. It is an initial foundation for preserving evidence and calculating a few transparent quantities; CI validation is still pending.
 
 ## Research sequence
 
