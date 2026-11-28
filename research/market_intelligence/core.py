@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import math
-from typing import Iterable, Sequence
+from typing import Iterable
 from urllib.parse import urlsplit
 
 
@@ -52,10 +52,10 @@ class MarketEvent:
     """One immutable version of an event, with point-in-time availability.
 
     A correction is a new record with the same source_event_id and a later
-    available_at, not an in-place mutation. available_at is when this exact
-    version became public to the market; observed_at is when our collector
-    captured it. Keeping them separate prevents ingestion time being mistaken
-    for publication time.
+    available_at, not an in-place mutation. event_at records when the underlying
+    event occurred; published_at is the source's publication time; available_at
+    is when this exact version became public; observed_at is when our collector
+    captured it. Keeping these clocks separate prevents temporal leakage.
     """
 
     event_id: str
@@ -69,6 +69,7 @@ class MarketEvent:
     published_at: datetime
     available_at: datetime
     observed_at: datetime
+    event_at: datetime | None = None
     source_updated_at: datetime | None = None
 
     def __post_init__(self) -> None:
@@ -87,7 +88,7 @@ class MarketEvent:
             if value != value.strip():
                 raise ValueError(f"{name} must not contain surrounding whitespace")
 
-        if self.source_tier not in _ALLOWED_SOURCE_TIERS:
+        if not isinstance(self.source_tier, str) or self.source_tier not in _ALLOWED_SOURCE_TIERS:
             raise ValueError(
                 f"source_tier must be one of {sorted(_ALLOWED_SOURCE_TIERS)}"
             )
@@ -98,6 +99,8 @@ class MarketEvent:
         for name in ("published_at", "available_at", "observed_at"):
             normalized = parse_utc_timestamp(getattr(self, name))
             object.__setattr__(self, name, normalized)
+        if self.event_at is not None:
+            object.__setattr__(self, "event_at", parse_utc_timestamp(self.event_at))
         if self.source_updated_at is not None:
             object.__setattr__(
                 self, "source_updated_at", parse_utc_timestamp(self.source_updated_at)
@@ -142,6 +145,8 @@ def compute_surprise(
     dispersion = _finite_number("historical_std", historical_std)
     if dispersion <= 0:
         raise ValueError("historical_std must be greater than zero")
+    if isinstance(favorable_direction, bool) or not isinstance(favorable_direction, int):
+        raise TypeError("favorable_direction must be the integer -1 or 1")
     if favorable_direction not in (-1, 1):
         raise ValueError("favorable_direction must be -1 or 1")
     raw = actual_value - consensus_value
