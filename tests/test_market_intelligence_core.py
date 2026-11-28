@@ -108,7 +108,9 @@ class MarketEventTests(unittest.TestCase):
             }
         )
         result = events_as_of([first, second], stamp("2026-11-28T10:02:00Z"))
-        self.assertEqual({item.source_event_id for item in result}, {"wire-123", "wire-456"})
+        self.assertEqual(
+            {item.source_event_id for item in result}, {"wire-123", "wire-456"}
+        )
 
 
 class QuantitativeTests(unittest.TestCase):
@@ -132,7 +134,7 @@ class QuantitativeTests(unittest.TestCase):
     def test_expected_return_is_probability_weighted(self):
         self.assertAlmostEqual(
             expected_return([(0.5, 0.08), (0.3, 0.01), (0.2, -0.10)]),
-            0.024,
+            0.023,
         )
 
     def test_expected_return_rejects_unclosed_probability_mass(self):
