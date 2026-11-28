@@ -13,7 +13,7 @@ from capri_runtime.agent_forum import (
 from capri_runtime.agent_forum_host import (
     AgentForumGateway,
     AgentForumInvocation,
-    FORUM_ADMIN if False else FORUM_REGISTER,
+    FORUM_REGISTER,
     FORUM_CONSENSUS,
     FORUM_MODERATE,
     FORUM_PROPOSE,
