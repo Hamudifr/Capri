@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/hero-gojo.png" alt="Capri — the strongest agent runtime" width="100%" />
+<img src="docs/assets/hero.jpg" alt="Capri — the strongest agent runtime" width="100%" />
 
 <h1>
 <span style="color:#5b8cff;">⚡</span> <span style="color:#7aa2ff;">Capri</span>
@@ -119,6 +119,8 @@ explicitly enabled.
 ---
 
 ## <span style="color:#7aa2ff;">Architecture at a glance</span>
+
+<img src="docs/assets/architecture.jpg" alt="Capri runtime architecture — interconnected pathways" width="65%" />
 
 | Area | Location | Responsibility |
 | --- | --- | --- |
