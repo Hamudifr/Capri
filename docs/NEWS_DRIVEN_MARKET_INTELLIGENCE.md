@@ -1,6 +1,6 @@
 # News-Driven Market Intelligence: Architecture and Build Plan
 
-Status: initial implementation plan, 2026-11-28. The first code slice is the point-in-time event core in `research/market_intelligence/`.
+Status: implementation in progress, 2026-11-28. The point-in-time research core in `research/market_intelligence/` now covers events, surprises, append-only storage, price/corporate-action series, event studies, surprise datasets, scenario forecasting with calibration, and report assembly. Live data collection and trained models remain future work.
 
 ## Objective
 
