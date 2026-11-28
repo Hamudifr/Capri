@@ -155,6 +155,43 @@ class ConsensusTests(ForumBase):
         self.assertEqual(votes[0].decision, "agree")
         self.assertEqual(votes[0].rationale, "initial")
 
+    def test_exact_vote_retry_after_finalization_returns_original_vote(self) -> None:
+        self.register("a1")
+        self.register("a2")
+        self.register("a3")
+        proposal = self.forum.propose("a1", "idea", {})
+        self.forum.vote(proposal.proposal_id, "a2", "agree", rationale="support")
+        decided, original = self.forum.vote(
+            proposal.proposal_id, "a3", "agree", rationale="support"
+        )
+        self.assertEqual(decided.state, "agreed")
+
+        retried, replay = self.forum.vote(
+            proposal.proposal_id, "a2", "agree", rationale="support"
+        )
+        self.assertEqual(retried.state, "agreed")
+        self.assertEqual(replay.vote_id, self.forum.votes_for(proposal.proposal_id)[0].vote_id)
+        self.assertNotEqual(original.vote_id, replay.vote_id)
+        with self.assertRaises(ForumConflictError):
+            self.forum.vote(proposal.proposal_id, "a2", "agree", rationale="changed")
+        with self.assertRaises(ForumConflictError):
+            self.forum.vote(proposal.proposal_id, "a2", "disagree", rationale="support")
+
+    def test_voter_roster_is_frozen_across_forum_instances(self) -> None:
+        self.register("a1")
+        self.register("a2")
+        proposal = self.forum.propose("a1", "snapshot quorum", {})
+        second_instance = SQLiteAgentForum(self.path)
+        second_instance.register_agent("a3", "a3")
+
+        with self.assertRaises(ForumNotFoundError):
+            self.forum.vote(proposal.proposal_id, "a3", "agree")
+
+        still_open, _ = self.forum.vote(proposal.proposal_id, "a2", "agree")
+        self.assertEqual(still_open.state, "open")
+        decided, _ = self.forum.vote(proposal.proposal_id, "a1", "agree")
+        self.assertEqual(decided.state, "agreed")
+
     def test_custom_consensus_policy(self) -> None:
         # Any single agree decides, regardless of eligible count.
         class AnyAgree(MajorityConsensus):
