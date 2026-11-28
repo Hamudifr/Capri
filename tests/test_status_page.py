@@ -12,6 +12,7 @@ import os
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from urllib.error import HTTPError
 
 APP_PATH = Path(__file__).resolve().parent.parent / "app.py"
 _SPEC = importlib.util.spec_from_file_location("capri_status_app", APP_PATH)
@@ -105,6 +106,20 @@ HEALTHY = {
 }
 
 
+class FakeOpener:
+    def __init__(self, response: object) -> None:
+        self.response = response
+        self.open_args: tuple[object, ...] | None = None
+        self.timeout: int | None = None
+
+    def open(self, url: str, timeout: int) -> object:
+        self.open_args = (url,)
+        self.timeout = timeout
+        if isinstance(self.response, BaseException):
+            raise self.response
+        return self.response
+
+
 class FakeResponse:
     status = 200
 
@@ -136,33 +151,48 @@ class SupabaseStatusTests(unittest.TestCase):
 
     def test_reads_only_the_keyless_health_contract(self) -> None:
         response = FakeResponse(json.dumps(HEALTHY).encode())
-        with patch.object(app_module, "urlopen", return_value=response) as request:
+        opener = FakeOpener(response)
+        with patch.object(app_module, "build_opener", return_value=opener) as factory:
             status = app_module._load_supabase_status()
 
         self.assertEqual(status, HEALTHY)
-        request.assert_called_once_with(
-            f"{SUPABASE_URL}/functions/v1/capri-keepalive", timeout=2
+        factory.assert_called_once()
+        self.assertEqual(
+            opener.open_args,
+            (f"{SUPABASE_URL}/functions/v1/capri-keepalive",),
         )
+        self.assertEqual(opener.timeout, 2)
 
     def test_rejects_a_different_host_without_network_access(self) -> None:
         with patch.dict(os.environ, {"SUPABASE_URL": "https://attacker.example"}):
-            with patch.object(app_module, "urlopen") as request:
+            with patch.object(app_module, "build_opener") as factory:
                 self.assertIsNone(app_module._load_supabase_status())
-        request.assert_not_called()
+        factory.assert_not_called()
+
+    def test_rejects_redirects_instead_of_following_them(self) -> None:
+        redirect = HTTPError(
+            f"{SUPABASE_URL}/functions/v1/capri-keepalive",
+            302,
+            "redirect",
+            {},
+            None,
+        )
+        with patch.object(app_module, "build_opener", return_value=FakeOpener(redirect)):
+            self.assertIsNone(app_module._load_supabase_status())
 
     def test_rejects_non_boolean_health_fields(self) -> None:
         payload = dict(HEALTHY, cron_active="true")
         response = FakeResponse(json.dumps(payload).encode())
-        with patch.object(app_module, "urlopen", return_value=response):
+        with patch.object(app_module, "build_opener", return_value=FakeOpener(response)):
             self.assertIsNone(app_module._load_supabase_status())
 
     def test_rejects_oversized_response(self) -> None:
         response = FakeResponse(b" " * 4097)
-        with patch.object(app_module, "urlopen", return_value=response):
+        with patch.object(app_module, "build_opener", return_value=FakeOpener(response)):
             self.assertIsNone(app_module._load_supabase_status())
 
     def test_network_failure_is_unverified_not_healthy(self) -> None:
-        with patch.object(app_module, "urlopen", side_effect=TimeoutError):
+        with patch.object(app_module, "build_opener", side_effect=TimeoutError):
             self.assertIsNone(app_module._load_supabase_status())
 
     def test_status_page_renders_safe_signals_and_keeps_cdn_cache(self) -> None:
