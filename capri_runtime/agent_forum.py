@@ -480,6 +480,11 @@ class SQLiteAgentForum:
                     "INSERT INTO proposal_events(proposal_id,timestamp,state,version,event_type) VALUES(?,?,'open',1,'created')",
                     (proposal_id, stamp),
                 )
+                connection.execute(
+                    """INSERT INTO proposal_eligible_voters(proposal_id,agent_id)
+                    SELECT ?, agent_id FROM agents""",
+                    (proposal_id,),
+                )
                 connection.execute("COMMIT")
             except Exception:
                 try:
