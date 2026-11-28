@@ -58,12 +58,28 @@ class AgentForumInvocation:
 class AgentForumGateway:
     """Least-privilege facade over SQLiteAgentForum.
 
+    MODEL_TOOL_METHODS is the explicit candidate allowlist for a host adapter;
+    registration and consensus administration are deliberately excluded.
+
     agent_for_invocation is trusted host code. It receives the authenticated
     execution context, including its host-generated operation ID, and returns
     the one agent identity selected for that invocation. This supports a
     principal that owns multiple agent instances without accepting an
     agent_id from model/client arguments.
     """
+
+    MODEL_TOOL_METHODS = (
+        "propose",
+        "list_proposals",
+        "get_proposal",
+        "vote",
+        "votes_for",
+        "record_work",
+        "work_log",
+        "record_skill",
+        "skill_history",
+        "supersede",
+    )
 
     def __init__(
         self,
@@ -226,15 +242,13 @@ class AgentForumGateway:
     ) -> tuple[Vote, ...]:
         actor = self._check(invocation)
         self._require_read_scope(actor)
-        proposal = self._forum.get_proposal(proposal_id)
+        votes = self._forum.votes_for(proposal_id)
         if self._shared(actor):
-            return self._forum.votes_for(proposal_id)
-        if proposal.author_id != actor.agent_id:
-            raise ForumNotFoundError("proposal does not exist")
-        return tuple(
-            vote for vote in self._forum.votes_for(proposal_id)
-            if vote.agent_id == actor.agent_id
-        )
+            return votes
+        # Self scope exposes only this agent's own vote, whether or not it
+        # authored the proposal. No other agent's vote or proposal metadata
+        # is disclosed by this projection.
+        return tuple(vote for vote in votes if vote.agent_id == actor.agent_id)
 
     def record_work(
         self,
