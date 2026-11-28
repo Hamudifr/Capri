@@ -648,45 +648,55 @@ class SQLiteAgentForum:
         return agree, disagree, abstain
 
     def resolve_consensus(self, proposal_id: str) -> Proposal:
-        """Recompute consensus from votes and transition the proposal if decided.
+        """Resolve against the voter roster frozen when the proposal was created.
 
-        The host-injected consensus policy inspects the current tally and the
-        number of registered (eligible) agents. Idempotent: calling it again on
-        an already-decided proposal returns it unchanged.
+        Tally, eligible-voter count, and state transition share one IMMEDIATE
+        transaction. Concurrent registration cannot change an in-flight
+        proposal's quorum, and separate forum instances see the same snapshot.
         """
         proposal_id = _text(proposal_id, "proposal_id", 64)
         with self._lock:
             connection = self._connect()
             try:
+                connection.execute("BEGIN IMMEDIATE")
                 row = connection.execute(
-                    "SELECT state,version FROM proposals WHERE proposal_id=?", (proposal_id,),
+                    "SELECT state,version FROM proposals WHERE proposal_id=?",
+                    (proposal_id,),
                 ).fetchone()
                 if row is None:
                     raise ForumNotFoundError("proposal does not exist")
                 if row[0] != "open":
-                    return self.get_proposal(proposal_id)
-                agree, disagree, abstain = self._tally(connection, proposal_id)
-                eligible = connection.execute("SELECT COUNT(*) FROM agents").fetchone()[0]
-                decided = self.consensus.decide(agree, disagree, abstain, eligible)
-                if decided is None or decided not in {"agreed", "rejected"}:
-                    return self.get_proposal(proposal_id)
-                stamp = _stamp(None)
-                connection.execute("BEGIN IMMEDIATE")
-                current = connection.execute(
-                    "SELECT version FROM proposals WHERE proposal_id=?", (proposal_id,),
-                ).fetchone()
-                if current is None or current[0] != row[1]:
-                    connection.execute("ROLLBACK")
-                    raise ForumConflictError("proposal version changed during consensus")
-                connection.execute(
-                    "UPDATE proposals SET state=?, version=version+1, updated_at=? WHERE proposal_id=? AND version=?",
-                    (decided, stamp, proposal_id, row[1]),
-                )
-                connection.execute(
-                    "INSERT INTO proposal_events(proposal_id,timestamp,state,version,event_type) VALUES(?,?,?,?,'consensus')",
-                    (proposal_id, stamp, decided, row[1] + 1),
-                )
-                connection.execute("COMMIT")
+                    connection.execute("COMMIT")
+                else:
+                    agree, disagree, abstain = self._tally(connection, proposal_id)
+                    eligible = connection.execute(
+                        "SELECT COUNT(*) FROM proposal_eligible_voters WHERE proposal_id=?",
+                        (proposal_id,),
+                    ).fetchone()[0]
+                    decided = self.consensus.decide(
+                        agree, disagree, abstain, eligible
+                    )
+                    if decided not in {"agreed", "rejected"}:
+                        connection.execute("COMMIT")
+                    else:
+                        stamp = _stamp(None)
+                        cursor = connection.execute(
+                            """UPDATE proposals
+                            SET state=?, version=version+1, updated_at=?
+                            WHERE proposal_id=? AND state='open' AND version=?""",
+                            (decided, stamp, proposal_id, row[1]),
+                        )
+                        if cursor.rowcount != 1:
+                            raise ForumConflictError(
+                                "proposal version changed during consensus"
+                            )
+                        connection.execute(
+                            """INSERT INTO proposal_events(
+                                proposal_id,timestamp,state,version,event_type
+                            ) VALUES(?,?,?,?,'consensus')""",
+                            (proposal_id, stamp, decided, row[1] + 1),
+                        )
+                        connection.execute("COMMIT")
             except Exception:
                 try:
                     connection.execute("ROLLBACK")
