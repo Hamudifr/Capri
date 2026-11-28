@@ -569,10 +569,6 @@ class SQLiteAgentForum:
                 ).fetchone()
                 if proposal is None:
                     raise ForumNotFoundError("proposal does not exist")
-                if proposal[0] != "open":
-                    raise ForumConflictError("proposal is not open and cannot accept votes")
-                if not self._agent_exists(connection, agent_id):
-                    raise ForumNotFoundError("voting agent does not exist")
                 existing = connection.execute(
                     "SELECT vote_id,decision,rationale FROM proposal_votes WHERE proposal_id=? AND agent_id=?",
                     (proposal_id, agent_id),
@@ -580,8 +576,18 @@ class SQLiteAgentForum:
                 if existing is not None:
                     if existing[1] != decision or existing[2] != rationale:
                         raise ForumConflictError("agent has already cast a different vote")
+                    # An exact retry remains idempotent even after this vote
+                    # finalized the proposal. A conflicting retry never does.
                     connection.execute("COMMIT")
                     return self.get_proposal(proposal_id), self.get_vote(existing[0])
+                if proposal[0] != "open":
+                    raise ForumConflictError("proposal is not open and cannot accept votes")
+                eligible = connection.execute(
+                    "SELECT 1 FROM proposal_eligible_voters WHERE proposal_id=? AND agent_id=?",
+                    (proposal_id, agent_id),
+                ).fetchone()
+                if eligible is None:
+                    raise ForumNotFoundError("voting agent is not eligible for this proposal")
                 cursor = connection.execute(
                     """INSERT INTO proposal_votes(proposal_id,agent_id,decision,rationale,created_at)
                     VALUES(?,?,?,?,?)""",
