@@ -494,14 +494,12 @@ class SQLiteAgentForum:
                     )
                 else:
                     voter_ids = eligible
-                    existing = {
+                    registered = {
                         row[0] for row in connection.execute(
-                            "SELECT agent_id FROM agents WHERE agent_id IN (%s)" %
-                            ",".join("?" for _ in voter_ids),
-                            voter_ids,
+                            "SELECT agent_id FROM agents"
                         ).fetchall()
                     }
-                    if existing != set(voter_ids):
+                    if not set(voter_ids).issubset(registered):
                         raise ForumNotFoundError("eligible voter roster contains an unknown agent")
                 connection.execute(
                     """INSERT INTO proposals(proposal_id,author_id,title,body_json,rationale,profound,state,version,created_at,updated_at)
