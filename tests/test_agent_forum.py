@@ -302,15 +302,18 @@ class IntegrityTests(ForumBase):
         self.forum.record_work("a1", "work")
         self.forum.record_skill("a1", "math", confidence=0.5)
         p = self.forum.propose("a1", "idea", {})
-        # One agree among two eligible agents is not a majority -> stays open,
-        # which the backup must preserve exactly.
+        # The proposal's voter roster is frozen before a3 is registered.
+        self.register("a3")
+        # One agree among two snapshotted eligible agents is not a majority.
         self.forum.vote(p.proposal_id, "a2", "agree")
         backup = self.forum.backup_to(str(Path(self._tmp.name) / "backup.sqlite"))
         self.assertTrue(Path(backup).exists())
         restored = SQLiteAgentForum(backup)
-        self.assertEqual(len(restored.list_agents()), 2)
+        self.assertEqual(len(restored.list_agents()), 3)
         self.assertEqual(restored.get_proposal(p.proposal_id).state, "open")
         self.assertEqual(restored.latest_skill_confidence("a1", "math"), 0.5)
+        with self.assertRaises(ForumNotFoundError):
+            restored.vote(p.proposal_id, "a3", "agree")
 
 
 if __name__ == "__main__":
