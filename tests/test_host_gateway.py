@@ -76,6 +76,38 @@ class HostToolGatewayTests(unittest.TestCase):
         self.assertEqual(result[0].status, "permission_denied")
         self.assertEqual(self.calls, [])
 
+    def test_gateway_binds_host_generated_operation_id(self):
+        registry = ToolRegistry()
+        registry.register(
+            ToolSpec(
+                "operation_bound",
+                "records:read",
+                SCHEMA,
+                resource_authorizer=lambda args, context: (
+                    context.operation_id == "trusted-op-1"
+                ),
+            ),
+            lambda args: {"ok": True},
+        )
+        bridge = ToolExecutionBridge(
+            ToolExecutor(registry, InMemoryAuditSink())
+        )
+        gateway = HostToolGateway(self.authority, bridge)
+
+        allowed = gateway.execute_batch(
+            "alice-token",
+            [ToolCallRequest("call-1", "operation_bound", {})],
+            operation_id="trusted-op-1",
+        )
+        self.assertEqual(allowed[0].status, "succeeded")
+
+        denied = gateway.execute_batch(
+            "alice-token",
+            [ToolCallRequest("call-2", "operation_bound", {})],
+            operation_id="different-op",
+        )
+        self.assertEqual(denied[0].status, "permission_denied")
+
     def test_gateway_requires_trusted_dependencies(self):
         with self.assertRaises(HostAuthorityError):
             HostToolGateway("resolver", self.gateway._bridge)

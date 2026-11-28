@@ -301,6 +301,29 @@ class SQLiteAgentForum:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )""")
+                eligibility_table_exists = connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='proposal_eligible_voters'"
+                ).fetchone() is not None
+                connection.execute("""CREATE TABLE IF NOT EXISTS proposal_eligible_voters (
+                    proposal_id TEXT NOT NULL REFERENCES proposals(proposal_id) ON DELETE RESTRICT,
+                    agent_id TEXT NOT NULL REFERENCES agents(agent_id) ON DELETE RESTRICT,
+                    PRIMARY KEY(proposal_id, agent_id)
+                )""")
+                if not eligibility_table_exists:
+                    # Upgrade legacy forums once: freeze the currently registered
+                    # roster for every existing proposal. New proposals snapshot
+                    # their roster atomically in propose().
+                    connection.execute(
+                        """INSERT OR IGNORE INTO proposal_eligible_voters(proposal_id,agent_id)
+                        SELECT proposals.proposal_id, agents.agent_id
+                        FROM proposals CROSS JOIN agents"""
+                    )
+                connection.execute("""CREATE TRIGGER IF NOT EXISTS proposal_eligible_voters_immutable_update
+                    BEFORE UPDATE ON proposal_eligible_voters
+                    BEGIN SELECT RAISE(ABORT, 'proposal voter snapshots are immutable'); END""")
+                connection.execute("""CREATE TRIGGER IF NOT EXISTS proposal_eligible_voters_immutable_delete
+                    BEFORE DELETE ON proposal_eligible_voters
+                    BEGIN SELECT RAISE(ABORT, 'proposal voter snapshots are immutable'); END""")
                 connection.execute("""CREATE TABLE IF NOT EXISTS proposal_votes (
                     vote_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     proposal_id TEXT NOT NULL REFERENCES proposals(proposal_id) ON DELETE RESTRICT,
@@ -432,7 +455,9 @@ class SQLiteAgentForum:
 
     def propose(
         self, author_id: str, title: str, body: dict[str, Any], *,
-        rationale: str = "", profound: bool = False, now: datetime | None = None,
+        rationale: str = "", profound: bool = False,
+        eligible_voter_ids: list[str] | tuple[str, ...] | None = None,
+        now: datetime | None = None,
     ) -> Proposal:
         author_id = _text(author_id, "author_id", 128)
         title = _text(title, "title", 200)
@@ -440,6 +465,17 @@ class SQLiteAgentForum:
         rationale = _text(rationale, "rationale", 2_000) if rationale else ""
         if type(profound) is not bool:
             raise ForumValidationError("profound must be a boolean")
+        if eligible_voter_ids is not None:
+            if type(eligible_voter_ids) not in (list, tuple) or not eligible_voter_ids:
+                raise ForumValidationError("eligible_voter_ids must be a non-empty list or tuple")
+            eligible = tuple(
+                _text(agent_id, "eligible voter agent_id", 128)
+                for agent_id in eligible_voter_ids
+            )
+            if len(eligible) > 1024 or len(set(eligible)) != len(eligible):
+                raise ForumValidationError("eligible voter roster is too large or contains duplicates")
+        else:
+            eligible = None
         stamp = _stamp(now)
         proposal_id = str(uuid4())
         with self._lock:
@@ -448,6 +484,21 @@ class SQLiteAgentForum:
                 connection.execute("BEGIN IMMEDIATE")
                 if not self._agent_exists(connection, author_id):
                     raise ForumNotFoundError("author agent does not exist")
+                if eligible is None:
+                    voter_ids = tuple(
+                        row[0] for row in connection.execute(
+                            "SELECT agent_id FROM agents ORDER BY agent_id"
+                        ).fetchall()
+                    )
+                else:
+                    voter_ids = eligible
+                    registered = {
+                        row[0] for row in connection.execute(
+                            "SELECT agent_id FROM agents"
+                        ).fetchall()
+                    }
+                    if not set(voter_ids).issubset(registered):
+                        raise ForumNotFoundError("eligible voter roster contains an unknown agent")
                 connection.execute(
                     """INSERT INTO proposals(proposal_id,author_id,title,body_json,rationale,profound,state,version,created_at,updated_at)
                     VALUES(?,?,?,?,?,?, 'open', 1, ?, ?)""",
@@ -456,6 +507,10 @@ class SQLiteAgentForum:
                 connection.execute(
                     "INSERT INTO proposal_events(proposal_id,timestamp,state,version,event_type) VALUES(?,?,'open',1,'created')",
                     (proposal_id, stamp),
+                )
+                connection.executemany(
+                    "INSERT INTO proposal_eligible_voters(proposal_id,agent_id) VALUES(?,?)",
+                    ((proposal_id, agent_id) for agent_id in voter_ids),
                 )
                 connection.execute("COMMIT")
             except Exception:
@@ -541,10 +596,6 @@ class SQLiteAgentForum:
                 ).fetchone()
                 if proposal is None:
                     raise ForumNotFoundError("proposal does not exist")
-                if proposal[0] != "open":
-                    raise ForumConflictError("proposal is not open and cannot accept votes")
-                if not self._agent_exists(connection, agent_id):
-                    raise ForumNotFoundError("voting agent does not exist")
                 existing = connection.execute(
                     "SELECT vote_id,decision,rationale FROM proposal_votes WHERE proposal_id=? AND agent_id=?",
                     (proposal_id, agent_id),
@@ -552,8 +603,18 @@ class SQLiteAgentForum:
                 if existing is not None:
                     if existing[1] != decision or existing[2] != rationale:
                         raise ForumConflictError("agent has already cast a different vote")
+                    # An exact retry remains idempotent even after this vote
+                    # finalized the proposal. A conflicting retry never does.
                     connection.execute("COMMIT")
                     return self.get_proposal(proposal_id), self.get_vote(existing[0])
+                if proposal[0] != "open":
+                    raise ForumConflictError("proposal is not open and cannot accept votes")
+                eligible = connection.execute(
+                    "SELECT 1 FROM proposal_eligible_voters WHERE proposal_id=? AND agent_id=?",
+                    (proposal_id, agent_id),
+                ).fetchone()
+                if eligible is None:
+                    raise ForumNotFoundError("voting agent is not eligible for this proposal")
                 cursor = connection.execute(
                     """INSERT INTO proposal_votes(proposal_id,agent_id,decision,rationale,created_at)
                     VALUES(?,?,?,?,?)""",
@@ -614,45 +675,55 @@ class SQLiteAgentForum:
         return agree, disagree, abstain
 
     def resolve_consensus(self, proposal_id: str) -> Proposal:
-        """Recompute consensus from votes and transition the proposal if decided.
+        """Resolve against the voter roster frozen when the proposal was created.
 
-        The host-injected consensus policy inspects the current tally and the
-        number of registered (eligible) agents. Idempotent: calling it again on
-        an already-decided proposal returns it unchanged.
+        Tally, eligible-voter count, and state transition share one IMMEDIATE
+        transaction. Concurrent registration cannot change an in-flight
+        proposal's quorum, and separate forum instances see the same snapshot.
         """
         proposal_id = _text(proposal_id, "proposal_id", 64)
         with self._lock:
             connection = self._connect()
             try:
+                connection.execute("BEGIN IMMEDIATE")
                 row = connection.execute(
-                    "SELECT state,version FROM proposals WHERE proposal_id=?", (proposal_id,),
+                    "SELECT state,version FROM proposals WHERE proposal_id=?",
+                    (proposal_id,),
                 ).fetchone()
                 if row is None:
                     raise ForumNotFoundError("proposal does not exist")
                 if row[0] != "open":
-                    return self.get_proposal(proposal_id)
-                agree, disagree, abstain = self._tally(connection, proposal_id)
-                eligible = connection.execute("SELECT COUNT(*) FROM agents").fetchone()[0]
-                decided = self.consensus.decide(agree, disagree, abstain, eligible)
-                if decided is None or decided not in {"agreed", "rejected"}:
-                    return self.get_proposal(proposal_id)
-                stamp = _stamp(None)
-                connection.execute("BEGIN IMMEDIATE")
-                current = connection.execute(
-                    "SELECT version FROM proposals WHERE proposal_id=?", (proposal_id,),
-                ).fetchone()
-                if current is None or current[0] != row[1]:
-                    connection.execute("ROLLBACK")
-                    raise ForumConflictError("proposal version changed during consensus")
-                connection.execute(
-                    "UPDATE proposals SET state=?, version=version+1, updated_at=? WHERE proposal_id=? AND version=?",
-                    (decided, stamp, proposal_id, row[1]),
-                )
-                connection.execute(
-                    "INSERT INTO proposal_events(proposal_id,timestamp,state,version,event_type) VALUES(?,?,?,?,'consensus')",
-                    (proposal_id, stamp, decided, row[1] + 1),
-                )
-                connection.execute("COMMIT")
+                    connection.execute("COMMIT")
+                else:
+                    agree, disagree, abstain = self._tally(connection, proposal_id)
+                    eligible = connection.execute(
+                        "SELECT COUNT(*) FROM proposal_eligible_voters WHERE proposal_id=?",
+                        (proposal_id,),
+                    ).fetchone()[0]
+                    decided = self.consensus.decide(
+                        agree, disagree, abstain, eligible
+                    )
+                    if decided not in {"agreed", "rejected"}:
+                        connection.execute("COMMIT")
+                    else:
+                        stamp = _stamp(None)
+                        cursor = connection.execute(
+                            """UPDATE proposals
+                            SET state=?, version=version+1, updated_at=?
+                            WHERE proposal_id=? AND state='open' AND version=?""",
+                            (decided, stamp, proposal_id, row[1]),
+                        )
+                        if cursor.rowcount != 1:
+                            raise ForumConflictError(
+                                "proposal version changed during consensus"
+                            )
+                        connection.execute(
+                            """INSERT INTO proposal_events(
+                                proposal_id,timestamp,state,version,event_type
+                            ) VALUES(?,?,?,?,'consensus')""",
+                            (proposal_id, stamp, decided, row[1] + 1),
+                        )
+                        connection.execute("COMMIT")
             except Exception:
                 try:
                     connection.execute("ROLLBACK")
@@ -836,11 +907,28 @@ class SQLiteAgentForum:
                 _json_value(body)
             except (TypeError, ValueError, ForumValidationError):
                 raise ForumValidationError("proposal backup body is corrupt") from None
-        votes = connection.execute("SELECT proposal_id,agent_id FROM proposal_votes").fetchall()
         proposal_ids = {row[0] for row in proposals}
-        for proposal_id, agent_id in votes:
+        eligible_rows = connection.execute(
+            "SELECT proposal_id,agent_id FROM proposal_eligible_voters"
+        ).fetchall()
+        eligible_by_proposal: dict[str, set[str]] = {}
+        for proposal_id, agent_id in eligible_rows:
             if proposal_id not in proposal_ids or agent_id not in agent_ids:
-                raise ForumValidationError("vote backup references an unknown proposal or agent")
+                raise ForumValidationError(
+                    "proposal voter snapshot references an unknown proposal or agent"
+                )
+            eligible_by_proposal.setdefault(proposal_id, set()).add(agent_id)
+        for proposal_id, *_ in proposals:
+            if not eligible_by_proposal.get(proposal_id):
+                raise ForumValidationError("proposal voter snapshot is empty")
+        votes = connection.execute(
+            "SELECT proposal_id,agent_id FROM proposal_votes"
+        ).fetchall()
+        for proposal_id, agent_id in votes:
+            if proposal_id not in proposal_ids or agent_id not in eligible_by_proposal.get(proposal_id, set()):
+                raise ForumValidationError(
+                    "vote backup references an unknown or ineligible proposal voter"
+                )
         work = connection.execute("SELECT agent_id,detail_json FROM work_log").fetchall()
         for agent_id, detail_json in work:
             if agent_id not in agent_ids:
