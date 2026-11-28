@@ -177,8 +177,11 @@ class SupabaseStatusTests(unittest.TestCase):
             {},
             None,
         )
-        with patch.object(app_module, "build_opener", return_value=FakeOpener(redirect)):
-            self.assertIsNone(app_module._load_supabase_status())
+        try:
+            with patch.object(app_module, "build_opener", return_value=FakeOpener(redirect)):
+                self.assertIsNone(app_module._load_supabase_status())
+        finally:
+            redirect.close()
 
     def test_rejects_non_boolean_health_fields(self) -> None:
         payload = dict(HEALTHY, cron_active="true")
