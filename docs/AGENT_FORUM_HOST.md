@@ -41,6 +41,8 @@ Missing permissions fail closed. Self-only reads return not-found for another ag
 The following is a composition sketch. The host callbacks and operation ID source are deployment-specific and are not configured by this library.
 
 ```python
+from dataclasses import asdict
+
 from capri_runtime import (
     AgentForumGateway,
     HostAuthorityResolver,
@@ -90,12 +92,12 @@ registry.register(
             context.principal_id == invocation.principal_id
         ),
     ),
-    lambda args: gateway.propose(
+    lambda args: asdict(gateway.propose(
         invocation,
         args["title"],
         args["body"],
         rationale=args.get("rationale", ""),
-    ),
+    )),
 )
 registry.register(
     ToolSpec(
@@ -115,12 +117,15 @@ registry.register(
             context.principal_id == invocation.principal_id
         ),
     ),
-    lambda args: gateway.vote(
+    lambda args: [
+        asdict(proposal),
+        asdict(vote),
+    ] if (proposal_vote := gateway.vote(
         invocation,
         args["proposal_id"],
         args["decision"],
         rationale=args.get("rationale", ""),
-    ),
+    )) else None,
 )
 
 bridge = ToolExecutionBridge(ToolExecutor(registry, host_audit_sink))
