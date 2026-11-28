@@ -123,6 +123,12 @@ because pruned rows return their space after vacuum.
   never as healthy. The response keeps
   `Cache-Control: public, max-age=60, s-maxage=300`, so the health signal
   can be up to five minutes old and repeat visits are served by the CDN.
+- The probe uses a redirect-disabled opener: even a valid Supabase
+  response cannot redirect the server-side request to an arbitrary host.
+- The Vercel project default function region is now `fra1` (Frankfurt),
+  matching the Supabase database region. This affects future deployments;
+  already-created production deployments retain their original region
+  until a new production deployment is made.
 - The page remains a dependency-free WSGI function
   (`requirements.txt` empty); the build install step is a no-op.
 - Deploy volume (~5/day) is far below the 100/day cap; builds finish in
