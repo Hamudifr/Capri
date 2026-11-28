@@ -117,15 +117,20 @@ registry.register(
             context.principal_id == invocation.principal_id
         ),
     ),
-    lambda args: [
-        asdict(proposal),
-        asdict(vote),
-    ] if (proposal_vote := gateway.vote(
-        invocation,
-        args["proposal_id"],
-        args["decision"],
-        rationale=args.get("rationale", ""),
-    )) else None,
+    lambda args: {
+        "proposal": asdict(gateway.vote(
+            invocation,
+            args["proposal_id"],
+            args["decision"],
+            rationale=args.get("rationale", ""),
+        )[0]),
+        "vote": asdict(gateway.vote(
+            invocation,
+            args["proposal_id"],
+            args["decision"],
+            rationale=args.get("rationale", ""),
+        )[1]),
+    },
 )
 
 bridge = ToolExecutionBridge(ToolExecutor(registry, host_audit_sink))
