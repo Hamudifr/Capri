@@ -66,6 +66,11 @@ class AgentForumGateway:
     the one agent identity selected for that invocation. This supports a
     principal that owns multiple agent instances without accepting an
     agent_id from model/client arguments.
+
+    eligible_voters_for_proposal is also trusted host code. It selects the
+    exact registered agent identities eligible to vote on a new proposal.
+    The host may count each agent instance separately or choose one per
+    controlling principal; the model cannot change the roster.
     """
 
     MODEL_TOOL_METHODS = (
@@ -86,6 +91,9 @@ class AgentForumGateway:
         forum: SQLiteAgentForum,
         authority: HostAuthorityResolver,
         agent_for_invocation: Callable[[ExecutionContext], str | None],
+        eligible_voters_for_proposal: Callable[
+            [ExecutionContext], list[str] | tuple[str, ...]
+        ],
     ) -> None:
         if not isinstance(forum, SQLiteAgentForum):
             raise HostAuthorityError("a trusted SQLiteAgentForum is required")
@@ -93,9 +101,12 @@ class AgentForumGateway:
             raise HostAuthorityError("a trusted HostAuthorityResolver is required")
         if not callable(agent_for_invocation):
             raise HostAuthorityError("a trusted agent-binding resolver is required")
+        if not callable(eligible_voters_for_proposal):
+            raise HostAuthorityError("a trusted proposal voter-roster resolver is required")
         self._forum = forum
         self._authority = authority
         self._agent_for_invocation = agent_for_invocation
+        self._eligible_voters_for_proposal = eligible_voters_for_proposal
         self._issuer = object()
 
     def bind_invocation(
@@ -197,8 +208,25 @@ class AgentForumGateway:
     ) -> Proposal:
         actor = self._check(invocation)
         self._require(actor, FORUM_PROPOSE)
+        try:
+            eligible_voter_ids = self._eligible_voters_for_proposal(
+                ExecutionContext(
+                    actor.principal_id,
+                    actor.permissions,
+                    actor.operation_id,
+                )
+            )
+        except Exception:
+            raise HostAuthorityError("proposal voter-roster resolution failed") from None
+        if type(eligible_voter_ids) not in (list, tuple):
+            raise HostAuthorityError("proposal voter-roster resolver returned an invalid roster")
         return self._forum.propose(
-            actor.agent_id, title, body, rationale=rationale, profound=profound
+            actor.agent_id,
+            title,
+            body,
+            rationale=rationale,
+            profound=profound,
+            eligible_voter_ids=eligible_voter_ids,
         )
 
     def list_proposals(
