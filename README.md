@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/hero.jpg" alt="Capri — the strongest agent runtime" width="100%" />
+<img src="docs/assets/hero.jpg" alt="Gojo Satoru — Capri, the strongest agent runtime" width="100%" />
 
 <h1>
 <span style="color:#5b8cff;">⚡</span> <span style="color:#7aa2ff;">Capri</span>
