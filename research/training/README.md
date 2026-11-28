@@ -68,6 +68,24 @@ research/training/
 └── game/
     ├── __init__.py
     └── core.py                ← minimax, Nash equilibrium, Shapley value, zero-sum
+├── ml/
+    ├── __init__.py
+    └── core.py                ← SVMs, decision trees, k-means, naive Bayes
+├── odes/
+    ├── __init__.py
+    └── core.py                ← Euler, Heun, RK4, RK45, ODE systems
+├── timeseries/
+    ├── __init__.py
+    └── core.py                ← moving averages, autocorrelation, AR/MA, ARMA
+├── quantum/
+    ├── __init__.py
+    └── core.py                ← qubits, gates, Bell states, Grover search
+├── database/
+    ├── __init__.py
+    └── core.py                ← B-trees, hash indexes, relational algebra
+└── verification/
+    ├── __init__.py
+    └── core.py                ← model checking, Hoare logic, sequent calculus
 ```
 
 ## Modules
@@ -414,13 +432,126 @@ and cooperation.
 - **Cooperative games**: `shapley_value` (fair allocation of
   surplus), `check_correlated_equilibrium` (verify CE conditions).
 
+### Machine Learning (`ml/core.py`)
+
+Supervised and unsupervised learning: the algorithms behind
+classification and clustering.
+
+- **SVMs**: `svm_train` (linear soft-margin SVM via sub-gradient
+  descent), `svm_predict`, `svm_decision_function` — the support
+  vector machine with hinge loss.
+- **Decision trees**: `gini_impurity`, `entropy`,
+  `information_gain` — the split criteria; `build_decision_tree`
+  (CART-style with best-split search), `decision_tree_train`,
+  `decision_tree_predict` — full tree construction and inference.
+- **k-means**: `kmeans_plusplus_init` (smart initialization),
+  `kmeans` (Lloyd's algorithm), `silhouette_score` — clustering and
+  evaluation.
+- **Naive Bayes**: `GaussianNaiveBayes` (continuous features with
+  Laplace-smoothed variances), `MultinomialNaiveBayes` (discrete
+  count features with additive smoothing) — the two classic variants.
+
+### Differential Equations (`odes/core.py`)
+
+Numerical solution of ordinary differential equations: from the
+simplest method to adaptive step control.
+
+- **Euler's method**: `euler` — first-order explicit integrator.
+- **Heun's method**: `heun` — second-order (RK2 / improved Euler).
+- **Runge-Kutta 4**: `rk4` — the standard fourth-order method.
+- **Adaptive RK45**: `rk45` — Richardson extrapolation error
+  control with adaptive step sizing.
+- **Systems**: `euler_system`, `rk4_system` — solve coupled ODEs;
+  `second_order_to_first` — convert y'' = f(t, y, y') to a first-order
+  system.
+- **Analytical solutions**: `exponential_decay_solution`,
+  `harmonic_oscillator_solution`, `logistic_growth_solution` — for
+  verifying numerical results.
+
+### Time Series Analysis (`timeseries/core.py`)
+
+Modeling and forecasting sequential data: autocorrelation, ARIMA
+components, and decomposition.
+
+- **Moving averages**: `simple_moving_average`,
+  `exponential_moving_average`, `weighted_moving_average` — smoothing
+  and trend extraction.
+- **Autocorrelation**: `autocorrelation`, `autocorrelation_function`,
+  `partial_autocorrelation` — ACF and PACF for model identification.
+- **AR models**: `ar_yule_walker` (Yule-Walker estimation),
+  `ar_predict` — autoregressive modeling and forecasting.
+- **MA models**: `ma_predict`, `ma_theoretical_acf` — moving-average
+  theoretical ACF and forecasting.
+- **ARMA**: `ARMAModel` — combined AR+MA with forecasting.
+- **Stationarity**: `adf_test` (Augmented Dickey-Fuller),
+  `linear_detrend`, `seasonal_decompose` — preprocessing and testing.
+
+### Quantum Computing (`quantum/core.py`)
+
+Quantum mechanics and quantum algorithms: from qubits to Grover's
+search.
+
+- **States**: `zero_state`, `basis_state`, `state_normalize`,
+  `state_probability`, `state_expectation` — quantum state vectors
+  and observables.
+- **Gates**: `apply_x`, `apply_y`, `apply_z`, `apply_h`, `apply_s`,
+  `apply_t`, `apply_cnot` — single-qubit and two-qubit gate
+  application on n-qubit states.
+- **Bell states**: `bell_state`, `create_bell_pair` — entanglement
+  generation and verification.
+- **Circuits**: `QuantumCircuit` — fluent circuit builder with
+  measurement.
+- **Amplitude amplification**: `grover_diffusion_operator`,
+  `amplitude_amplification`, `grover_search` — Grover's search
+  algorithm.
+- **Utilities**: `state_fidelity`, `max_probability` — state
+  comparison and measurement analysis.
+
+### Database Internals (`database/core.py`)
+
+The data structures behind relational databases: indexing, tree
+structures, and relational algebra.
+
+- **B-trees**: `BTree`, `BTreeNode` — balanced search tree with
+  insertion, search, range search, and in-order traversal.
+- **Hash indexes**: `HashIndex` (separate chaining),
+  `OpenAddressingHash` (linear probing) — two index structures.
+- **Relational algebra**: `Relation` with `project`, `select`,
+  `union`, `intersect`, `difference`, `natural_join`, `theta_join` —
+  the algebraic operations on relations.
+- **SimpleDB**: `SimpleDB` — in-memory database with table creation,
+  insert, and query execution.
+
+### Formal Verification (`verification/core.py`)
+
+Proving correctness of systems: model checking, Hoare logic, and
+proof systems.
+
+- **Kripke structures**: `KripkeStructure`, `bfs_reachable` — state
+  space model for temporal logic.
+- **LTL model checking**: `lt_check_always` (A□),
+  `lt_check_eventually` (EF), `lt_check_exists_always` (E□),
+  `lt_check_until` (AU) — temporal property verification.
+- **Bounded model checking**: `bounded_model_check` — bounded
+  verification within a step limit.
+- **Hoare logic**: `HoareTriple`, `weakest_precondition`,
+  `assignment_wp`, `sequential_wp`, `hoare_assignment` — deductive
+  program verification.
+- **GCL**: `GuardedCommand`, `GCLProgram` — Dijkstra's guarded
+  command language with weakest precondition computation.
+- **Sequent calculus**: `Sequent`, `ProofSystem` — propositional
+  proof system with and/or/not/imp rules.
+- **Invariants**: `check_inductive_invariant`,
+  `check_safety_property` — inductive and reachability-based
+  invariant checking.
+
 ## Running the Tests
 
 ```bash
 python3 -m unittest discover -s tests -p "test_training_*.py" -v
 ```
 
-The test suite (472 tests) covers every function and class above,
+The test suite (605 tests) covers every function and class above,
 verifying correctness against known mathematical results.
 
 ## Design Constraints
@@ -438,13 +569,19 @@ verifying correctness against known mathematical results.
 
 The natural next areas to study and implement:
 
-- **Machine learning**: SVMs, decision trees, clustering (k-means,
-  hierarchical), naive Bayes.
-- **Differential equations**: Euler's method, Runge-Kutta (RK4),
-  solving ODEs numerically.
-- **Time series**: AR/MA models, ARIMA basics, moving averages.
-- **Quantum computing**: qubits, quantum gates, Bell states,
-  amplitude amplification.
-- **Database internals**: B-trees, hash indexes, relational algebra.
-- **Formal verification**: model checking, Hoare logic, proof
-  assistants.
+- **Deep learning**: backpropagation, MLPs, CNNs, RNNs, backprop
+  through time.
+- **Algorithms**: sorting (quicksort, mergesort, heapsort), advanced
+  data structures (segment trees, Fenwick trees, treaps).
+- **Computational complexity**: NP-completeness proofs, reductions,
+  approximation algorithms.
+- **Number theory**: continued fractions, LLL lattice reduction,
+  elliptic curve cryptography.
+- **Optimization**: interior point methods, convex optimization,
+  ADMM, distributed SGD.
+- **Probability**: measure theory, stochastic processes (Poisson,
+  Brownian motion), filtering (Kalman, particle filters).
+- **Computational geometry**: Delaunay triangulation, range trees,
+  sweep-line algorithms.
+- **Quantum algorithms**: Shor's algorithm, quantum Fourier
+  transform, variational quantum algorithms.
