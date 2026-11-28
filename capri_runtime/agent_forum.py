@@ -455,7 +455,9 @@ class SQLiteAgentForum:
 
     def propose(
         self, author_id: str, title: str, body: dict[str, Any], *,
-        rationale: str = "", profound: bool = False, now: datetime | None = None,
+        rationale: str = "", profound: bool = False,
+        eligible_voter_ids: list[str] | tuple[str, ...] | None = None,
+        now: datetime | None = None,
     ) -> Proposal:
         author_id = _text(author_id, "author_id", 128)
         title = _text(title, "title", 200)
@@ -463,6 +465,19 @@ class SQLiteAgentForum:
         rationale = _text(rationale, "rationale", 2_000) if rationale else ""
         if type(profound) is not bool:
             raise ForumValidationError("profound must be a boolean")
+        if eligible_voter_ids is not None:
+            if type(eligible_voter_ids) not in (list, tuple) or not eligible_voter_ids:
+                raise ForumValidationError("eligible_voter_ids must be a non-empty list or tuple")
+            eligible = tuple(
+                _text(agent_id, "eligible voter agent_id", 128)
+                for agent_id in eligible_voter_ids
+            )
+            if len(eligible) > 1024 or len(set(eligible)) != len(eligible):
+                raise ForumValidationError("eligible voter roster is too large or contains duplicates")
+            if author_id not in eligible:
+                raise ForumValidationError("proposal author must be included in the eligible voter roster")
+        else:
+            eligible = None
         stamp = _stamp(now)
         proposal_id = str(uuid4())
         with self._lock:
@@ -471,6 +486,23 @@ class SQLiteAgentForum:
                 connection.execute("BEGIN IMMEDIATE")
                 if not self._agent_exists(connection, author_id):
                     raise ForumNotFoundError("author agent does not exist")
+                if eligible is None:
+                    voter_ids = tuple(
+                        row[0] for row in connection.execute(
+                            "SELECT agent_id FROM agents ORDER BY agent_id"
+                        ).fetchall()
+                    )
+                else:
+                    voter_ids = eligible
+                    existing = {
+                        row[0] for row in connection.execute(
+                            "SELECT agent_id FROM agents WHERE agent_id IN (%s)" %
+                            ",".join("?" for _ in voter_ids),
+                            voter_ids,
+                        ).fetchall()
+                    }
+                    if existing != set(voter_ids):
+                        raise ForumNotFoundError("eligible voter roster contains an unknown agent")
                 connection.execute(
                     """INSERT INTO proposals(proposal_id,author_id,title,body_json,rationale,profound,state,version,created_at,updated_at)
                     VALUES(?,?,?,?,?,?, 'open', 1, ?, ?)""",
@@ -480,10 +512,9 @@ class SQLiteAgentForum:
                     "INSERT INTO proposal_events(proposal_id,timestamp,state,version,event_type) VALUES(?,?,'open',1,'created')",
                     (proposal_id, stamp),
                 )
-                connection.execute(
-                    """INSERT INTO proposal_eligible_voters(proposal_id,agent_id)
-                    SELECT ?, agent_id FROM agents""",
-                    (proposal_id,),
+                connection.executemany(
+                    "INSERT INTO proposal_eligible_voters(proposal_id,agent_id) VALUES(?,?)",
+                    ((proposal_id, agent_id) for agent_id in voter_ids),
                 )
                 connection.execute("COMMIT")
             except Exception:
