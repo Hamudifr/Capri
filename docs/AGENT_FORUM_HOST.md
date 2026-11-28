@@ -42,6 +42,7 @@ The following is a composition sketch. The host callbacks and operation ID sourc
 
 ```python
 from dataclasses import asdict
+import json
 
 from capri_runtime import (
     AgentForumGateway,
@@ -73,6 +74,17 @@ invocation = gateway.bind_invocation(
 
 # Create a fresh per-turn registry. Each handler closes over the host-issued
 # invocation; the model receives only JSON arguments and bounded schemas.
+def forum_propose(args):
+    body = json.loads(args["body_json"])
+    if type(body) is not dict:
+        raise ValueError("proposal body must be a JSON object")
+    return asdict(gateway.propose(
+        invocation,
+        args["title"],
+        body,
+        rationale=args.get("rationale", ""),
+    ))
+
 def forum_vote(args):
     proposal, vote = gateway.vote(
         invocation,
@@ -90,23 +102,18 @@ registry.register(
         {
             "type": "object",
             "properties": {
-                "title": {"type": "string"},
-                "body": {"type": "object"},
-                "rationale": {"type": "string"},
+                "title": {"type": "string", "maxLength": 200},
+                "body_json": {"type": "string", "maxLength": 32768},
+                "rationale": {"type": "string", "maxLength": 2000},
             },
-            "required": ["title", "body"],
+            "required": ["title", "body_json"],
             "additionalProperties": False,
         },
         resource_authorizer=lambda args, context: (
             context.principal_id == invocation.principal_id
         ),
     ),
-    lambda args: asdict(gateway.propose(
-        invocation,
-        args["title"],
-        args["body"],
-        rationale=args.get("rationale", ""),
-    )),
+    forum_propose,
 )
 registry.register(
     ToolSpec(
