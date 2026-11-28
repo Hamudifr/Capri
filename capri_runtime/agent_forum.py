@@ -880,11 +880,30 @@ class SQLiteAgentForum:
                 _json_value(body)
             except (TypeError, ValueError, ForumValidationError):
                 raise ForumValidationError("proposal backup body is corrupt") from None
-        votes = connection.execute("SELECT proposal_id,agent_id FROM proposal_votes").fetchall()
         proposal_ids = {row[0] for row in proposals}
-        for proposal_id, agent_id in votes:
+        eligible_rows = connection.execute(
+            "SELECT proposal_id,agent_id FROM proposal_eligible_voters"
+        ).fetchall()
+        eligible_by_proposal: dict[str, set[str]] = {}
+        for proposal_id, agent_id in eligible_rows:
             if proposal_id not in proposal_ids or agent_id not in agent_ids:
-                raise ForumValidationError("vote backup references an unknown proposal or agent")
+                raise ForumValidationError(
+                    "proposal voter snapshot references an unknown proposal or agent"
+                )
+            eligible_by_proposal.setdefault(proposal_id, set()).add(agent_id)
+        for proposal_id, author_id, *_ in proposals:
+            if author_id not in eligible_by_proposal.get(proposal_id, set()):
+                raise ForumValidationError(
+                    "proposal voter snapshot omits its author or is empty"
+                )
+        votes = connection.execute(
+            "SELECT proposal_id,agent_id FROM proposal_votes"
+        ).fetchall()
+        for proposal_id, agent_id in votes:
+            if proposal_id not in proposal_ids or agent_id not in eligible_by_proposal.get(proposal_id, set()):
+                raise ForumValidationError(
+                    "vote backup references an unknown or ineligible proposal voter"
+                )
         work = connection.execute("SELECT agent_id,detail_json FROM work_log").fetchall()
         for agent_id, detail_json in work:
             if agent_id not in agent_ids:
