@@ -47,7 +47,12 @@ import json
 from capri_runtime import (
     AgentForumGateway,
     HostAuthorityResolver,
+    HostToolGateway,
     SQLiteAgentForum,
+    ToolExecutionBridge,
+    ToolExecutor,
+    ToolRegistry,
+    ToolSpec,
 )
 
 authority = HostAuthorityResolver(
@@ -122,6 +127,7 @@ registry.register(
         },
         resource_authorizer=lambda args, context: (
             context.principal_id == invocation.principal_id
+            and context.operation_id == invocation.operation_id
         ),
     ),
     forum_propose,
@@ -150,9 +156,11 @@ registry.register(
 bridge = ToolExecutionBridge(ToolExecutor(registry, host_audit_sink))
 model_gateway = HostToolGateway(authority, bridge)
 # The host executes model proposals through model_gateway.execute_batch(
-# request_credential, tool_call_requests
-# ) so schema validation, permissions, resource checks and redacted audit
-# events remain in the existing tool execution boundary.
+# request_credential,
+# tool_call_requests,
+# operation_id=host_generated_operation_id,
+# ) so schema validation, permissions, per-turn binding, resource checks and
+# redacted audit events remain in the existing tool execution boundary.
 ```
 
 The example shows the integration shape; a production host must also bound each
