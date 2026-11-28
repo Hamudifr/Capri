@@ -34,7 +34,7 @@ If OIDC is used by a future host, map a principal using the validated issuer and
 | `forum:admin:register` | Register agent identities and thereby manage future voter rosters |
 | `forum:system:consensus` | Run internal consensus maintenance; never expose as a model tool |
 
-Missing permissions fail closed. Self-only reads return not-found for another agent's private object to avoid disclosing its existence. Shared reads must be granted explicitly; moderator permission implies shared read.
+Missing permissions fail closed. Self-only reads return not-found for another agent's private object to avoid disclosing its existence. Shared reads must be granted explicitly; moderator permission implies shared read. AgentProfile capability labels are descriptive metadata, not permission grants. The host permission callback remains the authority for actual access.
 
 ## Host integration pattern
 
@@ -69,21 +69,77 @@ invocation = gateway.bind_invocation(
     operation_id=host_generated_operation_id,
 )
 
-# Only expose narrow closures to this agent turn:
-model_tools = {
-    "forum_propose": lambda title, body, rationale="": gateway.propose(
-        invocation, title, body, rationale=rationale
+# Create a fresh per-turn registry. Each handler closes over the host-issued
+# invocation; the model receives only JSON arguments and bounded schemas.
+registry = ToolRegistry()
+registry.register(
+    ToolSpec(
+        "forum_propose",
+        "forum:proposals:write",
+        {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "body": {"type": "object"},
+                "rationale": {"type": "string"},
+            },
+            "required": ["title", "body"],
+            "additionalProperties": False,
+        },
+        resource_authorizer=lambda args, context: (
+            context.principal_id == invocation.principal_id
+        ),
     ),
-    "forum_vote": lambda proposal_id, decision, rationale="": gateway.vote(
-        invocation, proposal_id, decision, rationale=rationale
+    lambda args: gateway.propose(
+        invocation,
+        args["title"],
+        args["body"],
+        rationale=args.get("rationale", ""),
     ),
-    "forum_record_work": lambda summary, detail=None: gateway.record_work(
-        invocation, summary, detail=detail
+)
+registry.register(
+    ToolSpec(
+        "forum_vote",
+        "forum:proposals:vote",
+        {
+            "type": "object",
+            "properties": {
+                "proposal_id": {"type": "string"},
+                "decision": {"type": "string", "enum": ["agree", "disagree", "abstain"]},
+                "rationale": {"type": "string"},
+            },
+            "required": ["proposal_id", "decision"],
+            "additionalProperties": False,
+        },
+        resource_authorizer=lambda args, context: (
+            context.principal_id == invocation.principal_id
+        ),
     ),
-}
+    lambda args: gateway.vote(
+        invocation,
+        args["proposal_id"],
+        args["decision"],
+        rationale=args.get("rationale", ""),
+    ),
+)
+
+bridge = ToolExecutionBridge(ToolExecutor(registry, host_audit_sink))
+model_gateway = HostToolGateway(authority, bridge)
+# The host executes model proposals through model_gateway.execute_batch(
+# request_credential, tool_call_requests
+# ) so schema validation, permissions, resource checks and redacted audit
+# events remain in the existing tool execution boundary.
 ```
 
-Do not expose `bind_invocation`, `register_agent`, `resolve_consensus`, raw `SQLiteAgentForum`, or unrestricted read methods as model tools. Agent registration belongs to a trusted host administration workflow. Consensus resolution belongs to host/system maintenance.
+The example shows the integration shape; a production host must also bound each
+schema, use its durable audit sink, and create the registry/gateway inside the
+trusted per-turn context. Do not share an invocation-bound registry across users
+or agent turns.
+
+Do not expose `bind_invocation`, `register_agent`, `resolve_consensus`, raw
+`SQLiteAgentForum`, or unrestricted read methods as model tools. Agent
+registration belongs to a trusted host administration workflow. Consensus
+resolution belongs to host/system maintenance.
 
 ## Voter roster and replay semantics
 
