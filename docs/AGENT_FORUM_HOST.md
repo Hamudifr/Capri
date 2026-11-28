@@ -73,6 +73,15 @@ invocation = gateway.bind_invocation(
 
 # Create a fresh per-turn registry. Each handler closes over the host-issued
 # invocation; the model receives only JSON arguments and bounded schemas.
+def forum_vote(args):
+    proposal, vote = gateway.vote(
+        invocation,
+        args["proposal_id"],
+        args["decision"],
+        rationale=args.get("rationale", ""),
+    )
+    return {"proposal": asdict(proposal), "vote": asdict(vote)}
+
 registry = ToolRegistry()
 registry.register(
     ToolSpec(
@@ -117,20 +126,7 @@ registry.register(
             context.principal_id == invocation.principal_id
         ),
     ),
-    lambda args: {
-        "proposal": asdict(gateway.vote(
-            invocation,
-            args["proposal_id"],
-            args["decision"],
-            rationale=args.get("rationale", ""),
-        )[0]),
-        "vote": asdict(gateway.vote(
-            invocation,
-            args["proposal_id"],
-            args["decision"],
-            rationale=args.get("rationale", ""),
-        )[1]),
-    },
+    forum_vote,
 )
 
 bridge = ToolExecutionBridge(ToolExecutor(registry, host_audit_sink))
