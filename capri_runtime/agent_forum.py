@@ -301,6 +301,29 @@ class SQLiteAgentForum:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )""")
+                eligibility_table_exists = connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='proposal_eligible_voters'"
+                ).fetchone() is not None
+                connection.execute("""CREATE TABLE IF NOT EXISTS proposal_eligible_voters (
+                    proposal_id TEXT NOT NULL REFERENCES proposals(proposal_id) ON DELETE RESTRICT,
+                    agent_id TEXT NOT NULL REFERENCES agents(agent_id) ON DELETE RESTRICT,
+                    PRIMARY KEY(proposal_id, agent_id)
+                )""")
+                if not eligibility_table_exists:
+                    # Upgrade legacy forums once: freeze the currently registered
+                    # roster for every existing proposal. New proposals snapshot
+                    # their roster atomically in propose().
+                    connection.execute(
+                        """INSERT OR IGNORE INTO proposal_eligible_voters(proposal_id,agent_id)
+                        SELECT proposals.proposal_id, agents.agent_id
+                        FROM proposals CROSS JOIN agents"""
+                    )
+                connection.execute("""CREATE TRIGGER IF NOT EXISTS proposal_eligible_voters_immutable_update
+                    BEFORE UPDATE ON proposal_eligible_voters
+                    BEGIN SELECT RAISE(ABORT, 'proposal voter snapshots are immutable'); END""")
+                connection.execute("""CREATE TRIGGER IF NOT EXISTS proposal_eligible_voters_immutable_delete
+                    BEFORE DELETE ON proposal_eligible_voters
+                    BEGIN SELECT RAISE(ABORT, 'proposal voter snapshots are immutable'); END""")
                 connection.execute("""CREATE TABLE IF NOT EXISTS proposal_votes (
                     vote_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     proposal_id TEXT NOT NULL REFERENCES proposals(proposal_id) ON DELETE RESTRICT,
