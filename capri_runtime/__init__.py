@@ -71,6 +71,8 @@ from .orchestration import (
     ToolOrchestrator,
 )
 from .host import HostToolGateway
+from .agent_forum import SQLiteAgentForum
+from .agent_forum_host import AgentForumGateway, AgentForumInvocation
 from .supervisor_lock import PosixSupervisorLock
 from .host_runtime import CapriHostRuntime, HostRuntimeError, HostWorkerReservation
 from .service import (
@@ -224,6 +226,9 @@ __all__ = [
     "HostLearningConsentAuthority",
     "LearningConsentAuthorityError",
     "HostToolGateway",
+    "SQLiteAgentForum",
+    "AgentForumGateway",
+    "AgentForumInvocation",
     "CapriHostRuntime",
     "HostRuntimeError",
     "HostWorkerReservation",
