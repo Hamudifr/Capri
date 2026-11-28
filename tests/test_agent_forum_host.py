@@ -78,12 +78,18 @@ class AgentForumGatewayTests(unittest.TestCase):
             }.get(credential),
             lambda principal: self.permissions[principal],
         )
+        self.authority = authority
+        self.agent_for_invocation = lambda context: self.bindings.get(
+            (context.principal_id, context.operation_id or "")
+        )
+        self.eligible_voters_for_proposal = lambda context: tuple(
+            profile.agent_id for profile in self.forum.list_agents()
+        )
         self.gateway = AgentForumGateway(
             self.forum,
             authority,
-            lambda context: self.bindings.get(
-                (context.principal_id, context.operation_id or "")
-            ),
+            self.agent_for_invocation,
+            self.eligible_voters_for_proposal,
         )
 
     def bind(self, credential: str, operation_id: str) -> AgentForumInvocation:
@@ -130,6 +136,44 @@ class AgentForumGatewayTests(unittest.TestCase):
             self.gateway.record_work(bob, "not allowed")
         self.assertEqual(self.forum.list_proposals(), ())
         self.assertEqual(self.forum.work_log("b1"), ())
+
+    def test_host_selected_voter_roster_excludes_unselected_agent_instances(self):
+        restricted = AgentForumGateway(
+            self.forum,
+            self.authority,
+            self.agent_for_invocation,
+            lambda context: ("a1", "b1"),
+        )
+        alice = restricted.bind_invocation(
+            "alice-token", operation_id="alice-main"
+        )
+        alice_second = restricted.bind_invocation(
+            "alice-token", operation_id="alice-second"
+        )
+        bob = restricted.bind_invocation(
+            "bob-token", operation_id="bob-main"
+        )
+        proposal = restricted.propose(alice, "host roster", {})
+
+        with self.assertRaises(ForumNotFoundError):
+            restricted.vote(alice_second, proposal.proposal_id, "agree")
+        decided, _ = restricted.vote(bob, proposal.proposal_id, "agree")
+        self.assertEqual(decided.state, "agreed")
+
+    def test_voter_roster_resolver_failure_fails_before_proposal_write(self):
+        failing = AgentForumGateway(
+            self.forum,
+            self.authority,
+            self.agent_for_invocation,
+            lambda context: (_ for _ in ()).throw(RuntimeError("roster secret")),
+        )
+        invocation = failing.bind_invocation(
+            "alice-token", operation_id="alice-main"
+        )
+        with self.assertRaises(HostAuthorityError) as raised:
+            failing.propose(invocation, "must not persist", {})
+        self.assertNotIn("roster secret", str(raised.exception))
+        self.assertEqual(self.forum.list_proposals(), ())
 
     def test_vote_actor_is_bound_to_authenticated_agent(self):
         alice = self.bind("alice-token", "alice-main")
@@ -240,6 +284,7 @@ class AgentForumGatewayTests(unittest.TestCase):
                 lambda principal: self.permissions["alice"],
             ),
             lambda context: "a1",
+            lambda context: ("a1",),
         )
         with self.assertRaises(HostAuthorityError):
             other.propose(invocation, "cross gateway", {})
@@ -252,6 +297,7 @@ class AgentForumGatewayTests(unittest.TestCase):
                 lambda principal: self.permissions["alice"],
             ),
             lambda context: (_ for _ in ()).throw(RuntimeError("secret")),
+            lambda context: ("a1",),
         )
         with self.assertRaises(HostAuthorityError) as raised:
             failing.bind_invocation("opaque", operation_id="trusted-op")
