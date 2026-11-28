@@ -65,8 +65,22 @@ class StatusPageTests(unittest.TestCase):
         self.assertEqual(int(headers["Content-Length"]), len(body))
 
     def test_commit_substitution(self) -> None:
-        _, _, body = call("GET", commit="deadbeefcafe1234")
-        self.assertIn(b"deadbeefcafe1234", body)
+        commit = "deadbeefcafe1234" * 2 + "deadbeefcafe1234"
+        _, _, body = call("GET", commit=commit)
+        self.assertIn(commit.encode("ascii"), body)
+
+    def test_malformed_commit_falls_back_to_unknown(self) -> None:
+        for commit in (
+            "<script>alert(1)</script>",
+            "a" * 39,
+            "g" * 40,
+            "a" * 41,
+            "deadbeef\r\nX-Injected: yes",
+        ):
+            with self.subTest(commit=commit):
+                _, _, body = call("GET", commit=commit)
+                self.assertIn(b"<code>unknown</code>", body)
+                self.assertNotIn(b"<script>alert(1)</script>", body)
 
     def test_missing_commit_falls_back_to_unknown(self) -> None:
         _, _, body = call("GET", commit=None)

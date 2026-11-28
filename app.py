@@ -8,6 +8,7 @@ runtime work.
 """
 
 import os
+import re
 
 _PAGE = b"""<!doctype html>
 <html lang="en">
@@ -34,11 +35,22 @@ repository's static status endpoint.</p>
 </html>
 """
 
+_COMMIT_SHA_RE = re.compile(r"[0-9a-fA-F]{40}\Z")
+
+
+def _display_commit(value: str) -> str:
+    """Return a full hexadecimal Git SHA, or a harmless placeholder.
+
+    This value is interpolated into HTML. Treat deployment environment data
+    as untrusted rather than allowing malformed values to become markup.
+    """
+    return value if _COMMIT_SHA_RE.fullmatch(value) else "unknown"
+
 
 def app(environ, start_response):
     """Serve the static status page for any request method."""
-    commit = os.environ.get("VERCEL_GIT_COMMIT_SHA", "unknown")
-    body = _PAGE.replace(b"__COMMIT__", commit.encode("ascii", "replace"))
+    commit = _display_commit(os.environ.get("VERCEL_GIT_COMMIT_SHA", "unknown"))
+    body = _PAGE.replace(b"__COMMIT__", commit.encode("ascii"))
     start_response(
         "200 OK",
         [
@@ -64,3 +76,4 @@ def app(environ, start_response):
     if environ.get("REQUEST_METHOD") == "HEAD":
         return [b""]
     return [body]
+
