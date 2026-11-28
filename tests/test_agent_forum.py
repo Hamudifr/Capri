@@ -139,6 +139,22 @@ class ConsensusTests(ForumBase):
         self.assertEqual(vote.decision, "agree")
         self.assertEqual(len(self.forum.votes_for(p.proposal_id)), 1)
 
+    def test_conflicting_agent_vote_replay_is_rejected(self) -> None:
+        self.register("a1")
+        self.register("a2")
+        p = self.forum.propose("a1", "idea", {})
+        self.forum.vote(p.proposal_id, "a2", "agree", rationale="initial")
+
+        with self.assertRaises(ForumConflictError):
+            self.forum.vote(p.proposal_id, "a2", "disagree", rationale="initial")
+        with self.assertRaises(ForumConflictError):
+            self.forum.vote(p.proposal_id, "a2", "agree", rationale="changed")
+
+        votes = self.forum.votes_for(p.proposal_id)
+        self.assertEqual(len(votes), 1)
+        self.assertEqual(votes[0].decision, "agree")
+        self.assertEqual(votes[0].rationale, "initial")
+
     def test_custom_consensus_policy(self) -> None:
         # Any single agree decides, regardless of eligible count.
         class AnyAgree(MajorityConsensus):
