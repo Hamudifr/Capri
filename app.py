@@ -13,7 +13,7 @@ import json
 import os
 import re
 from urllib.parse import urlsplit
-from urllib.request import urlopen
+from urllib.request import HTTPRedirectHandler, build_opener
 
 _PAGE = b"""<!doctype html>
 <html lang="en">
@@ -70,8 +70,17 @@ def _load_supabase_status() -> dict[str, bool | str] | None:
     ):
         return None
 
+    class _NoRedirect(HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, new_url):
+            # The health probe is a fixed host. Never follow a redirect to
+            # an arbitrary destination from the remote response.
+            return None
+
     try:
-        with urlopen(f"{base_url}/functions/v1/capri-keepalive", timeout=2) as response:
+        opener = build_opener(_NoRedirect)
+        with opener.open(
+            f"{base_url}/functions/v1/capri-keepalive", timeout=2
+        ) as response:
             if response.status != 200:
                 return None
             raw = response.read(4097)
