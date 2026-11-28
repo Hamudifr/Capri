@@ -1,4 +1,4 @@
-""""Minimal Vercel status page for the Capri repository.
+"""Minimal Vercel status page for the Capri repository.
 
 The Capri runtime itself is a CLI/agent (the ``capri`` console script
 declared in ``pyproject.toml``). This WSGI entrypoint serves a small
