@@ -142,7 +142,7 @@ class AgentForumGatewayTests(unittest.TestCase):
             self.forum,
             self.authority,
             self.agent_for_invocation,
-            lambda context: ("a1", "b1"),
+            lambda context: ("b1",),
         )
         alice = restricted.bind_invocation(
             "alice-token", operation_id="alice-main"
@@ -157,10 +157,10 @@ class AgentForumGatewayTests(unittest.TestCase):
 
         with self.assertRaises(ForumNotFoundError):
             restricted.vote(alice_second, proposal.proposal_id, "agree")
-        still_open, _ = restricted.vote(bob, proposal.proposal_id, "agree")
-        self.assertEqual(still_open.state, "open")
-        decided, _ = restricted.vote(alice, proposal.proposal_id, "agree")
+        decided, _ = restricted.vote(bob, proposal.proposal_id, "agree")
         self.assertEqual(decided.state, "agreed")
+        with self.assertRaises(ForumNotFoundError):
+            restricted.vote(alice, proposal.proposal_id, "agree")
 
     def test_voter_roster_resolver_failure_fails_before_proposal_write(self):
         failing = AgentForumGateway(
