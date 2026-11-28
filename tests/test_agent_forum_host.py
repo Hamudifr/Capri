@@ -157,10 +157,10 @@ class AgentForumGatewayTests(unittest.TestCase):
 
         with self.assertRaises(ForumNotFoundError):
             restricted.vote(alice_second, proposal.proposal_id, "agree")
-        decided, _ = restricted.vote(bob, proposal.proposal_id, "agree")
-        self.assertEqual(decided.state, "agreed")
         with self.assertRaises(ForumNotFoundError):
             restricted.vote(alice, proposal.proposal_id, "agree")
+        decided, _ = restricted.vote(bob, proposal.proposal_id, "agree")
+        self.assertEqual(decided.state, "agreed")
 
     def test_voter_roster_resolver_failure_fails_before_proposal_write(self):
         failing = AgentForumGateway(
