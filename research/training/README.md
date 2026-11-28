@@ -83,9 +83,27 @@ research/training/
 ├── database/
     ├── __init__.py
     └── core.py                ← B-trees, hash indexes, relational algebra
-└── verification/
+├── verification/
+│   ├── __init__.py
+│   └── core.py                ← model checking, Hoare logic, sequent calculus
+├── deeplearning/
+│   ├── __init__.py
+│   └── core.py                ← MLP, CNN, RNN, backpropagation
+├── algorithms/
+│   ├── __init__.py
+│   └── core.py                ← sorting, Fenwick/segment/treap, string algorithms, DP
+├── stochastic/
+│   ├── __init__.py
+│   └── core.py                ← Poisson, Brownian motion, CTMC, Kalman/Particle filters
+├── complexity/
+│   ├── __init__.py
+│   └── core.py                ← 3-SAT, reductions, NP-complete problems, approximation
+├── convexopt/
+│   ├── __init__.py
+│   └── core.py                ← gradient descent variants, ADMM, interior point, KKT
+└── quantum_algos/
     ├── __init__.py
-    └── core.py                ← model checking, Hoare logic, sequent calculus
+    └── core.py                ← QFT, Shor, amplitude estimation, VQE, QAOA, QEC
 ```
 
 ## Modules
@@ -545,13 +563,143 @@ proof systems.
   `check_safety_property` — inductive and reachability-based
   invariant checking.
 
+### Deep Learning (`deeplearning/core.py`)
+
+Neural network foundations: the building blocks of modern deep learning.
+
+- **Activations**: `sigmoid`, `tanh`, `relu`, `softmax` and their
+  derivatives — the nonlinearities that give networks their power.
+- **MLP**: `MLP` — a multilayer perceptron with configurable hidden
+  layers, He-initialization, ReLU hidden activations, softmax output,
+  and full backpropagation with gradient descent training.
+- **Convolution**: `conv2d_forward` — 2D convolution with configurable
+  stride and padding, the operation behind CNNs.
+- **Pooling**: `pool2d_forward` — max and average pooling layers.
+- **RNN**: `VanillaRNN` — a vanilla recurrent neural network with
+  tanh hidden state, forward pass, and backpropagation through time
+  (BPTT) training step.
+
+### Algorithms & Data Structures (`algorithms/core.py`)
+
+Core algorithms and data structures: sorting, trees, strings, and
+dynamic programming.
+
+- **Sorting**: `quicksort` (in-place Lomuto partition),
+  `mergesort` (stable, top-down), `heapsort` (heap-based) —
+  the three fundamental sorting algorithms.
+- **Fenwick tree**: `FenwickTree` — prefix-sum data structure with
+  O(log n) point updates and prefix queries.
+- **Segment tree**: `SegmentTree` — range-query and range-update
+  structure with O(log n) operations.
+- **Treap**: `Treap` — randomized binary search tree with
+  insertion, deletion, and in-order traversal.
+- **String algorithms**: `rabin_karp` (hash-based substring search),
+  `kmp_search` (Knuth-Morris-Pratt), `suffix_array` and
+  `lcp_array` — classic string processing.
+- **Dynamic programming**: `matrix_chain_multiply` (optimal parenthesization),
+  `optimal_bst` (optimal binary search tree), `edit_distance`
+  (Levenshtein distance).
+- **Shortest paths**: `dijkstra_pq` (Dijkstra with priority queue),
+  `astar_search` (A* with heuristic) — graph traversal algorithms.
+
+### Stochastic Processes (`stochastic/core.py`)
+
+Random processes over time: the mathematics of uncertainty dynamics.
+
+- **Poisson**: `poisson_pmf`, `poisson_cdf` — the Poisson
+  distribution for counting events.
+- **Brownian motion**: `brownian_motion` (Wiener process
+  simulation), `geometric_brownian_motion` (GBM for modeling
+  asset prices).
+- **CTMC**: `CTMC` — continuous-time Markov chain with transition
+  rate matrix, simulation, and stationary distribution computation.
+- **Kalman filter**: `KalmanFilter` — recursive Bayesian filtering
+  for linear Gaussian systems with prediction and update steps.
+- **Particle filter**: `ParticleFilter` — sequential Monte Carlo
+  filtering for nonlinear/non-Gaussian systems.
+- **Metropolis-Hastings**: `metropolis_hastings` — MCMC sampler
+  for arbitrary target distributions.
+
+### Computational Complexity (`complexity/core.py`)
+
+The theory of computational hardness: NP-completeness, reductions,
+and approximation.
+
+- **Complexity classes**: `COMPLEXITY_CLASSES` — formal definitions
+  of P, NP, NP-complete, and NP-hard.
+- **3-SAT**: `is_3sat_satisfiable` — DPLL-based SAT solver for
+  3-conjunctive normal form.
+- **Reductions**: `sat_to_vertex_cover` — polynomial-time reduction
+  from 3-SAT to vertex cover, demonstrating NP-completeness.
+- **Vertex cover**: `vertex_cover_decision` (brute-force decision),
+  `vertex_cover_approximation` (2-approximation), `vertex_cover_kernel`
+  (kernelization for parameterized complexity).
+- **Graph problems**: `max_clique` (brute-force), `hamiltonian_cycle`
+  (backtracking), `graph_coloring_3_coloring` (3-coloring).
+- **Approximation**: `set_cover_approximation` (greedy ln-approx),
+  `traveling_salesman_nearest_neighbor`, `traveling_salesman_2opt`
+  (2-opt improvement for TSP).
+- **Exponential algorithms**: `subset_sum_meet_in_the_middle`
+  (O(2^(n/2))), `knapsack_dp` (pseudo-polynomial), `knapsack_bruteforce`.
+
+### Convex Optimization (`convexopt/core.py`)
+
+Algorithms for minimizing convex functions: the engine behind
+modern optimization.
+
+- **Convexity**: `is_convex_quadratic`, `is_convex_on_interval` —
+  checks for convexity of quadratic and general functions.
+- **Gradient descent**: `gradient_descent` (vanilla),
+  `gradient_descent_momentum`, `gradient_descent_nesterov` —
+  first-order optimization with momentum and acceleration.
+- **Projected gradient**: `projected_gradient_descent` — for
+  constrained optimization with box constraints.
+- **Subgradient**: `subgradient_method` — for non-smooth convex
+  functions (e.g., L1 regularization).
+- **Lasso**: `lasso_coordinate_descent` — coordinate descent for
+  L1-regularized least squares.
+- **ADMM**: `admm_solve` — Alternating Direction Method of
+  Multipliers for distributed convex optimization.
+- **Interior point**: `interior_point_log_barrier` — primal
+  interior point method with logarithmic barrier and Armijo line
+  search.
+- **Duality**: `kkt_check`, `lagrangian`, `dual_function` —
+  KKT conditions, Lagrangian, and dual function evaluation.
+
+### Quantum Algorithms (`quantum_algos/core.py`)
+
+Quantum computation: the algorithms that harness quantum mechanics
+for computational advantage.
+
+- **QFT**: `qft`, `inverse_qft`, `qft_circuit` — the Quantum
+  Fourier Transform, the backbone of quantum phase estimation and
+  Shor's algorithm.
+- **Phase estimation**: `phase_estimation` — estimates eigenvalues
+  of a unitary operator; `phase_estimation_accuracy` — precision
+  analysis.
+- **Shor's algorithm**: `shor_period_estimate` — period finding
+  via QFT, the core of integer factorization.
+- **Amplitude estimation**: `amplitude_estimation`,
+  `amplitude_estimation_probability` — quantum amplitude estimation
+  for quadratic speedup over classical sampling.
+- **Deutsch-Jozsa**: `deutsch_jozsa_classical` — the deterministic
+  vs. probabilistic comparison that motivated quantum computation.
+- **VQE**: `VQE` — Variational Quantum Eigensolver for finding
+  ground-state energies of molecular Hamiltonians.
+- **QAOA**: `QAOA` — Quantum Approximate Optimization Algorithm
+  for combinatorial optimization problems (MaxCut).
+- **Quantum error correction**: `BitFlipCode` — 3-qubit bit-flip
+  code with syndrome measurement and correction.
+- **Utilities**: `simple_ansatz`, `state_expectation` — variational
+  ansatz construction and state expectation value computation.
+
 ## Running the Tests
 
 ```bash
 python3 -m unittest discover -s tests -p "test_training_*.py" -v
 ```
 
-The test suite (605 tests) covers every function and class above,
+The test suite (720 tests) covers every function and class above,
 verifying correctness against known mathematical results.
 
 ## Design Constraints
@@ -569,19 +717,19 @@ verifying correctness against known mathematical results.
 
 The natural next areas to study and implement:
 
-- **Deep learning**: backpropagation, MLPs, CNNs, RNNs, backprop
-  through time.
-- **Algorithms**: sorting (quicksort, mergesort, heapsort), advanced
-  data structures (segment trees, Fenwick trees, treaps).
-- **Computational complexity**: NP-completeness proofs, reductions,
-  approximation algorithms.
 - **Number theory**: continued fractions, LLL lattice reduction,
   elliptic curve cryptography.
-- **Optimization**: interior point methods, convex optimization,
-  ADMM, distributed SGD.
-- **Probability**: measure theory, stochastic processes (Poisson,
-  Brownian motion), filtering (Kalman, particle filters).
-- **Computational geometry**: Delaunay triangulation, range trees,
-  sweep-line algorithms.
-- **Quantum algorithms**: Shor's algorithm, quantum Fourier
-  transform, variational quantum algorithms.
+- **Automata theory**: regex-to-NFA-to-DFA equivalence checking,
+  pumping lemma proofs, Myhill-Nerode theorem.
+- **Type theory**: system F (parametric polymorphism), dependent
+  types, Curry-Howard correspondence.
+- **Computational topology**: simplicial complexes, homology
+  computation, persistent homology.
+- **Game theory**: extensive-form games, correlated equilibrium
+  computation, mechanism design.
+- **Probabilistic programming**: variational inference, expectation
+  propagation, Hamiltonian Monte Carlo.
+- **Database theory**: query optimization, join algorithms,
+  transaction isolation levels.
+- **Formal languages**: context-free grammar parsing (CYK, Earley),
+  unification algorithms, term rewriting.
