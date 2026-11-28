@@ -47,9 +47,27 @@ research/training/
 ├── graph/
 │   ├── __init__.py
 │   └── algorithms.py          ← UnionFind, MST, Bellman-Ford, max-flow, SCC
-└── lambd/
+├── lambd/
+│   ├── __init__.py
+│   └── calculus.py            ← lambda terms, alpha/beta/eta, Church encoding, STLC
+├── geometry/
+│   ├── __init__.py
+│   └── core.py                ← vectors, polygons, convex hull, Voronoi, k-d tree
+├── rl/
+│   ├── __init__.py
+│   └── core.py                ← MDPs, Q-learning, SARSA, value/policy iteration, REINFORCE
+├── gp/
+│   ├── __init__.py
+│   └── core.py                ← kernels, Cholesky, Gaussian process regression
+├── sat/
+│   ├── __init__.py
+│   └── solver.py              ← 2-SAT, CDCL with watch literals, DPLL
+├── compilers/
+│   ├── __init__.py
+│   └── core.py                ← lexer, parser, AST, bytecode VM for TinyLang
+└── game/
     ├── __init__.py
-    └── calculus.py            ← lambda terms, alpha/beta/eta, Church encoding, STLC
+    └── core.py                ← minimax, Nash equilibrium, Shapley value, zero-sum
 ```
 
 ## Modules
@@ -288,13 +306,121 @@ foundation of functional programming and type systems.
   for type inference), `STLC` (the simply typed lambda calculus
   evaluator).
 
+### Computational Geometry (`geometry/core.py`)
+
+Spatial reasoning: shapes, hulls, and spatial data structures.
+
+- **Vector ops**: `v_add`, `v_sub`, `v_scale`, `v_dot`, `v_cross`,
+  `v_norm`, `v_dist`, `v_dist_sq`, `v_normalize`, `v_angle` —
+  the 2D vector toolkit.
+- **Lines and polygons**: `line_intersection`, `segment_intersect`
+  (orientation-based), `polygon_area` (shoelace), `polygon_perimeter`,
+  `point_in_polygon` (ray casting), `polygon_centroid`.
+- **Convex hull**: `convex_hull` (monotone chain / Andrew's algorithm),
+  `is_convex` (turn-direction check).
+- **Voronoi diagram**: `nearest_site`, `voronoi_cell_bounds`
+  (grid-sampled), `voronoi_diagram`.
+- **k-d tree**: `KDTree` with `nearest` and `k_nearest` for
+  nearest-neighbor queries in 2D.
+
+### Reinforcement Learning (`rl/core.py`)
+
+The mathematics of learning from rewards: agents, environments,
+and the algorithms that train them.
+
+- **Policies**: `epsilon_greedy` (with tie-breaking),
+  `softmax_policy` (temperature-controlled).
+- **Q-learning**: `q_learning_update` (off-policy), `sarisa_update`
+  (on-policy SARSA) — the core update rules for value-based RL.
+- **Planning**: `value_iteration` (Bellman backup to convergence),
+  `extract_policy` (greedy policy from value function),
+  `policy_iteration` (alternating evaluation and improvement).
+- **Policy gradient**: `reinforce_update` (REINFORCE, Monte Carlo
+  policy gradient for binary softmax policies).
+- **GridWorld**: `GridWorld` — the classic 4×4 gridworld MDP with
+  goal (+1), pit (-1), and boundary handling.
+- **Training**: `train_q_learning` (full Q-learning training loop),
+  `evaluate_q_policy` (success-rate evaluation).
+
+### Gaussian Processes (`gp/core.py`)
+
+Bayesian non-parametric regression: the mathematics of kernel
+methods and uncertainty.
+
+- **Kernels**: `rbf_kernel` (Gaussian), `linear_kernel`,
+  `matern_kernel` (ν = 0.5, 1.5, 2.5, general), `periodic_kernel`.
+- **Linear algebra**: `gram_matrix`, `cholesky_decompose`
+  (returns None if not positive definite), `cholesky_solve`,
+  `forward_substitute` (for GP prediction formulas).
+- **GaussianProcess**: `fit` (Cholesky-based), `predict` (posterior
+  mean and variance), `log_marginal_likelihood` — the full GP
+  regression pipeline with exact inference.
+- **Hyperparameter optimization**: `optimize_hyperparameters`
+  (gradient descent on log marginal likelihood for RBF length scale).
+
+### SAT Solving (`sat/solver.py`)
+
+Boolean satisfiability: from linear-time 2-SAT to modern CDCL.
+
+- **2-SAT**: `solve_2sat` — linear-time algorithm via implication
+  graphs and SCC (Kosaraju). Returns a satisfying assignment or None.
+- **CDCL**: `CDCLSolver` — Conflict-Driven Clause Learning with
+  watch literals, BCP (boolean constraint propagation), VSIDS-style
+  variable ordering, and 1-UIP clause learning.
+- **DPLL**: `dpll_solve` — simple recursive DPLL for comparison.
+- **Utilities**: `var_of`, `neg`, `to_clause_str`.
+
+### Compilers (`compilers/core.py`)
+
+Building a compiler from scratch: the full pipeline from source
+code to executing bytecode.
+
+- **Lexer**: `Lexer` — tokenizes TinyLang source into `Token`
+  objects. Supports numbers, strings, identifiers, keywords,
+  operators, and comments.
+- **Parser**: `Parser` — recursive descent parser producing an
+  AST. Supports expressions, `let` bindings, `def` functions,
+  `if`/`else`, `while`, `print`, and `return`.
+- **AST nodes**: `NumberLiteral`, `StringLiteral`, `BoolLiteral`,
+  `Ident`, `BinOp`, `UnaryOp`, `Assign`, `LetStmt`, `IfStmt`,
+  `WhileStmt`, `ForStmt`, `ReturnStmt`, `PrintStmt`, `FuncDef`,
+  `Call`, `Program`.
+- **Compiler**: `Compiler` — compiles the AST to stack-based
+  bytecode (`LOAD_CONST`, `LOAD_VAR`, `LOAD_ARG`, `STORE_VAR`,
+  arithmetic/comparison ops, `JUMP`, `JUMP_IF_FALSE_POP`, `CALL`,
+  `RETURN`, `PRINT`).
+- **VM**: `VM` — stack-based bytecode virtual machine that executes
+  the compiled code with global variables, function calls, and
+  control flow.
+- **Top-level**: `compile_and_run` — one-call pipeline: source →
+  tokens → AST → bytecode → execution.
+
+### Game Theory (`game/core.py`)
+
+The mathematics of strategic interaction: equilibria, dominance,
+and cooperation.
+
+- **Game representation**: `make_zero_sum_game`, `make_bimatrix_game`
+  — build games from payoff matrices.
+- **Best response**: `best_response` — optimal response to an
+  opponent's mixed strategy.
+- **Dominance**: `strictly_dominated`, `weakly_dominated`,
+  `eliminate_dominated` — iterative elimination of dominated strategies.
+- **Nash equilibrium**: `nash_equilibrium_2p` (pure-strategy NE),
+  `mixed_nash_equilibrium_2x2` (closed-form mixed NE for 2×2 games).
+- **Zero-sum games**: `zero_sum_game_value` (LP-based game value),
+  `zero_sum_game_optimal_mixed` (optimal mixed strategy),
+  `fictitious_play_strategy` (iterative fictitious play approximation).
+- **Cooperative games**: `shapley_value` (fair allocation of
+  surplus), `check_correlated_equilibrium` (verify CE conditions).
+
 ## Running the Tests
 
 ```bash
 python3 -m unittest discover -s tests -p "test_training_*.py" -v
 ```
 
-The test suite (335 tests) covers every function and class above,
+The test suite (472 tests) covers every function and class above,
 verifying correctness against known mathematical results.
 
 ## Design Constraints
@@ -312,10 +438,13 @@ verifying correctness against known mathematical results.
 
 The natural next areas to study and implement:
 
-- **Gaussian processes**: kernel methods, Cholesky decomposition,
-  posterior prediction.
-- **Reinforcement learning**: Q-learning, policy gradient,
-  Markov decision processes.
-- **Computational geometry**: convex hull, Voronoi diagrams,
-  k-d trees.
-- **Advanced SAT**: CDCL solver, 2-SAT in linear time.
+- **Machine learning**: SVMs, decision trees, clustering (k-means,
+  hierarchical), naive Bayes.
+- **Differential equations**: Euler's method, Runge-Kutta (RK4),
+  solving ODEs numerically.
+- **Time series**: AR/MA models, ARIMA basics, moving averages.
+- **Quantum computing**: qubits, quantum gates, Bell states,
+  amplitude amplification.
+- **Database internals**: B-trees, hash indexes, relational algebra.
+- **Formal verification**: model checking, Hoare logic, proof
+  assistants.

@@ -107,6 +107,64 @@ from research.training.lambd.calculus import (
     type_of,
 )
 
+from research.training.geometry.core import (
+    KDTree, KDNode,
+    v_add as geo_v_add, v_sub as geo_v_sub, v_scale as geo_v_scale,
+    v_dot as geo_v_dot, v_cross as geo_v_cross, v_norm as geo_v_norm,
+    v_dist as geo_v_dist, v_dist_sq as geo_v_dist_sq,
+    v_normalize as geo_v_normalize, v_angle as geo_v_angle,
+    line_intersection as geo_line_intersection,
+    segment_intersect as geo_segment_intersect,
+    polygon_area as geo_polygon_area, polygon_perimeter as geo_polygon_perimeter,
+    point_in_polygon as geo_point_in_polygon, polygon_centroid as geo_polygon_centroid,
+    convex_hull as geo_convex_hull, is_convex as geo_is_convex,
+    nearest_site as geo_nearest_site,
+    voronoi_cell_bounds as geo_voronoi_cell_bounds,
+    voronoi_diagram as geo_voronoi_diagram,
+)
+from research.training.rl.core import (
+    GridWorld,
+    epsilon_greedy, softmax_policy,
+    q_learning_update as rl_q_learning_update,
+    sarsa_update as rl_sarsa_update,
+    value_iteration as rl_value_iteration,
+    extract_policy as rl_extract_policy,
+    policy_iteration as rl_policy_iteration,
+    reinforce_update as rl_reinforce_update,
+    train_q_learning, evaluate_q_policy,
+)
+from research.training.gp.core import (
+    GaussianProcess as GP_Model,
+    rbf_kernel as gp_rbf_kernel, linear_kernel as gp_linear_kernel,
+    matern_kernel as gp_matern_kernel, periodic_kernel as gp_periodic_kernel,
+    gram_matrix as gp_gram_matrix,
+    cholesky_decompose as gp_cholesky_decompose,
+    cholesky_solve as gp_cholesky_solve,
+    optimize_hyperparameters as gp_optimize_hyperparameters,
+)
+from research.training.sat.solver import (
+    CDCLSolver,
+    solve_2sat, solve_sat_cdcl, dpll_solve,
+    var_of as sat_var_of, neg as sat_neg,
+)
+from research.training.compilers.core import (
+    Lexer, Parser, Compiler, VM as BytecodeVM,
+    Token as CompilerToken, CodeObject,
+    compile_and_run,
+)
+from research.training.game.core import (
+    make_zero_sum_game, make_bimatrix_game,
+    minimax as game_minimax,
+    best_response as game_best_response,
+    strictly_dominated as game_strictly_dominated,
+    weakly_dominated as game_weakly_dominated,
+    eliminate_dominated as game_eliminate_dominated,
+    nash_equilibrium_2p, mixed_nash_equilibrium_2x2,
+    zero_sum_game_value, zero_sum_game_optimal_mixed,
+    fictitious_play_strategy,
+    shapley_value, check_correlated_equilibrium,
+)
+
 __all__ = [
     # logic
     "var", "negate", "conjoin", "disjoin", "imply", "biconditional",
@@ -197,4 +255,41 @@ __all__ = [
     "base_type", "arrow_type", "type_equals", "type_pretty",
     "t_var", "t_abs", "t_app", "infer_type", "check_type",
     "type_of",
+    # geometry
+    "KDTree", "KDNode",
+    "geo_v_add", "geo_v_sub", "geo_v_scale",
+    "geo_v_dot", "geo_v_cross", "geo_v_norm",
+    "geo_v_dist", "geo_v_dist_sq",
+    "geo_v_normalize", "geo_v_angle",
+    "geo_line_intersection", "geo_segment_intersect",
+    "geo_polygon_area", "geo_polygon_perimeter",
+    "geo_point_in_polygon", "geo_polygon_centroid",
+    "geo_convex_hull", "geo_is_convex",
+    "geo_nearest_site",
+    "geo_voronoi_cell_bounds", "geo_voronoi_diagram",
+    # rl
+    "GridWorld",
+    "epsilon_greedy", "softmax_policy",
+    "rl_q_learning_update", "rl_sarsa_update",
+    "rl_value_iteration", "rl_extract_policy", "rl_policy_iteration",
+    "rl_reinforce_update",
+    "train_q_learning", "evaluate_q_policy",
+    # gp
+    "GP_Model",
+    "gp_rbf_kernel", "gp_linear_kernel", "gp_matern_kernel", "gp_periodic_kernel",
+    "gp_gram_matrix", "gp_cholesky_decompose", "gp_cholesky_solve",
+    "gp_optimize_hyperparameters",
+    # sat
+    "CDCLSolver", "solve_2sat", "solve_sat_cdcl", "dpll_solve",
+    "sat_var_of", "sat_neg",
+    # compilers
+    "Lexer", "Parser", "Compiler", "BytecodeVM",
+    "CompilerToken", "CodeObject", "compile_and_run",
+    # game
+    "make_zero_sum_game", "make_bimatrix_game",
+    "game_minimax", "game_best_response",
+    "game_strictly_dominated", "game_weakly_dominated", "game_eliminate_dominated",
+    "nash_equilibrium_2p", "mixed_nash_equilibrium_2x2",
+    "zero_sum_game_value", "zero_sum_game_optimal_mixed",
+    "fictitious_play_strategy", "shapley_value", "check_correlated_equilibrium",
 ]
