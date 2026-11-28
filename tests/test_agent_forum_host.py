@@ -175,6 +175,10 @@ class AgentForumGatewayTests(unittest.TestCase):
 
         self.assertEqual(self.gateway.votes_for(alice, proposal.proposal_id), ())
         self.assertEqual(
+            self.gateway.votes_for(bob, proposal.proposal_id)[0].agent_id,
+            "b1",
+        )
+        self.assertEqual(
             self.gateway.votes_for(reader, proposal.proposal_id)[0].agent_id,
             "b1",
         )
@@ -219,6 +223,13 @@ class AgentForumGatewayTests(unittest.TestCase):
             self.gateway.resolve_consensus(admin, proposal.proposal_id).state,
             "open",
         )
+
+    def test_model_tool_allowlist_excludes_host_and_system_operations(self):
+        self.assertIn("propose", AgentForumGateway.MODEL_TOOL_METHODS)
+        self.assertIn("vote", AgentForumGateway.MODEL_TOOL_METHODS)
+        self.assertNotIn("bind_invocation", AgentForumGateway.MODEL_TOOL_METHODS)
+        self.assertNotIn("register_agent", AgentForumGateway.MODEL_TOOL_METHODS)
+        self.assertNotIn("resolve_consensus", AgentForumGateway.MODEL_TOOL_METHODS)
 
     def test_invocation_from_another_gateway_cannot_be_reused(self):
         invocation = self.bind("alice-token", "alice-main")
