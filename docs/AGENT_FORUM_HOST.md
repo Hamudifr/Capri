@@ -167,12 +167,12 @@ resolution belongs to host/system maintenance.
 
 ## Voter roster and replay semantics
 
-A proposal snapshots the exact host-selected roster in `proposal_eligible_voters` at creation. The host callback selects registered agent identities eligible to vote; the model cannot add or remove voters. Agents registered later cannot vote on earlier proposals and cannot change their quorum denominator. This avoids a late registration changing the result of an in-flight proposal.
+A proposal snapshots the exact host-selected roster in `proposal_eligible_voters` at creation. The host callback selects registered agent identities eligible to vote; the model cannot add or remove voters. The proposal author may be excluded from the voter roster when the host assigns proposing and voting to separate roles. Agents registered later cannot vote on earlier proposals and cannot change their quorum denominator. This avoids a late registration changing the result of an in-flight proposal.
 
 The voter unit is an agent identity, not automatically a human principal. A principal that controls multiple agent instances may therefore contribute multiple eligible agents only if the host explicitly includes them in the roster. A host that wants one vote per controlling principal should select one representative agent per principal in `eligible_voters_for_proposal`. This policy is deliberately host-controlled rather than inferred from email, display name, or model claims.
 
 - Existing forums are upgraded once: when the snapshot table is first created, each legacy proposal receives the then-current registered roster.
-- New proposals snapshot the host-selected voter roster in the same SQLite transaction as proposal creation. The store validates that the author is included and every voter is registered.
+- New proposals snapshot the non-empty host-selected voter roster in the same SQLite transaction as proposal creation. The store validates that every voter is registered; the author must be registered but need not be a voter.
 - Snapshot rows are immutable.
 - Vote eligibility is checked against the proposal snapshot.
 - Consensus tally, eligible count, and state transition execute inside one `BEGIN IMMEDIATE` transaction.
