@@ -13,7 +13,7 @@ math, then extend it.
 ```
 research/training/
 ├── README.md                  ← this file
-├── __init__.py                ← top-level re-exports (~90 symbols)
+├── __init__.py                ← top-level re-exports (~140 symbols)
 ├── logic/
 │   ├── __init__.py
 │   └── propositional.py       ← propositional logic, SAT, resolution, FOL
@@ -29,9 +29,18 @@ research/training/
 ├── theory/
 │   ├── __init__.py
 │   └── computation.py         ← DFA/NFA, regex, Turing machines, graphs, DP
-└── optimization/
+├── optimization/
+│   ├── __init__.py
+│   └── methods.py             ← root finding, line search, CG, SA, GA, LR schedules
+├── info/
+│   ├── __init__.py
+│   └── theory.py              ← entropy, mutual information, Huffman coding
+├── retrieval/
+│   ├── __init__.py
+│   └── core.py                ← TF-IDF, cosine similarity, inverted index, BM25
+└── crypto/
     ├── __init__.py
-    └── methods.py             ← root finding, line search, CG, SA, GA, LR schedules
+    └── numbers.py             ← modular arithmetic, primality, RSA, Diffie-Hellman
 ```
 
 ## Modules
@@ -145,13 +154,70 @@ How to find minima and roots, the engine behind every trained model.
   the schedules used in real training runs.
 - **Nelder-Mead**: `nelder_mead` (simplex method, simplified).
 
+### Information Theory (`info/theory.py`)
+
+The mathematics of information: how to quantify, measure, and
+compress uncertainty.
+
+- **Entropy**: `shannon_entropy` (bits), `joint_entropy`,
+  `marginal_probs`, `conditional_entropy`.
+- **Mutual information**: `mutual_information` (I(X;Y) = H(X)+H(Y)−H(X,Y)),
+  `normalized_mutual_information` (0 to 1 scale), `information_gain`
+  (the decision-tree split criterion).
+- **Divergence**: `kl_divergence_bits`, `cross_entropy_bits`,
+  `entropy_from_counts`.
+- **Huffman coding**: `HuffmanCoder` — builds a prefix-free code tree
+  from symbol frequencies, with encode/decode and average code length.
+  The foundation of lossless compression.
+- **Feature selection**: `mutual_information_feature` — computes MI
+  between each feature and a target, the basis of filter-based
+  feature selection.
+
+### Information Retrieval (`retrieval/core.py`)
+
+How search engines find and rank documents.
+
+- **Preprocessing**: `tokenize`, `remove_stop_words`,
+  `DEFAULT_STOP_WORDS`.
+- **TF-IDF**: `term_frequency`, `document_frequency`,
+  `inverse_document_frequency`, `tfidf_weights` — the classic
+  vector-space model.
+- **Similarity**: `cosine_similarity`, `dot_product_sparse`,
+  `vector_norm` for sparse document vectors.
+- **Inverted index**: `InvertedIndex` — maps terms to documents,
+  with AND/OR search. The core structure behind every search engine.
+- **BM25**: `BM25Ranker` — the modern standard ranking function
+  with tunable k1 and b parameters.
+- **Evaluation**: `precision_score`, `recall_score`, `f1_score`,
+  `mean_average_precision` — the metrics for ranking quality.
+
+### Number Theory & Cryptography (`crypto/numbers.py`)
+
+The math behind modern cryptography.
+
+- **Modular arithmetic**: `mod_pow` (binary exponentiation),
+  `modular_inverse` (extended Euclidean), `euler_phi`,
+  `fermat_little_theorem`, `euler_theorem`.
+- **GCD**: `gcd` (Euclid's algorithm), `extended_gcd`.
+- **Primality**: `is_prime_trial`, `miller_rabin` (probabilistic),
+  `find_prime`.
+- **Square roots**: `tonelli_shanks` (modular square roots for
+  odd primes).
+- **RSA**: `RSA` class — key generation, encrypt, decrypt, and
+  byte-level encrypt/decrypt.
+- **Discrete log**: `baby_step_giant_step` — O(√p) discrete log.
+- **Key exchange**: `diffie_hellman_shared` — the Diffie-Hellman
+  shared-secret computation.
+- **Hashing**: `fnv1a_32`, `fnv1a_64` (FNV-1a), `sha256_hex`,
+  `sha256_int`.
+
 ## Running the Tests
 
 ```bash
 python3 -m unittest discover -s tests -p "test_training_*.py" -v
 ```
 
-The test suite (152 tests) covers every function and class above,
+The test suite (241 tests) covers every function and class above,
 verifying correctness against known mathematical results.
 
 ## Design Constraints
@@ -169,18 +235,12 @@ verifying correctness against known mathematical results.
 
 The natural next areas to study and implement:
 
-- **Information theory**: entropy extensions, mutual information,
-  cross-entropy as KL divergence to uniform.
-- **Information retrieval**: TF-IDF, cosine similarity, inverted
-  index, BM25.
 - **Gaussian processes**: kernel methods, Cholesky decomposition,
   posterior prediction.
 - **Reinforcement learning**: Q-learning, policy gradient,
   Markov decision processes.
 - **Computational geometry**: convex hull, Voronoi diagrams,
   k-d trees.
-- **Number theory & cryptography**: modular arithmetic, RSA,
-  discrete logarithm.
 - **Signal processing**: DFT, FFT, convolution, filtering.
 - **Graph theory deep dive**: minimum spanning tree (Kruskal/Prim),
   maximum flow, shortest paths with negative weights (Bellman-Ford).

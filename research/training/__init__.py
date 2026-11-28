@@ -51,6 +51,30 @@ from research.training.optimization.methods import (
     step_decay, exponential_decay, cosine_annealing,
     linear_warmup, cosine_with_warmup, nelder_mead,
 )
+from research.training.info.theory import (
+    shannon_entropy, joint_entropy, marginal_probs,
+    conditional_entropy, mutual_information,
+    normalized_mutual_information, information_gain,
+    kl_divergence_bits, cross_entropy_bits, entropy_from_counts,
+    HuffmanNode, HuffmanCoder, mutual_information_feature,
+)
+from research.training.retrieval.core import (
+    tokenize, remove_stop_words, DEFAULT_STOP_WORDS,
+    term_frequency, document_frequency, inverse_document_frequency,
+    tfidf_weights, cosine_similarity, dot_product_sparse,
+    retrieval_vector_norm as vector_norm_retrieval,
+    InvertedIndex, BM25Ranker,
+    precision_score, recall_score, f1_score, mean_average_precision,
+)
+from research.training.crypto.numbers import (
+    mod_pow, modular_inverse, euler_phi,
+    fermat_little_theorem, euler_theorem,
+    gcd, extended_gcd,
+    is_prime_trial, miller_rabin, find_prime,
+    tonelli_shanks, RSA, baby_step_giant_step,
+    diffie_hellman_shared, fnv1a_32, fnv1a_64,
+    sha256_hex, sha256_int,
+)
 
 __all__ = [
     # logic
@@ -94,4 +118,25 @@ __all__ = [
     "conjugate_gradient", "simulated_annealing", "genetic_algorithm",
     "step_decay", "exponential_decay", "cosine_annealing",
     "linear_warmup", "cosine_with_warmup", "nelder_mead",
+    # info
+    "shannon_entropy", "joint_entropy", "marginal_probs",
+    "conditional_entropy", "mutual_information",
+    "normalized_mutual_information", "information_gain",
+    "kl_divergence_bits", "cross_entropy_bits", "entropy_from_counts",
+    "HuffmanNode", "HuffmanCoder", "mutual_information_feature",
+    # retrieval
+    "tokenize", "remove_stop_words", "DEFAULT_STOP_WORDS",
+    "term_frequency", "document_frequency", "inverse_document_frequency",
+    "tfidf_weights", "cosine_similarity", "dot_product_sparse",
+    "vector_norm_retrieval", "InvertedIndex", "BM25Ranker",
+    "precision_score", "recall_score", "f1_score",
+    "mean_average_precision",
+    # crypto
+    "mod_pow", "modular_inverse", "euler_phi",
+    "fermat_little_theorem", "euler_theorem",
+    "gcd", "extended_gcd",
+    "is_prime_trial", "miller_rabin", "find_prime",
+    "tonelli_shanks", "RSA", "baby_step_giant_step",
+    "diffie_hellman_shared", "fnv1a_32", "fnv1a_64",
+    "sha256_hex", "sha256_int",
 ]
