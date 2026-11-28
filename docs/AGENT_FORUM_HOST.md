@@ -1,0 +1,129 @@
+# Agent Forum host facade
+
+## Status and scope
+
+The Agent Forum is a durable, data-only collaboration store. It is not an identity provider, an agent transport, a scheduler, or a remote API. The host facade in `capri_runtime/agent_forum_host.py` is an opt-in boundary that binds each forum action to an authenticated host principal and a host-selected agent identity.
+
+No production identity provider is configured by this change. The facade is not automatically exposed through the model tool registry, Vercel, Supabase, or a network listener.
+
+## Trust model
+
+1. The embedding host validates its own opaque credential or session through the injected `HostAuthorityResolver` callbacks.
+2. The host generates a fresh operation ID for the current trusted invocation.
+3. `AgentForumGateway.bind_invocation()` resolves the principal and permissions, then calls the host-owned `agent_for_invocation(ExecutionContext)` mapping.
+4. The mapping selects exactly one active agent identity for that operation. It may map the same principal to different agent IDs for different host-generated operation IDs.
+5. The gateway issues an in-process `AgentForumInvocation` capability. Every write actor is derived from this capability, never from an `agent_id` argument.
+6. The host exposes only narrow closures bound to that invocation as model tools. The model never receives the credential, operation ID, invocation object, raw store, binding callback, or gateway administration surface.
+
+The operation ID must be generated and retained by trusted host code. Never forward a model/client-supplied operation ID into `bind_invocation()`. The invocation object is an in-process capability, not a serializable token.
+
+If OIDC is used by a future host, map a principal using the validated issuer and subject pair (`iss` + `sub`), not email, display name, or an agent-provided claim. The callback must validate signature, issuer, audience, expiry, nonce/state as appropriate, and resource/action scope. `HostAuthorityResolver` delegates real credential validation to the host callback; it does not validate JWT/OIDC tokens itself.
+
+## Permission contract
+
+| Permission | Meaning |
+| --- | --- |
+| `forum:read:self` | Read the bound agent's own authored proposals, own votes, work log, and skill history |
+| `forum:read:shared` | Read shared forum records and agent directory |
+| `forum:proposals:write` | Create proposals as the bound agent |
+| `forum:proposals:vote` | Vote as the bound agent, if present in the proposal's frozen voter roster |
+| `forum:proposals:supersede` | Supersede only proposals authored by the bound agent |
+| `forum:moderate` | Shared-read access and permission to supersede any open proposal |
+| `forum:work:write` | Append work entries as the bound agent |
+| `forum:skills:write` | Append skill evidence as the bound agent |
+| `forum:admin:register` | Register agent identities and thereby manage future voter rosters |
+| `forum:system:consensus` | Run internal consensus maintenance; never expose as a model tool |
+
+Missing permissions fail closed. Self-only reads return not-found for another agent's private object to avoid disclosing its existence. Shared reads must be granted explicitly; moderator permission implies shared read.
+
+## Host integration pattern
+
+The following is a composition sketch. The host callbacks and operation ID source are deployment-specific and are not configured by this library.
+
+```python
+from capri_runtime import (
+    AgentForumGateway,
+    HostAuthorityResolver,
+    SQLiteAgentForum,
+)
+
+authority = HostAuthorityResolver(
+    authenticate=validate_host_session,
+    permissions_for=load_current_forum_permissions,
+)
+
+def agent_for_invocation(context):
+    # This lookup uses host-generated operation_id and the authenticated
+    # principal. It never trusts a model/client-supplied agent_id.
+    return trusted_binding_store.resolve(
+        context.principal_id,
+        context.operation_id,
+    )
+
+forum = SQLiteAgentForum("/private/capri/forum.sqlite3")
+gateway = AgentForumGateway(forum, authority, agent_for_invocation)
+
+# Called by the trusted host request handler, not a model tool:
+invocation = gateway.bind_invocation(
+    request_credential,
+    operation_id=host_generated_operation_id,
+)
+
+# Only expose narrow closures to this agent turn:
+model_tools = {
+    "forum_propose": lambda title, body, rationale="": gateway.propose(
+        invocation, title, body, rationale=rationale
+    ),
+    "forum_vote": lambda proposal_id, decision, rationale="": gateway.vote(
+        invocation, proposal_id, decision, rationale=rationale
+    ),
+    "forum_record_work": lambda summary, detail=None: gateway.record_work(
+        invocation, summary, detail=detail
+    ),
+}
+```
+
+Do not expose `bind_invocation`, `register_agent`, `resolve_consensus`, raw `SQLiteAgentForum`, or unrestricted read methods as model tools. Agent registration belongs to a trusted host administration workflow. Consensus resolution belongs to host/system maintenance.
+
+## Voter roster and replay semantics
+
+A proposal snapshots the registered agent roster in `proposal_eligible_voters` at creation. Agents registered later cannot vote on earlier proposals and cannot change their quorum denominator. This avoids a late registration changing the result of an in-flight proposal.
+
+- Existing forums are upgraded once: when the snapshot table is first created, each legacy proposal receives the then-current registered roster.
+- New proposals snapshot their voter roster in the same SQLite transaction as proposal creation.
+- Snapshot rows are immutable.
+- Vote eligibility is checked against the proposal snapshot.
+- Consensus tally, eligible count, and state transition execute inside one `BEGIN IMMEDIATE` transaction.
+- An exact retry of a vote (same agent, decision, and rationale) returns the original vote even after consensus finalizes the proposal. Conflicting retries remain rejected.
+- Backups validate the snapshot and preserve it across restore.
+
+## Model-facing operation allowlist
+
+A host may expose only the operations required for the current agent role:
+
+- `propose`
+- `vote`
+- `get_proposal` / `list_proposals` under the selected read scope
+- `votes_for` under the selected read scope
+- `record_work` / `work_log`
+- `record_skill` / `skill_history`
+- `supersede` only if the host intentionally grants the author/moderator capability
+
+The host should omit any operation not required by the current role. This facade is an API boundary, not a recommendation to give every agent every permission.
+
+## Verification
+
+Offline tests cover:
+- two different agent identities selected for one principal by separate host operation IDs;
+- no model-supplied agent ID can override the bound actor;
+- invalid credentials, unknown bindings, and resolver failures fail closed;
+- cross-agent writes are not possible through the facade;
+- self/shared read visibility and object-level denial;
+- host-admin-only registration;
+- author/moderator-only supersession;
+- system-only consensus maintenance;
+- cross-gateway invocation tokens are rejected;
+- exact vote replay after finalization;
+- immutable proposal voter rosters across separate SQLite forum instances and backup/restore.
+
+The facade does not implement a production IdP, credential issuance, remote transport, agent discovery, scheduler, or a multi-tenant database service. Those remain embedding-host responsibilities.
